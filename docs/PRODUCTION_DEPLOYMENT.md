@@ -91,9 +91,10 @@ This keeps the Cloud Run web-serving portion well below the ₹1,500/month targe
 ## 4. Release verification
 
 Every push to `main` first applies pending Supabase migrations and deploys the
-Edge Function. It then runs lint and the production build, creates an immutable
-image tagged with the commit SHA, deploys it, and checks `/healthz`. Before
-promoting a release, also verify:
+Edge Function. In parallel, it validates `GCP_SA_KEY`, the selected Google
+Cloud project, and the Artifact Registry repository. It then runs lint and the
+production build, creates an immutable image tagged with the commit SHA,
+deploys it, and checks `/healthz`. Before promoting a release, also verify:
 
 1. Firebase sign-in and personal profile update.
 2. Admin event automation settings and a manual report email.
