@@ -59,17 +59,19 @@ Create these repository secrets:
 
 - `SUPABASE_ACCESS_TOKEN`
 - `SUPABASE_DB_PASSWORD`
-- `GCP_WORKLOAD_IDENTITY_PROVIDER`
-- `GCP_SERVICE_ACCOUNT`
+- `GCP_SA_KEY`
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
 - `VITE_FIREBASE_API_KEY`
 
-Use Workload Identity Federation for GitHub Actions. Do not store a long-lived Google service-account JSON key in GitHub.
+`GCP_SA_KEY` must contain the complete Google service-account key JSON (not a filename, connection string, or base64 value). The deployment workflow authenticates with this secret directly and does not use Workload Identity Federation.
+
+Treat `GCP_SA_KEY` as a password: create it only for the GitHub deployment service account, grant that account `roles/run.admin` and `roles/artifactregistry.writer`, plus `roles/iam.serviceAccountUser` on the Cloud Run runtime service account. Do not grant `Owner`. Rotate the key immediately if it is exposed, and prefer Workload Identity Federation for a future hardening pass.
 
 `SUPABASE_ACCESS_TOKEN` is created under Supabase account access tokens and
 must have access to the target project. `SUPABASE_DB_PASSWORD` is the target
-project's database password. The workflow uses them only to apply migrations
+project's database password only (not a connection URL or pooler password).
+The workflow uses them only to apply migrations
 and deploy `app-api`; provider keys remain stored directly in Supabase.
 
 ## 3. Cloud Run cost controls

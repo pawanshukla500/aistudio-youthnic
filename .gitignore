@@ -16,6 +16,9 @@ dist-ssr
 !.env.example
 .migration-audit-*
 
+# Generated temporarily by google-github-actions/auth when credentials_json is used.
+gha-creds-*.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
