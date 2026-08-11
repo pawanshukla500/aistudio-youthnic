@@ -15,7 +15,7 @@ permissions:
 
 env:
   PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-  REGION: ${{ vars.GCP_REGION || 'asia-south1' }}
+  REGION: ${{ vars.GCP_REGION || 'europe-west1' }}
   SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'youthnic-ai-studio' }}
   REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY || 'cloud-run' }}
 
@@ -79,6 +79,7 @@ jobs:
       - id: auth
         uses: google-github-actions/auth@v3
         with:
+          project_id: ${{ env.PROJECT_ID }}
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 

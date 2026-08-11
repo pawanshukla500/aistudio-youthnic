@@ -45,7 +45,7 @@ Create these repository variables:
 
 - `SUPABASE_PROJECT_REF` (`cyygmyiqgdzgeoayxbro`)
 - `GCP_PROJECT_ID`
-- `GCP_REGION` (recommended: `asia-south1`)
+- `GCP_REGION` (recommended: `europe-west1` when using Cloud Run domain mapping)
 - `CLOUD_RUN_SERVICE` (default: `youthnic-ai-studio`)
 - `ARTIFACT_REGISTRY_REPOSITORY` (default: `cloud-run`)
 - `VITE_FIREBASE_AUTH_DOMAIN`
