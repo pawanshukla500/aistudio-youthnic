@@ -1,0 +1,291 @@
+export type JsonRecord = Record<string, unknown>;
+
+export type ProductIdentityProfile = {
+  category: string;
+  mainColor: string;
+  secondaryColors: string[];
+  fabric: string;
+  pattern: string;
+  print: string;
+  texture: string;
+  neckline: string;
+  sleeveType: string;
+  length: string;
+  fit: string;
+  silhouette: string;
+  frontConstruction: string;
+  backConstruction: string;
+  buttons: string;
+  zippers: string;
+  pockets: string;
+  embroidery: string;
+  logos: string;
+  accessoriesIncluded: string;
+  bottomWearDetails: string;
+  footwearDetails: string;
+  detailPlacementMap: string[];
+  absenceConstraints: string[];
+  invariantDetails: string[];
+  uncertaintyNotes: string[];
+};
+
+export type StudioPose = {
+  id: string;
+  title: string;
+  description: string;
+  cameraAngle: string;
+  framing: string;
+  bodyPosition: string;
+  handPlacement: string;
+  expression: string;
+  highlightedDetails: string[];
+  productVisibilityRules: string[];
+  primaryReference: string;
+  purpose: string;
+  consistencyNotes: string;
+  prompt: string;
+  enabled: boolean;
+};
+
+const POSE_SLOTS = [
+  {
+    id: "full_front",
+    title: "Full Front Product View",
+    framing: "3:4 portrait, head-to-toe with footwear and garment hem fully inside frame",
+    bodyPosition: "Square to camera with balanced weight and a natural catalog stance",
+    handPlacement: "Hands relaxed beside the body without covering neckline, waist, pockets, or trims",
+    expression: "Playful, warm, confident Gen-Z energy while keeping the same face and hairstyle throughout the set",
+    productVisibilityRules: ["front construction unobstructed", "complete bottom wear visible", "no garment detail hidden by hands or hair"],
+    consistencyNotes: "Establish the model, face, hair, accessories, footwear, scene, lighting, and color-treatment anchor for poses 2-5",
+    description: "Straight-on full-body hero view with the complete product readable from head to hem.",
+    cameraAngle: "Eye-level straight-on full-body",
+    highlightedDetails: ["front construction", "overall silhouette", "complete outfit"],
+    primaryReference: "front",
+    purpose: "Primary e-commerce listing image",
+    prompt: "Create a straight-on full-body front hero image. Show the complete outfit, including the exact bottom wear and footwear, with a natural premium e-commerce stance.",
+  },
+  {
+    id: "angled",
+    title: "Professional Side / 3/4 View",
+    framing: "3:4 portrait, full-body with clear side silhouette and no crop at hem or footwear",
+    bodyPosition: "Rotate torso and hips together to a garment-appropriate three-quarter angle without twisting or deforming the product",
+    handPlacement: "Keep hands away from the side seam, sleeve shape, pockets, waist treatment, and drape being demonstrated",
+    expression: "Same recognizable face and styling, with a subtle professional variation from the hero expression",
+    productVisibilityRules: ["front and side construction remain readable", "silhouette is not compressed", "bottom wear remains unchanged and visible"],
+    consistencyNotes: "Use Pose 1 only as the model and shoot anchor; preserve the original product references as garment truth",
+    description: "A professional three-quarter or side view that reveals depth, drape, fit, and side construction.",
+    cameraAngle: "Eye-level 35-55 degree three-quarter view",
+    highlightedDetails: ["side silhouette", "fit", "drape and construction"],
+    primaryReference: "front",
+    purpose: "Show garment depth and fit",
+    prompt: "Create an intentional three-quarter or side fashion pose that is visibly different from the hero pose while keeping the full outfit readable.",
+  },
+  {
+    id: "back",
+    title: "Full Back View",
+    framing: "3:4 portrait, head-to-toe true rear view with the full back and hem visible",
+    bodyPosition: "Model faces fully away from camera with shoulders and hips square; no three-quarter cheat",
+    handPlacement: "Hands placed naturally where they do not cover the back neckline, closure, embroidery, waist, or rear silhouette",
+    expression: "Face is not forced toward camera; preserve identity through hair, body, and styling continuity",
+    productVisibilityRules: ["uploaded back image is the sole back-design authority", "entire rear construction visible", "never infer back details from the front"],
+    consistencyNotes: "Keep the same model, hair, accessories, footwear, scene, lighting, and exact bottom wear while showing the authoritative back",
+    description: "A true full back view sourced from the uploaded back product photograph.",
+    cameraAngle: "Eye-level straight-on back view",
+    highlightedDetails: ["back construction", "back neckline", "rear pattern placement"],
+    primaryReference: "back",
+    purpose: "Document the real back design",
+    prompt: "Turn the model fully away from camera and reproduce the uploaded back reference exactly. This must be a true back view, never an invented rear design.",
+  },
+  {
+    id: "creative",
+    title: "Creative Gen-Z Fashion Pose",
+    framing: "3:4 portrait with a garment-appropriate full or three-quarter body editorial crop",
+    bodyPosition: "Use controlled movement selected for this category and construction, with anatomically natural posture and a readable silhouette",
+    handPlacement: "Expressive but intentional; hands must not cover the garment's key selling features or change its apparent shape",
+    expression: "Current Gen-Z editorial expression while retaining the exact same recognizable model face and hairstyle",
+    productVisibilityRules: ["product remains the visual subject", "no prop or limb hides key construction", "creative movement does not alter fit, length, or pattern"],
+    consistencyNotes: "Borrow only art direction from style references; garment, bottom wear, footwear, accessories, model, and shoot continuity remain locked",
+    description: "A current, expressive Gen-Z fashion pose that follows the selected creative direction without hiding the garment.",
+    cameraAngle: "Product-appropriate editorial angle",
+    highlightedDetails: ["movement", "silhouette", "creative direction"],
+    primaryReference: "front",
+    purpose: "Campaign and social-commerce storytelling",
+    prompt: "Create a bold, playful, scroll-stopping Gen-Z fashion pose suited to this exact product category, with genuine attitude and movement. Preserve the complete product while borrowing only mood, composition, and lighting from style references.",
+  },
+  {
+    id: "closeup",
+    title: "Close-Up Product Detail",
+    framing: "3:4 portrait close-up including the same model face and the specific highest-value product detail",
+    bodyPosition: "Subtle garment-appropriate turn that presents the chosen detail on a natural body without distortion",
+    handPlacement: "Hands completely outside the selected detail area",
+    expression: "Same recognizable face, hair, makeup, and styling with a warm, playful close-up expression",
+    productVisibilityRules: ["selected detail is sharp and unobstructed", "fabric/pattern detail reference has priority when supplied", "face remains visible and consistent"],
+    consistencyNotes: "Magnify real details only; do not invent extra embroidery, print, weave, stitching, trim, jewelry, or branding",
+    description: "A closer model-and-product composition focused on the most important material and construction details.",
+    cameraAngle: "Eye-level face-to-waist detail framing",
+    highlightedDetails: ["fabric texture", "neckline", "print or embroidery"],
+    primaryReference: "fabric_pattern",
+    purpose: "Prove material and construction quality",
+    prompt: "Create a face-to-waist close-up with the same model face visible and the product's most important real fabric, texture, print, embroidery, neckline, or construction detail in sharp focus. Keep hands outside the detail area.",
+  },
+] as const;
+
+function stringValue(value: unknown, fallback = "Not visible in the supplied references") {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return fallback;
+}
+
+function stringArray(value: unknown, fallback: string[] = []) {
+  if (!Array.isArray(value)) return fallback;
+  const entries = value.map((item) => stringValue(item, "")).filter(Boolean);
+  return entries.length ? entries.slice(0, 20) : fallback;
+}
+
+function objectValue(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
+export function parseJsonResponse(text: string): JsonRecord {
+  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const parsed = JSON.parse(cleaned);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("The AI provider returned an invalid object.");
+  return parsed as JsonRecord;
+}
+
+export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
+  const product = objectValue(raw.productIdentity ?? raw.product_identity);
+  const creative = objectValue(raw.creativeDirection ?? raw.creative_direction);
+  const model = objectValue(raw.modelIdentity ?? raw.model_identity);
+  const rawPoseValue = raw.posePlan ?? raw.pose_plan;
+  const rawPoses = Array.isArray(rawPoseValue) ? (rawPoseValue as unknown[]) : [];
+  const productIdentity: ProductIdentityProfile = {
+    category: stringValue(product.category, categoryFallback),
+    mainColor: stringValue(product.mainColor ?? product.main_color),
+    secondaryColors: stringArray(product.secondaryColors ?? product.secondary_colors),
+    fabric: stringValue(product.fabric), pattern: stringValue(product.pattern), print: stringValue(product.print),
+    texture: stringValue(product.texture), neckline: stringValue(product.neckline),
+    sleeveType: stringValue(product.sleeveType ?? product.sleeve_type), length: stringValue(product.length),
+    fit: stringValue(product.fit), silhouette: stringValue(product.silhouette),
+    frontConstruction: stringValue(product.frontConstruction ?? product.front_construction),
+    backConstruction: stringValue(product.backConstruction ?? product.back_construction),
+    buttons: stringValue(product.buttons), zippers: stringValue(product.zippers), pockets: stringValue(product.pockets),
+    embroidery: stringValue(product.embroidery), logos: stringValue(product.logos),
+    accessoriesIncluded: stringValue(product.accessoriesIncluded ?? product.accessories_included),
+    bottomWearDetails: stringValue(product.bottomWearDetails ?? product.bottom_wear_details),
+    footwearDetails: stringValue(product.footwearDetails ?? product.footwear_details),
+    detailPlacementMap: stringArray(product.detailPlacementMap ?? product.detail_placement_map),
+    absenceConstraints: stringArray(product.absenceConstraints ?? product.absence_constraints),
+    invariantDetails: stringArray(product.invariantDetails ?? product.invariant_details),
+    uncertaintyNotes: stringArray(product.uncertaintyNotes ?? product.uncertainty_notes),
+  };
+  const creativeDirection = {
+    backgroundStyle: stringValue(creative.backgroundStyle ?? creative.background_style, "Clean premium catalog background"),
+    studioEnvironment: stringValue(creative.studioEnvironment ?? creative.studio_environment, "Professional fashion shoot environment"),
+    lighting: stringValue(creative.lighting, "Soft commercial fashion lighting"),
+    cameraPerspective: stringValue(creative.cameraPerspective ?? creative.camera_perspective, "Eye-level fashion perspective"),
+    composition: stringValue(creative.composition, "Product-first balanced composition"),
+    framing: stringValue(creative.framing, "3:4 portrait framing"),
+    mood: stringValue(creative.mood, "Premium, playful, and youthful Gen-Z energy"),
+    colorTreatment: stringValue(creative.colorTreatment ?? creative.color_treatment, "Natural product-accurate color"),
+    modelStyling: stringValue(creative.modelStyling ?? creative.model_styling, "Minimal styling that does not obscure the product"),
+    photographyStyle: stringValue(creative.photographyStyle ?? creative.photography_style, "Commercial fashion photography"),
+    propUsage: stringValue(creative.propUsage ?? creative.prop_usage, "No distracting props"),
+    shadowStyle: stringValue(creative.shadowStyle ?? creative.shadow_style, "Natural contact shadows"),
+    editorialCommercialFeel: stringValue(creative.editorialCommercialFeel ?? creative.editorial_commercial_feel, "Premium e-commerce editorial"),
+    lensAndCamera: stringValue(creative.lensAndCamera ?? creative.lens_and_camera, "One consistent full-frame fashion-camera perspective and natural lens rendering"),
+    setContinuity: stringValue(creative.setContinuity ?? creative.set_continuity, "One real shoot day: identical set, time of day, light direction, white balance, exposure, and color grade"),
+    realismRules: stringValue(creative.realismRules ?? creative.realism_rules, "Natural skin texture, anatomically correct hands, realistic fabric physics, optical depth, and no synthetic AI artifacts"),
+  };
+  const modelIdentity = {
+    castingDirection: stringValue(model.castingDirection ?? model.casting_direction, "One consistent adult fashion model across all five images"),
+    face: stringValue(model.face, "Keep the same recognizable face across the complete set"),
+    hair: stringValue(model.hair, "Keep one hairstyle across the complete set"),
+    makeup: stringValue(model.makeup, "Keep makeup consistent and natural"),
+    bodyProportions: stringValue(model.bodyProportions ?? model.body_proportions, "Keep realistic body proportions identical across poses"),
+    stylingLock: stringValue(model.stylingLock ?? model.styling_lock, "Keep footwear and accessories identical across every pose"),
+  };
+  const poses = Array.isArray(rawPoses) ? rawPoses : [];
+  const posePlan: StudioPose[] = POSE_SLOTS.map((fallback, index) => {
+    const candidate = objectValue(poses.find((pose) => objectValue(pose).id === fallback.id) ?? poses[index]);
+    return {
+      id: fallback.id, title: stringValue(candidate.title ?? candidate.name, fallback.title),
+      description: stringValue(candidate.description, fallback.description),
+      cameraAngle: stringValue(candidate.cameraAngle ?? candidate.camera_angle, fallback.cameraAngle),
+      framing: stringValue(candidate.framing, fallback.framing),
+      bodyPosition: stringValue(candidate.bodyPosition ?? candidate.body_position, fallback.bodyPosition),
+      handPlacement: stringValue(candidate.handPlacement ?? candidate.hand_placement, fallback.handPlacement),
+      expression: stringValue(candidate.expression, fallback.expression),
+      highlightedDetails: stringArray(candidate.highlightedDetails ?? candidate.highlighted_details, [...fallback.highlightedDetails]),
+      productVisibilityRules: stringArray(candidate.productVisibilityRules ?? candidate.product_visibility_rules, [...fallback.productVisibilityRules]),
+      primaryReference: stringValue(candidate.primaryReference ?? candidate.primary_reference, fallback.primaryReference),
+      purpose: stringValue(candidate.purpose, fallback.purpose),
+      consistencyNotes: stringValue(candidate.consistencyNotes ?? candidate.consistency_notes, fallback.consistencyNotes),
+      prompt: stringValue(candidate.prompt, fallback.prompt), enabled: candidate.enabled !== false,
+    };
+  });
+  return { productIdentity, creativeDirection, modelIdentity, posePlan };
+}
+
+export function buildCombinedAnalysisPrompt(args: {
+  skuName: string; productDetails: string; category: string; modelDirection: string; sceneDirection: string;
+  referenceManifest: Array<{ number: number; role: string }>;
+}) {
+  const manifest = args.referenceManifest.map(({ number, role }) => `IMAGE ${number}: ${role}`).join("\n");
+  return `You are the visual merchandiser and shoot planner for a fashion e-commerce studio.
+
+Analyze EVERY supplied image before answering.
+${manifest}
+
+REFERENCE AUTHORITY (highest to lowest):
+1. FRONT PRODUCT - authoritative front product design.
+2. BACK PRODUCT - authoritative back design; never infer the back from the front.
+3. FABRIC / PATTERN DETAIL - high-priority truth for weave, texture, print, embroidery, stitching, trims, and construction.
+4. ADDITIONAL PRODUCT - another source of product truth.
+5. STYLE REFERENCE - creative direction only. Never copy its garment, product color, bottoms, logos, or accessories.
+
+SKU: ${args.skuName}
+Declared category: ${args.category}
+User product notes: ${args.productDetails}
+Requested model direction: ${args.modelDirection || "one consistent professional adult fashion model"}
+Requested scene direction: ${args.sceneDirection || "derive one consistent commercial scene from style references"}
+
+Build a precise Product Identity Profile. If a detail is unclear, record it in uncertaintyNotes; do not invent it. Perform an evidence audit for closures and decoration placement. For buttons, zippers, hooks, ties, tassels/latkans, trim, beads, embroidery, pockets, piping, logos, stitching and hardware, record exactly where each detail IS visible and where it is ABSENT. Do not assume symmetry. Fill detailPlacementMap with region-specific hard locks and absenceConstraints with negative product facts.
+
+Build a Creative Direction Profile from style references, but never allow style to alter the product. Lock one lens family, camera height, perspective, exposure, white balance, color grade, light direction, shadow behavior, set geometry, and time-of-day so the results read as contact sheets from one real professional shoot. Define one Model Identity Profile locking the same recognizable adult face, skin tone, hair, makeup, body proportions, accessories and footwear across all five images.
+
+Create exactly five product-specific camera setups in one coherent commercial coverage sequence, in this order and with these ids: full_front, angled, back, creative, closeup. They are not five unrelated concepts. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints.
+
+- full_front: square, unobstructed head-to-toe hero; establishes face/hair/styling/footwear/scene/lighting anchor.
+- angled: best side or three-quarter orientation for THIS garment; prove depth, drape, seams/slits/pockets/layering without distortion.
+- back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority.
+- creative: playful, scroll-stopping Gen-Z editorial movement tailored to this garment while keeping product completely readable.
+- closeup: face-to-waist 3:4 crop with the same face; choose the most commercially useful real detail; hands completely outside that detail; prioritize FABRIC / PATTERN DETAIL.
+
+Across all five, ONLY pose, angle, framing, and expression may change. Exact product, colors, pattern, bottom wear, face, hairstyle, makeup, accessories, footwear, scene, lighting, shadows, camera/lens feel, and color treatment remain locked.
+
+Return STRICT JSON only:
+{"productIdentity":{"category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[]},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":""},"modelIdentity":{"castingDirection":"","face":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"posePlan":[{"id":"full_front"},{"id":"angled"},{"id":"back"},{"id":"creative"},{"id":"closeup"}]}`;
+}
+
+export const CONSISTENCY_RULES = [
+  "Original product references always outrank generated images and style references.",
+  "Keep the same model face, skin tone, hair, body proportions, makeup, accessories, and footwear across all five poses.",
+  "Keep exact garment colors, fabric, texture, pattern scale and placement, print, embroidery, logos, stitching, trims, buttons, zippers, pockets, fit, silhouette, and length.",
+  "Keep the exact bottom wear and included accessories shown in product references.",
+  "Use the back product image as the sole authority for the back pose.",
+  "Style references control only background, lighting, composition, camera, mood, and creative treatment.",
+  "Never add text, random logos, extra layers, duplicate people, or unreferenced garment elements.",
+  "Treat detailPlacementMap and absenceConstraints as hard locks: never relocate, mirror, extend, add, or remove a garment detail.",
+];
+
+export const ANALYSIS_VERSION = "generation-session-v4-supabase-invariant-delta";
+
+export function smallHash(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}

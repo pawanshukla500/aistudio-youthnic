@@ -1,0 +1,42 @@
+{
+  "name": "ai-studio-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint src",
+    "preview": "vite preview",
+    "firebase:sync-supabase-claims": "node scripts/sync-firebase-supabase-claims.mjs",
+    "supabase:verify-firebase": "node scripts/verify-supabase-firebase.mjs",
+    "supabase:verify-cutover": "node scripts/verify-supabase-cutover.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.112.2",
+    "clsx": "^2.1.1",
+    "exceljs": "^4.4.0",
+    "file-saver": "^2.0.5",
+    "firebase": "^12.17.1",
+    "jszip": "^3.10.1",
+    "lucide-react": "^1.31.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.2",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@types/file-saver": "^2.0.7",
+    "@types/jszip": "^3.4.0",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "autoprefixer": "^10.5.4",
+    "oxlint": "^1.75.0",
+    "postcss": "^8.5.26",
+    "tailwindcss": "3.4",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0"
+  }
+}
