@@ -1159,6 +1159,9 @@ async function createUserOperation(request: Request, args: JsonRecord) {
       const loginUrl = Deno.env.get("FRONTEND_URL") || "https://aistudio.youthnic.shop";
       const html = `
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-radius: 8px;">
+  <div style="text-align: center; margin-bottom: 32px;">
+    <img src="https://aistudio.youthnic.shop/logo.png" alt="Youthnic AI Studio" style="max-height: 48px; width: auto;" />
+  </div>
   <h2 style="color: #111827; font-size: 24px; font-weight: 600; margin-top: 0; margin-bottom: 16px; text-align: center;">Welcome to Youthnic AI Studio</h2>
   <div style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 32px; text-align: center;">
     Hi ${escapeHtml(displayName)},<br><br>
