@@ -8,7 +8,7 @@ export const api = {
   analysis: { analyzeReferences: "analysis.analyzeReferences" },
   files: { saveReference: "files.saveReference" },
   generation: { queueSku: "generation.queueSku", regeneratePose: "generation.regeneratePose" },
-  jobs: { list: "jobs.list", get: "jobs.get", getQueuePosition: "jobs.getQueuePosition", cancel: "jobs.cancel", remove: "jobs.remove" },
+  jobs: { list: "jobs.list", get: "jobs.get", getQueuePosition: "jobs.getQueuePosition", cancel: "jobs.cancel", remove: "jobs.remove", regenerateSession: "jobs.regenerateSession" },
   notifications: { list: "notifications.list", markRead: "notifications.markRead", markAllRead: "notifications.markAllRead" },
   catalog: {
     list: "catalog.list", get: "catalog.get", createCatalog: "catalog.createCatalog", bulkAddVariants: "catalog.bulkAddVariants",
@@ -149,7 +149,7 @@ async function getJob(jobId: string) {
     "Professional Side / 3/4 View",
     "Full Back View",
     "Creative Gen-Z Fashion Pose",
-    "Natural Zoomed-Out Face & Vibe Shot",
+    "Zoomed-In Face & Product Highlight",
   ];
   const mappedPoses = poseRows.map((pose) => {
     const asset = generatedAssets.find((entry) => Number(record(entry.metadata).poseIndex) === Number(pose.pose_index));
@@ -505,6 +505,8 @@ async function mutateBackend(endpoint: BackendEndpoint, args: Record<string, any
       return invokeAppApi("jobs.cancel", args);
     case api.jobs.remove:
       return invokeAppApi("jobs.remove", args);
+    case api.jobs.regenerateSession:
+      return invokeAppApi("jobs.regenerateSession", args);
     case api.files.saveReference:
       return invokeAppApi("files.saveReference", args);
     case api.catalog.createCatalog:
