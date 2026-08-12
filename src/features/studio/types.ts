@@ -1,7 +1,7 @@
 import type { Id } from "../../lib/backend";
 
 export type ProductReferenceRole = "front" | "back" | "fabric_pattern" | "additional_product";
-export type ReferenceRole = ProductReferenceRole | "style_reference";
+export type ReferenceRole = ProductReferenceRole | "style_reference" | "model_reference";
 
 export type StudioReference = {
   id: string;

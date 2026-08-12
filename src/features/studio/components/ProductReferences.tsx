@@ -128,6 +128,33 @@ export function ProductReferences({
   );
 }
 
+export function ModelFaceReference({
+  reference,
+  onFile,
+  onRemove,
+}: {
+  reference?: StudioReference;
+  onFile: (file: File) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="max-w-[220px]">
+        <ReferenceCard
+          reference={reference}
+          label="Upload Model Face Reference"
+          description="Click or drop a clear face photo"
+          onFile={onFile}
+          onRemove={reference ? onRemove : undefined}
+        />
+      </div>
+      <p className="text-[10px] leading-4 text-secondary">
+        Optional. When uploaded, this exact face is locked as the model's identity for every pose — the shoot matches it as closely as photographically possible instead of designing its own face. Leave empty to let the shoot design one consistent model.
+      </p>
+    </div>
+  );
+}
+
 export function StyleReferences({
   references,
   onAdd,
