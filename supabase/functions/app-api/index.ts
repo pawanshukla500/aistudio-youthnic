@@ -304,6 +304,12 @@ function roleLabel(role: string) {
   return labels[role] || role.toUpperCase();
 }
 
+function extensionForMimeType(mimeType: string) {
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/webp") return "webp";
+  return "jpg";
+}
+
 function canonicalReferences(references: ReferenceInput[]) {
   const order: Record<string, number> = { front: 0, back: 1, fabric_pattern: 2, additional_product: 3, style_reference: 4 };
   return [...references].sort((left, right) => (order[left.role] ?? 99) - (order[right.role] ?? 99) || left.hash.localeCompare(right.hash));
@@ -548,6 +554,12 @@ async function generateImage(args: { prompt: string; model: string; size: string
   body.append("prompt", args.prompt);
   body.append("size", args.size);
   body.append("quality", args.quality);
+  // OpenAI defaults image edits/generations to lossless PNG, which routinely runs several MB
+  // per pose - slow to upload, store, and download, and unnecessary for catalog photography.
+  // Request JPEG instead: this alone (at OpenAI's default output_compression=100, i.e. we don't
+  // override it) is what gets a comparable fashion-catalog project down to a few hundred KB per
+  // image, so match that rather than layering on an extra, unproven compression knob.
+  body.append("output_format", "jpeg");
   // GPT Image 2 always processes reference images at high fidelity and rejects
   // input_fidelity. Older supported GPT Image edit models accept the hint.
   if (["gpt-image-1.5", "gpt-image-1"].includes(args.model)) body.append("input_fidelity", "high");
@@ -582,14 +594,14 @@ async function generateImage(args: { prompt: string; model: string; size: string
     const binary = atob(String(item.b64_json));
     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
     return {
-      blob: new Blob([bytes], { type: "image/png" }), base64: String(item.b64_json), mimeType: "image/png",
+      blob: new Blob([bytes], { type: "image/jpeg" }), base64: String(item.b64_json), mimeType: "image/jpeg",
       requestId, usage, costUsd,
     };
   }
   const imageResponse = await fetch(String(item.url));
   if (!imageResponse.ok) throw new Error("The generated OpenAI image could not be downloaded.");
   const blob = await imageResponse.blob();
-  return { blob, base64: await blobToBase64(blob), mimeType: blob.type || "image/png", requestId, usage, costUsd };
+  return { blob, base64: await blobToBase64(blob), mimeType: blob.type || "image/jpeg", requestId, usage, costUsd };
 }
 
 function permanentProviderError(error: unknown) {
@@ -864,8 +876,11 @@ async function processWorker(request: Request, args: JsonRecord) {
   const approved: LoadedReference[] = [];
   if (anchorPose?.output_url || anchorPose?.storage_path) {
     approved.push(await loadReference({
+      // No mimeType hint here on purpose: loadReference() falls back to the fetched blob's
+      // actual Content-Type. Pose 1 is now stored as JPEG, so hardcoding "image/png" would
+      // mislabel real JPEG bytes and break how Gemini/OpenAI decode this reference image.
       role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path,
-      hash: smallHash(String(anchorPose.output_url || anchorPose.storage_path)), filename: "approved-pose-1.png", mimeType: "image/png", size: 0,
+      hash: smallHash(String(anchorPose.output_url || anchorPose.storage_path)), filename: "approved-pose-1.jpg", mimeType: "", size: 0,
     }));
   }
   const storedPoseData = (pose.generation_data || {}) as JsonRecord;
@@ -928,7 +943,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     const { data: latestJob } = await service.from("generation_jobs").select("status").eq("job_id", job.job_id).maybeSingle();
     if (["cancelling", "cancelled"].includes(String(latestJob?.status || ""))) return finalizeCancelledJob(job);
     const safeSku = String((job.job_data as JsonRecord)?.skuId || job.sku_name || "product").replace(/[^a-zA-Z0-9._-]+/g, "-");
-    const storagePath = `organizations/${job.org_id}/generated/${job.job_id}/${pose.pose_index}-${safeSku}-${crypto.randomUUID()}.png`;
+    const storagePath = `organizations/${job.org_id}/generated/${job.job_id}/${pose.pose_index}-${safeSku}-${crypto.randomUUID()}.${extensionForMimeType(generated.mimeType)}`;
     const stored = await uploadFirebaseObject({ storagePath, blob: generated.blob, mimeType: generated.mimeType });
     const completedAt = new Date().toISOString();
     const usagePatch = accumulatedUsage(pose as JsonRecord, generated.usage, generated.requestId, attemptCost);
