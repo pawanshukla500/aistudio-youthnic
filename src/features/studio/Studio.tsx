@@ -169,7 +169,7 @@ export function Studio() {
     }
     setModelReference((current) => {
       if (current) URL.revokeObjectURL(current.previewUrl);
-      return file ? makeReference("model_reference", file) : null;
+      return file ? makeReference("model_identity", file) : null;
     });
     markAnalysisStale();
     setNotice(null);

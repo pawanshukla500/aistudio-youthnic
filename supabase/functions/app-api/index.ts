@@ -294,7 +294,7 @@ async function loadAvailableReferences(references: ReferenceInput[]): Promise<Lo
 
 function roleLabel(role: string) {
   const labels: Record<string, string> = {
-    model_reference: "MODEL FACE REFERENCE - the exact, non-negotiable face and identity for the model in every pose; reproduce it as closely as photographically possible, never invent or beautify a different face",
+    model_identity: "MODEL FACE REFERENCE - the exact, non-negotiable face and identity for the model in every pose; reproduce it as closely as photographically possible, never invent or beautify a different face",
     front: "FRONT PRODUCT - authoritative front product truth",
     back: "BACK PRODUCT - authoritative back design and construction",
     fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority texture, print, embroidery, stitching, trim and construction truth",
@@ -312,7 +312,7 @@ function extensionForMimeType(mimeType: string) {
 }
 
 function canonicalReferences(references: ReferenceInput[]) {
-  const order: Record<string, number> = { model_reference: 0, front: 1, back: 2, fabric_pattern: 3, additional_product: 4, style_reference: 5 };
+  const order: Record<string, number> = { model_identity: 0, front: 1, back: 2, fabric_pattern: 3, additional_product: 4, style_reference: 5 };
   return [...references].sort((left, right) => (order[left.role] ?? 99) - (order[right.role] ?? 99) || left.hash.localeCompare(right.hash));
 }
 
@@ -332,16 +332,62 @@ function extractGeminiText(data: JsonRecord) {
   return parts.map((part) => typeof (part as JsonRecord)?.text === "string" ? String((part as JsonRecord).text) : "").filter(Boolean).join("\n").trim();
 }
 
-async function geminiJson(model: string, parts: JsonRecord[]) {
+// Diagnoses *why* Gemini returned no usable text - a blocked prompt (promptFeedback.blockReason)
+// or a candidate that stopped for a non-STOP reason (finishReason: SAFETY/RECITATION/MAX_TOKENS/
+// OTHER) both look identical ("no text") to extractGeminiText, but need very different handling
+// and very different error messages for anyone debugging a failed job.
+function geminiBlockReason(data: JsonRecord) {
+  const promptFeedback = data.promptFeedback as JsonRecord | undefined;
+  const blockReason = String(promptFeedback?.blockReason || "");
+  const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+  const finishReason = String((candidates[0] as JsonRecord | undefined)?.finishReason || "");
+  return [blockReason, finishReason && finishReason !== "STOP" ? finishReason : ""].filter(Boolean).join("/");
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Sent with every Gemini analysis/QA call. Default Gemini safety thresholds are tuned for
+// general-purpose consumer traffic and routinely flag ordinary, fully-clothed fashion-catalog
+// photography of real people as a false positive - this is the actual, frequent cause behind
+// "Gemini returned no structured response" failures burning through a whole generation job.
+// This is an authorized internal tool analyzing licensed product photography for an e-commerce
+// catalog, not open-ended public content, so relaxing (not disabling) these thresholds to only
+// block genuinely high-probability harmful content is the correct fix, not a policy workaround.
+const GEMINI_SAFETY_SETTINGS = [
+  { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
+  { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+  { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
+  { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
+];
+
+// A single flaky/rate-limited/momentarily-over-cautious Gemini call used to burn an entire
+// $0.05-0.07 OpenAI image generation attempt via the outer per-pose retry loop, since QA runs
+// after the (expensive) image already exists. Retry the (cheap, no-image-cost) Gemini call a
+// few times first so a transient hiccup doesn't waste that budget or fail poses needlessly.
+async function geminiJson(model: string, parts: JsonRecord[], attempt = 1): Promise<{ raw: JsonRecord; text: string; json: JsonRecord }> {
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": requiredEnv("GEMINI_API_KEY") },
-    body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { responseMimeType: "application/json" } }),
+    body: JSON.stringify({
+      contents: [{ role: "user", parts }],
+      generationConfig: { responseMimeType: "application/json" },
+      safetySettings: GEMINI_SAFETY_SETTINGS,
+    }),
   });
   const data = await response.json().catch(() => ({})) as JsonRecord;
+  const retryableStatus = !response.ok && [408, 429, 500, 502, 503, 504].includes(response.status);
+  const text = response.ok ? extractGeminiText(data) : "";
+  if ((retryableStatus || (response.ok && !text)) && attempt < 3) {
+    await sleep(500 * attempt);
+    return geminiJson(model, parts, attempt + 1);
+  }
   if (!response.ok) throw new Error(String((data.error as JsonRecord | undefined)?.message || `Gemini failed (${response.status}).`));
-  const text = extractGeminiText(data);
-  if (!text) throw new Error("Gemini returned no structured response.");
+  if (!text) {
+    const reason = geminiBlockReason(data);
+    throw new Error(`Gemini returned no structured response${reason ? ` (${reason})` : ""}.`);
+  }
   return { raw: data, text, json: parseJsonResponse(text) };
 }
 
@@ -458,7 +504,7 @@ function selectReferences(references: LoadedReference[], approved: LoadedReferen
   // The model face reference (if supplied) leads every pose's image set, including pose 1 -
   // it is the identity ground truth and must reach every generation and QA call, not just the
   // poses that also get an approved-pose-1 anchor.
-  const modelRef = references.filter((reference) => reference.role === "model_reference").slice(0, 1);
+  const modelRef = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
   const product = order.flatMap((role) => references.filter((reference) => reference.role === role));
   const style = references.filter((reference) => reference.role === "style_reference").slice(0, 3);
   return [...modelRef, ...product, ...approved.slice(0, 1), ...style].slice(0, MAX_REFERENCES);
@@ -476,7 +522,7 @@ function composeGenerationPrompt(args: {
   const absent = Array.isArray(product?.absenceConstraints) ? product.absenceConstraints.map(String) : [];
   const manifest = args.references.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
   const hasApprovedAnchor = args.references.some((reference) => reference.role === "approved_pose");
-  const hasModelReference = args.references.some((reference) => reference.role === "model_reference");
+  const hasModelReference = args.references.some((reference) => reference.role === "model_identity");
   const faceVisible = args.pose.id !== "back";
   const allowedDelta = [
     `pose/body position: ${args.pose.bodyPosition}`,
@@ -628,7 +674,7 @@ async function validatePose(args: {
     productIdentity: args.session.productIdentity, creativeDirection: args.session.creativeDirection,
     modelIdentity: args.session.modelIdentity, consistencyRules: (args.session.consistencyRules as string[]) || CONSISTENCY_RULES,
     hasApprovedAnchor: args.approved.length > 0,
-    hasModelReference: qaRefs.some((reference) => reference.role === "model_reference"),
+    hasModelReference: qaRefs.some((reference) => reference.role === "model_identity"),
     referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`),
   });
   const parts: JsonRecord[] = [{ text: prompt }, { text: "IMAGE A: NEWLY GENERATED POSE UNDER TEST" }, { inlineData: { mimeType: args.generated.mimeType, data: args.generated.base64 } }];
