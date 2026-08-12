@@ -31,6 +31,7 @@ const creativeFields: Array<[keyof StudioAnalysis["creativeDirection"], string]>
   ["mood", "Mood"],
   ["colorTreatment", "Color treatment"],
   ["modelStyling", "Model styling"],
+  ["suggestedAccessories", "Suggested accessories"],
   ["photographyStyle", "Photography"],
   ["shadowStyle", "Shadows"],
   ["lensAndCamera", "Lens & camera"],

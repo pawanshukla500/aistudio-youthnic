@@ -3,8 +3,8 @@ import { parseJsonResponse, type JsonRecord } from "./profiles.ts";
 const CHECK_KEYS = [
   "model_face", "garment_identity", "colors", "fabric_texture", "print_pattern",
   "front_back_design", "bottom_wear", "details_and_branding", "detail_placement",
-  "absence_constraints", "fit_silhouette", "styling_continuity", "pose_requirement",
-  "unexpected_changes",
+  "absence_constraints", "fit_silhouette", "styling_continuity", "styling_addition",
+  "pose_requirement", "unexpected_changes",
 ] as const;
 
 export function buildPoseQaPrompt(args: {
@@ -29,10 +29,10 @@ ${args.referenceManifest.join("\n")}
 
 ${args.hasApprovedAnchor ? "The approved anchor must show the same recognizable person, hair, body proportions, styling, backdrop, lighting, and color treatment." : "This is Pose 1. It must establish a realistic, coherent model and shoot anchor."}
 
-Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face. Fail any invented or moved button, tassel/latkan, closure, trim, pocket, logo, embroidery, jewelry, or hardware. For a back pose, fail unless it is a true back view matching the uploaded BACK. For a close-up, fail if the same face is not visible or hands/accessories obscure the selected detail.
+Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face. Fail any invented or moved button, tassel/latkan, closure, trim, pocket, logo, embroidery, jewelry, or hardware. For a back pose, fail unless it is a true back view matching the uploaded BACK. For pose 5 (the natural zoomed-out face & vibe shot), fail if it is a tight macro crop instead of a natural, zoomed-out shot with the outfit still readable, or if the expression looks stiff or unnatural instead of a beautiful, cute, genuine Gen-Z smile or expression. If a stylist accessory suggestion was provided, fail styling_addition when it is missing, inconsistent across poses, or hides/replaces any garment detail, bottom wear, or footwear from the product references; pass styling_addition when no suggestion was provided and none was invented.
 
 Return STRICT JSON only:
-{"pass":true,"score":100,"checks":{"model_face":"pass","garment_identity":"pass","colors":"pass","fabric_texture":"pass","print_pattern":"pass","front_back_design":"pass","bottom_wear":"pass","details_and_branding":"pass","detail_placement":"pass","absence_constraints":"pass","fit_silhouette":"pass","styling_continuity":"pass","pose_requirement":"pass","unexpected_changes":"pass"},"failed":[],"reason":"short verdict","correction":"specific correction prompt if failed"}`;
+{"pass":true,"score":100,"checks":{"model_face":"pass","garment_identity":"pass","colors":"pass","fabric_texture":"pass","print_pattern":"pass","front_back_design":"pass","bottom_wear":"pass","details_and_branding":"pass","detail_placement":"pass","absence_constraints":"pass","fit_silhouette":"pass","styling_continuity":"pass","styling_addition":"pass","pose_requirement":"pass","unexpected_changes":"pass"},"failed":[],"reason":"short verdict","correction":"specific correction prompt if failed"}`;
 }
 
 export function normalizePoseQaResult(raw: JsonRecord) {

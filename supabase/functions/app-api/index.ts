@@ -446,7 +446,7 @@ function selectReferences(references: LoadedReference[], approved: LoadedReferen
   const order = poseType === "back"
     ? ["back", "front", "fabric_pattern", "additional_product"]
     : poseType === "closeup"
-      ? ["fabric_pattern", "front", "back", "additional_product"]
+      ? ["front", "fabric_pattern", "back", "additional_product"]
       : ["front", "back", "fabric_pattern", "additional_product"];
   const product = order.flatMap((role) => references.filter((reference) => reference.role === role));
   const style = references.filter((reference) => reference.role === "style_reference").slice(0, 3);
@@ -495,6 +495,9 @@ ${absent.length ? absent.map((rule) => `- ${rule}`).join("\n") : "- Add no butto
 LOCKED ART DIRECTION - MUST NOT CHANGE BETWEEN POSES:
 ${JSON.stringify(creative)}
 
+STYLING ADDITION (optional, locked once chosen):
+${creative.suggestedAccessories ? `The stylist has proposed adding: ${creative.suggestedAccessories}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}
+
 ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
 ${allowedDelta.map((value) => `- ${value}`).join("\n")}
 - Hand placement: ${args.pose.handPlacement}
@@ -520,7 +523,7 @@ ${rules.map((rule) => `- ${rule}`).join("\n")}
 - Never complete, mirror, continue, relocate, add or remove decoration for symmetry.
 - Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
 ${args.pose.id === "back" ? "- TRUE BACK HARD RULE: shoulders and hips fully face away. Reproduce uploaded BACK exactly; never infer the rear from FRONT." : ""}
-${args.pose.id === "closeup" ? "- CLOSE-UP HARD RULE: same clearly visible face in a face-to-waist 3:4 crop; both hands and all new accessories completely outside the chosen product-detail area." : ""}
+${args.pose.id === "closeup" ? "- POSE 5 HARD RULE: this is a natural, zoomed-out shot, not a tight macro face crop - keep enough frame to read the full outfit. The face must carry a beautiful, cute, natural Gen-Z expression that feels candid, not stiff or over-posed." : ""}
 ${args.correction ? `\nPREVIOUS ATTEMPT FAILED QA. Correct only these issues while preserving every lock:\n${args.correction}` : ""}
 
 Product accuracy is more important than style matching. Output only the finished photograph: no captions, labels, collage, borders or watermark.`;

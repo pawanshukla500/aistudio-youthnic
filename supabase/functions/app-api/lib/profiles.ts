@@ -52,7 +52,7 @@ const POSE_SLOTS = [
     id: "full_front",
     title: "Full Front Product View",
     framing: "3:4 portrait, head-to-toe with footwear and garment hem fully inside frame",
-    bodyPosition: "Square to camera with balanced weight and a natural catalog stance",
+    bodyPosition: "Square to camera with balanced weight and a natural, playful Gen-Z catalog stance - relaxed and confident, never stiff or robotic",
     handPlacement: "Hands relaxed beside the body without covering neckline, waist, pockets, or trims",
     expression: "Playful, warm, confident Gen-Z energy while keeping the same face and hairstyle throughout the set",
     productVisibilityRules: ["front construction unobstructed", "complete bottom wear visible", "no garment detail hidden by hands or hair"],
@@ -70,7 +70,7 @@ const POSE_SLOTS = [
     framing: "3:4 portrait, full-body with clear side silhouette and no crop at hem or footwear",
     bodyPosition: "Rotate torso and hips together to a garment-appropriate three-quarter angle without twisting or deforming the product",
     handPlacement: "Keep hands away from the side seam, sleeve shape, pockets, waist treatment, and drape being demonstrated",
-    expression: "Same recognizable face and styling, with a subtle professional variation from the hero expression",
+    expression: "Same recognizable face and styling, with a playful, natural Gen-Z variation on the hero expression - a genuine smile or confident smirk, not stiff studio energy",
     productVisibilityRules: ["front and side construction remain readable", "silhouette is not compressed", "bottom wear remains unchanged and visible"],
     consistencyNotes: "Use Pose 1 only as the model and shoot anchor; preserve the original product references as garment truth",
     description: "A professional three-quarter or side view that reveals depth, drape, fit, and side construction.",
@@ -84,9 +84,9 @@ const POSE_SLOTS = [
     id: "back",
     title: "Full Back View",
     framing: "3:4 portrait, head-to-toe true rear view with the full back and hem visible",
-    bodyPosition: "Model faces fully away from camera with shoulders and hips square; no three-quarter cheat",
+    bodyPosition: "Model faces fully away from camera with shoulders and hips square, weight relaxed and natural; no three-quarter cheat",
     handPlacement: "Hands placed naturally where they do not cover the back neckline, closure, embroidery, waist, or rear silhouette",
-    expression: "Face is not forced toward camera; preserve identity through hair, body, and styling continuity",
+    expression: "Face is not forced toward camera; preserve identity and playful Gen-Z energy through hair, body, and styling continuity",
     productVisibilityRules: ["uploaded back image is the sole back-design authority", "entire rear construction visible", "never infer back details from the front"],
     consistencyNotes: "Keep the same model, hair, accessories, footwear, scene, lighting, and exact bottom wear while showing the authoritative back",
     description: "A true full back view sourced from the uploaded back product photograph.",
@@ -102,7 +102,7 @@ const POSE_SLOTS = [
     framing: "3:4 portrait with a garment-appropriate full or three-quarter body editorial crop",
     bodyPosition: "Use controlled movement selected for this category and construction, with anatomically natural posture and a readable silhouette",
     handPlacement: "Expressive but intentional; hands must not cover the garment's key selling features or change its apparent shape",
-    expression: "Current Gen-Z editorial expression while retaining the exact same recognizable model face and hairstyle",
+    expression: "Current, effortlessly cool Gen-Z editorial expression while retaining the exact same recognizable model face and hairstyle",
     productVisibilityRules: ["product remains the visual subject", "no prop or limb hides key construction", "creative movement does not alter fit, length, or pattern"],
     consistencyNotes: "Borrow only art direction from style references; garment, bottom wear, footwear, accessories, model, and shoot continuity remain locked",
     description: "A current, expressive Gen-Z fashion pose that follows the selected creative direction without hiding the garment.",
@@ -114,19 +114,19 @@ const POSE_SLOTS = [
   },
   {
     id: "closeup",
-    title: "Close-Up Product Detail",
-    framing: "3:4 portrait close-up including the same model face and the specific highest-value product detail",
-    bodyPosition: "Subtle garment-appropriate turn that presents the chosen detail on a natural body without distortion",
-    handPlacement: "Hands completely outside the selected detail area",
-    expression: "Same recognizable face, hair, makeup, and styling with a warm, playful close-up expression",
-    productVisibilityRules: ["selected detail is sharp and unobstructed", "fabric/pattern detail reference has priority when supplied", "face remains visible and consistent"],
-    consistencyNotes: "Magnify real details only; do not invent extra embroidery, print, weave, stitching, trim, jewelry, or branding",
-    description: "A closer model-and-product composition focused on the most important material and construction details.",
-    cameraAngle: "Eye-level face-to-waist detail framing",
-    highlightedDetails: ["fabric texture", "neckline", "print or embroidery"],
-    primaryReference: "fabric_pattern",
-    purpose: "Prove material and construction quality",
-    prompt: "Create a face-to-waist close-up with the same model face visible and the product's most important real fabric, texture, print, embroidery, neckline, or construction detail in sharp focus. Keep hands outside the detail area.",
+    title: "Natural Zoomed-Out Face & Vibe Shot",
+    framing: "3:4 portrait, zoomed out enough to read the full upper body (or more) - never a tight macro face crop",
+    bodyPosition: "Relaxed, natural stance with a slight candid shift in weight, as if caught mid-moment rather than posed stiffly",
+    handPlacement: "Hands relaxed and natural - near face, hair, or resting loosely - never covering the garment's key details",
+    expression: "A beautiful, cute, natural Gen-Z-style face with a genuine expression - a soft real smile or candid laugh, warm eyes, unfiltered and approachable, never stiff or over-posed",
+    productVisibilityRules: ["outfit stays clearly readable even though the shot centers the face", "no garment detail hidden by hands or hair", "this reads as a natural candid moment, not a beauty macro crop"],
+    consistencyNotes: "Keep the same face, hair, makeup, accessories, footwear, scene, lighting, and exact bottom wear established in Pose 1; only the framing pulls back to a natural, zoomed-out candid feel",
+    description: "A natural, zoomed-out candid moment that spotlights a beautiful, cute, Gen-Z-style face and genuine expression while keeping the full outfit in frame.",
+    cameraAngle: "Eye-level, zoomed out to a natural half-to-full body view",
+    highlightedDetails: ["natural expression", "face and vibe", "overall outfit read"],
+    primaryReference: "front",
+    purpose: "Social-first, scroll-stopping lifestyle image that feels authentic and shareable",
+    prompt: "Create a natural, zoomed-out lifestyle shot - not a tight close-up - with a beautiful, cute, Gen-Z-style face and a genuine, natural expression such as a soft smile or candid laugh. Keep the full outfit readable in frame; this should feel like a real, unposed moment from the shoot, not a beauty macro crop.",
   },
 ] as const;
 
@@ -196,6 +196,10 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
     lensAndCamera: stringValue(creative.lensAndCamera ?? creative.lens_and_camera, "One consistent full-frame fashion-camera perspective and natural lens rendering"),
     setContinuity: stringValue(creative.setContinuity ?? creative.set_continuity, "One real shoot day: identical set, time of day, light direction, white balance, exposure, and color grade"),
     realismRules: stringValue(creative.realismRules ?? creative.realism_rules, "Natural skin texture, anatomically correct hands, realistic fabric physics, optical depth, and no synthetic AI artifacts"),
+    suggestedAccessories: stringValue(
+      creative.suggestedAccessories ?? creative.suggested_accessories,
+      "No additional accessory needed - style with only what the product references show",
+    ),
   };
   const modelIdentity = {
     castingDirection: stringValue(model.castingDirection ?? model.casting_direction, "One consistent adult fashion model across all five images"),
@@ -254,18 +258,22 @@ Build a precise Product Identity Profile. If a detail is unclear, record it in u
 
 Build a Creative Direction Profile from style references, but never allow style to alter the product. Lock one lens family, camera height, perspective, exposure, white balance, color grade, light direction, shadow behavior, set geometry, and time-of-day so the results read as contact sheets from one real professional shoot. Define one Model Identity Profile locking the same recognizable adult face, skin tone, hair, makeup, body proportions, accessories and footwear across all five images.
 
+Overall pose energy: every one of the five poses should feel playful, warm, and Gen-Z-friendly - natural and full of genuine attitude, never stiff, robotic, or overly corporate-catalog.
+
+Accessory styling suggestion: look at what footwear and accessories (if any) the product references actually show. If the product's own footwear/bag/accessories are missing, incomplete, or would not read well on camera, propose ONE tasteful, trend-right, Gen-Z-appropriate addition (for example a specific footwear style or a small bag) in creativeDirection.suggestedAccessories, described specifically enough for a stylist to execute identically across all five poses. Only suggest an addition when it genuinely fits the pose plan and category - if the product references already show adequate footwear/accessories, or nothing suits the shot, leave creativeDirection.suggestedAccessories empty. This is a styling addition only: it must never be treated as part of the garment, and it must never contradict detailPlacementMap or absenceConstraints.
+
 Create exactly five product-specific camera setups in one coherent commercial coverage sequence, in this order and with these ids: full_front, angled, back, creative, closeup. They are not five unrelated concepts. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints.
 
-- full_front: square, unobstructed head-to-toe hero; establishes face/hair/styling/footwear/scene/lighting anchor.
+- full_front: square, unobstructed head-to-toe hero; establishes face/hair/styling/footwear/scene/lighting anchor with playful, confident Gen-Z energy.
 - angled: best side or three-quarter orientation for THIS garment; prove depth, drape, seams/slits/pockets/layering without distortion.
 - back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority.
 - creative: playful, scroll-stopping Gen-Z editorial movement tailored to this garment while keeping product completely readable.
-- closeup: face-to-waist 3:4 crop with the same face; choose the most commercially useful real detail; hands completely outside that detail; prioritize FABRIC / PATTERN DETAIL.
+- closeup: a natural, zoomed-out shot (never a tight macro crop) spotlighting a beautiful, cute, Gen-Z-style face with a genuine, natural expression, while the outfit stays readable in frame.
 
 Across all five, ONLY pose, angle, framing, and expression may change. Exact product, colors, pattern, bottom wear, face, hairstyle, makeup, accessories, footwear, scene, lighting, shadows, camera/lens feel, and color treatment remain locked.
 
 Return STRICT JSON only:
-{"productIdentity":{"category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[]},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":""},"modelIdentity":{"castingDirection":"","face":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"posePlan":[{"id":"full_front"},{"id":"angled"},{"id":"back"},{"id":"creative"},{"id":"closeup"}]}`;
+{"productIdentity":{"category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[]},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"posePlan":[{"id":"full_front"},{"id":"angled"},{"id":"back"},{"id":"creative"},{"id":"closeup"}]}`;
 }
 
 export const CONSISTENCY_RULES = [
@@ -277,9 +285,14 @@ export const CONSISTENCY_RULES = [
   "Style references control only background, lighting, composition, camera, mood, and creative treatment.",
   "Never add text, random logos, extra layers, duplicate people, or unreferenced garment elements.",
   "Treat detailPlacementMap and absenceConstraints as hard locks: never relocate, mirror, extend, add, or remove a garment detail.",
+  "The optional stylist accessory suggestion (creativeDirection.suggestedAccessories) may be added only when present, and must stay identical and product-appropriate across every pose - never invent a second, different accessory and never let it hide or replace any garment detail, bottom wear, or footwear shown in the product references.",
 ];
 
-export const ANALYSIS_VERSION = "generation-session-v4-supabase-invariant-delta";
+// Bumping this invalidates cached/stored analyses (Studio's analysis_cache and each
+// catalog variant's stored ai_analysis) so the new playful Gen-Z pose plan, the rebuilt
+// pose 5, and the accessory-suggestion field take effect on the next analysis run
+// instead of quietly reusing a pre-change cache hit.
+export const ANALYSIS_VERSION = "generation-session-v5-genz-playful-accessories";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

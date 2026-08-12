@@ -78,6 +78,7 @@ export type CreativeDirectionProfile = {
   lensAndCamera: string;
   setContinuity: string;
   realismRules: string;
+  suggestedAccessories: string;
 };
 
 export type StudioAnalysis = {

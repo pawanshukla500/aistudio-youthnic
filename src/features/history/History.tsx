@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Ban, ChevronDown, ChevronUp, Download, Image as ImageIcon, RefreshCcw, Search, Trash2, User, Loader2, Sparkles, Clock, AlertCircle, X } from "lucide-react";
-import { api, invokeAppApi, useMutation, useQuery, type Id } from "../../lib/backend";
+import { Ban, ChevronDown, ChevronUp, Download, Image as ImageIcon, Images, RefreshCcw, Search, Trash2, User, Loader2, Sparkles, Clock, AlertCircle, X } from "lucide-react";
+import { api, getJobReferenceImages, invokeAppApi, useMutation, useQuery, type Id } from "../../lib/backend";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
@@ -55,6 +55,28 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const [regenerateTarget, setRegenerateTarget] = useState<any | null>(null);
   const [extraInstructions, setExtraInstructions] = useState("");
   const [regenerateError, setRegenerateError] = useState("");
+  const [showReferences, setShowReferences] = useState(false);
+  const [references, setReferences] = useState<any[] | null>(null);
+  const [referencesLoading, setReferencesLoading] = useState(false);
+  const [referencesError, setReferencesError] = useState("");
+  const [selectedReference, setSelectedReference] = useState<any | null>(null);
+
+  // Fetched only when the user opts in — never on expand/render — so browsing History
+  // doesn't cost extra Firebase Storage requests for images nobody asked to see.
+  const toggleReferences = async () => {
+    if (showReferences) { setShowReferences(false); return; }
+    setShowReferences(true);
+    if (references || referencesLoading) return;
+    setReferencesLoading(true);
+    setReferencesError("");
+    try {
+      setReferences(await getJobReferenceImages(jobId));
+    } catch (reason) {
+      setReferencesError(reason instanceof Error ? reason.message : "Could not load reference images.");
+    } finally {
+      setReferencesLoading(false);
+    }
+  };
 
   const submitRegeneration = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -145,7 +167,15 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           </>
         )}
         
-        <div className="flex-1 flex justify-end">
+        <div className="flex-1 flex justify-end gap-2">
+          <button
+            onClick={() => void toggleReferences()}
+            disabled={referencesLoading}
+            className="flex items-center gap-2 rounded-lg bg-surface-container px-3 py-1.5 text-xs font-bold text-on-surface transition-colors hover:bg-surface-container-high disabled:opacity-50"
+          >
+            {referencesLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Images className="h-3.5 w-3.5" />}
+            {referencesLoading ? "Loading..." : showReferences ? "Hide references" : "View references"}
+          </button>
           <button
             onClick={downloadZip}
             disabled={isZipping || !job.poses.some((p: any) => p.status === "completed" && p.outputUrl)}
@@ -156,6 +186,33 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           </button>
         </div>
       </div>
+
+      {showReferences && (
+        <div className="mb-6 rounded-xl border border-outline-variant/40 bg-white p-4 shadow-sm">
+          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-secondary">Attached product & reference images</p>
+          {referencesError && <p className="flex items-center gap-2 text-sm text-danger"><AlertCircle className="h-4 w-4" /> {referencesError}</p>}
+          {!referencesError && references && references.length === 0 && (
+            <p className="text-sm text-secondary">No reference images were stored for this generation.</p>
+          )}
+          {!referencesError && references && references.length > 0 && (
+            <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 lg:grid-cols-6">
+              {references.map((reference) => (
+                <button
+                  key={reference._id}
+                  type="button"
+                  onClick={() => setSelectedReference(reference)}
+                  className="group text-left"
+                >
+                  <div className="aspect-square overflow-hidden rounded-lg border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all group-hover:border-primary/40 group-hover:shadow-md">
+                    <img src={reference.url} alt={reference.label} loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                  </div>
+                  <p className="mt-1.5 truncate text-[10px] font-semibold text-secondary">{reference.label}</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-5">
         {job.poses.map((pose: any) => (
@@ -232,6 +289,19 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 {selectedPose.completedAt && Date.now() - selectedPose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && <button onClick={() => { setRegenerateError(""); setExtraInstructions(""); setRegenerateTarget(selectedPose); }} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-soft-blush px-4 py-3 font-semibold text-primary hover:bg-primary/15"><RefreshCcw className="h-4 w-4" /> Regenerate with instructions</button>}
                 <button onClick={() => void downloadPose(selectedPose)} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-white hover:bg-primary-dark"><Download className="h-4 w-4" /> Download image</button>
               </aside>
+            </div>
+          </div>
+        </div>
+      )}
+      {selectedReference && (
+        <div className="fixed inset-0 z-[80] grid place-items-center bg-navy-soft/80 p-4" onClick={() => setSelectedReference(null)}>
+          <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-outline-variant/40 px-5 py-4">
+              <div><p className="text-[10px] font-bold uppercase tracking-widest text-primary">Reference</p><h3 className="font-syne text-lg font-bold text-on-surface">{selectedReference.label}</h3></div>
+              <button onClick={() => setSelectedReference(null)} className="rounded-lg p-2 text-secondary hover:bg-surface-container"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="grid min-h-0 flex-1 place-items-center overflow-auto bg-neutral-950 p-4">
+              <img src={selectedReference.url} alt={selectedReference.label} decoding="async" className="max-h-[76vh] max-w-full object-contain" />
             </div>
           </div>
         </div>
