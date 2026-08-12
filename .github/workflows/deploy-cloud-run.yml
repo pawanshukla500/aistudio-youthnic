@@ -135,4 +135,4 @@ jobs:
             --execution-environment=gen2
 
       - name: Verify deployed health
-        run: curl --fail --retry 5 --retry-delay 3 "${{ steps.deploy.outputs.url }}/healthz"
+        run: curl --fail --retry 5 --retry-delay 3 "${{ steps.deploy.outputs.url }}/"
