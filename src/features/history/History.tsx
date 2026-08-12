@@ -73,7 +73,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           if (blob.type === "image/png") ext = "png";
           else if (blob.type === "image/webp") ext = "webp";
           
-          const filename = `${i + 1}_${pose.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${ext}`;
+          const safeTitle = String(pose.title || "pose").replace(/[^a-z0-9]/gi, '_').toLowerCase();
+          const filename = `${i + 1}_${safeTitle}.${ext}`;
           folder.file(filename, blob);
         } catch (err) {
           console.error("Failed to fetch image for ZIP", err);
