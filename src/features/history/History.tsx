@@ -60,6 +60,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const [referencesLoading, setReferencesLoading] = useState(false);
   const [referencesError, setReferencesError] = useState("");
   const [selectedReference, setSelectedReference] = useState<any | null>(null);
+  const [downloadingPoseId, setDownloadingPoseId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState("");
 
   // Fetched only when the user opts in — never on expand/render — so browsing History
   // doesn't cost extra Firebase Storage requests for images nobody asked to see.
@@ -95,9 +97,17 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 
   const downloadPose = async (pose: any) => {
     if (!pose?.outputUrl) return;
-    const blob = await fetchPoseImageBlob(jobId, pose);
-    const extension = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
-    saveAs(blob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}.${extension}`);
+    setDownloadError("");
+    setDownloadingPoseId(pose._id);
+    try {
+      const blob = await fetchPoseImageBlob(jobId, pose);
+      const extension = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
+      saveAs(blob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}.${extension}`);
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Could not download this image.");
+    } finally {
+      setDownloadingPoseId(null);
+    }
   };
   
   const downloadZip = async () => {
@@ -105,22 +115,43 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     try {
       setIsZipping(true);
       const zip = new JSZip();
-      
+
       const completedPoses = job.poses.filter((p: any) => p.status === "completed" && p.outputUrl);
       if (completedPoses.length === 0) return;
 
       const folder = zip.folder(`Youthnic_${job.skuId || "Generation"}`);
       if (!folder) return;
 
+      // One batched call fetches every pose's bytes in a single round trip (the server fetches
+      // them from Firebase in parallel, sharing one auth token) instead of one function call per
+      // image — that per-image round-tripping was what made "Download ZIP" slow. Anything missing
+      // from the batch (a storagePath-less legacy pose, or a partial batch failure) still falls
+      // back to the single-image path below.
+      const storagePaths = [...new Set(completedPoses.map((p: any) => p.storagePath).filter(Boolean))];
+      const blobByStoragePath = new Map<string, Blob>();
+      if (storagePaths.length) {
+        try {
+          const result = await invokeAppApi<{ assets: Array<{ storagePath: string; base64?: string; mimeType?: string; error?: string }> }>(
+            "jobs.downloadAssets",
+            { jobId, storagePaths },
+          );
+          for (const asset of result.assets) {
+            if (asset.base64) blobByStoragePath.set(asset.storagePath, base64ToBlob(asset.base64, asset.mimeType || "image/png"));
+          }
+        } catch (err) {
+          console.error("Batched ZIP download failed, falling back to per-image downloads", err);
+        }
+      }
+
       const promises = completedPoses.map(async (pose: any, i: number) => {
         try {
-          const blob = await fetchPoseImageBlob(jobId, pose);
+          const blob = blobByStoragePath.get(pose.storagePath) ?? await fetchPoseImageBlob(jobId, pose);
 
           // Determine extension from content type or fallback to jpg
           let ext = "jpg";
           if (blob.type === "image/png") ext = "png";
           else if (blob.type === "image/webp") ext = "webp";
-          
+
           const safeTitle = String(pose.title || "pose").replace(/[^a-z0-9]/gi, '_').toLowerCase();
           const filename = `${i + 1}_${safeTitle}.${ext}`;
           folder.file(filename, blob);
@@ -251,6 +282,20 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   Regenerate
                 </button>
               )}
+              {pose.outputUrl && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void downloadPose(pose);
+                  }}
+                  disabled={downloadingPoseId === pose._id}
+                  title="Download this image"
+                  className="absolute right-2.5 bottom-2.5 z-10 flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-bold text-primary opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 hover:bg-white disabled:opacity-100"
+                >
+                  {downloadingPoseId === pose._id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                  Download
+                </button>
+              )}
             </div>
             <h4 className="mt-3 text-xs font-semibold text-on-surface">{pose.poseNumber}. {pose.title}</h4>
             {pose.outputUrl && (
@@ -287,7 +332,10 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   {!selectedPose.usageReported && <p className="mt-3 text-[10px] leading-4 text-warning">This provider response did not include token usage, so no token cost was invented.</p>}
                 </div>
                 {selectedPose.completedAt && Date.now() - selectedPose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && <button onClick={() => { setRegenerateError(""); setExtraInstructions(""); setRegenerateTarget(selectedPose); }} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-soft-blush px-4 py-3 font-semibold text-primary hover:bg-primary/15"><RefreshCcw className="h-4 w-4" /> Regenerate with instructions</button>}
-                <button onClick={() => void downloadPose(selectedPose)} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-white hover:bg-primary-dark"><Download className="h-4 w-4" /> Download image</button>
+                <button onClick={() => void downloadPose(selectedPose)} disabled={downloadingPoseId === selectedPose._id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
+                  {downloadingPoseId === selectedPose._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  {downloadingPoseId === selectedPose._id ? "Downloading…" : "Download image"}
+                </button>
               </aside>
             </div>
           </div>
@@ -315,6 +363,13 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             {regenerateError && <p className="mt-4 rounded-xl border border-danger/20 bg-danger-surface p-3 text-sm text-danger">{regenerateError}</p>}
             <div className="mt-6 flex justify-end gap-3"><button type="button" disabled={Boolean(regeneratingId)} onClick={() => setRegenerateTarget(null)} className="rounded-xl border border-outline-variant px-4 py-2.5 text-sm font-bold text-secondary">Cancel</button><button disabled={Boolean(regeneratingId)} className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{regeneratingId ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}{regeneratingId ? "Queueing…" : "Regenerate pose"}</button></div>
           </form>
+        </div>
+      )}
+      {downloadError && (
+        <div className="fixed bottom-6 right-6 z-[120] flex items-center gap-3 rounded-xl border border-danger/20 bg-white px-5 py-4 text-sm text-danger shadow-xl">
+          <AlertCircle className="h-5 w-5" />
+          <span className="font-medium">{downloadError}</span>
+          <button onClick={() => setDownloadError("")} className="ml-4 text-xs font-bold uppercase tracking-widest text-secondary hover:text-on-surface">Dismiss</button>
         </div>
       )}
     </div>
