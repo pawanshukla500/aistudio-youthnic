@@ -1055,6 +1055,28 @@ async function removeJob(request: Request, args: JsonRecord) {
   return { success: true, deletedImages: generatedPaths.length - storageDeleteFailures, storageDeleteFailures };
 }
 
+// Browsers can render Firebase Storage download URLs directly in <img> tags without any
+// CORS setup, but a client-side fetch()/getBytes() of that same URL is subject to CORS —
+// and the bucket has no CORS configuration for this app's origin. That silently breaks the
+// History page's image/ZIP downloads (each fetch rejects and is swallowed, so the ZIP comes
+// back empty). Proxy the bytes through this already-authenticated, same-origin function
+// instead, using the Firebase Admin credentials this worker already holds.
+async function downloadGeneratedAsset(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "studio.generate");
+  const jobId = String(args.jobId || "");
+  const storagePath = String(args.storagePath || "");
+  if (!jobId || !storagePath) throw new Error("jobId and storagePath are required.");
+  const { data: job } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  if (!job) throw new Error("Generation job not found.");
+  const [{ data: pose }, { data: asset }] = await Promise.all([
+    service.from("session_generations").select("generation_id").eq("session_id", job.session_id).eq("storage_path", storagePath).maybeSingle(),
+    service.from("planning_assets").select("id").eq("generation_job_id", jobId).eq("asset_role", "generated").eq("storage_path", storagePath).maybeSingle(),
+  ]);
+  if (!pose && !asset) throw new Error("This image does not belong to the requested generation job.");
+  const blob = await downloadFirebaseObject(storagePath);
+  return { base64: await blobToBase64(blob), mimeType: blob.type || "image/png" };
+}
+
 async function adminOverview(request: Request) {
   const { workspace } = await workspaceFor(request);
   if (!workspace.isAdmin && !workspace.permissions.some((permission) => permission.startsWith("admin."))) throw new Error("You do not have access to the admin console.");
@@ -2083,6 +2105,7 @@ Deno.serve(async (request) => {
       "jobs.cancel": () => cancelJob(request, args),
       "jobs.regenerate": () => regeneratePose(request, args),
       "jobs.remove": () => removeJob(request, args),
+      "jobs.downloadAsset": () => downloadGeneratedAsset(request, args),
       "worker": () => processWorker(request, args),
       "admin.overview": () => adminOverview(request),
       "admin.createUser": () => createUserOperation(request, args),

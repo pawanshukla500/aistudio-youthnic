@@ -1,9 +1,40 @@
 import { useEffect, useState } from "react";
 import { Ban, ChevronDown, ChevronUp, Download, Image as ImageIcon, RefreshCcw, Search, Trash2, User, Loader2, Sparkles, Clock, AlertCircle, X } from "lucide-react";
-import { api, useMutation, useQuery, type Id } from "../../lib/backend";
+import { api, invokeAppApi, useMutation, useQuery, type Id } from "../../lib/backend";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
+
+function base64ToBlob(base64: string, mimeType: string): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mimeType || "image/png" });
+}
+
+// Firebase Storage download URLs render fine in <img> tags (no CORS needed to display an
+// image), but a browser fetch() of that same URL is subject to CORS — and the bucket isn't
+// configured to allow this app's origin. That's why the image/ZIP downloads used to come
+// back empty: every fetch() rejected and was swallowed silently. Route through the
+// authenticated app-api function instead, which fetches the bytes server-side with the
+// Firebase Admin credentials and hands them back as base64. Fall back to a direct fetch for
+// any pose missing a storagePath (e.g. legacy rows), or if the proxy call fails.
+async function fetchPoseImageBlob(jobId: string, pose: any): Promise<Blob> {
+  if (pose.storagePath) {
+    try {
+      const result = await invokeAppApi<{ base64: string; mimeType: string }>("jobs.downloadAsset", {
+        jobId,
+        storagePath: pose.storagePath,
+      });
+      return base64ToBlob(result.base64, result.mimeType);
+    } catch (err) {
+      console.error("Proxied image download failed, falling back to direct fetch", err);
+    }
+  }
+  const response = await fetch(pose.outputUrl);
+  if (!response.ok) throw new Error("Image download failed");
+  return response.blob();
+}
 
 function statusClass(status: string) {
   if (status === "completed") return "bg-success/10 text-success border border-success/20";
@@ -42,9 +73,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 
   const downloadPose = async (pose: any) => {
     if (!pose?.outputUrl) return;
-    const response = await fetch(pose.outputUrl);
-    if (!response.ok) throw new Error("Image download failed");
-    const blob = await response.blob();
+    const blob = await fetchPoseImageBlob(jobId, pose);
     const extension = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
     saveAs(blob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}.${extension}`);
   };
@@ -63,11 +92,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 
       const promises = completedPoses.map(async (pose: any, i: number) => {
         try {
-          const response = await fetch(pose.outputUrl);
-          if (!response.ok) throw new Error("Image download failed");
-          
-          const blob = await response.blob();
-          
+          const blob = await fetchPoseImageBlob(jobId, pose);
+
           // Determine extension from content type or fallback to jpg
           let ext = "jpg";
           if (blob.type === "image/png") ext = "png";
