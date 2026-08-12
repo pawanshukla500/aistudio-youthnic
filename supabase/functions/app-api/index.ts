@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.112.2";
+import ExcelJS from "https://esm.sh/exceljs@4.4.0";
 import { deleteFirebaseObject, downloadFirebaseObject, uploadFirebaseObject, createFirebaseUser, updateFirebaseUser, deleteFirebaseUser } from "./firebase-admin.ts";
 import {
   ANALYSIS_VERSION,
@@ -221,7 +222,7 @@ function localDateParts(timezone: string, date = new Date()) {
   return { iso: `${value.year}-${value.month}-${value.day}`, year: Number(value.year), month: Number(value.month), day: Number(value.day) };
 }
 
-async function sendEmail(args: { recipients: string[]; subject: string; html: string }) {
+async function sendEmail(args: { recipients: string[]; subject: string; html: string; attachments?: Array<{ filename: string; content: string }> }) {
   const apiKey = Deno.env.get("RESEND_API_KEY")?.trim();
   const from = Deno.env.get("RESEND_FROM")?.trim();
   if (!apiKey || !from) throw new Error("Email delivery is not configured. Add RESEND_API_KEY and RESEND_FROM to Supabase Edge Function secrets.");
@@ -229,7 +230,7 @@ async function sendEmail(args: { recipients: string[]; subject: string; html: st
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from, to: args.recipients, subject: args.subject, html: args.html }),
+    body: JSON.stringify({ from, to: args.recipients, subject: args.subject, html: args.html, attachments: args.attachments }),
   });
   const data = await response.json().catch(() => ({})) as JsonRecord;
   if (!response.ok) throw new Error(String(data.message || `Email provider failed (${response.status}).`));
@@ -1984,6 +1985,39 @@ async function syncOpenAiUsageOperation(request: Request, args: JsonRecord) {
   };
 }
 
+async function sendEventEmailOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request);
+  const recipients = cleanEmails(args.recipients);
+  const subject = String(args.subject || "Event Update");
+  
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px;">
+      <h2 style="color: #111827; font-size: 24px; font-weight: 600; margin-top: 0; margin-bottom: 16px;">${escapeHtml(subject)}</h2>
+      <div style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px; white-space: pre-wrap;">${escapeHtml(String(args.body || "Please find the attached event data."))}</div>
+      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
+      <p style="color: #6b7280; font-size: 14px; margin: 0;">Youthnic AI Studio Events Team</p>
+    </div>
+  `;
+
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Event Data');
+  worksheet.columns = Array.isArray(args.excelColumns) ? args.excelColumns as Array<{header: string, key: string}> : [{header: 'Details', key: 'details'}];
+  worksheet.addRows(Array.isArray(args.excelRows) ? args.excelRows as any[] : []);
+  
+  const buffer = await workbook.xlsx.writeBuffer();
+  const base64Content = bytesToBase64(new Uint8Array(buffer as ArrayBuffer));
+  const filename = String(args.excelFilename || "event_data.xlsx");
+
+  const id = await sendEmail({
+    recipients,
+    subject,
+    html,
+    attachments: [{ filename, content: base64Content }]
+  });
+
+  return { success: true, emailId: id };
+}
+
 async function importMigrationArchiveOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request);
   if (!workspace.isAdmin) throw new Error("Only an administrator can import the migration archive.");
@@ -2042,6 +2076,7 @@ Deno.serve(async (request) => {
       "events.research": () => runEventResearchOperation(request),
       "events.digest": () => sendDigestOperation(request),
       "events.automation": () => runEventAutomationOperation(request),
+      "events.sendEmail": () => sendEventEmailOperation(request, args),
       "migration.archive": () => importMigrationArchiveOperation(request, args),
     };
     const handler = handlers[operation];
