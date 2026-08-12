@@ -1,7 +1,10 @@
 import type { Id } from "../../lib/backend";
 
 export type ProductReferenceRole = "front" | "back" | "fabric_pattern" | "additional_product";
-export type ReferenceRole = ProductReferenceRole | "style_reference" | "model_reference";
+// "model_identity" (not "model_reference") to match the existing planning_assets_asset_role_check
+// constraint in Supabase - that value was already reserved there; introducing a different string
+// here would fail the DB insert with a check-constraint violation.
+export type ReferenceRole = ProductReferenceRole | "style_reference" | "model_identity";
 
 export type StudioReference = {
   id: string;
