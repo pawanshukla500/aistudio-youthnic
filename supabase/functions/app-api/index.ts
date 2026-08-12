@@ -1153,7 +1153,37 @@ async function createUserOperation(request: Request, args: JsonRecord) {
       action: "admin.user.created", resource_type: "organization_member", resource_id: member.id,
       metadata: { firebaseUid: firebaseUser.localId, roleIds, roleNames: roles.map((role) => role.name) },
     });
-    return { userId: member.id, firebaseUid: firebaseUser.localId, welcomeEmailSent: false };
+    
+    let welcomeEmailSent = false;
+    try {
+      const loginUrl = Deno.env.get("FRONTEND_URL") || "https://aistudio.youthnic.shop";
+      const html = `
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-radius: 8px;">
+  <h2 style="color: #111827; font-size: 24px; font-weight: 600; margin-top: 0; margin-bottom: 16px; text-align: center;">Welcome to Youthnic AI Studio</h2>
+  <div style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 32px; text-align: center;">
+    Hi ${escapeHtml(displayName)},<br><br>
+    An administrator has created an account for you at Youthnic AI Studio. You can now log in using this email address.
+  </div>
+  <div style="text-align: center; margin-bottom: 32px;">
+    <a href="${loginUrl}" style="display: inline-block; background-color: #000000; color: #ffffff; font-weight: 600; font-size: 16px; text-decoration: none; padding: 12px 24px; border-radius: 6px;">
+      Log In Now
+    </a>
+  </div>
+  <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
+  <p style="color: #6b7280; font-size: 14px; margin: 0; text-align: center;">Youthnic AI Studio Administration</p>
+</div>
+`;
+      await sendEmail({
+        recipients: [email],
+        subject: "Welcome to Youthnic AI Studio",
+        html
+      });
+      welcomeEmailSent = true;
+    } catch (emailError) {
+      console.error("Failed to send welcome email", emailError);
+    }
+
+    return { userId: member.id, firebaseUid: firebaseUser.localId, welcomeEmailSent };
   } catch (error) {
     await deleteFirebaseUser(firebaseUser.localId).catch(() => undefined);
     throw error;
