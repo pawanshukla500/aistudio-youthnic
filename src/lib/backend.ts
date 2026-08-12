@@ -149,7 +149,7 @@ async function getJob(jobId: string) {
     "Professional Side / 3/4 View",
     "Full Back View",
     "Creative Gen-Z Fashion Pose",
-    "Close-Up Product Detail",
+    "Natural Zoomed-Out Face & Vibe Shot",
   ];
   const mappedPoses = poseRows.map((pose) => {
     const asset = generatedAssets.find((entry) => Number(record(entry.metadata).poseIndex) === Number(pose.pose_index));
@@ -217,6 +217,36 @@ async function getJob(jobId: string) {
     session: sessionResult.data,
     poses: mappedPoses,
   };
+}
+
+const REFERENCE_ROLE_LABELS: Record<string, string> = {
+  front: "Front product",
+  back: "Back product",
+  fabric_pattern: "Fabric / pattern detail",
+  additional_product: "Additional product",
+  style_reference: "Style reference",
+};
+
+function referenceRoleLabel(role: string) {
+  return REFERENCE_ROLE_LABELS[role] || (role ? role.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase()) : "Reference");
+}
+
+// Deliberately not folded into getJob(): the History page only calls this when the user
+// opts in via "View reference images", so the attached product/style images are never
+// fetched by default just from expanding a job's details.
+export async function getJobReferenceImages(jobId: string) {
+  const { data, error } = await supabase.from("generation_jobs").select("job_data").eq("job_id", jobId).maybeSingle();
+  if (error) throw error;
+  const references = record(data?.job_data).references;
+  return (Array.isArray(references) ? references : [])
+    .map((entry: Record<string, any>, index: number) => ({
+      _id: String(entry.id || `${jobId}-ref-${index}`),
+      role: String(entry.role || ""),
+      label: referenceRoleLabel(String(entry.role || "")),
+      url: String(entry.downloadUrl || ""),
+      filename: String(entry.filename || `${entry.role || "reference"}.jpg`),
+    }))
+    .filter((entry) => entry.url);
 }
 
 async function queuePosition(jobId: string) {
