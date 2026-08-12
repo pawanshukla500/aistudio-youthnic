@@ -126,7 +126,7 @@ jobs:
             --allow-unauthenticated
             --port=8080
             --cpu=1
-            --memory=256Mi
+            --memory=512Mi
             --concurrency=80
             --min-instances=0
             --max-instances=3
