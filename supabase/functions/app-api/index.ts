@@ -548,15 +548,6 @@ ${args.correction ? `\nPREVIOUS ATTEMPT FAILED QA. Correct only these issues whi
 Product accuracy is more important than style matching. Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
 }
 
-// output_compression only applies to jpeg/webp (OpenAI ignores it for png); scale it with the
-// same quality tier the user already picks so "high" still buys back some of the size the
-// lower tiers trade away, instead of one fixed compression level for every quality setting.
-function outputCompressionForQuality(quality: string) {
-  if (quality === "high") return 90;
-  if (quality === "low") return 72;
-  return 82;
-}
-
 async function generateImage(args: { prompt: string; model: string; size: string; quality: string; references: LoadedReference[] }) {
   const body = new FormData();
   body.append("model", args.model);
@@ -565,9 +556,10 @@ async function generateImage(args: { prompt: string; model: string; size: string
   body.append("quality", args.quality);
   // OpenAI defaults image edits/generations to lossless PNG, which routinely runs several MB
   // per pose - slow to upload, store, and download, and unnecessary for catalog photography.
-  // Request compressed JPEG instead: comparable visual quality at a few hundred KB per image.
+  // Request JPEG instead: this alone (at OpenAI's default output_compression=100, i.e. we don't
+  // override it) is what gets a comparable fashion-catalog project down to a few hundred KB per
+  // image, so match that rather than layering on an extra, unproven compression knob.
   body.append("output_format", "jpeg");
-  body.append("output_compression", String(outputCompressionForQuality(args.quality)));
   // GPT Image 2 always processes reference images at high fidelity and rejects
   // input_fidelity. Older supported GPT Image edit models accept the hint.
   if (["gpt-image-1.5", "gpt-image-1"].includes(args.model)) body.append("input_fidelity", "high");
