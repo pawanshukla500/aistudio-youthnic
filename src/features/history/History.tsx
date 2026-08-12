@@ -358,6 +358,12 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         <div className="fixed inset-0 z-[110] grid place-items-center bg-navy-soft/75 p-4" onClick={() => !regeneratingId && setRegenerateTarget(null)}>
           <form onSubmit={submitRegeneration} onClick={(event) => event.stopPropagation()} className="w-full max-w-xl rounded-3xl bg-white p-7 shadow-2xl">
             <div className="flex items-start justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">Pose {regenerateTarget.poseNumber}</p><h3 className="mt-2 font-syne text-2xl font-bold text-on-surface">Regenerate {regenerateTarget.title}</h3><p className="mt-1 text-sm leading-6 text-secondary">Add a precise correction. Original front, back, fabric, product identity, model, and scene remain authoritative.</p></div><button type="button" disabled={Boolean(regeneratingId)} onClick={() => setRegenerateTarget(null)} className="rounded-lg p-2 text-secondary hover:bg-surface-container disabled:opacity-40"><X className="h-5 w-5" /></button></div>
+            {regenerateTarget.poseNumber === 1 && (
+              <p className="mt-4 rounded-xl border border-warning/30 bg-warning/5 p-3 text-xs leading-5 text-warning-dark">
+                <AlertCircle className="mr-1.5 inline h-3.5 w-3.5 align-text-bottom" />
+                Pose 1 is the face and shoot anchor for this whole set — poses 2–5 were generated to match it. Regenerating it can change the model's face; if it does, regenerate the other poses afterward so every image still shows the same person.
+              </p>
+            )}
             <label className="mt-6 block text-xs font-bold uppercase tracking-wider text-secondary">Extra instructions<textarea autoFocus maxLength={1000} rows={5} value={extraInstructions} onChange={(event) => setExtraInstructions(event.target.value)} placeholder="Example: Back side should not have hanging/latkan elements. Preserve the plain uploaded back construction exactly." className="mt-2 w-full resize-y rounded-xl border border-outline-variant p-3 text-sm font-normal normal-case leading-6 tracking-normal text-on-surface outline-none focus:border-primary" /></label>
             <div className="mt-2 flex justify-between text-[10px] text-secondary"><span>Leave blank to retry with the existing locked shoot plan.</span><span>{extraInstructions.length}/1000</span></div>
             {regenerateError && <p className="mt-4 rounded-xl border border-danger/20 bg-danger-surface p-3 text-sm text-danger">{regenerateError}</p>}

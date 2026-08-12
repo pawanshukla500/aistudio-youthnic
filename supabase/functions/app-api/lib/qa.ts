@@ -1,7 +1,7 @@
 import { parseJsonResponse, type JsonRecord } from "./profiles.ts";
 
 const CHECK_KEYS = [
-  "model_face", "garment_identity", "colors", "fabric_texture", "print_pattern",
+  "model_face", "face_realism", "garment_identity", "colors", "fabric_texture", "print_pattern",
   "front_back_design", "bottom_wear", "details_and_branding", "detail_placement",
   "absence_constraints", "fit_silhouette", "styling_continuity", "styling_addition",
   "pose_requirement", "unexpected_changes",
@@ -27,12 +27,14 @@ ${args.consistencyRules.map((rule) => `- ${rule}`).join("\n")}
 Reference manifest:
 ${args.referenceManifest.join("\n")}
 
-${args.hasApprovedAnchor ? "The approved anchor must show the same recognizable person, hair, body proportions, styling, backdrop, lighting, and color treatment." : "This is Pose 1. It must establish a realistic, coherent model and shoot anchor."}
+${args.hasApprovedAnchor ? "Compare IMAGE A against the APPROVED POSE 1 reference at the facial-feature level - face shape, eyes, eyebrows, nose, lips, jawline, skin tone and texture, and hairstyle must all match the same person. Also confirm body proportions, styling, backdrop, lighting, and color treatment match." : "This is Pose 1. It must establish one specific, photorealistic, naturally beautiful adult face and a realistic, coherent shoot anchor."}
 
-Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face. Fail any invented or moved button, tassel/latkan, closure, trim, pocket, logo, embroidery, jewelry, or hardware. For a back pose, fail unless it is a true back view matching the uploaded BACK. For pose 5 (the natural zoomed-out face & vibe shot), fail if it is a tight macro crop instead of a natural, zoomed-out shot with the outfit still readable, or if the expression looks stiff or unnatural instead of a beautiful, cute, genuine Gen-Z smile or expression. If a stylist accessory suggestion was provided, fail styling_addition when it is missing, inconsistent across poses, or hides/replaces any garment detail, bottom wear, or footwear from the product references; pass styling_addition when no suggestion was provided and none was invented.
+Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face. Fail any invented or moved button, tassel/latkan, closure, trim, pocket, logo, embroidery, jewelry, or hardware. For a back pose, fail unless it is a true back view matching the uploaded BACK; face_realism automatically passes for a back pose since the face is not visible. For pose 5 (the natural zoomed-out face & vibe shot), fail if it is a tight macro crop instead of a natural, zoomed-out shot with the outfit still readable, or if the expression looks stiff or unnatural instead of a beautiful, cute, genuine Gen-Z smile or expression. If a stylist accessory suggestion was provided, fail styling_addition when it is missing, inconsistent across poses, or hides/replaces any garment detail, bottom wear, or footwear from the product references; pass styling_addition when no suggestion was provided and none was invented.
+
+Face quality bar - fail face_realism for any of these even if everything else matches: plastic, waxy, airbrushed, or over-smoothed "beauty filter" skin instead of natural texture with visible pores; crossed, misaligned, asymmetric, glassy, or otherwise distorted/malformed eyes; unnaturally uniform, fused, extra, missing, or warped teeth; any blurring, warping, melting, or duplicated/misplaced facial features; or a mirror-symmetric "AI face" that does not read as a real photographed person. Give a specific, actionable correction for any face_realism or model_face failure (name the exact feature that is wrong).
 
 Return STRICT JSON only:
-{"pass":true,"score":100,"checks":{"model_face":"pass","garment_identity":"pass","colors":"pass","fabric_texture":"pass","print_pattern":"pass","front_back_design":"pass","bottom_wear":"pass","details_and_branding":"pass","detail_placement":"pass","absence_constraints":"pass","fit_silhouette":"pass","styling_continuity":"pass","styling_addition":"pass","pose_requirement":"pass","unexpected_changes":"pass"},"failed":[],"reason":"short verdict","correction":"specific correction prompt if failed"}`;
+{"pass":true,"score":100,"checks":{"model_face":"pass","face_realism":"pass","garment_identity":"pass","colors":"pass","fabric_texture":"pass","print_pattern":"pass","front_back_design":"pass","bottom_wear":"pass","details_and_branding":"pass","detail_placement":"pass","absence_constraints":"pass","fit_silhouette":"pass","styling_continuity":"pass","styling_addition":"pass","pose_requirement":"pass","unexpected_changes":"pass"},"failed":[],"reason":"short verdict","correction":"specific correction prompt if failed"}`;
 }
 
 export function normalizePoseQaResult(raw: JsonRecord) {
