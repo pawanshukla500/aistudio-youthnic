@@ -294,11 +294,12 @@ async function loadAvailableReferences(references: ReferenceInput[]): Promise<Lo
 
 function roleLabel(role: string) {
   const labels: Record<string, string> = {
+    model_reference: "MODEL FACE REFERENCE - the exact, non-negotiable face and identity for the model in every pose; reproduce it as closely as photographically possible, never invent or beautify a different face",
     front: "FRONT PRODUCT - authoritative front product truth",
     back: "BACK PRODUCT - authoritative back design and construction",
     fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority texture, print, embroidery, stitching, trim and construction truth",
     additional_product: "ADDITIONAL PRODUCT PHOTO - supporting product truth",
-    approved_pose: "APPROVED POSE 1 - model identity and shoot-continuity anchor only; never product truth",
+    approved_pose: "APPROVED POSE 1 - shoot-continuity anchor (scene, lighting, styling); also the model identity anchor only when no MODEL FACE REFERENCE was supplied",
     style_reference: "STYLE REFERENCE ONLY - background, composition, mood, lighting and creative direction; never product identity",
   };
   return labels[role] || role.toUpperCase();
@@ -311,7 +312,7 @@ function extensionForMimeType(mimeType: string) {
 }
 
 function canonicalReferences(references: ReferenceInput[]) {
-  const order: Record<string, number> = { front: 0, back: 1, fabric_pattern: 2, additional_product: 3, style_reference: 4 };
+  const order: Record<string, number> = { model_reference: 0, front: 1, back: 2, fabric_pattern: 3, additional_product: 4, style_reference: 5 };
   return [...references].sort((left, right) => (order[left.role] ?? 99) - (order[right.role] ?? 99) || left.hash.localeCompare(right.hash));
 }
 
@@ -454,9 +455,13 @@ function selectReferences(references: LoadedReference[], approved: LoadedReferen
     : poseType === "closeup"
       ? ["front", "fabric_pattern", "back", "additional_product"]
       : ["front", "back", "fabric_pattern", "additional_product"];
+  // The model face reference (if supplied) leads every pose's image set, including pose 1 -
+  // it is the identity ground truth and must reach every generation and QA call, not just the
+  // poses that also get an approved-pose-1 anchor.
+  const modelRef = references.filter((reference) => reference.role === "model_reference").slice(0, 1);
   const product = order.flatMap((role) => references.filter((reference) => reference.role === role));
   const style = references.filter((reference) => reference.role === "style_reference").slice(0, 3);
-  return [...product, ...approved.slice(0, 1), ...style].slice(0, MAX_REFERENCES);
+  return [...modelRef, ...product, ...approved.slice(0, 1), ...style].slice(0, MAX_REFERENCES);
 }
 
 function composeGenerationPrompt(args: {
@@ -471,6 +476,7 @@ function composeGenerationPrompt(args: {
   const absent = Array.isArray(product?.absenceConstraints) ? product.absenceConstraints.map(String) : [];
   const manifest = args.references.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
   const hasApprovedAnchor = args.references.some((reference) => reference.role === "approved_pose");
+  const hasModelReference = args.references.some((reference) => reference.role === "model_reference");
   const faceVisible = args.pose.id !== "back";
   const allowedDelta = [
     `pose/body position: ${args.pose.bodyPosition}`,
@@ -492,9 +498,11 @@ ${JSON.stringify(model)}
 - Pose 1 is only the subject/scene anchor for later poses. It never overrides original product references.
 
 FACE & IDENTITY LOCK - HIGHEST PRIORITY:
-${hasApprovedAnchor
-    ? "The image labeled APPROVED POSE 1 in the reference manifest above is the exact, non-negotiable ground truth for this model's identity. Reproduce the identical facial bone structure, eye shape and color, eyebrow shape, nose, lips, jawline, skin tone and texture, and hairstyle seen in that image - do not idealize, beautify, average, or drift toward a different face."
-    : "This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally beautiful adult face exactly as described in modelIdentity above - every later pose in this set must reproduce this same face."}
+${hasModelReference
+    ? `The image labeled MODEL FACE REFERENCE in the reference manifest above is the exact, non-negotiable face and identity for this model in EVERY pose, including this one - it outranks every other face source, including the approved-pose anchor. Reproduce it as close to pixel-identical as photographically possible: identical facial bone structure, eyes (shape, color, spacing), eyebrows, nose, lips, jawline, skin tone and texture, and hairstyle. Do not idealize, beautify, average, restyle, or blend it with any other face - this must read as the same real person from that reference photo, not merely a similar-looking model.${hasApprovedAnchor ? " Use the APPROVED POSE 1 image only for scene, lighting, and styling continuity - never as a face source." : ""}`
+    : hasApprovedAnchor
+      ? "The image labeled APPROVED POSE 1 in the reference manifest above is the exact, non-negotiable ground truth for this model's identity. Reproduce the identical facial bone structure, eye shape and color, eyebrow shape, nose, lips, jawline, skin tone and texture, and hairstyle seen in that image - do not idealize, beautify, average, or drift toward a different face."
+      : "This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally beautiful adult face exactly as described in modelIdentity above - every later pose in this set must reproduce this same face."}
 ${faceVisible
     ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct and naturally shaped eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
     : "The face is turned away and is not the subject of this pose - keep hair color/style, skin tone, and body proportions consistent with the identity anchor."}
@@ -620,6 +628,7 @@ async function validatePose(args: {
     productIdentity: args.session.productIdentity, creativeDirection: args.session.creativeDirection,
     modelIdentity: args.session.modelIdentity, consistencyRules: (args.session.consistencyRules as string[]) || CONSISTENCY_RULES,
     hasApprovedAnchor: args.approved.length > 0,
+    hasModelReference: qaRefs.some((reference) => reference.role === "model_reference"),
     referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`),
   });
   const parts: JsonRecord[] = [{ text: prompt }, { text: "IMAGE A: NEWLY GENERATED POSE UNDER TEST" }, { inlineData: { mimeType: args.generated.mimeType, data: args.generated.base64 } }];

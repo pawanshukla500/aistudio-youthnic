@@ -10,7 +10,7 @@ import { firebaseStorage } from "../../lib/firebase";
 import { AnalysisProfile } from "./components/AnalysisProfile";
 import { OutputSettings } from "./components/OutputSettings";
 import { PosePlan } from "./components/PosePlan";
-import { ProductReferences, StyleReferences } from "./components/ProductReferences";
+import { ModelFaceReference, ProductReferences, StyleReferences } from "./components/ProductReferences";
 import type {
   OutputOptions,
   ProductReferenceRole,
@@ -67,6 +67,7 @@ export function Studio() {
 
   const [productReferences, setProductReferences] = useState<Partial<Record<ProductReferenceRole, StudioReference>>>({});
   const [styleReferences, setStyleReferences] = useState<StudioReference[]>([]);
+  const [modelReference, setModelReference] = useState<StudioReference | null>(null);
   const [poses, setPoses] = useState(basePoses);
   const [analysis, setAnalysis] = useState<StudioAnalysis | null>(null);
   const [analysisSourceKey, setAnalysisSourceKey] = useState<string | null>(null);
@@ -87,8 +88,8 @@ export function Studio() {
   const queuePosition = useQuery(api.jobs.getQueuePosition, submittedJobId && submittedJob?.status === "queued" ? { jobId: submittedJobId } : "skip");
 
   const allReferences = useMemo(
-    () => [...Object.values(productReferences).filter(Boolean), ...styleReferences] as StudioReference[],
-    [productReferences, styleReferences],
+    () => [...Object.values(productReferences).filter(Boolean), ...(modelReference ? [modelReference] : []), ...styleReferences] as StudioReference[],
+    [modelReference, productReferences, styleReferences],
   );
   const requiredReady = Boolean(productReferences.front && productReferences.back);
   const effectiveSkuId = skuId.trim() || `studio-${productReferences.front?.id.slice(0, 8) || "draft"}`;
@@ -153,6 +154,22 @@ export function Studio() {
       if (file) next[role] = makeReference(role, file);
       else delete next[role];
       return next;
+    });
+    markAnalysisStale();
+    setNotice(null);
+  };
+
+  const changeModelReference = (file: File | null) => {
+    if (file) {
+      const error = validateFile(file);
+      if (error) {
+        setNotice({ tone: "error", text: error });
+        return;
+      }
+    }
+    setModelReference((current) => {
+      if (current) URL.revokeObjectURL(current.previewUrl);
+      return file ? makeReference("model_reference", file) : null;
     });
     markAnalysisStale();
     setNotice(null);
@@ -244,6 +261,7 @@ export function Studio() {
       const uploadedById = new Map(uploaded.map((reference) => [reference.id, reference]));
       setProductReferences((current) => Object.fromEntries(Object.entries(current).map(([role, reference]) => [role, reference ? uploadedById.get(reference.id) || reference : reference])) as Partial<Record<ProductReferenceRole, StudioReference>>);
       setStyleReferences((current) => current.map((reference) => uploadedById.get(reference.id) || reference));
+      setModelReference((current) => current ? uploadedById.get(current.id) || current : current);
       const result = await analyzeReferences({
         organizationId: organization._id,
         createdBy: user._id,
@@ -342,6 +360,7 @@ export function Studio() {
       });
       setProductReferences({});
       setStyleReferences([]);
+      setModelReference(null);
       setPoses(basePoses);
       setAnalysis(null);
       setAnalysisSourceKey(null);
@@ -453,6 +472,10 @@ export function Studio() {
               </p>
             </div>
             <ProductReferences references={productReferences} onChange={changeProductReference} />
+            <div className="mt-4 border-t border-outline-variant/30 pt-4">
+              <h3 className="mb-2 text-sm font-bold text-on-surface">Model face lock</h3>
+              <ModelFaceReference reference={modelReference || undefined} onFile={changeModelReference} onRemove={() => changeModelReference(null)} />
+            </div>
             <div className="mt-4 border-t border-outline-variant/30 pt-4">
               <StyleReferences references={styleReferences} onAdd={addStyleReferences} onReplace={replaceStyleReference} onRemove={removeStyleReference} />
             </div>
