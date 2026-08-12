@@ -464,6 +464,8 @@ function composeGenerationPrompt(args: {
   const placement = Array.isArray(product?.detailPlacementMap) ? product.detailPlacementMap.map(String) : [];
   const absent = Array.isArray(product?.absenceConstraints) ? product.absenceConstraints.map(String) : [];
   const manifest = args.references.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
+  const hasApprovedAnchor = args.references.some((reference) => reference.role === "approved_pose");
+  const faceVisible = args.pose.id !== "back";
   const allowedDelta = [
     `pose/body position: ${args.pose.bodyPosition}`,
     `camera angle: ${args.pose.cameraAngle}`,
@@ -482,6 +484,14 @@ LOCKED SUBJECT - MUST NOT CHANGE:
 ${JSON.stringify(model)}
 - Same recognizable face, skin tone, body proportions, hairstyle, hair length/color, makeup, accessories and footwear across the complete set.
 - Pose 1 is only the subject/scene anchor for later poses. It never overrides original product references.
+
+FACE & IDENTITY LOCK - HIGHEST PRIORITY:
+${hasApprovedAnchor
+    ? "The image labeled APPROVED POSE 1 in the reference manifest above is the exact, non-negotiable ground truth for this model's identity. Reproduce the identical facial bone structure, eye shape and color, eyebrow shape, nose, lips, jawline, skin tone and texture, and hairstyle seen in that image - do not idealize, beautify, average, or drift toward a different face."
+    : "This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally beautiful adult face exactly as described in modelIdentity above - every later pose in this set must reproduce this same face."}
+${faceVisible
+    ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct and naturally shaped eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
+    : "The face is turned away and is not the subject of this pose - keep hair color/style, skin tone, and body proportions consistent with the identity anchor."}
 
 LOCKED PRODUCT - MUST NOT CHANGE:
 ${JSON.stringify(product)}
@@ -517,6 +527,9 @@ REALISTIC INTEGRATION:
 - Match locked lighting direction, color temperature, shadows, contact shadows, perspective, lens feel, depth and scene geometry.
 - Keep anatomy realistic and keep hands away from product details.
 - Preserve believable pores, flyaway hairs, fabric microtexture, seam depth, edge transitions, optical depth of field, and grounded foot/contact shadows. Avoid waxy skin, over-smoothed fabric, duplicated motifs, over-sharpening, floating garments, plastic texture, and other synthetic AI tells.
+${faceVisible ? `- Render the eyes with correct anatomy: two naturally shaped, correctly positioned eyes with realistic iris detail, natural catchlights, and a correctly aligned gaze - never crossed, misaligned, melted, or malformed.
+- Render teeth naturally: a real, slightly imperfect smile with naturally aligned teeth in the correct count - never uniformly perfect, fused, extra, missing, or warped.
+- Skin must show real photographic micro-detail (pores, faint texture variation) rather than an airbrushed, plastic, or over-smoothed "beauty filter" look.` : ""}
 
 PROHIBITED UNRELATED CHANGES:
 ${rules.map((rule) => `- ${rule}`).join("\n")}

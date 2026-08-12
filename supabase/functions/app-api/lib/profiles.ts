@@ -195,7 +195,10 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
     editorialCommercialFeel: stringValue(creative.editorialCommercialFeel ?? creative.editorial_commercial_feel, "Premium e-commerce editorial"),
     lensAndCamera: stringValue(creative.lensAndCamera ?? creative.lens_and_camera, "One consistent full-frame fashion-camera perspective and natural lens rendering"),
     setContinuity: stringValue(creative.setContinuity ?? creative.set_continuity, "One real shoot day: identical set, time of day, light direction, white balance, exposure, and color grade"),
-    realismRules: stringValue(creative.realismRules ?? creative.realism_rules, "Natural skin texture, anatomically correct hands, realistic fabric physics, optical depth, and no synthetic AI artifacts"),
+    realismRules: stringValue(
+      creative.realismRules ?? creative.realism_rules,
+      "Natural skin texture with visible pores and subtle micro-imperfections, anatomically correct and naturally shaped eyes and teeth, anatomically correct hands, realistic fabric physics, optical depth, and no synthetic AI artifacts such as waxy/airbrushed skin, doll-like symmetry, or warped features",
+    ),
     suggestedAccessories: stringValue(
       creative.suggestedAccessories ?? creative.suggested_accessories,
       "No additional accessory needed - style with only what the product references show",
@@ -203,7 +206,11 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
   };
   const modelIdentity = {
     castingDirection: stringValue(model.castingDirection ?? model.casting_direction, "One consistent adult fashion model across all five images"),
-    face: stringValue(model.face, "Keep the same recognizable face across the complete set"),
+    face: stringValue(model.face, "Keep the exact same recognizable face across the complete set - identical face shape, eyes, eyebrows, nose, lips, and jawline as established in Pose 1"),
+    faceRealism: stringValue(
+      model.faceRealism ?? model.face_realism,
+      "Photorealistic human face: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry (not mirror-symmetric), anatomically correct eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never plastic, waxy, airbrushed, doll-like, or synthetic-looking.",
+    ),
     hair: stringValue(model.hair, "Keep one hairstyle across the complete set"),
     makeup: stringValue(model.makeup, "Keep makeup consistent and natural"),
     bodyProportions: stringValue(model.bodyProportions ?? model.body_proportions, "Keep realistic body proportions identical across poses"),
@@ -256,7 +263,9 @@ Requested scene direction: ${args.sceneDirection || "derive one consistent comme
 
 Build a precise Product Identity Profile. If a detail is unclear, record it in uncertaintyNotes; do not invent it. Perform an evidence audit for closures and decoration placement. For buttons, zippers, hooks, ties, tassels/latkans, trim, beads, embroidery, pockets, piping, logos, stitching and hardware, record exactly where each detail IS visible and where it is ABSENT. Do not assume symmetry. Fill detailPlacementMap with region-specific hard locks and absenceConstraints with negative product facts.
 
-Build a Creative Direction Profile from style references, but never allow style to alter the product. Lock one lens family, camera height, perspective, exposure, white balance, color grade, light direction, shadow behavior, set geometry, and time-of-day so the results read as contact sheets from one real professional shoot. Define one Model Identity Profile locking the same recognizable adult face, skin tone, hair, makeup, body proportions, accessories and footwear across all five images.
+Build a Creative Direction Profile from style references, but never allow style to alter the product. Lock one lens family, camera height, perspective, exposure, white balance, color grade, light direction, shadow behavior, set geometry, and time-of-day so the results read as contact sheets from one real professional shoot. In realismRules, explicitly require natural skin texture with visible pores, anatomically correct and naturally shaped eyes and teeth, and no synthetic AI artifacts.
+
+Define one Model Identity Profile with concrete, specific facial detail - not generic filler. Describe face shape, eye shape and color, eyebrow shape, nose, lips, and jawline specifically enough that the exact same person is recognizable in every pose. In modelIdentity.faceRealism, lock the photorealism bar for every pose: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth) - never a plastic, waxy, airbrushed, or symmetric "AI face". Lock skin tone, hair, makeup, body proportions, accessories and footwear the same way across all five images.
 
 Overall pose energy: every one of the five poses should feel playful, warm, and Gen-Z-friendly - natural and full of genuine attitude, never stiff, robotic, or overly corporate-catalog.
 
@@ -273,12 +282,13 @@ Create exactly five product-specific camera setups in one coherent commercial co
 Across all five, ONLY pose, angle, framing, and expression may change. Exact product, colors, pattern, bottom wear, face, hairstyle, makeup, accessories, footwear, scene, lighting, shadows, camera/lens feel, and color treatment remain locked.
 
 Return STRICT JSON only:
-{"productIdentity":{"category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[]},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"posePlan":[{"id":"full_front"},{"id":"angled"},{"id":"back"},{"id":"creative"},{"id":"closeup"}]}`;
+{"productIdentity":{"category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[]},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"posePlan":[{"id":"full_front"},{"id":"angled"},{"id":"back"},{"id":"creative"},{"id":"closeup"}]}`;
 }
 
 export const CONSISTENCY_RULES = [
   "Original product references always outrank generated images and style references.",
   "Keep the same model face, skin tone, hair, body proportions, makeup, accessories, and footwear across all five poses.",
+  "Every face must be photorealistic and anatomically correct: natural skin texture with visible pores, correctly shaped and aligned eyes with realistic catchlights, and naturally aligned teeth. Never render a distorted, warped, blurred, or plastic/waxy/mirror-symmetric \"AI face\".",
   "Keep exact garment colors, fabric, texture, pattern scale and placement, print, embroidery, logos, stitching, trims, buttons, zippers, pockets, fit, silhouette, and length.",
   "Keep the exact bottom wear and included accessories shown in product references.",
   "Use the back product image as the sole authority for the back pose.",
@@ -289,10 +299,10 @@ export const CONSISTENCY_RULES = [
 ];
 
 // Bumping this invalidates cached/stored analyses (Studio's analysis_cache and each
-// catalog variant's stored ai_analysis) so the new playful Gen-Z pose plan, the rebuilt
-// pose 5, and the accessory-suggestion field take effect on the next analysis run
-// instead of quietly reusing a pre-change cache hit.
-export const ANALYSIS_VERSION = "generation-session-v5-genz-playful-accessories";
+// catalog variant's stored ai_analysis) so prompt/schema changes here (the playful Gen-Z
+// pose plan, the accessory-suggestion field, and the specific face/photorealism locks) take
+// effect on the next analysis run instead of quietly reusing a pre-change cache hit.
+export const ANALYSIS_VERSION = "generation-session-v6-face-realism-lock";
 
 export function smallHash(value: string) {
   let hash = 2166136261;
