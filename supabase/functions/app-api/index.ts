@@ -875,13 +875,17 @@ async function processWorker(request: Request, args: JsonRecord) {
     : { data: null };
   const approved: LoadedReference[] = [];
   if (anchorPose?.output_url || anchorPose?.storage_path) {
-    approved.push(await loadReference({
-      // No mimeType hint here on purpose: loadReference() falls back to the fetched blob's
-      // actual Content-Type. Pose 1 is now stored as JPEG, so hardcoding "image/png" would
-      // mislabel real JPEG bytes and break how Gemini/OpenAI decode this reference image.
+    // Load the reference first to determine the actual MIME type from the blob,
+    // then set the filename extension to match. No mimeType hint here on purpose:
+    // loadReference() falls back to the fetched blob's actual Content-Type.
+    // Pose 1 is now stored as JPEG, but could be PNG or WebP for legacy data.
+    const loaded = await loadReference({
       role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path,
-      hash: smallHash(String(anchorPose.output_url || anchorPose.storage_path)), filename: "approved-pose-1.jpg", mimeType: "", size: 0,
-    }));
+      hash: smallHash(String(anchorPose.output_url || anchorPose.storage_path)), filename: "approved-pose-1", mimeType: "", size: 0,
+    });
+    // Update filename to include the correct extension based on resolved MIME type
+    loaded.filename = `approved-pose-1.${extensionForMimeType(loaded.mimeType)}`;
+    approved.push(loaded);
   }
   const storedPoseData = (pose.generation_data || {}) as JsonRecord;
   const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
