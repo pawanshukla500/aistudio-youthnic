@@ -386,6 +386,7 @@ export function History() {
   const { organization } = useWorkspace();
   const cancelJob = useMutation(api.jobs.cancel);
   const removeJob = useMutation(api.jobs.remove);
+  const regenerateSession = useMutation(api.jobs.regenerateSession);
 
   const pageSize = 10;
   const [page, setPage] = useState(1);
@@ -427,6 +428,12 @@ export function History() {
     if (!window.confirm("Delete this generation and its generated Firebase images? This cannot be undone.")) return;
     setBusyJobId(jobId);
     try { await removeJob({ jobId }); if (expanded === jobId) setExpanded(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete generation."); } finally { setBusyJobId(null); }
+  };
+
+  const regenerateFailedSession = async (jobId: string) => {
+    if (!window.confirm("Regenerate this session? Every pose that didn't complete will be re-attempted; poses that already completed are kept as-is.")) return;
+    setBusyJobId(jobId);
+    try { await regenerateSession({ jobId }); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not regenerate this session."); } finally { setBusyJobId(null); }
   };
 
   return (
@@ -549,6 +556,11 @@ export function History() {
                    {['queued', 'processing'].includes(job.status) && (
                       <button disabled={busyJobId === job._id} title="Stop generation" onClick={(e) => { e.stopPropagation(); void stopGeneration(job._id); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-secondary transition-colors hover:bg-warning-surface hover:text-warning hover:shadow-sm disabled:opacity-50">
                          {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Stop
+                      </button>
+                   )}
+                   {job.status === "failed" && (
+                      <button disabled={busyJobId === job._id} title="Re-attempt every pose that didn't complete; completed poses are kept" onClick={(e) => { e.stopPropagation(); void regenerateFailedSession(job._id); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-secondary transition-colors hover:bg-primary/10 hover:text-primary hover:shadow-sm disabled:opacity-50">
+                         {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />} Regenerate session
                       </button>
                    )}
                    {!['queued', 'processing'].includes(job.status) && (

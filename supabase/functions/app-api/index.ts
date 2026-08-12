@@ -499,7 +499,7 @@ function selectReferences(references: LoadedReference[], approved: LoadedReferen
   const order = poseType === "back"
     ? ["back", "front", "fabric_pattern", "additional_product"]
     : poseType === "closeup"
-      ? ["front", "fabric_pattern", "back", "additional_product"]
+      ? ["fabric_pattern", "front", "back", "additional_product"]
       : ["front", "back", "fabric_pattern", "additional_product"];
   // The model face reference (if supplied) leads every pose's image set, including pose 1 -
   // it is the identity ground truth and must reach every generation and QA call, not just the
@@ -596,7 +596,7 @@ ${rules.map((rule) => `- ${rule}`).join("\n")}
 - Never complete, mirror, continue, relocate, add or remove decoration for symmetry.
 - Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
 ${args.pose.id === "back" ? "- TRUE BACK HARD RULE: shoulders and hips fully face away. Reproduce uploaded BACK exactly; never infer the rear from FRONT." : ""}
-${args.pose.id === "closeup" ? "- POSE 5 HARD RULE: this is a natural, zoomed-out shot, not a tight macro face crop - keep enough frame to read the full outfit. The face must carry a beautiful, cute, natural Gen-Z expression that feels candid, not stiff or over-posed." : ""}
+${args.pose.id === "closeup" ? "- POSE 5 HARD RULE: this is a genuine ZOOMED-IN face-to-chest or face-to-waist shot - visibly tighter in scale than the full-body hero pose, never a repeat of that wide framing. The face must be sharp, beautiful, and carry a natural Gen-Z expression, and one real product detail (embroidery, neckline, drape, print, or fabric texture) must also be sharp and clearly visible in the same frame." : ""}
 ${args.correction ? `\nPREVIOUS ATTEMPT FAILED QA. Correct only these issues while preserving every lock:\n${args.correction}` : ""}
 
 Product accuracy is more important than style matching. Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
@@ -1123,6 +1123,42 @@ async function regeneratePose(request: Request, args: JsonRecord) {
   ]);
   scheduleBackground(kickWorker());
   return { success: true };
+}
+
+// Requeues every pose in a failed job that didn't complete, so one bad pose (or the cascading
+// "skipped because another required pose failed" poses that follow it) doesn't force the user
+// to click "Regenerate" one pose at a time. Poses that already completed are left untouched -
+// cheaper, and preserves the pose-1 identity anchor when it's one of the survivors.
+async function regenerateSession(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "studio.generate");
+  const jobId = String(args.jobId || "");
+  const { data: job } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  if (!job) throw new Error("Generation job not found.");
+  if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid) throw new Error("You can regenerate only your own generation jobs.");
+  if (job.status !== "failed") throw new Error("Only a failed generation can be regenerated as a whole session.");
+  const { data: poses } = await service.from("session_generations").select("generation_id,status").eq("session_id", job.session_id);
+  const incomplete = (poses || []).filter((pose) => pose.status !== "completed");
+  if (!incomplete.length) throw new Error("Every pose in this generation already completed - nothing to regenerate.");
+  const now = new Date().toISOString();
+  await Promise.all([
+    service.from("session_generations").update({
+      status: "queued", attempt_count: 0, qa_status: "pending", error: "", regeneration_instructions: "",
+      output_url: "", storage_path: "", updated_at: now,
+    }).eq("session_id", job.session_id).neq("status", "completed"),
+    service.from("generation_jobs").update({
+      status: "queued", readiness_status: "ready", readiness_reasons: [], attempt_count: 0, failed_poses: 0,
+      current_pose: null, available_at: now, error_code: "", error_message: "", completed_at: null,
+      lock_expires_at: null, locked_at: null, updated_at: now,
+    }).eq("job_id", job.job_id),
+    service.from("catalog_sessions").update({ status: "generating", updated_at: now }).eq("session_id", job.session_id),
+    service.from("audit_logs").insert({
+      organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
+      action: "generation.session.regenerated", resource_type: "generation_job", resource_id: jobId,
+      metadata: { posesReset: incomplete.length },
+    }),
+  ]);
+  scheduleBackground(kickWorker());
+  return { success: true, posesReset: incomplete.length };
 }
 
 async function removeJob(request: Request, args: JsonRecord) {
@@ -2223,6 +2259,7 @@ Deno.serve(async (request) => {
       "studio.queue": () => queueGeneration(request, args),
       "jobs.cancel": () => cancelJob(request, args),
       "jobs.regenerate": () => regeneratePose(request, args),
+      "jobs.regenerateSession": () => regenerateSession(request, args),
       "jobs.remove": () => removeJob(request, args),
       "jobs.downloadAsset": () => downloadGeneratedAsset(request, args),
       "jobs.downloadAssets": () => downloadGeneratedAssets(request, args),

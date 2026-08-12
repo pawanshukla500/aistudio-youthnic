@@ -114,19 +114,19 @@ const POSE_SLOTS = [
   },
   {
     id: "closeup",
-    title: "Natural Zoomed-Out Face & Vibe Shot",
-    framing: "3:4 portrait, zoomed out enough to read the full upper body (or more) - never a tight macro face crop",
-    bodyPosition: "Relaxed, natural stance with a slight candid shift in weight, as if caught mid-moment rather than posed stiffly",
-    handPlacement: "Hands relaxed and natural - near face, hair, or resting loosely - never covering the garment's key details",
+    title: "Zoomed-In Face & Product Highlight",
+    framing: "3:4 portrait, genuinely zoomed in to a face-to-chest or face-to-waist crop - visibly tighter in scale than the full-body hero pose, never a repeat of it",
+    bodyPosition: "Natural, relaxed upper-body angle, as if caught mid-moment, that keeps both the face and the chosen product highlight clearly readable",
+    handPlacement: "Hands relaxed and natural - resting near the highlighted detail without covering it, or away from frame if the detail is elsewhere",
     expression: "A beautiful, cute, natural Gen-Z-style face with a genuine expression - a soft real smile or candid laugh, warm eyes, unfiltered and approachable, never stiff or over-posed",
-    productVisibilityRules: ["outfit stays clearly readable even though the shot centers the face", "no garment detail hidden by hands or hair", "this reads as a natural candid moment, not a beauty macro crop"],
-    consistencyNotes: "Keep the same face, hair, makeup, accessories, footwear, scene, lighting, and exact bottom wear established in Pose 1; only the framing pulls back to a natural, zoomed-out candid feel",
-    description: "A natural, zoomed-out candid moment that spotlights a beautiful, cute, Gen-Z-style face and genuine expression while keeping the full outfit in frame.",
-    cameraAngle: "Eye-level, zoomed out to a natural half-to-full body view",
-    highlightedDetails: ["natural expression", "face and vibe", "overall outfit read"],
-    primaryReference: "front",
-    purpose: "Social-first, scroll-stopping lifestyle image that feels authentic and shareable",
-    prompt: "Create a natural, zoomed-out lifestyle shot - not a tight close-up - with a beautiful, cute, Gen-Z-style face and a genuine, natural expression such as a soft smile or candid laugh. Keep the full outfit readable in frame; this should feel like a real, unposed moment from the shoot, not a beauty macro crop.",
+    productVisibilityRules: ["face is sharp and clearly visible", "one real product detail (embroidery, neckline, pallu/dupatta drape, print, trim, or fabric texture) is also sharp and unobstructed in the same frame", "this is a genuine zoomed-in shot, not the full-body hero framing repeated"],
+    consistencyNotes: "Keep the same face, hair, makeup, accessories, footwear, scene, lighting, and exact bottom wear established in Pose 1; only the framing zooms in tight enough to read both the face and the highlighted detail clearly",
+    description: "A zoomed-in shot that pairs a beautiful, natural face with a sharp highlight of the product's most important real detail.",
+    cameraAngle: "Eye-level, zoomed in to a face-to-chest or face-to-waist crop",
+    highlightedDetails: ["natural expression", "face", "key product detail"],
+    primaryReference: "fabric_pattern",
+    purpose: "Social-first beauty-and-product shot that sells both the face and the craftsmanship",
+    prompt: "Create a genuinely zoomed-in face-to-chest or face-to-waist shot - clearly tighter in scale than the full-body hero pose, never a repeat of it - pairing a beautiful, cute, Gen-Z-style face with a genuine, natural expression alongside one sharp, clearly visible highlight of the product's most important real detail (embroidery, neckline, drape, print, or fabric texture).",
   },
 ] as const;
 
@@ -278,7 +278,7 @@ Create exactly five product-specific camera setups in one coherent commercial co
 - angled: best side or three-quarter orientation for THIS garment; prove depth, drape, seams/slits/pockets/layering without distortion.
 - back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority.
 - creative: playful, scroll-stopping Gen-Z editorial movement tailored to this garment while keeping product completely readable.
-- closeup: a natural, zoomed-out shot (never a tight macro crop) spotlighting a beautiful, cute, Gen-Z-style face with a genuine, natural expression, while the outfit stays readable in frame.
+- closeup: a genuine zoomed-in face-to-chest or face-to-waist shot (never a repeat of the full-body hero framing) pairing a beautiful, cute, Gen-Z-style face with a genuine, natural expression AND one sharp, clearly visible real product detail (embroidery, neckline, drape, print, or fabric texture).
 
 Across all five, ONLY pose, angle, framing, and expression may change. Exact product, colors, pattern, bottom wear, face, hairstyle, makeup, accessories, footwear, scene, lighting, shadows, camera/lens feel, and color treatment remain locked.
 
@@ -302,10 +302,10 @@ export const CONSISTENCY_RULES = [
 
 // Bumping this invalidates cached/stored analyses (Studio's analysis_cache and each
 // catalog variant's stored ai_analysis) so prompt/schema changes here (the playful Gen-Z
-// pose plan, the accessory-suggestion field, the face/photorealism locks, and the
-// model-face-reference support) take effect on the next analysis run instead of quietly
-// reusing a pre-change cache hit.
-export const ANALYSIS_VERSION = "generation-session-v7-model-face-reference";
+// pose plan, the accessory-suggestion field, the face/photorealism locks, the
+// model-face-reference support, and the corrected zoomed-IN pose 5) take effect on the
+// next analysis run instead of quietly reusing a pre-change cache hit.
+export const ANALYSIS_VERSION = "generation-session-v8-pose5-zoomed-in";
 
 export function smallHash(value: string) {
   let hash = 2166136261;
