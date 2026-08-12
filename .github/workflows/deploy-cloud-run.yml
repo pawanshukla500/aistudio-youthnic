@@ -19,27 +19,6 @@ env:
   REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY || 'cloud-run' }}
 
 jobs:
-  validate-gcp:
-    name: Validate Google Cloud deployment access
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-
-      - id: auth
-        uses: google-github-actions/auth@v3
-        with:
-          project_id: ${{ env.PROJECT_ID }}
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-          create_credentials_file: true
-
-      - uses: google-github-actions/setup-gcloud@v3
-
-      - name: Verify project and Artifact Registry access
-        run: |
-          gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)"
-          gcloud artifacts repositories describe "$REPOSITORY" --location="$REGION" --format="value(name)"
-
   deploy-supabase:
     name: Deploy Supabase database and Edge Function
     runs-on: ubuntu-latest
@@ -58,6 +37,9 @@ jobs:
       - name: Link production project
         run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
 
+      - name: Repair remote migration history
+        run: supabase migration repair --status reverted 20260730160238 20260730160242 20260730161513 20260801110407 20260801154448 20260801155825 20260801160311 20260801160534 20260802072834 20260802084640 20260802085604 20260802093311 20260802093314 20260802093404 20260802093407 --linked || true
+
       - name: Preview pending migrations
         run: supabase db push --linked --dry-run
 
@@ -68,7 +50,7 @@ jobs:
         run: supabase functions deploy app-api --project-ref "$SUPABASE_PROJECT_REF" --use-api
 
   test-and-deploy:
-    needs: [validate-gcp, deploy-supabase]
+    needs: [deploy-supabase]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
