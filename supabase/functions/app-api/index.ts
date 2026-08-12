@@ -1080,6 +1080,35 @@ async function downloadGeneratedAsset(request: Request, args: JsonRecord) {
   return { base64: await blobToBase64(blob), mimeType: blob.type || "image/png" };
 }
 
+// Batched sibling of downloadGeneratedAsset for the "Download ZIP" flow. Calling the
+// single-asset operation once per pose meant N separate function invocations - each paying
+// its own cold-start and Google OAuth token exchange - which is what made ZIP downloads slow.
+// This does one job lookup, one batched ownership check, and fetches every image in parallel
+// within a single invocation (one shared token), so the client makes exactly one round trip.
+async function downloadGeneratedAssets(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "studio.generate");
+  const jobId = String(args.jobId || "");
+  const storagePaths = [...new Set((Array.isArray(args.storagePaths) ? args.storagePaths : []).map((value) => String(value || "")).filter(Boolean))];
+  if (!jobId || !storagePaths.length) throw new Error("jobId and storagePaths are required.");
+  const { data: job } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  if (!job) throw new Error("Generation job not found.");
+  const [{ data: poses }, { data: assets }] = await Promise.all([
+    service.from("session_generations").select("storage_path").eq("session_id", job.session_id).in("storage_path", storagePaths),
+    service.from("planning_assets").select("storage_path").eq("generation_job_id", jobId).eq("asset_role", "generated").in("storage_path", storagePaths),
+  ]);
+  const allowed = new Set([...(poses || []), ...(assets || [])].map((row) => String(row.storage_path || "")));
+  const assetResults = await Promise.all(storagePaths.map(async (storagePath) => {
+    if (!allowed.has(storagePath)) return { storagePath, error: "This image does not belong to the requested generation job." };
+    try {
+      const blob = await downloadFirebaseObject(storagePath);
+      return { storagePath, base64: await blobToBase64(blob), mimeType: blob.type || "image/png" };
+    } catch (error) {
+      return { storagePath, error: errorMessage(error) };
+    }
+  }));
+  return { assets: assetResults };
+}
+
 async function adminOverview(request: Request) {
   const { workspace } = await workspaceFor(request);
   if (!workspace.isAdmin && !workspace.permissions.some((permission) => permission.startsWith("admin."))) throw new Error("You do not have access to the admin console.");
@@ -2109,6 +2138,7 @@ Deno.serve(async (request) => {
       "jobs.regenerate": () => regeneratePose(request, args),
       "jobs.remove": () => removeJob(request, args),
       "jobs.downloadAsset": () => downloadGeneratedAsset(request, args),
+      "jobs.downloadAssets": () => downloadGeneratedAssets(request, args),
       "worker": () => processWorker(request, args),
       "admin.overview": () => adminOverview(request),
       "admin.createUser": () => createUserOperation(request, args),
