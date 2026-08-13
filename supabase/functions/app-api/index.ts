@@ -1472,6 +1472,21 @@ async function catalogBatch(workspace: Awaited<ReturnType<typeof workspaceFor>>[
   return data as JsonRecord;
 }
 
+// Best-effort cleanup for the batch-level reference entries mutate_planning_batch_reference_images
+// just replaced or removed from planning_batches.reference_images. A failure here never rolls
+// back or blocks the reference-image update that already committed - it only leaves an orphaned
+// Firebase Storage object, the same tolerance removeJob() already applies to generated images.
+// deleteFirebaseObject() itself tolerates a 404 (already-gone object), so this is safe to call
+// even if the same path was already cleaned up by a concurrent request.
+async function cleanupOrphanedBatchReferences(removed: unknown) {
+  const entries = Array.isArray(removed) ? removed as JsonRecord[] : [];
+  const paths = [...new Set(entries.map((entry) => String(entry.storagePath || entry.storage_path || "")).filter(Boolean))];
+  if (!paths.length) return;
+  const results = await Promise.allSettled(paths.map(deleteFirebaseObject));
+  const failures = results.filter((result) => result.status === "rejected").length;
+  if (failures) console.warn(`Could not delete ${failures} orphaned catalog reference object(s) from Firebase Storage.`);
+}
+
 async function saveReferenceOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request);
   if (!hasAnyPermission(workspace, ["studio.generate", "planning.manage"])) throw new Error("You do not have permission to upload product references.");
@@ -1483,16 +1498,20 @@ async function saveReferenceOperation(request: Request, args: JsonRecord) {
     size: Number(args.size || 0), storageProvider: String(args.storageProvider || "firebase"),
   };
   if (!batchId) return reference.id;
-  const batch = await catalogBatch(workspace, batchId);
+  await catalogBatch(workspace, batchId); // Org-scoped access check; throws if not found/accessible.
   // Batch-level shared references (visible to every variant in the catalog, not tied to one
   // colourway's own front/back/fabric assets). style_reference: up to a few, creative direction
   // only. model_identity: the one face this whole catalog run should lock to - replace rather
   // than accumulate a second, conflicting one, since a batch only has one model.
   if (role === "style_reference" || role === "model_identity") {
-    const current = Array.isArray(batch.reference_images) ? batch.reference_images as JsonRecord[] : [];
-    const next = role === "model_identity" ? current.filter((entry) => entry.role !== "model_identity") : current;
-    const { error } = await service.from("planning_batches").update({ reference_images: [...next, reference], updated_at: new Date().toISOString() }).eq("id", batchId);
+    // Read-modify-write happens atomically in the database (one UPDATE, one row lock) instead
+    // of here in app code, so a concurrent upload/removal against the same batch can't silently
+    // clobber this change or vice versa.
+    const { data: removed, error } = await service.rpc("mutate_planning_batch_reference_images", {
+      p_batch_id: batchId, p_add: reference, p_replace_role: role === "model_identity" ? "model_identity" : null, p_remove_id: null,
+    });
     if (error) throw new Error(error.message);
+    scheduleBackground(cleanupOrphanedBatchReferences(removed));
     await service.from("planning_requests").update({ analysis_status: "stale", updated_at: new Date().toISOString() }).eq("batch_id", batchId).not("front_image_url", "is", null).not("back_image_url", "is", null);
     scheduleBackground(kickCatalogPreflight(batchId));
     return `${role}:${reference.id}`;
@@ -1616,14 +1635,20 @@ async function addCatalogStyleReferenceOperation(request: Request, args: JsonRec
 
 async function removeCatalogStyleReferenceOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
-  const batch = await catalogBatch(workspace, String(args.catalogId || ""));
+  const catalogId = String(args.catalogId || "");
+  await catalogBatch(workspace, catalogId); // Org-scoped access check; throws if not found/accessible.
   // Removes any batch-level shared reference by id, regardless of which role prefix
-  // saveReferenceOperation returned it with (style_reference or model_identity).
+  // saveReferenceOperation returned it with (style_reference or model_identity). Same atomic
+  // RPC as the add/replace path above, so a concurrent add/remove against this batch can't
+  // race with this removal.
   const referenceId = String(args.referenceId || "").replace(/^(style|model_identity):/, "");
-  const current = Array.isArray(batch.reference_images) ? batch.reference_images as JsonRecord[] : [];
-  await service.from("planning_batches").update({ reference_images: current.filter((entry) => String(entry.id || "") !== referenceId), updated_at: new Date().toISOString() }).eq("id", String(args.catalogId));
-  await service.from("planning_requests").update({ analysis_status: "stale", analysis_fingerprint: "", updated_at: new Date().toISOString() }).eq("batch_id", String(args.catalogId)).not("front_image_url", "is", null).not("back_image_url", "is", null);
-  scheduleBackground(kickCatalogPreflight(String(args.catalogId || "")));
+  const { data: removed, error } = await service.rpc("mutate_planning_batch_reference_images", {
+    p_batch_id: catalogId, p_add: null, p_replace_role: null, p_remove_id: referenceId,
+  });
+  if (error) throw new Error(error.message);
+  scheduleBackground(cleanupOrphanedBatchReferences(removed));
+  await service.from("planning_requests").update({ analysis_status: "stale", analysis_fingerprint: "", updated_at: new Date().toISOString() }).eq("batch_id", catalogId).not("front_image_url", "is", null).not("back_image_url", "is", null);
+  scheduleBackground(kickCatalogPreflight(catalogId));
   return { success: true };
 }
 

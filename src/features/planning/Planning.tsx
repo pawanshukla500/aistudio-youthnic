@@ -308,8 +308,9 @@ export function Planning() {
     setBusy("upload-model_identity");
     setNotice(null);
     try {
-      const referenceId = await uploadRef("model_identity", file, `${selected.name}-shared-model`, selectedId);
-      await addCatalogStyleReference({ catalogId: selectedId, referenceId });
+      // uploadRef already persists this as the batch's model_identity reference and schedules
+      // preflight itself (see saveReferenceOperation) - no separate catalog-validation call needed.
+      await uploadRef("model_identity", file, `${selected.name}-shared-model`, selectedId);
       notify("success", "Model face reference uploaded. Every colourway in this catalog will lock to this exact face.");
     } catch (reason) {
       notify("error", getErrorMessage(reason, "Model face reference upload failed."));
@@ -549,7 +550,7 @@ export function Planning() {
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
                       <div key={modelReference._id} className="group relative overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container-lowest">
                         <div className="aspect-[4/3]">{modelReference.url ? <img src={modelReference.url} alt="Model face reference" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><ImageIcon className="h-5 w-5 text-outline" /></div>}</div>
-                        <div className="flex items-center justify-between gap-2 px-3 py-2"><p className="truncate text-[11px] font-semibold text-on-surface">Model face</p>{canEditReferences && <button disabled={busy === `remove-model-${modelReference._id}`} onClick={() => void removeModelReference(modelReference._id)} className="rounded p-1 text-secondary hover:bg-danger-surface hover:text-danger"><Trash2 className="h-3.5 w-3.5" /></button>}</div>
+                        <div className="flex items-center justify-between gap-2 px-3 py-2"><p className="truncate text-[11px] font-semibold text-on-surface">Model face</p>{canEditReferences && <button aria-label="Remove model face reference" disabled={busy === `remove-model-${modelReference._id}`} onClick={() => void removeModelReference(modelReference._id)} className="rounded p-1 text-secondary hover:bg-danger-surface hover:text-danger"><Trash2 className="h-3.5 w-3.5" /></button>}</div>
                       </div>
                     </div>
                   );
