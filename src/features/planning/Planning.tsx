@@ -33,7 +33,7 @@ type RoadmapEvent = Record<string, any> & { _id: string; name: string; daysUntil
 type PlanningRoadmap = { events: RoadmapEvent[] };
 type CatalogSummary = any;
 type CatalogVariant = Record<string, any> & { outputs: Array<Record<string, any> & { status: string; poseNumber: number; title: string; url?: string }> };
-type CatalogDetail = Record<string, any> & { variants: CatalogVariant[]; styleReferences: any[] };
+type CatalogDetail = Record<string, any> & { variants: CatalogVariant[]; styleReferences: any[]; modelReference: { _id: string; url: string; filename: string } | null };
 
 const emptyCreate = {
   name: "",
@@ -300,6 +300,38 @@ export function Planning() {
     }
   };
 
+  // Reuses the same shared-batch-reference plumbing as the style reference above (role is the
+  // only thing that differs) - this face is locked as the model's exact identity across every
+  // colourway in the catalog, the same way Studio's "Model face lock" upload works.
+  const pickModelReference = async (file: File | undefined) => {
+    if (!file || !selectedId || !selected) return;
+    setBusy("upload-model_identity");
+    setNotice(null);
+    try {
+      // uploadRef already persists this as the batch's model_identity reference and schedules
+      // preflight itself (see saveReferenceOperation) - no separate catalog-validation call needed.
+      await uploadRef("model_identity", file, `${selected.name}-shared-model`, selectedId);
+      notify("success", "Model face reference uploaded. Every colourway in this catalog will lock to this exact face.");
+    } catch (reason) {
+      notify("error", getErrorMessage(reason, "Model face reference upload failed."));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const removeModelReference = async (referenceId: Id<"productReferences">) => {
+    if (!selectedId) return;
+    setBusy(`remove-model-${referenceId}`);
+    try {
+      await removeCatalogStyleReference({ catalogId: selectedId, referenceId });
+      notify("success", "Model face reference removed from this catalog.");
+    } catch (reason) {
+      notify("error", getErrorMessage(reason, "Could not remove the model face reference."));
+    } finally {
+      setBusy("");
+    }
+  };
+
   const runSchedule = async (whenMs: number) => {
     if (!selectedId) return;
     setBusy("schedule");
@@ -493,6 +525,37 @@ export function Planning() {
                   </div>
                 ) : (
                   <div className="mt-4 flex items-center gap-3 rounded-xl border border-dashed border-outline-variant/50 bg-surface-container-lowest p-4 text-xs text-secondary"><ImageIcon className="h-5 w-5 shrink-0" /><span>No style reference yet. Generation can use the written scene direction, but a visual reference gives Gemini a clearer creative target.</span></div>
+                )}
+              </section>
+
+              {/* Shared model identity reference */}
+              <section className="rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-sm">
+                <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Optional · Model face lock</p>
+                    <h3 className="mt-1 font-syne text-lg font-bold text-on-surface">Model identity reference</h3>
+                    <p className="mt-1 max-w-2xl text-xs leading-5 text-secondary">Upload one clear face photo to lock every colourway in this catalog to that exact model, instead of letting the shoot design and self-lock its own face. Leave empty to keep the default behaviour.</p>
+                  </div>
+                  {canEditReferences && !selected.modelReference && (
+                    <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm">
+                      {busy === "upload-model_identity" ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                      Upload model face
+                      <input type="file" accept="image/*" className="hidden" disabled={busy === "upload-model_identity"} onChange={(event) => { void pickModelReference(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+                    </label>
+                  )}
+                </div>
+                {selected.modelReference ? (() => {
+                  const modelReference = selected.modelReference;
+                  return (
+                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                      <div key={modelReference._id} className="group relative overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container-lowest">
+                        <div className="aspect-[4/3]">{modelReference.url ? <img src={modelReference.url} alt="Model face reference" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center"><ImageIcon className="h-5 w-5 text-outline" /></div>}</div>
+                        <div className="flex items-center justify-between gap-2 px-3 py-2"><p className="truncate text-[11px] font-semibold text-on-surface">Model face</p>{canEditReferences && <button aria-label="Remove model face reference" disabled={busy === `remove-model-${modelReference._id}`} onClick={() => void removeModelReference(modelReference._id)} className="rounded p-1 text-secondary hover:bg-danger-surface hover:text-danger"><Trash2 className="h-3.5 w-3.5" /></button>}</div>
+                      </div>
+                    </div>
+                  );
+                })() : (
+                  <div className="mt-4 flex items-center gap-3 rounded-xl border border-dashed border-outline-variant/50 bg-surface-container-lowest p-4 text-xs text-secondary"><ImageIcon className="h-5 w-5 shrink-0" /><span>No model face reference yet. Generation will design and lock its own consistent model, the same as before.</span></div>
                 )}
               </section>
 
