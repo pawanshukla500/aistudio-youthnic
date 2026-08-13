@@ -54,7 +54,7 @@ function ProfileGrid({ items }: { items: Array<[string, unknown]> }) {
   );
 }
 
-export function AnalysisProfile({ 
+export function AnalysisProfile({
   analysis,
   analyzing,
   ready,
@@ -62,7 +62,11 @@ export function AnalysisProfile({
   current,
   onAnalyze,
   onImprovePosePlan,
-}: { 
+  sceneDirection,
+  onSceneDirectionChange,
+  garmentSummary,
+  onGarmentSummaryChange,
+}: {
   analysis: StudioAnalysis | null,
   analyzing: boolean,
   ready: boolean,
@@ -70,23 +74,13 @@ export function AnalysisProfile({
   current: boolean,
   onAnalyze: () => void,
   onImprovePosePlan: () => void,
+  sceneDirection: string,
+  onSceneDirectionChange: (value: string) => void,
+  garmentSummary: string,
+  onGarmentSummaryChange: (value: string) => void,
 }) {
   const [isOpen, setIsOpen] = useState(true);
   const [contextOpen, setContextOpen] = useState(false);
-
-  const sceneDirection = analysis ? [
-    analysis.creativeDirection.backgroundStyle,
-    analysis.creativeDirection.studioEnvironment,
-    analysis.creativeDirection.lighting,
-    analysis.creativeDirection.mood,
-  ].filter(Boolean).join(" · ") : "";
-
-  const garmentSummary = analysis ? [
-    analysis.productIdentity.category,
-    analysis.productIdentity.mainColor,
-    analysis.productIdentity.fabric,
-    ...(analysis.productIdentity.invariantDetails || []),
-  ].filter(Boolean).join(", ") : "";
 
   return (
     <div className="w-full">
@@ -142,23 +136,23 @@ export function AnalysisProfile({
 
           <div>
             <label className="mb-2 block text-xs font-bold text-secondary">Scene direction</label>
-            <textarea 
-              readOnly 
-              value={sceneDirection} 
-              rows={3} 
-              placeholder="Backdrop, lighting, and mood. Edit anytime." 
-              className="w-full resize-none rounded-lg border border-outline-variant/60 bg-white px-3 py-2 text-sm text-on-surface shadow-sm outline-none focus:border-primary" 
+            <textarea
+              value={sceneDirection}
+              onChange={(event) => onSceneDirectionChange(event.target.value)}
+              rows={3}
+              placeholder="Backdrop, lighting, and mood. Edit anytime - the pose plan rebuilds from your edit."
+              className="w-full resize-none rounded-lg border border-outline-variant/60 bg-white px-3 py-2 text-sm text-on-surface shadow-sm outline-none focus:border-primary"
             />
           </div>
 
           <div>
             <label className="mb-2 block text-xs font-bold text-secondary">Garment summary</label>
-            <textarea 
-              readOnly 
-              value={garmentSummary} 
-              rows={3} 
-              placeholder="AI garment notes appear after analyzing references." 
-              className="w-full resize-none rounded-lg border border-outline-variant/60 bg-white px-3 py-2 text-sm text-on-surface shadow-sm outline-none focus:border-primary" 
+            <textarea
+              value={garmentSummary}
+              onChange={(event) => onGarmentSummaryChange(event.target.value)}
+              rows={3}
+              placeholder="AI garment notes appear after analyzing references. Edit anytime - the pose plan rebuilds from your edit."
+              className="w-full resize-none rounded-lg border border-outline-variant/60 bg-white px-3 py-2 text-sm text-on-surface shadow-sm outline-none focus:border-primary"
             />
           </div>
 
