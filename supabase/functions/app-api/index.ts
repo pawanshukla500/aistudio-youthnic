@@ -1484,13 +1484,18 @@ async function saveReferenceOperation(request: Request, args: JsonRecord) {
   };
   if (!batchId) return reference.id;
   const batch = await catalogBatch(workspace, batchId);
-  if (role === "style_reference") {
+  // Batch-level shared references (visible to every variant in the catalog, not tied to one
+  // colourway's own front/back/fabric assets). style_reference: up to a few, creative direction
+  // only. model_identity: the one face this whole catalog run should lock to - replace rather
+  // than accumulate a second, conflicting one, since a batch only has one model.
+  if (role === "style_reference" || role === "model_identity") {
     const current = Array.isArray(batch.reference_images) ? batch.reference_images as JsonRecord[] : [];
-    const { error } = await service.from("planning_batches").update({ reference_images: [...current, reference], updated_at: new Date().toISOString() }).eq("id", batchId);
+    const next = role === "model_identity" ? current.filter((entry) => entry.role !== "model_identity") : current;
+    const { error } = await service.from("planning_batches").update({ reference_images: [...next, reference], updated_at: new Date().toISOString() }).eq("id", batchId);
     if (error) throw new Error(error.message);
     await service.from("planning_requests").update({ analysis_status: "stale", updated_at: new Date().toISOString() }).eq("batch_id", batchId).not("front_image_url", "is", null).not("back_image_url", "is", null);
     scheduleBackground(kickCatalogPreflight(batchId));
-    return `style:${reference.id}`;
+    return `${role}:${reference.id}`;
   }
   const { data: planningRequest } = await service.from("planning_requests").select("id").eq("batch_id", batchId).eq("sku_name", String(args.skuId || "")).maybeSingle();
   if (!planningRequest) throw new Error("The catalog colourway was not found for this upload.");
@@ -1612,7 +1617,9 @@ async function addCatalogStyleReferenceOperation(request: Request, args: JsonRec
 async function removeCatalogStyleReferenceOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const batch = await catalogBatch(workspace, String(args.catalogId || ""));
-  const referenceId = String(args.referenceId || "").replace(/^style:/, "");
+  // Removes any batch-level shared reference by id, regardless of which role prefix
+  // saveReferenceOperation returned it with (style_reference or model_identity).
+  const referenceId = String(args.referenceId || "").replace(/^(style|model_identity):/, "");
   const current = Array.isArray(batch.reference_images) ? batch.reference_images as JsonRecord[] : [];
   await service.from("planning_batches").update({ reference_images: current.filter((entry) => String(entry.id || "") !== referenceId), updated_at: new Date().toISOString() }).eq("id", String(args.catalogId));
   await service.from("planning_requests").update({ analysis_status: "stale", analysis_fingerprint: "", updated_at: new Date().toISOString() }).eq("batch_id", String(args.catalogId)).not("front_image_url", "is", null).not("back_image_url", "is", null);
@@ -1705,11 +1712,15 @@ async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
       hash: String((asset.metadata as JsonRecord)?.hash || asset.id), filename: String((asset.metadata as JsonRecord)?.filename || `${asset.asset_role}.jpg`),
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     }));
-  const styleRefs: ReferenceInput[] = (Array.isArray(batch.reference_images) ? batch.reference_images as JsonRecord[] : []).map((entry) => ({
-    id: String(entry.id || ""), role: "style_reference", downloadUrl: String(entry.downloadUrl || entry.image_url || ""), storagePath: String(entry.storagePath || entry.storage_path || ""),
+  // batch.reference_images holds every batch-level shared reference (style_reference and, now,
+  // model_identity) tagged with its own role - preserve that tag instead of collapsing
+  // everything to "style_reference", or a model-identity upload would silently be treated as
+  // creative direction only and never reach the FACE & IDENTITY LOCK in the generation prompt.
+  const sharedRefs: ReferenceInput[] = (Array.isArray(batch.reference_images) ? batch.reference_images as JsonRecord[] : []).map((entry) => ({
+    id: String(entry.id || ""), role: String(entry.role || "style_reference"), downloadUrl: String(entry.downloadUrl || entry.image_url || ""), storagePath: String(entry.storagePath || entry.storage_path || ""),
     hash: String(entry.hash || entry.id || ""), filename: String(entry.filename || "style-reference.jpg"), mimeType: String(entry.mimeType || "image/jpeg"), size: Number(entry.size || 0),
   }));
-  return { productRefs, references: canonicalReferences([...productRefs, ...styleRefs]) };
+  return { productRefs, references: canonicalReferences([...productRefs, ...sharedRefs]) };
 }
 
 function catalogAnalysisFingerprint(batch: JsonRecord, variant: JsonRecord, references: ReferenceInput[]) {

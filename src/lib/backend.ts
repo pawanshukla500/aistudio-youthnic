@@ -383,7 +383,12 @@ async function getCatalog(catalogId: string) {
       outputs,
     };
   });
-  const styleEntries = Array.isArray(batch.reference_images) ? batch.reference_images : [];
+  // reference_images holds every batch-level shared reference (style_reference and, now,
+  // model_identity) tagged by its own role - split them back out here instead of treating
+  // everything as a style reference, which would misfile a model face upload.
+  const referenceEntries = Array.isArray(batch.reference_images) ? batch.reference_images : [];
+  const styleEntries = referenceEntries.filter((entry: Record<string, any>) => (entry.role || "style_reference") === "style_reference");
+  const modelEntry = referenceEntries.find((entry: Record<string, any>) => entry.role === "model_identity");
   return {
     ...batch,
     _id: batch.id,
@@ -403,6 +408,7 @@ async function getCatalog(catalogId: string) {
     scheduleError: batch.schedule_error || "",
     variants: hydrated,
     styleReferences: styleEntries.map((entry: Record<string, any>) => ({ _id: `style:${entry.id}`, url: entry.downloadUrl || entry.image_url, filename: entry.filename || "Style reference" })),
+    modelReference: modelEntry ? { _id: `model_identity:${modelEntry.id}`, url: modelEntry.downloadUrl || modelEntry.image_url, filename: modelEntry.filename || "Model face reference" } : null,
     hasLockedAnchor: Boolean(record(batch.catalog_memory).anchorOutputUrl),
   };
 }
