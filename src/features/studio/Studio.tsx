@@ -71,6 +71,13 @@ export function Studio() {
   const [poses, setPoses] = useState(basePoses);
   const [analysis, setAnalysis] = useState<StudioAnalysis | null>(null);
   const [analysisSourceKey, setAnalysisSourceKey] = useState<string | null>(null);
+  // User-editable corrections layered onto the AI's own "Scene direction"/"Garment summary"
+  // read-out in AnalysisProfile. Empty means "use whatever Gemini derived" (shown as a fallback
+  // display value below); once the member types something, it's sent back as an extra director's
+  // note on the next analysis and is never silently overwritten by a fresh analysis result, the
+  // same way productDetails already behaves.
+  const [sceneDirectionNote, setSceneDirectionNote] = useState("");
+  const [garmentSummaryNote, setGarmentSummaryNote] = useState("");
   const [options, setOptions] = useState(defaultOptions);
   const [analyzing, setAnalyzing] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -94,6 +101,23 @@ export function Studio() {
   const requiredReady = Boolean(productReferences.front && productReferences.back);
   const effectiveSkuId = skuId.trim() || `studio-${productReferences.front?.id.slice(0, 8) || "draft"}`;
   const effectiveSkuName = skuName.trim() || skuId.trim() || "Untitled studio product";
+  // What AnalysisProfile actually shows: the member's own edit if they've made one, else the AI's
+  // derived read-out of the last analysis. Kept here (not inside AnalysisProfile) so the same
+  // values can both render and feed the next analysis request below.
+  const derivedSceneDirection = useMemo(() => analysis ? [
+    analysis.creativeDirection.backgroundStyle,
+    analysis.creativeDirection.studioEnvironment,
+    analysis.creativeDirection.lighting,
+    analysis.creativeDirection.mood,
+  ].filter(Boolean).join(" · ") : "", [analysis]);
+  const derivedGarmentSummary = useMemo(() => analysis ? [
+    analysis.productIdentity.category,
+    analysis.productIdentity.mainColor,
+    analysis.productIdentity.fabric,
+    ...(analysis.productIdentity.invariantDetails || []),
+  ].filter(Boolean).join(", ") : "", [analysis]);
+  const sceneDirectionValue = sceneDirectionNote || derivedSceneDirection;
+  const garmentSummaryValue = garmentSummaryNote || derivedGarmentSummary;
   const analysisInputKey = useMemo(
     () => JSON.stringify({
       references: allReferences.map((reference) => ({
@@ -109,8 +133,10 @@ export function Studio() {
       category,
       modelDirection: options.modelIdentity,
       sceneDirection: options.backgroundStyle,
+      sceneDirectionNote: sceneDirectionNote.trim(),
+      garmentSummaryNote: garmentSummaryNote.trim(),
     }),
-    [allReferences, category, effectiveSkuId, effectiveSkuName, options.backgroundStyle, options.modelIdentity, productDetails],
+    [allReferences, category, effectiveSkuId, effectiveSkuName, options.backgroundStyle, options.modelIdentity, productDetails, sceneDirectionNote, garmentSummaryNote],
   );
   const latestAnalysisKeyRef = useRef(analysisInputKey);
   latestAnalysisKeyRef.current = analysisInputKey;
@@ -262,15 +288,21 @@ export function Studio() {
       setProductReferences((current) => Object.fromEntries(Object.entries(current).map(([role, reference]) => [role, reference ? uploadedById.get(reference.id) || reference : reference])) as Partial<Record<ProductReferenceRole, StudioReference>>);
       setStyleReferences((current) => current.map((reference) => uploadedById.get(reference.id) || reference));
       setModelReference((current) => current ? uploadedById.get(current.id) || current : current);
+      // Fold the member's Scene direction / Garment summary edits into the same director's-note
+      // params the rest of this form already sends - buildCombinedAnalysisPrompt treats them as
+      // "requested scene direction" / "user product notes", so Gemini re-derives both the product
+      // identity and the five-pose plan around the correction. Because these strings also flow
+      // into the backend's cache key (productHash), repeating an edit you've already sent (or
+      // reverting one) hits the existing 30-day analysis cache instead of a fresh Gemini call.
       const result = await analyzeReferences({
         organizationId: organization._id,
         createdBy: user._id,
         skuId: effectiveSkuId,
         skuName: effectiveSkuName,
-        productDetails: productDetails.trim(),
+        productDetails: [productDetails.trim(), garmentSummaryNote.trim()].filter(Boolean).join(". "),
         category,
         modelDirection: options.modelIdentity,
-        sceneDirection: options.backgroundStyle,
+        sceneDirection: [options.backgroundStyle, sceneDirectionNote.trim()].filter(Boolean).join(". "),
         references: uploaded.map((reference) => ({
           id: reference.id,
           role: reference.role,
@@ -528,6 +560,10 @@ export function Studio() {
                current={analysisIsCurrent}
                onAnalyze={handleAnalyze}
                onImprovePosePlan={handleImprovePosePlan}
+               sceneDirection={sceneDirectionValue}
+               onSceneDirectionChange={(value) => updateText(setSceneDirectionNote, value)}
+               garmentSummary={garmentSummaryValue}
+               onGarmentSummaryChange={(value) => updateText(setGarmentSummaryNote, value)}
              />
           </section>
         </div>
