@@ -7,6 +7,15 @@
 -- statement in the database instead, where Postgres's own row lock on the UPDATE serializes
 -- concurrent callers. Also returns the entries this call actually removed/replaced, so the
 -- caller can best-effort clean up their now-orphaned Firebase Storage objects.
+--
+-- `locked` explicitly takes the row lock (FOR UPDATE) before either the "which entries are
+-- being removed" read or the write derive their array from it. Without this, `removed` was a
+-- plain SELECT sharing the statement's start-of-query snapshot while the UPDATE re-reads the
+-- latest committed row only for its own SET clause (via Postgres's read-committed recheck) -
+-- under a concurrent model_identity replacement, the two could disagree, so the entries
+-- returned for storage cleanup would not match what the UPDATE actually removed. Locking first
+-- and having both `removed` and `updated` read the same `locked.reference_images` keeps them
+-- consistent with each other and with whatever the UPDATE actually writes.
 
 create or replace function public.mutate_planning_batch_reference_images(
   p_batch_id text,
@@ -19,22 +28,26 @@ language sql
 security definer
 set search_path = pg_catalog, public
 as $$
-  with removed as (
-    select coalesce(jsonb_agg(entry), '[]'::jsonb) as entries
-    from public.planning_batches as batch,
-         jsonb_array_elements(coalesce(batch.reference_images, '[]'::jsonb)) as entry
+  with locked as (
+    select batch.id, coalesce(batch.reference_images, '[]'::jsonb) as reference_images
+    from public.planning_batches as batch
     where batch.id::text = p_batch_id
-      and (
-        (p_replace_role is not null and entry ->> 'role' = p_replace_role)
-        or (p_remove_id is not null and entry ->> 'id' = p_remove_id)
-      )
+    for update
+  ),
+  removed as (
+    select coalesce(jsonb_agg(entry), '[]'::jsonb) as entries
+    from locked, jsonb_array_elements(locked.reference_images) as entry
+    where (
+      (p_replace_role is not null and entry ->> 'role' = p_replace_role)
+      or (p_remove_id is not null and entry ->> 'id' = p_remove_id)
+    )
   ),
   updated as (
     update public.planning_batches as batch
     set reference_images = coalesce(
           (
             select jsonb_agg(entry)
-            from jsonb_array_elements(coalesce(batch.reference_images, '[]'::jsonb)) as entry
+            from jsonb_array_elements(locked.reference_images) as entry
             where not (
               (p_replace_role is not null and entry ->> 'role' = p_replace_role)
               or (p_remove_id is not null and entry ->> 'id' = p_remove_id)
@@ -43,7 +56,8 @@ as $$
           '[]'::jsonb
         ) || case when p_add is not null then jsonb_build_array(p_add) else '[]'::jsonb end,
         updated_at = now()
-    where batch.id::text = p_batch_id
+    from locked
+    where batch.id::text = locked.id::text
     returning batch.id
   )
   select removed.entries from removed;
