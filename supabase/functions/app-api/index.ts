@@ -841,12 +841,38 @@ async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRe
   await finalizeJob({ ...job, actual_cost_usd: Number(job.actual_cost_usd || 0) }, session, (finalPoses || []) as JsonRecord[]);
 }
 
+// The image behind a QA rejection is already paid for, so it is archived instead of
+// discarded: the shoot owner can see exactly what the model produced, judge the
+// verdict, and salvage the frame if it is usable. Archiving must never turn a QA
+// rejection into a hard upload failure, so any storage error is logged and ignored.
+async function archiveRejectedAttempt(args: {
+  job: JsonRecord;
+  pose: JsonRecord;
+  attempt: number;
+  generated: { blob: Blob; mimeType: string };
+  qa: { reason: string; score: number; failed: string[] };
+}): Promise<JsonRecord | null> {
+  try {
+    const storagePath = `organizations/${args.job.org_id}/generated/${args.job.job_id}/rejected/${args.pose.pose_index}-attempt-${args.attempt}-${crypto.randomUUID()}.${extensionForMimeType(args.generated.mimeType)}`;
+    const stored = await uploadFirebaseObject({ storagePath, blob: args.generated.blob, mimeType: args.generated.mimeType });
+    return {
+      attempt: args.attempt, url: stored.downloadUrl, storagePath: stored.storagePath,
+      mimeType: args.generated.mimeType, reason: args.qa.reason, failed: args.qa.failed,
+      score: args.qa.score, createdAt: Date.now(),
+    };
+  } catch (error) {
+    console.error("Could not archive the QA-rejected attempt", errorMessage(error));
+    return null;
+  }
+}
+
 async function deferPoseRetry(args: {
   job: JsonRecord;
   pose: JsonRecord;
   attempt: number;
   message: string;
   corrections: string[];
+  rejectedAttempts: JsonRecord[];
   attemptCost: number;
   usage?: ProviderUsage;
   providerRequestId?: string;
@@ -864,7 +890,7 @@ async function deferPoseRetry(args: {
     service.from("session_generations").update({
       status: "queued", qa_status: "pending", error: retryMessage,
       attempt_count: args.attempt, updated_at: now,
-      generation_data: { ...poseData, corrections: args.corrections, correction: args.corrections.join("\n"), retryAvailableAt: availableAt },
+      generation_data: { ...poseData, corrections: args.corrections, correction: args.corrections.join("\n"), rejectedAttempts: args.rejectedAttempts, retryAvailableAt: availableAt },
       ...usagePatch,
     }).eq("session_id", args.job.session_id).eq("generation_id", args.pose.generation_id),
     service.from("generation_jobs").update({
@@ -970,6 +996,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     ...qaCorrections,
     requestedCorrection ? `USER REGENERATION INSTRUCTION (apply only if compatible with original product truth): ${requestedCorrection}` : "",
   ].filter(Boolean).join("\n");
+  let rejectedAttempts = Array.isArray(storedPoseData.rejectedAttempts) ? storedPoseData.rejectedAttempts as JsonRecord[] : [];
   let lastError = "Generation did not complete.";
   let attemptCost = 0;
   let attemptUsage: ProviderUsage | undefined;
@@ -1011,6 +1038,8 @@ async function processWorker(request: Request, args: JsonRecord) {
     if (!qa.pass) {
       const defect = [qa.correction || qa.reason, qa.failed.length ? `Failed checks: ${qa.failed.join(", ")}.` : ""].filter(Boolean).join(" ").trim();
       qaCorrections = [...qaCorrections, `Attempt ${attempt}: ${defect}`].slice(-MAX_GENERATION_ATTEMPTS);
+      const archived = await archiveRejectedAttempt({ job, pose, attempt, generated, qa });
+      if (archived) rejectedAttempts = [...rejectedAttempts, archived].slice(-MAX_GENERATION_ATTEMPTS);
       lastError = `Consistency QA failed: ${qa.reason}`;
       await service.from("qa_reviews").insert({
         organization_id: job.org_id, planning_request_id: job.planning_request_id, generation_job_id: job.job_id,
@@ -1074,8 +1103,16 @@ async function processWorker(request: Request, args: JsonRecord) {
   } catch (error) {
     lastError = errorMessage(error);
     if (!permanentProviderError(error) && attempt < MAX_GENERATION_ATTEMPTS) {
-      return deferPoseRetry({ job, pose, attempt, message: lastError, corrections: qaCorrections, attemptCost, usage: attemptUsage, providerRequestId, error });
+      return deferPoseRetry({ job, pose, attempt, message: lastError, corrections: qaCorrections, rejectedAttempts, attemptCost, usage: attemptUsage, providerRequestId, error });
     }
+  }
+  // Last attempt: the archive and the QA history have to be written here, because
+  // failPoseAndJob only touches pose status and never rewrites generation_data.
+  if (rejectedAttempts.length || qaCorrections.length) {
+    await service.from("session_generations").update({
+      generation_data: { ...storedPoseData, corrections: qaCorrections, correction: qaCorrections.join("\n"), rejectedAttempts },
+      updated_at: new Date().toISOString(),
+    }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
   }
   if (attemptUsage) {
     await Promise.all([
@@ -1183,6 +1220,28 @@ async function regenerateSession(request: Request, args: JsonRecord) {
   return { success: true, posesReset: incomplete.length };
 }
 
+// A pose owns more than its final image: attempts rejected by consistency QA are
+// archived so nothing the organization paid for is destroyed. Ownership checks and
+// deletion therefore have to cover that archive as well as the delivered image.
+function rejectedAttemptPaths(rows: JsonRecord[]) {
+  return rows.flatMap((row) => {
+    const data = (row.generation_data || {}) as JsonRecord;
+    return (Array.isArray(data.rejectedAttempts) ? data.rejectedAttempts as JsonRecord[] : []).map((entry) => String(entry.storagePath || ""));
+  });
+}
+
+async function jobImagePaths(job: JsonRecord) {
+  const [{ data: poses }, { data: generatedAssets }] = await Promise.all([
+    service.from("session_generations").select("storage_path,generation_data").eq("session_id", job.session_id),
+    service.from("planning_assets").select("storage_path").eq("generation_job_id", job.job_id).eq("asset_role", "generated"),
+  ]);
+  return new Set([
+    ...(poses || []).map((row) => String(row.storage_path || "")),
+    ...rejectedAttemptPaths((poses || []) as JsonRecord[]),
+    ...(generatedAssets || []).map((row) => String(row.storage_path || "")),
+  ].filter(Boolean));
+}
+
 async function removeJob(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "studio.generate");
   const jobId = String(args.jobId || "");
@@ -1190,11 +1249,7 @@ async function removeJob(request: Request, args: JsonRecord) {
   if (!job) throw new Error("Generation job not found.");
   if (["queued", "processing", "cancelling"].includes(job.status)) throw new Error("Cancel the active generation before deleting it.");
   if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid) throw new Error("You can delete only your own generation jobs.");
-  const [{ data: poses }, { data: generatedAssets }] = await Promise.all([
-    service.from("session_generations").select("storage_path").eq("session_id", job.session_id),
-    service.from("planning_assets").select("storage_path").eq("generation_job_id", jobId).eq("asset_role", "generated"),
-  ]);
-  const generatedPaths = [...new Set([...(poses || []), ...(generatedAssets || [])].map((entry) => String(entry.storage_path || "")).filter(Boolean))];
+  const generatedPaths = [...await jobImagePaths(job)];
   await service.from("planning_assets").delete().eq("generation_job_id", jobId).eq("asset_role", "generated");
   await service.from("catalog_sessions").delete().eq("session_id", job.session_id);
   await service.from("generation_jobs").delete().eq("job_id", jobId);
@@ -1216,11 +1271,8 @@ async function downloadGeneratedAsset(request: Request, args: JsonRecord) {
   if (!jobId || !storagePath) throw new Error("jobId and storagePath are required.");
   const { data: job } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
   if (!job) throw new Error("Generation job not found.");
-  const [{ data: pose }, { data: asset }] = await Promise.all([
-    service.from("session_generations").select("generation_id").eq("session_id", job.session_id).eq("storage_path", storagePath).maybeSingle(),
-    service.from("planning_assets").select("id").eq("generation_job_id", jobId).eq("asset_role", "generated").eq("storage_path", storagePath).maybeSingle(),
-  ]);
-  if (!pose && !asset) throw new Error("This image does not belong to the requested generation job.");
+  const allowed = await jobImagePaths(job);
+  if (!allowed.has(storagePath)) throw new Error("This image does not belong to the requested generation job.");
   const blob = await downloadFirebaseObject(storagePath);
   return { base64: await blobToBase64(blob), mimeType: blob.type || "image/png" };
 }
@@ -1237,11 +1289,7 @@ async function downloadGeneratedAssets(request: Request, args: JsonRecord) {
   if (!jobId || !storagePaths.length) throw new Error("jobId and storagePaths are required.");
   const { data: job } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
   if (!job) throw new Error("Generation job not found.");
-  const [{ data: poses }, { data: assets }] = await Promise.all([
-    service.from("session_generations").select("storage_path").eq("session_id", job.session_id).in("storage_path", storagePaths),
-    service.from("planning_assets").select("storage_path").eq("generation_job_id", jobId).eq("asset_role", "generated").in("storage_path", storagePaths),
-  ]);
-  const allowed = new Set([...(poses || []), ...(assets || [])].map((row) => String(row.storage_path || "")));
+  const allowed = await jobImagePaths(job);
   const assetResults = await Promise.all(storagePaths.map(async (storagePath) => {
     if (!allowed.has(storagePath)) return { storagePath, error: "This image does not belong to the requested generation job." };
     try {
