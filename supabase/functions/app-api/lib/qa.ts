@@ -15,7 +15,7 @@ export function buildPoseQaPrompt(args: {
   return `You are a strict fashion e-commerce consistency validator.
 
 Review IMAGE A (the newly generated pose) against every labeled source image that follows it.
-SOURCE PRIORITY: original FRONT/BACK/FABRIC/ADDITIONAL product references are authoritative for the garment. MODEL FACE REFERENCE (if present) is authoritative for the model's face/identity and outranks every other face source, including APPROVED POSE 1. APPROVED POSE 1 controls shoot continuity (scene, lighting, styling) always, and model identity only when no MODEL FACE REFERENCE was supplied. STYLE REFERENCE controls art direction only and must never override the product.
+SOURCE PRIORITY: original FRONT/BACK/FABRIC/ADDITIONAL product references are authoritative for the garment. MANNEQUIN / FLAT-LAY SHOT (if present) is authoritative for worn shape, proportion, length, drape and panel layout - validate silhouette, hem and sleeve length, and how the garment falls against it, but never fail IMAGE A for showing the garment on a live human model instead of a mannequin, dress form, hanger or flat surface, and never expect that apparatus to appear. MODEL FACE REFERENCE (if present) is authoritative for the model's face/identity and outranks every other face source, including APPROVED POSE 1. APPROVED POSE 1 controls shoot continuity (scene, lighting, styling) always, and model identity only when no MODEL FACE REFERENCE was supplied. STYLE REFERENCE controls art direction only and must never override the product.
 
 Pose ${args.poseNumber}: ${args.poseTitle} (${args.poseType})
 Approved pose requirement: ${JSON.stringify(args.poseDirection)}
