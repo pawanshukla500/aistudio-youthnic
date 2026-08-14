@@ -266,7 +266,9 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
               <span className={`absolute left-2.5 top-2.5 rounded-md px-2 py-1 text-[9px] font-bold uppercase shadow-sm backdrop-blur-md ${statusClass(pose.status)}`}>
                 {pose.status}
               </span>
-              {pose.outputUrl && ["completed", "failed"].includes(pose.status) && pose.completedAt && Date.now() - pose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && (
+              {/* A pose rejected by QA never produced an image, so it must stay
+                  retryable from here — otherwise a failed shoot is a dead end. */}
+              {(pose.status === "failed" || (pose.status === "completed" && pose.outputUrl)) && pose.completedAt && Date.now() - pose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -276,7 +278,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   }}
                   disabled={regeneratingId === pose._id}
                   title="Regenerate this pose — available for 24 hours after generation"
-                  className="absolute right-2.5 top-2.5 z-10 flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-bold text-primary opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 hover:bg-white disabled:opacity-100"
+                  className={`absolute right-2.5 top-2.5 z-10 flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-bold text-primary shadow-sm backdrop-blur transition-opacity hover:bg-white disabled:opacity-100 ${pose.outputUrl ? "opacity-0 group-hover:opacity-100" : "opacity-100"}`}
                 >
                   {regeneratingId === pose._id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCcw className="h-3 w-3" />}
                   Regenerate
