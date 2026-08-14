@@ -225,6 +225,7 @@ const REFERENCE_ROLE_LABELS: Record<string, string> = {
   front: "Front product",
   back: "Back product",
   fabric_pattern: "Fabric / pattern detail",
+  mannequin: "Mannequin / flat-lay",
   additional_product: "Additional product",
   style_reference: "Style reference",
 };

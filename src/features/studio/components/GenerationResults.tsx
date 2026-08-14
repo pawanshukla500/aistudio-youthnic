@@ -50,8 +50,8 @@ export function GenerationResults({
             <div className="space-y-2 p-3">
               <h3 className="text-sm font-bold leading-tight">{pose.title}</h3>
               <div className="flex items-center gap-1 text-[11px] text-secondary">
-                {pose.qaStatus === "passed" ? <CheckCircle2 className="h-3.5 w-3.5 text-success" /> : pose.status === "failed" ? <TriangleAlert className="h-3.5 w-3.5 text-danger" /> : <Clock3 className="h-3.5 w-3.5" />}
-                {pose.qaStatus === "passed" ? "Consistency passed" : pose.status === "failed" ? "Needs review" : pose.status}
+                {pose.qaStatus === "passed" ? <CheckCircle2 className="h-3.5 w-3.5 text-success" /> : pose.qaStatus === "unverified" ? <TriangleAlert className="h-3.5 w-3.5 text-warning" /> : pose.status === "failed" ? <TriangleAlert className="h-3.5 w-3.5 text-danger" /> : <Clock3 className="h-3.5 w-3.5" />}
+                {pose.qaStatus === "passed" ? "Consistency passed" : pose.qaStatus === "unverified" ? "QA unverified — review" : pose.status === "failed" ? "Needs review" : pose.status}
               </div>
               {pose.error && <p className="line-clamp-3 text-[10px] leading-relaxed text-danger">{pose.error}</p>}
               {!["queued", "generating"].includes(job.status) && (
