@@ -175,6 +175,7 @@ async function getJob(jobId: string) {
       totalTokens: Number(pose.total_tokens || assetUsage.total_tokens || 0),
       actualCost: Number(pose.actual_cost_usd || assetMetadata.actualCostUsd || 0),
       usageReported: Boolean(record(pose.usage_payload).providerReported || assetUsage.input_tokens || assetUsage.output_tokens),
+      rejectedAttempts: (Array.isArray(record(pose.generation_data).rejectedAttempts) ? record(pose.generation_data).rejectedAttempts : []) as Record<string, any>[],
     };
   });
   const knownPoseNumbers = new Set(mappedPoses.map((pose) => pose.poseNumber));
@@ -202,6 +203,7 @@ async function getJob(jobId: string) {
       totalTokens: Number(usage.total_tokens || 0),
       actualCost: Number(metadata.actualCostUsd || 0),
       usageReported: Boolean(usage.input_tokens || usage.output_tokens),
+      rejectedAttempts: [] as Record<string, any>[],
     });
   }
   mappedPoses.sort((left, right) => left.poseNumber - right.poseNumber);

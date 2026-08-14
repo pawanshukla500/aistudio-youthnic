@@ -95,6 +95,25 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     } finally { setRegeneratingId(null); }
   };
 
+  // Attempts rejected by consistency QA are archived server-side instead of being
+  // thrown away, so the shoot owner can see what the model actually produced.
+  const rejectedOf = (pose: any): any[] => (Array.isArray(pose?.rejectedAttempts) ? pose.rejectedAttempts : []);
+  const latestRejected = (pose: any) => rejectedOf(pose).at(-1) || null;
+
+  const downloadArchived = async (pose: any, attempt: any) => {
+    setDownloadError("");
+    setDownloadingPoseId(`${pose._id}:${attempt.attempt}`);
+    try {
+      const blob = await fetchPoseImageBlob(jobId, { storagePath: attempt.storagePath, outputUrl: attempt.url });
+      const extension = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
+      saveAs(blob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_attempt${attempt.attempt}_qa-rejected.${extension}`);
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Could not download this image.");
+    } finally {
+      setDownloadingPoseId(null);
+    }
+  };
+
   const downloadPose = async (pose: any) => {
     if (!pose?.outputUrl) return;
     setDownloadError("");
@@ -247,10 +266,17 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 
       <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-5">
         {job.poses.map((pose: any) => (
-          <div key={pose._id} className={`group ${pose.outputUrl ? "cursor-zoom-in" : "cursor-default"}`} onClick={() => pose.outputUrl && setSelectedPose(pose)}>
+          <div key={pose._id} className={`group ${pose.outputUrl || latestRejected(pose) ? "cursor-zoom-in" : "cursor-default"}`} onClick={() => (pose.outputUrl || latestRejected(pose)) && setSelectedPose(pose)}>
             <div className="relative aspect-[3/4] overflow-hidden rounded-xl border border-outline-variant/40 bg-white shadow-sm transition-all duration-300 hover:shadow-md hover:border-primary/40 group-hover:-translate-y-1">
               {pose.outputUrl ? (
                 <img src={pose.outputUrl} alt={pose.title} loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
+              ) : latestRejected(pose) ? (
+                <>
+                  <img src={latestRejected(pose).url} alt={`${pose.title} — rejected attempt`} loading="lazy" decoding="async" className="h-full w-full object-cover opacity-70 grayscale transition-transform duration-500 group-hover:scale-105" />
+                  <span className="absolute inset-x-0 bottom-0 bg-danger/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white">
+                    QA rejected · attempt {latestRejected(pose).attempt}
+                  </span>
+                </>
               ) : (
                 <div className="grid h-full place-items-center bg-surface-container-lowest">
                   {pose.status === "processing" ? (
@@ -319,8 +345,14 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
               <button onClick={() => setSelectedPose(null)} className="rounded-lg p-2 text-secondary hover:bg-surface-container"><X className="h-5 w-5" /></button>
             </div>
             <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_300px]">
-              <div className="grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-4"><img src={selectedPose.outputUrl} alt={selectedPose.title} decoding="async" className="max-h-[76vh] max-w-full object-contain" /></div>
+              <div className="grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-4"><img src={selectedPose.outputUrl || latestRejected(selectedPose)?.url} alt={selectedPose.title} decoding="async" className="max-h-[76vh] max-w-full object-contain" /></div>
               <aside className="space-y-4 overflow-auto p-5 text-sm">
+                {!selectedPose.outputUrl && latestRejected(selectedPose) && (
+                  <div className="rounded-xl border border-danger/20 bg-danger-surface p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-danger">Not delivered</p>
+                    <p className="mt-1.5 text-[11px] leading-4 text-secondary">Consistency QA rejected this frame, so it was never added to the set. It is kept here because it was already generated and paid for — check it against the product before using it.</p>
+                  </div>
+                )}
                 <div className="rounded-xl bg-surface-container-lowest p-4">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">OpenAI usage</p>
                   <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
@@ -334,10 +366,36 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   {!selectedPose.usageReported && <p className="mt-3 text-[10px] leading-4 text-warning">This provider response did not include token usage, so no token cost was invented.</p>}
                 </div>
                 {selectedPose.completedAt && Date.now() - selectedPose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && <button onClick={() => { setRegenerateError(""); setExtraInstructions(""); setRegenerateTarget(selectedPose); }} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-soft-blush px-4 py-3 font-semibold text-primary hover:bg-primary/15"><RefreshCcw className="h-4 w-4" /> Regenerate with instructions</button>}
-                <button onClick={() => void downloadPose(selectedPose)} disabled={downloadingPoseId === selectedPose._id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
-                  {downloadingPoseId === selectedPose._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  {downloadingPoseId === selectedPose._id ? "Downloading…" : "Download image"}
-                </button>
+                {selectedPose.outputUrl && (
+                  <button onClick={() => void downloadPose(selectedPose)} disabled={downloadingPoseId === selectedPose._id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
+                    {downloadingPoseId === selectedPose._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    {downloadingPoseId === selectedPose._id ? "Downloading…" : "Download image"}
+                  </button>
+                )}
+                {rejectedOf(selectedPose).length > 0 && (
+                  <div className="rounded-xl border border-outline-variant/40 p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">QA-rejected attempts</p>
+                    <div className="mt-3 space-y-3">
+                      {rejectedOf(selectedPose).map((attempt: any) => (
+                        <div key={attempt.storagePath} className="flex gap-3">
+                          <img src={attempt.url} alt={`Attempt ${attempt.attempt}`} loading="lazy" decoding="async" className="h-20 w-16 shrink-0 rounded-md border border-outline-variant/40 object-cover" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-bold text-on-surface">Attempt {attempt.attempt} · score {Number(attempt.score || 0)}</p>
+                            <p className="mt-0.5 line-clamp-3 text-[10px] leading-4 text-secondary" title={attempt.reason}>{attempt.reason}</p>
+                            <button
+                              onClick={() => void downloadArchived(selectedPose, attempt)}
+                              disabled={downloadingPoseId === `${selectedPose._id}:${attempt.attempt}`}
+                              className="mt-1.5 flex items-center gap-1.5 rounded-md border border-outline-variant px-2 py-1 text-[10px] font-bold text-secondary hover:bg-surface-container disabled:opacity-50"
+                            >
+                              {downloadingPoseId === `${selectedPose._id}:${attempt.attempt}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                              Download
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </aside>
             </div>
           </div>
