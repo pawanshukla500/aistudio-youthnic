@@ -298,6 +298,7 @@ function roleLabel(role: string) {
     front: "FRONT PRODUCT - authoritative front product truth",
     back: "BACK PRODUCT - authoritative back design and construction",
     fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority texture, print, embroidery, stitching, trim and construction truth",
+    mannequin: "MANNEQUIN / FLAT-LAY SHOT - authoritative garment truth for this exact garment: on a mannequin or dress form it also sets worn shape, fit, proportion and drape; laid flat it sets outline, construction, panel layout and length only, since flat cloth shows no worn drape. Read the garment from it, never reproduce the mannequin, dress form, hanger, pins, clips or the flat surface itself",
     additional_product: "ADDITIONAL PRODUCT PHOTO - supporting product truth",
     approved_pose: "APPROVED POSE 1 - shoot-continuity anchor (scene, lighting, styling); also the model identity anchor only when no MODEL FACE REFERENCE was supplied",
     style_reference: "STYLE REFERENCE ONLY - background, composition, mood, lighting and creative direction; never product identity",
@@ -496,11 +497,14 @@ function normalizeImageSize(aspectRatio: string, imageSize: string, model: strin
 }
 
 function selectReferences(references: LoadedReference[], approved: LoadedReference[], poseType: string) {
+  // A mannequin/flat-lay shot carries worn shape and drape, so it ranks with the
+  // primary product truth for full-body poses and drops below the detail shot for
+  // the close-up, where texture matters more than silhouette.
   const order = poseType === "back"
-    ? ["back", "front", "fabric_pattern", "additional_product"]
+    ? ["back", "front", "mannequin", "fabric_pattern", "additional_product"]
     : poseType === "closeup"
-      ? ["fabric_pattern", "front", "back", "additional_product"]
-      : ["front", "back", "fabric_pattern", "additional_product"];
+      ? ["fabric_pattern", "front", "back", "mannequin", "additional_product"]
+      : ["front", "back", "mannequin", "fabric_pattern", "additional_product"];
   // The model face reference (if supplied) leads every pose's image set, including pose 1 -
   // it is the identity ground truth and must reach every generation and QA call, not just the
   // poses that also get an approved-pose-1 anchor.
@@ -556,7 +560,8 @@ ${faceVisible
 LOCKED PRODUCT - MUST NOT CHANGE:
 ${JSON.stringify(product)}
 User notes: ${args.productDetails}
-Reference authority: FRONT controls front construction; BACK solely controls rear construction; FABRIC/PATTERN resolves material and small construction; ADDITIONAL supports product truth; STYLE controls art direction only.
+Reference authority: FRONT controls front construction; BACK solely controls rear construction; FABRIC/PATTERN resolves material and small construction; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion and drape, while a FLAT-LAY resolves outline, construction, panel layout and length only; ADDITIONAL supports product truth; STYLE controls art direction only.
+- Product references may be flat-lay, folded, pinned or shot on a mannequin or dress form. Rebuild the garment as it falls on a live human body, and never render a mannequin, dress form, hanger, clip, pin, prop stand, or the flat background surface in the output.
 Detail placement hard locks:
 ${placement.length ? placement.map((rule) => `- ${rule}`).join("\n") : "- Preserve every visible detail only in the exact region shown by the authoritative image."}
 Negative-evidence hard locks:
@@ -1023,7 +1028,19 @@ async function processWorker(request: Request, args: JsonRecord) {
     providerRequestId = generated.requestId;
     attemptCost = generated.costUsd;
     let qa: ReturnType<typeof parseQaResponse> & { usageMetadata?: unknown } = { pass: true, score: 100, checks: {}, failed: [], reason: "QA disabled.", correction: "" };
-    if (job.pose_qa !== false) qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData });
+    // A QA call that cannot return a verdict - safety block, provider outage, malformed
+    // response - is not evidence that the frame is wrong. The image is already generated
+    // and paid for, so it ships flagged for human review instead of being destroyed and
+    // regenerated three times into a total loss.
+    let qaUnavailable = "";
+    if (job.pose_qa !== false) {
+      try {
+        qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData });
+      } catch (error) {
+        qaUnavailable = errorMessage(error);
+        qa = { pass: true, score: 0, checks: {}, failed: [], reason: `Automatic consistency QA could not run: ${qaUnavailable}`, correction: "" };
+      }
+    }
     await service.from("ai_runs").insert({
       organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
       job_id: job.job_id, run_kind: "image_generation", model: job.model, provider: "openai",
@@ -1060,7 +1077,8 @@ async function processWorker(request: Request, args: JsonRecord) {
     await Promise.all([
       service.from("session_generations").update({
         status: "completed", output_url: stored.downloadUrl, storage_path: stored.storagePath,
-        qa_status: "passed", qa_payload: qa, error: "", updated_at: completedAt,
+        qa_status: qaUnavailable ? "unverified" : "passed", qa_payload: { ...qa, qaUnavailable },
+        error: qaUnavailable ? `Delivered without automatic consistency QA: ${qaUnavailable}`.slice(0, 1000) : "", updated_at: completedAt,
         generation_data: { ...storedPoseData, correction: "", corrections: [], completedAt: Date.now(), mimeType: generated.mimeType },
         ...usagePatch,
       }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id),
@@ -1073,7 +1091,9 @@ async function processWorker(request: Request, args: JsonRecord) {
           providerRequestId: generated.requestId, usage: generated.usage.raw, actualCostUsd: attemptCost,
         },
       }),
-      service.from("qa_reviews").insert({
+      // No automatic verdict means no review to record: an unverified frame must not
+      // leave a "passed" audit trail behind it.
+      qaUnavailable ? Promise.resolve() : service.from("qa_reviews").insert({
         organization_id: job.org_id, planning_request_id: job.planning_request_id, generation_job_id: job.job_id,
         pose_index: pose.pose_index, reviewer_type: "gemini_auto", score: qa.score, passed: true,
         issues: [], notes: qa.reason,
@@ -1801,7 +1821,7 @@ async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, ref
 async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
   const { data: assets } = await service.from("planning_assets").select("*").eq("planning_request_id", variant.id).order("created_at");
   const productRefs: ReferenceInput[] = (assets || [])
-    .filter((asset) => ["front", "back", "fabric_pattern", "additional_product"].includes(asset.asset_role))
+    .filter((asset) => ["front", "back", "fabric_pattern", "mannequin", "additional_product"].includes(asset.asset_role))
     .map((asset) => ({
       id: asset.id, role: asset.asset_role, downloadUrl: asset.image_url, storagePath: asset.storage_path,
       hash: String((asset.metadata as JsonRecord)?.hash || asset.id), filename: String((asset.metadata as JsonRecord)?.filename || `${asset.asset_role}.jpg`),

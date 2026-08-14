@@ -253,8 +253,11 @@ REFERENCE AUTHORITY (highest to lowest):
 2. FRONT PRODUCT - authoritative front product design.
 3. BACK PRODUCT - authoritative back design; never infer the back from the front.
 4. FABRIC / PATTERN DETAIL - high-priority truth for weave, texture, print, embroidery, stitching, trims, and construction.
-5. ADDITIONAL PRODUCT - another source of product truth.
-6. STYLE REFERENCE - creative direction only. Never copy its garment, product color, bottoms, logos, or accessories.
+5. MANNEQUIN / FLAT-LAY SHOT - on a mannequin or dress form, authoritative for worn shape, fit, proportion and drape; laid flat, authoritative for outline, construction, panel layout and length only, since flat cloth shows no worn drape.
+6. ADDITIONAL PRODUCT - another source of product truth.
+7. STYLE REFERENCE - creative direction only. Never copy its garment, product color, bottoms, logos, or accessories.
+
+Product references are frequently flat-lay, folded, pinned, or shot on a mannequin or dress form. Read the garment through that presentation: infer how each panel, hem, sleeve and closure behaves once it is worn on a live human body, and record that in the profile. The mannequin, dress form, hanger, clips, pins and the flat surface are photography apparatus, never part of the product - never describe them as garment features and never let them appear in the pose plan.
 
 SKU: ${args.skuName}
 Declared category: ${args.category}
@@ -266,7 +269,7 @@ Build a precise Product Identity Profile. If a detail is unclear, record it in u
 
 Build a Creative Direction Profile from style references, but never allow style to alter the product. Lock one lens family, camera height, perspective, exposure, white balance, color grade, light direction, shadow behavior, set geometry, and time-of-day so the results read as contact sheets from one real professional shoot. In realismRules, explicitly require natural skin texture with visible pores, anatomically correct and naturally shaped eyes and teeth, and no synthetic AI artifacts.
 
-Define one Model Identity Profile with concrete, specific facial detail - not generic filler. If a MODEL FACE REFERENCE image is present in the manifest above, describe THAT exact person's face shape, eye shape and color, eyebrow shape, nose, lips, and jawline in modelIdentity.face - do not invent a different face, and note in modelIdentity.face that this face must match the reference image exactly. If no MODEL FACE REFERENCE was supplied, design one specific face and describe it with the same level of concrete detail, specific enough that the exact same person is recognizable in every pose. In modelIdentity.faceRealism, lock the photorealism bar for every pose: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth) - never a plastic, waxy, airbrushed, or symmetric "AI face". Lock skin tone, hair, makeup, body proportions, accessories and footwear the same way across all five images.
+Define one Model Identity Profile with concrete, specific facial detail - not generic filler. Describe visible appearance attributes only; never identify, name, or infer personal attributes of anyone depicted. If a MODEL FACE REFERENCE image is present in the manifest above, describe the face shape, eye shape and color, eyebrow shape, nose, lips, and jawline visible in that image in modelIdentity.face - do not design a different face, and note in modelIdentity.face that these attributes must match the reference image exactly. If no MODEL FACE REFERENCE was supplied, design one specific face and describe it with the same level of concrete detail, specific enough that the exact same person is recognizable in every pose. In modelIdentity.faceRealism, lock the photorealism bar for every pose: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth) - never a plastic, waxy, airbrushed, or symmetric "AI face". Lock skin tone, hair, makeup, body proportions, accessories and footwear the same way across all five images.
 
 Overall pose energy: every one of the five poses should feel playful, warm, and Gen-Z-friendly - natural and full of genuine attitude, never stiff, robotic, or overly corporate-catalog.
 
