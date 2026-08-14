@@ -253,7 +253,7 @@ REFERENCE AUTHORITY (highest to lowest):
 2. FRONT PRODUCT - authoritative front product design.
 3. BACK PRODUCT - authoritative back design; never infer the back from the front.
 4. FABRIC / PATTERN DETAIL - high-priority truth for weave, texture, print, embroidery, stitching, trims, and construction.
-5. MANNEQUIN / FLAT-LAY SHOT - authoritative worn shape, proportion, length, drape and panel layout.
+5. MANNEQUIN / FLAT-LAY SHOT - on a mannequin or dress form, authoritative for worn shape, fit, proportion and drape; laid flat, authoritative for outline, construction, panel layout and length only, since flat cloth shows no worn drape.
 6. ADDITIONAL PRODUCT - another source of product truth.
 7. STYLE REFERENCE - creative direction only. Never copy its garment, product color, bottoms, logos, or accessories.
 

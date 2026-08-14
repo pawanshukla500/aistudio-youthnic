@@ -298,7 +298,7 @@ function roleLabel(role: string) {
     front: "FRONT PRODUCT - authoritative front product truth",
     back: "BACK PRODUCT - authoritative back design and construction",
     fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority texture, print, embroidery, stitching, trim and construction truth",
-    mannequin: "MANNEQUIN / FLAT-LAY SHOT - authoritative worn shape, proportion, length, drape and panel layout of this exact garment; read the garment from it, never reproduce the mannequin, dress form, hanger, pins, clips or the flat surface itself",
+    mannequin: "MANNEQUIN / FLAT-LAY SHOT - authoritative garment truth for this exact garment: on a mannequin or dress form it also sets worn shape, fit, proportion and drape; laid flat it sets outline, construction, panel layout and length only, since flat cloth shows no worn drape. Read the garment from it, never reproduce the mannequin, dress form, hanger, pins, clips or the flat surface itself",
     additional_product: "ADDITIONAL PRODUCT PHOTO - supporting product truth",
     approved_pose: "APPROVED POSE 1 - shoot-continuity anchor (scene, lighting, styling); also the model identity anchor only when no MODEL FACE REFERENCE was supplied",
     style_reference: "STYLE REFERENCE ONLY - background, composition, mood, lighting and creative direction; never product identity",
@@ -560,7 +560,7 @@ ${faceVisible
 LOCKED PRODUCT - MUST NOT CHANGE:
 ${JSON.stringify(product)}
 User notes: ${args.productDetails}
-Reference authority: FRONT controls front construction; BACK solely controls rear construction; FABRIC/PATTERN resolves material and small construction; MANNEQUIN/FLAT-LAY resolves worn shape, proportion, length and drape; ADDITIONAL supports product truth; STYLE controls art direction only.
+Reference authority: FRONT controls front construction; BACK solely controls rear construction; FABRIC/PATTERN resolves material and small construction; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion and drape, while a FLAT-LAY resolves outline, construction, panel layout and length only; ADDITIONAL supports product truth; STYLE controls art direction only.
 - Product references may be flat-lay, folded, pinned or shot on a mannequin or dress form. Rebuild the garment as it falls on a live human body, and never render a mannequin, dress form, hanger, clip, pin, prop stand, or the flat background surface in the output.
 Detail placement hard locks:
 ${placement.length ? placement.map((rule) => `- ${rule}`).join("\n") : "- Preserve every visible detail only in the exact region shown by the authoritative image."}
