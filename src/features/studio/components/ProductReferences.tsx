@@ -13,6 +13,7 @@ const productSlots: Array<{
   { id: "front", label: "Upload Front", description: "Click or drop image", required: true },
   { id: "back", label: "Upload Back", description: "Click or drop image", required: true },
   { id: "fabric_pattern", label: "Upload Fabric / Pattern Detail", description: "Click or drop image", required: false },
+  { id: "mannequin", label: "Upload Mannequin / Flat-lay Shot", description: "Dress form or flat-lay — sets worn shape and drape", required: false },
   { id: "additional_product", label: "Upload Additional Product Photo", description: "Click or drop image", required: false },
 ];
 

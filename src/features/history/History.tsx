@@ -292,6 +292,13 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
               <span className={`absolute left-2.5 top-2.5 rounded-md px-2 py-1 text-[9px] font-bold uppercase shadow-sm backdrop-blur-md ${statusClass(pose.status)}`}>
                 {pose.status}
               </span>
+              {/* Delivered without an automatic verdict — it must never be mistaken
+                  for a consistency-approved frame. */}
+              {pose.qaStatus === "unverified" && pose.outputUrl && (
+                <span className="absolute inset-x-0 bottom-0 bg-warning/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white">
+                  QA unverified · review
+                </span>
+              )}
               {/* A pose rejected by QA never produced an image, so it must stay
                   retryable from here — otherwise a failed shoot is a dead end. */}
               {(pose.status === "failed" || (pose.status === "completed" && pose.outputUrl)) && pose.completedAt && Date.now() - pose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && (
