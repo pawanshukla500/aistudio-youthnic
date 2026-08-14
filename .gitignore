@@ -29,3 +29,6 @@ gha-creds-*.json
 *.njsproj
 *.sln
 *.sw?
+
+# Supabase CLI local link cache
+supabase/.temp/

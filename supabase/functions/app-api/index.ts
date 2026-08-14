@@ -597,7 +597,7 @@ ${rules.map((rule) => `- ${rule}`).join("\n")}
 - Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
 ${args.pose.id === "back" ? "- TRUE BACK HARD RULE: shoulders and hips fully face away. Reproduce uploaded BACK exactly; never infer the rear from FRONT." : ""}
 ${args.pose.id === "closeup" ? "- POSE 5 HARD RULE: this is a genuine ZOOMED-IN face-to-chest or face-to-waist shot - visibly tighter in scale than the full-body hero pose, never a repeat of that wide framing. The face must be sharp, beautiful, and carry a natural Gen-Z expression, and one real product detail (embroidery, neckline, drape, print, or fabric texture) must also be sharp and clearly visible in the same frame." : ""}
-${args.correction ? `\nPREVIOUS ATTEMPT FAILED QA. Correct only these issues while preserving every lock:\n${args.correction}` : ""}
+${args.correction ? `\nEARLIER ATTEMPTS OF THIS EXACT POSE FAILED CONSISTENCY QA. Fix every issue listed below in one image while preserving every lock, and never reintroduce a defect an earlier attempt already corrected:\n${args.correction}` : ""}
 
 Product accuracy is more important than style matching. Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
 }
@@ -760,7 +760,7 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     service.from("generation_jobs").update({
       status, readiness_status: failed ? "needs_review" : "completed", readiness_reasons: failed ? [`${failed} pose(s) failed consistency validation.`] : [], completed_poses: completed, failed_poses: failed, completed_at: now,
       locked_at: null, lock_expires_at: null, updated_at: now,
-      ...(failed ? { error_code: "pose_consistency_failed", error_message: `${failed} pose(s) exhausted automatic generation/QA retries.` } : {}),
+      ...(failed ? { error_code: "pose_consistency_failed", error_message: `${failed} of ${poses.length} pose(s) exhausted automatic generation/QA retries${completed ? `; ${completed} pose(s) passed and can be downloaded or regenerated individually` : ""}.` } : {}),
     }).eq("job_id", job.job_id),
     service.from("catalog_sessions").update({ status: failed ? "needs_review" : "completed", updated_at: now }).eq("session_id", job.session_id),
     service.from("planning_requests").update({
@@ -819,8 +819,23 @@ async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRe
   await service.from("session_generations").update({ status: "failed", qa_status: "failed", error: message.slice(0, 1000), updated_at: now }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
   const { data: poses } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
   const remaining = (poses || []).filter((entry) => entry.status === "queued");
+  // Poses 2-5 depend only on the pose 1 identity anchor, never on each other.
+  // A later failure therefore keeps the shoot running and the set is delivered
+  // partially for review instead of discarding images already paid for.
+  if (remaining.length && Number(pose.pose_index) !== 1) {
+    await Promise.all([
+      service.from("generation_jobs").update({
+        status: "queued", available_at: now, locked_at: null, lock_expires_at: null,
+        failed_poses: (poses || []).filter((entry) => entry.status === "failed").length,
+        error_code: "pose_consistency_failed", error_message: message.slice(0, 1000), updated_at: now,
+      }).eq("job_id", job.job_id),
+      service.from("planning_requests").update({ generation_status: "queued", error_message: message.slice(0, 1000), updated_at: now }).eq("id", job.planning_request_id),
+    ]);
+    scheduleBackground(kickWorker(String(job.job_id)));
+    return;
+  }
   if (remaining.length) {
-    await service.from("session_generations").update({ status: "failed", qa_status: "failed", error: "Skipped because another required pose failed.", updated_at: now }).eq("session_id", job.session_id).eq("status", "queued");
+    await service.from("session_generations").update({ status: "failed", qa_status: "failed", error: "Skipped because pose 1 is the identity anchor for the set and could not be produced.", updated_at: now }).eq("session_id", job.session_id).eq("status", "queued");
   }
   const { data: finalPoses } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
   await finalizeJob({ ...job, actual_cost_usd: Number(job.actual_cost_usd || 0) }, session, (finalPoses || []) as JsonRecord[]);
@@ -831,7 +846,7 @@ async function deferPoseRetry(args: {
   pose: JsonRecord;
   attempt: number;
   message: string;
-  correction: string;
+  corrections: string[];
   attemptCost: number;
   usage?: ProviderUsage;
   providerRequestId?: string;
@@ -849,7 +864,7 @@ async function deferPoseRetry(args: {
     service.from("session_generations").update({
       status: "queued", qa_status: "pending", error: retryMessage,
       attempt_count: args.attempt, updated_at: now,
-      generation_data: { ...poseData, correction: args.correction, retryAvailableAt: availableAt },
+      generation_data: { ...poseData, corrections: args.corrections, correction: args.corrections.join("\n"), retryAvailableAt: availableAt },
       ...usagePatch,
     }).eq("session_id", args.job.session_id).eq("generation_id", args.pose.generation_id),
     service.from("generation_jobs").update({
@@ -945,8 +960,14 @@ async function processWorker(request: Request, args: JsonRecord) {
   const storedPoseData = (pose.generation_data || {}) as JsonRecord;
   const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
   const requestedCorrection = String(pose.regeneration_instructions || "").trim();
-  let correction = [
-    String(storedPoseData.correction || "").trim(),
+  // Every earlier QA verdict for this pose stays in the prompt. Carrying only
+  // the newest one let a retry fix the latest defect while reintroducing the
+  // one the previous attempt had already corrected.
+  let qaCorrections = (Array.isArray(storedPoseData.corrections)
+    ? storedPoseData.corrections.map(String)
+    : [String(storedPoseData.correction || "")]).map((entry) => entry.trim()).filter(Boolean);
+  const promptCorrection = () => [
+    ...qaCorrections,
     requestedCorrection ? `USER REGENERATION INSTRUCTION (apply only if compatible with original product truth): ${requestedCorrection}` : "",
   ].filter(Boolean).join("\n");
   let lastError = "Generation did not complete.";
@@ -963,7 +984,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     const prompt = composeGenerationPrompt({
       skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || "Untitled product"),
       productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
-      references: selected, correction,
+      references: selected, correction: promptCorrection(),
     });
     await service.from("session_generations").update({ full_prompt: prompt, attempt_count: attempt, updated_at: new Date().toISOString() }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
     const generatedStarted = Date.now();
@@ -988,7 +1009,8 @@ async function processWorker(request: Request, args: JsonRecord) {
       cost_usd: attemptCost, cost_source: generated.usage.providerReported ? "provider_reported_tokens_openai_public_rates" : "provider_not_reported",
     });
     if (!qa.pass) {
-      correction = qa.correction || qa.reason;
+      const defect = [qa.correction || qa.reason, qa.failed.length ? `Failed checks: ${qa.failed.join(", ")}.` : ""].filter(Boolean).join(" ").trim();
+      qaCorrections = [...qaCorrections, `Attempt ${attempt}: ${defect}`].slice(-MAX_GENERATION_ATTEMPTS);
       lastError = `Consistency QA failed: ${qa.reason}`;
       await service.from("qa_reviews").insert({
         organization_id: job.org_id, planning_request_id: job.planning_request_id, generation_job_id: job.job_id,
@@ -1010,7 +1032,7 @@ async function processWorker(request: Request, args: JsonRecord) {
       service.from("session_generations").update({
         status: "completed", output_url: stored.downloadUrl, storage_path: stored.storagePath,
         qa_status: "passed", qa_payload: qa, error: "", updated_at: completedAt,
-        generation_data: { ...storedPoseData, correction: "", completedAt: Date.now(), mimeType: generated.mimeType },
+        generation_data: { ...storedPoseData, correction: "", corrections: [], completedAt: Date.now(), mimeType: generated.mimeType },
         ...usagePatch,
       }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id),
       service.from("planning_assets").insert({
@@ -1052,7 +1074,7 @@ async function processWorker(request: Request, args: JsonRecord) {
   } catch (error) {
     lastError = errorMessage(error);
     if (!permanentProviderError(error) && attempt < MAX_GENERATION_ATTEMPTS) {
-      return deferPoseRetry({ job, pose, attempt, message: lastError, correction, attemptCost, usage: attemptUsage, providerRequestId, error });
+      return deferPoseRetry({ job, pose, attempt, message: lastError, corrections: qaCorrections, attemptCost, usage: attemptUsage, providerRequestId, error });
     }
   }
   if (attemptUsage) {
@@ -1929,46 +1951,194 @@ async function createEventOperation(request: Request, args: JsonRecord) {
   const leadDays = Math.max(1, Number(args.planningLeadDays || 21));
   const name = String(args.name || "").trim();
   if (!name) throw new Error("An event name is required.");
-  const slug = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${date.getUTCFullYear()}`;
+  const startDate = date.toISOString().slice(0, 10);
+  const endCandidate = args.endDate ? new Date(Number(args.endDate)).toISOString().slice(0, 10) : startDate;
+  const states = [...new Set((Array.isArray(args.states) ? args.states : []).map((entry) => String(entry).trim()).filter(Boolean))];
+  const marketplaces = [...new Set((Array.isArray(args.marketplaces) ? args.marketplaces : []).map((entry) => String(entry).trim()).filter(Boolean))];
+  const slug = `${slugify(name)}-${date.getUTCFullYear()}`;
   const { error } = await service.from("marketing_events").upsert({
-    organization_id: workspace.organization.id, slug, name, category: String(args.type || "festival"), start_date: date.toISOString().slice(0, 10),
-    end_date: date.toISOString().slice(0, 10), preparation_deadline: new Date(date.getTime() - leadDays * 86400_000).toISOString().slice(0, 10),
-    priority: "normal", description: "", source: "manual", status: "active", year: date.getUTCFullYear(), is_recurring: false, confidence: 1,
+    organization_id: workspace.organization.id, slug, name, category: String(args.type || "festival"), start_date: startDate,
+    end_date: endCandidate >= startDate ? endCandidate : startDate, preparation_deadline: shiftIsoDate(startDate, -leadDays),
+    priority: ["urgent", "high", "normal"].includes(String(args.priority)) ? String(args.priority) : "normal",
+    applicable_states: states.length ? states : ["Pan-India"], target_marketplaces: marketplaces.length ? marketplaces : ["All"],
+    description: String(args.description || "").trim(), source: "manual", source_detail: `Added by ${workspace.user.email}`,
+    status: "active", year: date.getUTCFullYear(), is_recurring: false, confidence: 1,
+    research_payload: { verificationStatus: "verified", campaignSeason: `${name} ${date.getUTCFullYear()}` },
   }, { onConflict: "organization_id,slug" });
   if (error) throw new Error(error.message);
   return { success: true };
 }
 
-const SEED_EVENT_ROWS = [
-  ["Independence Day Sale", "marketplace_sale", "2026-08-15", 30, "high", "All"],
-  ["Amazon Great Indian Festival", "marketplace_sale", "2026-09-23", 45, "urgent", "Amazon"],
-  ["Flipkart Big Billion Days", "marketplace_sale", "2026-09-23", 45, "urgent", "Flipkart"],
-  ["Navratri", "festival", "2026-10-11", 35, "high", "All"],
-  ["Diwali", "festival", "2026-11-08", 45, "urgent", "All"],
-  ["Wedding Season Peak", "seasonal", "2026-11-20", 45, "high", "All"],
-  ["Christmas", "festival", "2026-12-25", 21, "normal", "All"],
-  ["Republic Day Sale", "marketplace_sale", "2027-01-26", 30, "high", "All"],
-  ["Holi", "festival", "2027-03-03", 30, "high", "All"],
+// Fixed-calendar national moments. Month/day pairs recur every year, so the
+// baseline always lands inside the rolling twelve-month planning horizon.
+const BASELINE_EVENT_ROWS: Array<{ name: string; category: string; month: number; day: number; lead: number; priority: string; marketplaces: string[] }> = [
+  { name: "Republic Day Sale", category: "marketplace_sale", month: 1, day: 26, lead: 30, priority: "high", marketplaces: ["All"] },
+  { name: "Independence Day Sale", category: "marketplace_sale", month: 8, day: 15, lead: 30, priority: "high", marketplaces: ["All"] },
+  { name: "Wedding Season Peak", category: "seasonal", month: 11, day: 20, lead: 45, priority: "high", marketplaces: ["All"] },
+  { name: "Christmas", category: "festival", month: 12, day: 25, lead: 21, priority: "normal", marketplaces: ["All"] },
+  { name: "New Year Party Edit", category: "seasonal", month: 12, day: 31, lead: 30, priority: "high", marketplaces: ["All"] },
 ];
 
+function padNumber(value: number) {
+  return String(Math.trunc(value)).padStart(2, "0");
+}
+
+function shiftIsoDate(iso: string, days: number) {
+  return new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400_000).toISOString().slice(0, 10);
+}
+
+function clampMonth(value: unknown, fallback: number) {
+  const month = Math.round(Number(value || 0));
+  return month >= 1 && month <= 12 ? month : fallback;
+}
+
+function slugify(value: string) {
+  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+// The next calendar occurrence of a fixed day, rolling into next year once the
+// date is behind the organization's current date.
+function nextFixedDate(month: number, day: number, todayIso: string) {
+  const year = Number(todayIso.slice(0, 4));
+  const candidate = `${year}-${padNumber(month)}-${padNumber(day)}`;
+  return candidate >= todayIso ? candidate : `${year + 1}-${padNumber(month)}-${padNumber(day)}`;
+}
+
+// Reference catalogs describe festivals and marketplace campaigns as month
+// windows. Planning needs real dates, so the window is materialized as a
+// first-to-last-day range for the next occurrence still ahead of today.
+function nextMonthWindow(monthStart: unknown, monthEnd: unknown, todayIso: string) {
+  const start = clampMonth(monthStart, 1);
+  const end = clampMonth(monthEnd, start);
+  const baseYear = Number(todayIso.slice(0, 4));
+  for (const offset of [0, 1, 2]) {
+    const startYear = baseYear + offset;
+    const endYear = end >= start ? startYear : startYear + 1;
+    const startDate = `${startYear}-${padNumber(start)}-01`;
+    const endDate = `${endYear}-${padNumber(end)}-${padNumber(new Date(Date.UTC(endYear, end, 0)).getUTCDate())}`;
+    if (endDate >= todayIso) return { startDate, endDate, year: startYear };
+  }
+  const fallback = `${baseYear + 1}-${padNumber(start)}-01`;
+  return { startDate: fallback, endDate: fallback, year: baseYear + 1 };
+}
+
+async function insertSeedEvent(orgId: string, row: JsonRecord) {
+  const { data: existing } = await service.from("marketing_events").select("id").eq("organization_id", orgId).eq("slug", String(row.slug)).maybeSingle();
+  if (existing) return false;
+  const { error } = await service.from("marketing_events").insert({ organization_id: orgId, status: "active", is_recurring: true, ...row });
+  // A concurrent seed run may win the unique slug race; that is not a failure.
+  if (error && error.code !== "23505") throw new Error(error.message);
+  return !error;
+}
+
+// Seeds the roadmap from the reference catalogs so state-level festivals and
+// marketplace sale windows carry dates before any grounded research runs.
 async function seedEventsOperation(request: Request) {
   const { workspace } = await workspaceFor(request, "planning.manage");
-  let created = 0;
-  for (const [name, category, startDate, lead, priority, marketplace] of SEED_EVENT_ROWS) {
-    const slug = `${String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${String(startDate).slice(0, 4)}`;
-    const { data: existing } = await service.from("marketing_events").select("id").eq("organization_id", workspace.organization.id).eq("slug", slug).maybeSingle();
-    if (existing) continue;
-    const date = new Date(`${startDate}T06:30:00Z`);
-    const { error } = await service.from("marketing_events").insert({
-      organization_id: workspace.organization.id, slug, name, category, start_date: startDate, end_date: startDate,
-      preparation_deadline: new Date(date.getTime() - Number(lead) * 86400_000).toISOString().slice(0, 10), priority,
-      target_marketplaces: [marketplace], applicable_states: ["Pan-India"], description: "Seeded commercial calendar event.", source: "seed",
-      status: "active", year: Number(String(startDate).slice(0, 4)), is_recurring: false, confidence: 0.7,
+  const orgId = workspace.organization.id;
+  const settings = await automationSettings(orgId);
+  const today = localDateParts(String(settings.timezone || "Asia/Kolkata")).iso;
+  const [festivalsResult, campaignsResult] = await Promise.all([
+    service.from("regional_festival_catalog").select("*"),
+    service.from("marketplace_campaign_catalog").select("*"),
+  ]);
+  if (festivalsResult.error) throw new Error(festivalsResult.error.message);
+  if (campaignsResult.error) throw new Error(campaignsResult.error.message);
+
+  let festivals = 0;
+  let marketplaces = 0;
+  let baseline = 0;
+
+  for (const festival of festivalsResult.data || []) {
+    const window = nextMonthWindow(festival.typical_month_start, festival.typical_month_end, today);
+    const states = Array.isArray(festival.states) && festival.states.length ? festival.states.map(String) : [String(festival.region || "Pan-India")];
+    const lunar = Boolean(festival.lunar_based);
+    // Slugs follow the research convention (name + year) so a later grounded
+    // run upserts the exact date onto this row instead of duplicating it.
+    const created = await insertSeedEvent(orgId, {
+      slug: `${slugify(String(festival.name || festival.festival_key))}-${window.year}`,
+      name: String(festival.name),
+      category: "festival",
+      start_date: window.startDate,
+      end_date: window.endDate,
+      preparation_deadline: shiftIsoDate(window.startDate, -35),
+      priority: states.includes("Pan-India") ? "high" : "normal",
+      applicable_states: states,
+      target_marketplaces: ["All"],
+      recommended_categories: Array.isArray(festival.product_categories) ? festival.product_categories.map(String) : [],
+      visual_themes: Array.isArray(festival.visual_themes) ? festival.visual_themes.map(String) : [],
+      color_palette: Array.isArray(festival.color_palette) ? festival.color_palette.map(String) : [],
+      styling_props: Array.isArray(festival.styling_props) ? festival.styling_props.map(String) : [],
+      description: [String(festival.notes || ""), lunar ? "Lunar calendar festival — the exact date shifts every year and is confirmed by grounded research." : ""].filter(Boolean).join(" "),
+      source: "regional_catalog",
+      source_detail: `Seeded from the regional festival catalog (${String(festival.region || "India")}).`,
+      year: window.year,
+      confidence: lunar ? 0.45 : 0.6,
+      research_payload: {
+        verificationStatus: "estimated",
+        campaignSeason: `${festival.name} ${window.year}`,
+        planningWindow: `${window.startDate} → ${window.endDate}`,
+        lunarBased: lunar,
+        region: String(festival.region || ""),
+      },
     });
-    if (error) throw new Error(error.message);
-    created += 1;
+    if (created) festivals += 1;
   }
-  return { created };
+
+  for (const campaign of campaignsResult.data || []) {
+    const window = nextMonthWindow(campaign.typical_month_start, campaign.typical_month_end, today);
+    const priority = ["urgent", "high", "normal"].includes(String(campaign.priority)) ? String(campaign.priority) : "high";
+    const created = await insertSeedEvent(orgId, {
+      slug: `${slugify(String(campaign.name || campaign.campaign_key))}-${window.year}`,
+      name: String(campaign.name),
+      category: "marketplace_sale",
+      start_date: window.startDate,
+      end_date: window.endDate,
+      preparation_deadline: shiftIsoDate(window.startDate, priority === "urgent" ? 45 : 40),
+      priority,
+      applicable_states: ["Pan-India"],
+      target_marketplaces: [String(campaign.marketplace || "All")],
+      recommended_categories: Array.isArray(campaign.product_categories) ? campaign.product_categories.map(String) : [],
+      visual_themes: Array.isArray(campaign.visual_themes) ? campaign.visual_themes.map(String) : [],
+      color_palette: Array.isArray(campaign.color_palette) ? campaign.color_palette.map(String) : [],
+      description: [String(campaign.recurrence_notes || ""), "Marketplace sale windows are announced late — treat this as a planning window until the platform confirms."].filter(Boolean).join(" "),
+      source: "marketplace_catalog",
+      source_detail: `Seeded from the marketplace campaign catalog (${String(campaign.marketplace || "All")}).`,
+      year: window.year,
+      confidence: 0.55,
+      research_payload: {
+        verificationStatus: "estimated",
+        campaignSeason: `${campaign.name} ${window.year}`,
+        planningWindow: `${window.startDate} → ${window.endDate}`,
+        marketplace: String(campaign.marketplace || "All"),
+      },
+    });
+    if (created) marketplaces += 1;
+  }
+
+  for (const row of BASELINE_EVENT_ROWS) {
+    const startDate = nextFixedDate(row.month, row.day, today);
+    const created = await insertSeedEvent(orgId, {
+      slug: `${slugify(row.name)}-${startDate.slice(0, 4)}`,
+      name: row.name,
+      category: row.category,
+      start_date: startDate,
+      end_date: startDate,
+      preparation_deadline: shiftIsoDate(startDate, -row.lead),
+      priority: row.priority,
+      applicable_states: ["Pan-India"],
+      target_marketplaces: row.marketplaces,
+      description: "Fixed-date commercial calendar moment.",
+      source: "seed",
+      source_detail: "Baseline commercial calendar",
+      year: Number(startDate.slice(0, 4)),
+      confidence: 0.9,
+      research_payload: { verificationStatus: "verified", campaignSeason: `${row.name} ${startDate.slice(0, 4)}` },
+    });
+    if (created) baseline += 1;
+  }
+
+  return { created: festivals + marketplaces + baseline, festivals, marketplaces, baseline };
 }
 
 async function automationSettings(orgId: string) {
@@ -1994,8 +2164,11 @@ async function researchEventsForOrganization(orgId: string, runKind: "manual" | 
   const { data: run } = await service.from("event_research_runs").insert({ organization_id: orgId, run_kind: runKind, model, status: "running", started_at: started }).select("id").single();
   try {
     const response = await geminiGroundedJson(`Use Google Search to build a verified India fashion-commerce event calendar from ${new Date().toISOString().slice(0, 10)} through the next 12 months.
-Include national festivals, major shopping moments, verified marketplace sale windows, wedding/seasonal peaks, and culturally important state or union-territory events for: ${selectedStates.join(", ")}.
-Return ONLY valid JSON {"events":[...]}. Each event requires name, category, startDate YYYY-MM-DD, endDate YYYY-MM-DD, preparationDeadline YYYY-MM-DD (normally 30-45 days earlier), priority urgent|high|normal, marketplaces[], regions[] using official state names or Pan-India, recommendedCategories[], visualThemes[], colorPalette[], description, confidence 0..1, verificationStatus verified|estimated, sourceUrls[].
+Cover three groups completely:
+1. Festivals — national festivals plus the culturally important state and union-territory festivals for: ${selectedStates.join(", ")}. Give every state at least its major dressing-led festivals with the exact dated occurrence in this window (lunar festivals must use the year-specific date, not a generic month).
+2. Marketplace sale events — the dated sale windows for Myntra (EORS, Big Fashion Festival), Amazon (Great Indian Festival, Great Freedom Festival, Prime Day), Flipkart (Big Billion Days, Big Diwali Sale, Republic Day sale), Ajio, Nykaa Fashion and Meesho.
+3. Seasonal and wedding demand peaks with their dated windows.
+Return ONLY valid JSON {"events":[...]}. Each event requires name, category festival|marketplace_sale|seasonal|shopping|launch, startDate YYYY-MM-DD, endDate YYYY-MM-DD, preparationDeadline YYYY-MM-DD (normally 30-45 days earlier), priority urgent|high|normal, marketplaces[], regions[] using official state names or Pan-India, recommendedCategories[], visualThemes[], colorPalette[], description, confidence 0..1, verificationStatus verified|estimated, sourceUrls[].
 Use current authoritative sources. Never fabricate an exact marketplace date: if not officially announced, use a defensible planning window, mark estimated, reduce confidence, and explain that in description. Avoid duplicate events and past dates.`);
     const discovered = Array.isArray((response.json as JsonRecord).events) ? (response.json as JsonRecord).events as JsonRecord[] : [];
     let created = 0;
@@ -2039,12 +2212,275 @@ async function runEventResearchOperation(request: Request) {
   return researchEventsForOrganization(workspace.organization.id, "manual");
 }
 
-function eventReportHtml(organizationName: string, events: JsonRecord[], heading: string) {
-  const rows = events.map((event) => `<tr><td>${escapeHtml(event.start_date)}</td><td><strong>${escapeHtml(event.name)}</strong><br><small>${escapeHtml(event.category)}</small></td><td>${escapeHtml((event.applicable_states as unknown[] || []).join(", ") || "Pan-India")}</td><td>${escapeHtml(event.preparation_deadline || "-")}</td><td>${escapeHtml(event.priority || "normal")}</td></tr>`).join("");
-  return `<div style="font-family:Arial,sans-serif;color:#17131a;max-width:900px;margin:auto"><h1 style="color:#a8004f">${escapeHtml(organizationName)} · ${escapeHtml(heading)}</h1><p>This planning report contains ${events.length} upcoming commercial and cultural events. Product preparation should be complete by the listed deadline.</p><table style="width:100%;border-collapse:collapse" cellpadding="9"><thead><tr style="background:#f8edf3;text-align:left"><th>Event date</th><th>Event</th><th>States / region</th><th>Prep deadline</th><th>Priority</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No upcoming events found.</td></tr>'}</tbody></table><p style="font-size:12px;color:#6b6470">Generated by Youthnic AI Studio. Estimated dates remain marked in the Events module and should be checked before media spend is committed.</p></div>`;
+// Brand tokens mirrored from tailwind.config.js so the report reads like the
+// Events page it is generated from.
+const REPORT_THEME = {
+  primary: "#970046",
+  blush: "#FBF1F5",
+  line: "#F7E3EB",
+  surface: "#FAF8FF",
+  onSurface: "#131B2E",
+  secondary: "#575F69",
+  danger: "#DC2626",
+  dangerSurface: "#FEF2F2",
+  warning: "#D97706",
+  warningSurface: "#FFF7ED",
+  success: "#0F766E",
+  successSurface: "#ECFDF5",
+};
+
+const REPORT_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const REPORT_WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+type PlanningRow = {
+  name: string;
+  category: string;
+  categoryLabel: string;
+  startDate: string;
+  endDate: string;
+  prepDeadline: string;
+  priority: string;
+  states: string;
+  marketplaces: string;
+  categories: string;
+  themes: string;
+  palette: string;
+  description: string;
+  confidence: number;
+  verification: string;
+  source: string;
+  daysUntil: number;
+  prepDaysLeft: number;
+  prepStatus: string;
+  dayLabel: string;
+  monthKey: string;
+  monthLabel: string;
+};
+
+function daysBetweenIso(fromIso: string, toIso: string) {
+  const from = Date.parse(`${fromIso}T00:00:00Z`);
+  const to = Date.parse(`${toIso}T00:00:00Z`);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
+  return Math.round((to - from) / 86400_000);
 }
 
-async function sendTrackedEventEmail(args: { orgId: string; eventId?: string; kind: "monthly_report" | "event_reminder" | "manual_digest"; key: string; recipients: string[]; subject: string; html: string; payload?: JsonRecord }) {
+function listValue(value: unknown, fallback = "") {
+  const entries = Array.isArray(value) ? value.map((entry) => String(entry).trim()).filter(Boolean) : [];
+  return entries.length ? entries.join(", ") : fallback;
+}
+
+// One normalized shape drives the email table and the workbook, so both always
+// describe the same calendar.
+function planningRows(events: JsonRecord[], todayIso: string): PlanningRow[] {
+  return events
+    .map((event) => {
+      const startDate = String(event.start_date || "");
+      const endDate = String(event.end_date || startDate);
+      const prepDeadline = String(event.preparation_deadline || shiftIsoDate(startDate || todayIso, -21));
+      const research = (event.research_payload && typeof event.research_payload === "object" ? event.research_payload : {}) as JsonRecord;
+      const daysUntil = daysBetweenIso(todayIso, startDate);
+      const prepDaysLeft = daysBetweenIso(todayIso, prepDeadline);
+      const parsed = new Date(Date.parse(`${startDate}T00:00:00Z`));
+      const category = String(event.category || "seasonal");
+      return {
+        name: String(event.name || "Untitled event"),
+        category,
+        categoryLabel: category.replace(/_/g, " "),
+        startDate,
+        endDate,
+        prepDeadline,
+        priority: String(event.priority || "normal"),
+        states: listValue(event.applicable_states, "Pan-India"),
+        marketplaces: listValue(event.target_marketplaces, "All"),
+        categories: listValue(event.recommended_categories),
+        themes: listValue(event.visual_themes),
+        palette: listValue(event.color_palette),
+        description: String(event.description || ""),
+        confidence: Math.round(Math.max(0, Math.min(1, Number(event.confidence || 0))) * 100),
+        verification: String(research.verificationStatus || (Number(event.confidence || 0) >= 0.9 ? "verified" : "estimated")),
+        source: String(event.source || ""),
+        daysUntil,
+        prepDaysLeft,
+        prepStatus: prepDaysLeft < 0 ? "Overdue" : prepDaysLeft <= 14 ? "Due now" : "On track",
+        dayLabel: Number.isFinite(parsed.getTime()) ? REPORT_WEEKDAYS[parsed.getUTCDay()] : "",
+        monthKey: startDate.slice(0, 7),
+        monthLabel: Number.isFinite(parsed.getTime()) ? `${REPORT_MONTHS[parsed.getUTCMonth()]} ${parsed.getUTCFullYear()}` : "Undated",
+      };
+    })
+    .filter((row) => row.startDate)
+    .sort((left, right) => left.startDate.localeCompare(right.startDate) || left.name.localeCompare(right.name));
+}
+
+function priorityPill(priority: string) {
+  if (priority === "urgent") return `background:${REPORT_THEME.dangerSurface};color:${REPORT_THEME.danger}`;
+  if (priority === "high") return `background:${REPORT_THEME.warningSurface};color:${REPORT_THEME.warning}`;
+  return `background:#EAEDFF;color:${REPORT_THEME.secondary}`;
+}
+
+function prepPill(row: PlanningRow) {
+  if (row.prepDaysLeft < 0) return `background:${REPORT_THEME.dangerSurface};color:${REPORT_THEME.danger}`;
+  if (row.prepDaysLeft <= 14) return `background:${REPORT_THEME.warningSurface};color:${REPORT_THEME.warning}`;
+  return `background:${REPORT_THEME.successSurface};color:${REPORT_THEME.success}`;
+}
+
+function statCard(label: string, value: string | number, tone = REPORT_THEME.primary) {
+  return `<td style="padding:4px" width="25%"><div style="border:1px solid ${REPORT_THEME.line};border-radius:12px;background:#ffffff;padding:12px 14px"><div style="font:700 20px/1.1 Arial,Helvetica,sans-serif;color:${tone}">${escapeHtml(value)}</div><div style="font:600 10px/1.4 Arial,Helvetica,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:${REPORT_THEME.secondary};padding-top:4px">${escapeHtml(label)}</div></div></td>`;
+}
+
+function eventRowHtml(row: PlanningRow) {
+  const day = row.startDate.slice(8, 10);
+  const month = REPORT_MONTHS[Number(row.startDate.slice(5, 7)) - 1]?.slice(0, 3) || "";
+  const window = row.endDate && row.endDate !== row.startDate ? ` → ${escapeHtml(row.endDate)}` : "";
+  const meta = [row.states, row.marketplaces ? `Marketplaces: ${row.marketplaces}` : "", row.themes ? `Themes: ${row.themes}` : ""].filter(Boolean).join(" · ");
+  return `<tr>
+    <td valign="top" style="padding:12px 10px;border-bottom:1px solid ${REPORT_THEME.line};width:74px">
+      <div style="border-radius:10px;background:${REPORT_THEME.blush};text-align:center;padding:8px 4px">
+        <div style="font:700 20px/1 Arial,Helvetica,sans-serif;color:${REPORT_THEME.primary}">${escapeHtml(day)}</div>
+        <div style="font:700 9px/1.6 Arial,Helvetica,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:${REPORT_THEME.secondary}">${escapeHtml(month)}</div>
+      </div>
+      <div style="font:600 9px/1.6 Arial,Helvetica,sans-serif;text-align:center;color:${REPORT_THEME.secondary};padding-top:4px">${escapeHtml(row.dayLabel.slice(0, 3))}</div>
+    </td>
+    <td valign="top" style="padding:12px 10px;border-bottom:1px solid ${REPORT_THEME.line}">
+      <div style="font:700 15px/1.3 Arial,Helvetica,sans-serif;color:${REPORT_THEME.onSurface}">${escapeHtml(row.name)}${window ? `<span style="font:600 11px/1.3 Arial,Helvetica,sans-serif;color:${REPORT_THEME.secondary}">${window}</span>` : ""}</div>
+      <div style="font:600 10px/1.6 Arial,Helvetica,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:${REPORT_THEME.primary};padding-top:2px">${escapeHtml(row.categoryLabel)}</div>
+      ${meta ? `<div style="font:400 11px/1.5 Arial,Helvetica,sans-serif;color:${REPORT_THEME.secondary};padding-top:4px">${escapeHtml(meta)}</div>` : ""}
+    </td>
+    <td valign="top" align="right" style="padding:12px 10px;border-bottom:1px solid ${REPORT_THEME.line};width:190px">
+      <span style="display:inline-block;border-radius:999px;padding:3px 9px;font:700 9px/1.6 Arial,Helvetica,sans-serif;letter-spacing:.09em;text-transform:uppercase;${priorityPill(row.priority)}">${escapeHtml(row.priority)}</span>
+      <div style="font:400 11px/1.6 Arial,Helvetica,sans-serif;color:${REPORT_THEME.secondary};padding-top:6px">Prep by <strong style="color:${REPORT_THEME.onSurface}">${escapeHtml(row.prepDeadline)}</strong></div>
+      <span style="display:inline-block;border-radius:999px;padding:3px 9px;margin-top:4px;font:700 9px/1.6 Arial,Helvetica,sans-serif;letter-spacing:.09em;text-transform:uppercase;${prepPill(row)}">${escapeHtml(row.prepStatus)} · ${row.daysUntil <= 0 ? "live" : `${row.daysUntil}d out`}</span>
+    </td>
+  </tr>`;
+}
+
+function eventReportHtml(organizationName: string, events: JsonRecord[], heading: string, options: { todayIso?: string; note?: string; attachmentName?: string; rangeLabel?: string } = {}) {
+  const todayIso = options.todayIso || new Date().toISOString().slice(0, 10);
+  const rows = planningRows(events, todayIso);
+  const months = [...new Set(rows.map((row) => row.monthKey))];
+  const prepDue = rows.filter((row) => row.prepDaysLeft <= 14).length;
+  const festivals = rows.filter((row) => row.category === "festival").length;
+  const marketplaceCount = rows.filter((row) => row.category === "marketplace_sale").length;
+  const sections = months.map((monthKey) => {
+    const monthRows = rows.filter((row) => row.monthKey === monthKey);
+    return `<tr><td style="padding:22px 10px 6px">
+        <div style="font:700 11px/1.6 Arial,Helvetica,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:${REPORT_THEME.primary}">${escapeHtml(monthRows[0].monthLabel)}</div>
+        <div style="font:400 11px/1.6 Arial,Helvetica,sans-serif;color:${REPORT_THEME.secondary}">${monthRows.length} event${monthRows.length === 1 ? "" : "s"}</div>
+      </td></tr>
+      <tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${REPORT_THEME.line};border-radius:14px;background:#ffffff">${monthRows.map(eventRowHtml).join("")}</table></td></tr>`;
+  }).join("");
+
+  return `<div style="margin:0;padding:24px 12px;background:${REPORT_THEME.surface};font-family:Arial,Helvetica,sans-serif">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:760px;margin:0 auto;border-collapse:collapse">
+    <tr><td style="border-radius:18px;background:${REPORT_THEME.primary};padding:26px 24px">
+      <div style="font:700 10px/1.6 Arial,Helvetica,sans-serif;letter-spacing:.2em;text-transform:uppercase;color:#FFD5DD">${escapeHtml(organizationName)} · campaign intelligence</div>
+      <div style="font:700 26px/1.2 Arial,Helvetica,sans-serif;color:#ffffff;padding-top:6px">${escapeHtml(heading)}</div>
+      <div style="font:400 13px/1.6 Arial,Helvetica,sans-serif;color:#FFD5DD;padding-top:6px">${escapeHtml(options.rangeLabel || `Planning calendar generated on ${todayIso}`)}</div>
+    </td></tr>
+    ${options.note ? `<tr><td style="padding:14px 4px 0"><div style="border-left:3px solid ${REPORT_THEME.primary};background:#ffffff;border-radius:10px;padding:12px 14px;font:400 13px/1.6 Arial,Helvetica,sans-serif;color:${REPORT_THEME.onSurface};white-space:pre-wrap">${escapeHtml(options.note)}</div></td></tr>` : ""}
+    <tr><td style="padding:14px 0 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse"><tr>
+      ${statCard("Events in report", rows.length)}
+      ${statCard("Prep due ≤ 14 days", prepDue, prepDue ? REPORT_THEME.warning : REPORT_THEME.success)}
+      ${statCard("Festivals", festivals)}
+      ${statCard("Marketplace sales", marketplaceCount)}
+    </tr></table></td></tr>
+    ${rows.length ? sections : `<tr><td style="padding:24px 10px"><div style="border:1px dashed ${REPORT_THEME.line};border-radius:14px;background:#ffffff;padding:28px;text-align:center;font:400 13px/1.6 Arial,Helvetica,sans-serif;color:${REPORT_THEME.secondary}">No events fall inside this window. Run event research in the Events module to refresh the roadmap.</div></td></tr>`}
+    <tr><td style="padding:22px 10px 0">
+      <div style="border-radius:14px;background:${REPORT_THEME.blush};padding:16px 18px;font:400 12px/1.7 Arial,Helvetica,sans-serif;color:${REPORT_THEME.secondary}">
+        ${options.attachmentName ? `<strong style="color:${REPORT_THEME.onSurface}">${escapeHtml(options.attachmentName)}</strong> is attached with the full date-wise plan, prep deadlines, states, marketplaces and creative direction.<br>` : ""}
+        Prepare product, references and catalog uploads before each prep deadline. Dates marked <em>estimated</em> are planning windows and should be re-checked before media spend is committed.
+      </div>
+    </td></tr>
+    <tr><td style="padding:16px 10px 4px;font:400 11px/1.6 Arial,Helvetica,sans-serif;color:${REPORT_THEME.secondary};text-align:center">Generated by Youthnic AI Studio · Events roadmap</td></tr>
+  </table>
+</div>`;
+}
+
+// Date-wise planning workbook attached to every event report.
+async function buildEventWorkbook(organizationName: string, events: JsonRecord[], todayIso: string) {
+  const rows = planningRows(events, todayIso);
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Youthnic AI Studio";
+  workbook.created = new Date();
+
+  const calendar = workbook.addWorksheet("Planning calendar", { views: [{ state: "frozen", ySplit: 1 }] });
+  calendar.columns = [
+    { header: "#", key: "index", width: 5 },
+    { header: "Event date", key: "startDate", width: 13 },
+    { header: "Day", key: "dayLabel", width: 11 },
+    { header: "Window ends", key: "endDate", width: 13 },
+    { header: "Days until", key: "daysUntil", width: 11 },
+    { header: "Event", key: "name", width: 34 },
+    { header: "Type", key: "categoryLabel", width: 18 },
+    { header: "Priority", key: "priority", width: 10 },
+    { header: "Prep deadline", key: "prepDeadline", width: 14 },
+    { header: "Prep days left", key: "prepDaysLeft", width: 14 },
+    { header: "Prep status", key: "prepStatus", width: 12 },
+    { header: "States / region", key: "states", width: 30 },
+    { header: "Marketplaces", key: "marketplaces", width: 20 },
+    { header: "Product focus", key: "categories", width: 28 },
+    { header: "Visual themes", key: "themes", width: 30 },
+    { header: "Colour palette", key: "palette", width: 26 },
+    { header: "Confidence %", key: "confidence", width: 13 },
+    { header: "Verification", key: "verification", width: 13 },
+    { header: "Source", key: "source", width: 20 },
+    { header: "Notes", key: "description", width: 60 },
+  ];
+  rows.forEach((row, index) => calendar.addRow({ ...row, index: index + 1 }));
+
+  const months = [...new Set(rows.map((row) => row.monthKey))];
+  const summary = workbook.addWorksheet("Month summary", { views: [{ state: "frozen", ySplit: 1 }] });
+  summary.columns = [
+    { header: "Month", key: "month", width: 20 },
+    { header: "Events", key: "events", width: 10 },
+    { header: "Festivals", key: "festivals", width: 11 },
+    { header: "Marketplace sales", key: "marketplace", width: 18 },
+    { header: "Urgent", key: "urgent", width: 9 },
+    { header: "Prep due in window", key: "prepDue", width: 19 },
+    { header: "First prep deadline", key: "firstPrep", width: 19 },
+  ];
+  for (const monthKey of months) {
+    const monthRows = rows.filter((row) => row.monthKey === monthKey);
+    summary.addRow({
+      month: monthRows[0].monthLabel,
+      events: monthRows.length,
+      festivals: monthRows.filter((row) => row.category === "festival").length,
+      marketplace: monthRows.filter((row) => row.category === "marketplace_sale").length,
+      urgent: monthRows.filter((row) => row.priority === "urgent").length,
+      prepDue: monthRows.filter((row) => row.prepDaysLeft <= 14).length,
+      firstPrep: monthRows.map((row) => row.prepDeadline).sort()[0] || "",
+    });
+  }
+
+  for (const sheet of [calendar, summary]) {
+    const header = sheet.getRow(1);
+    header.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+    header.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF970046" } };
+    header.alignment = { vertical: "middle", horizontal: "left" };
+    header.height = 22;
+    sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: sheet.columnCount } };
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+      row.alignment = { vertical: "top", wrapText: true };
+      if (rowNumber % 2 === 0) row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFBF1F5" } };
+    });
+  }
+  calendar.getColumn("priority").eachCell((cell, rowNumber) => {
+    if (rowNumber === 1) return;
+    const value = String(cell.value || "");
+    cell.font = { bold: value === "urgent", color: { argb: value === "urgent" ? "FFDC2626" : value === "high" ? "FFD97706" : "FF575F69" } };
+  });
+  calendar.getColumn("prepStatus").eachCell((cell, rowNumber) => {
+    if (rowNumber === 1) return;
+    const value = String(cell.value || "");
+    cell.font = { bold: value !== "On track", color: { argb: value === "Overdue" ? "FFDC2626" : value === "Due now" ? "FFD97706" : "FF0F766E" } };
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const filename = `${slugify(organizationName) || "youthnic"}-event-plan-${todayIso}.xlsx`;
+  return { filename, content: bytesToBase64(new Uint8Array(buffer as ArrayBuffer)) };
+}
+
+async function sendTrackedEventEmail(args: { orgId: string; eventId?: string; kind: "monthly_report" | "event_reminder" | "manual_digest"; key: string; recipients: string[]; subject: string; html: string; attachments?: Array<{ filename: string; content: string }>; payload?: JsonRecord }) {
   const { data: existing } = await service.from("event_email_deliveries").select("id,status,updated_at").eq("organization_id", args.orgId).eq("delivery_kind", args.kind).eq("delivery_key", args.key).maybeSingle();
   if (existing?.status === "sent") return { sent: false, skipped: true, providerMessageId: "" };
   if (existing?.status === "pending" && Date.now() - Date.parse(existing.updated_at) < 10 * 60_000) return { sent: false, skipped: true, providerMessageId: "" };
@@ -2057,7 +2493,7 @@ async function sendTrackedEventEmail(args: { orgId: string; eventId?: string; ki
     throw new Error(error?.message || "Could not reserve the event email delivery.");
   }
   try {
-    const providerMessageId = await sendEmail({ recipients: args.recipients, subject: args.subject, html: args.html });
+    const providerMessageId = await sendEmail({ recipients: args.recipients, subject: args.subject, html: args.html, attachments: args.attachments });
     await service.from("event_email_deliveries").update({ status: "sent", provider_message_id: providerMessageId, sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", delivery.id);
     return { sent: true, skipped: false, providerMessageId };
   } catch (error) {
@@ -2066,17 +2502,53 @@ async function sendTrackedEventEmail(args: { orgId: string; eventId?: string; ki
   }
 }
 
-async function sendDigestOperation(request: Request) {
+function matchesFilterList(values: unknown, selected: string[]) {
+  if (!selected.length) return true;
+  const entries = (Array.isArray(values) ? values : []).map((entry) => String(entry).toLowerCase());
+  return selected.some((choice) => entries.includes(choice.toLowerCase()) || (choice.toLowerCase() !== "pan-india" && entries.includes("pan-india")) || entries.includes("all"));
+}
+
+// Emails the date-wise roadmap using the Events-page theme with the planning
+// workbook attached. Recipients default to the configured report list.
+async function sendDigestOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
-  const settings = await automationSettings(workspace.organization.id);
-  const recipients = cleanEmails(settings.report_recipients);
-  const today = new Date().toISOString().slice(0, 10);
-  const through = new Date(Date.now() + 365 * 86400_000).toISOString().slice(0, 10);
-  const { data: events, error } = await service.from("marketing_events").select("*").eq("organization_id", workspace.organization.id).eq("status", "active").gte("start_date", today).lte("start_date", through).order("start_date");
+  const orgId = workspace.organization.id;
+  const organizationName = workspace.organization.name;
+  const settings = await automationSettings(orgId);
+  const requested = cleanEmails(args.recipients);
+  const recipients = requested.length ? requested : cleanEmails(settings.report_recipients);
+  if (!recipients.length) throw new Error("Add at least one recipient, or configure report recipients in Administration.");
+  const today = localDateParts(String(settings.timezone || "Asia/Kolkata")).iso;
+  const horizonDays = Math.max(7, Math.min(730, Math.round(Number(args.horizonDays || 365))));
+  const through = shiftIsoDate(today, horizonDays);
+  const { data, error } = await service.from("marketing_events").select("*").eq("organization_id", orgId).eq("status", "active").gte("start_date", today).lte("start_date", through).order("start_date");
   if (error) throw new Error(error.message);
-  const subject = `${workspace.organization.name} · upcoming event planning report`;
-  const delivery = await sendTrackedEventEmail({ orgId: workspace.organization.id, kind: "manual_digest", key: crypto.randomUUID(), recipients, subject, html: eventReportHtml(workspace.organization.name, (events || []) as JsonRecord[], "Event planning report"), payload: { eventCount: events?.length || 0 } });
-  return { sent: delivery.sent, recipients, eventCount: events?.length || 0 };
+
+  const types = (Array.isArray(args.types) ? args.types : []).map((entry) => String(entry).trim()).filter(Boolean);
+  const states = (Array.isArray(args.states) ? args.states : []).map((entry) => String(entry).trim()).filter(Boolean);
+  const marketplaces = (Array.isArray(args.marketplaces) ? args.marketplaces : []).map((entry) => String(entry).trim()).filter(Boolean);
+  const eventIds = (Array.isArray(args.eventIds) ? args.eventIds : []).map((entry) => String(entry)).filter(Boolean);
+  const events = ((data || []) as JsonRecord[]).filter((event) => {
+    if (eventIds.length && !eventIds.includes(String(event.id))) return false;
+    if (types.length && !types.includes(String(event.category))) return false;
+    return matchesFilterList(event.applicable_states, states) && matchesFilterList(event.target_marketplaces, marketplaces);
+  });
+
+  const heading = String(args.heading || "").trim() || "Event planning report";
+  const rangeLabel = `${events.length} event${events.length === 1 ? "" : "s"} · ${today} → ${through}`;
+  const attachment = await buildEventWorkbook(organizationName, events, today);
+  const subject = String(args.subject || "").trim() || `${organizationName} · event plan · ${today} → ${through}`;
+  const delivery = await sendTrackedEventEmail({
+    orgId,
+    kind: "manual_digest",
+    key: crypto.randomUUID(),
+    recipients,
+    subject,
+    html: eventReportHtml(organizationName, events, heading, { todayIso: today, note: String(args.note || "").trim(), attachmentName: attachment.filename, rangeLabel }),
+    attachments: [{ filename: attachment.filename, content: attachment.content }],
+    payload: { eventCount: events.length, horizonDays, types, states, marketplaces, attachment: attachment.filename },
+  });
+  return { sent: delivery.sent, recipients, eventCount: events.length, attachment: attachment.filename, from: today, through };
 }
 
 async function updateAutomationSettingsOperation(request: Request, args: JsonRecord) {
@@ -2122,7 +2594,9 @@ async function runEventAutomationOperation(request: Request) {
       const organizationName = String((settings.organizations as unknown as JsonRecord | null)?.name || "Youthnic");
       if (settings.monthly_report_enabled && today.day === Number(settings.monthly_report_day || 1)) {
         try {
-          const delivery = await sendTrackedEventEmail({ orgId, kind: "monthly_report", key: `${today.year}-${String(today.month).padStart(2, "0")}`, recipients, subject: `${organizationName} · monthly event report · ${today.iso}`, html: eventReportHtml(organizationName, (upcoming || []) as JsonRecord[], "Monthly event report"), payload: { eventCount: upcoming?.length || 0, timezone } });
+          const monthlyEvents = (upcoming || []) as JsonRecord[];
+          const attachment = await buildEventWorkbook(organizationName, monthlyEvents, today.iso);
+          const delivery = await sendTrackedEventEmail({ orgId, kind: "monthly_report", key: `${today.year}-${String(today.month).padStart(2, "0")}`, recipients, subject: `${organizationName} · monthly event report · ${today.iso}`, html: eventReportHtml(organizationName, monthlyEvents, "Monthly event report", { todayIso: today.iso, attachmentName: attachment.filename, rangeLabel: `${monthlyEvents.length} event${monthlyEvents.length === 1 ? "" : "s"} · ${today.iso} → ${through}` }), attachments: [{ filename: attachment.filename, content: attachment.content }], payload: { eventCount: monthlyEvents.length, timezone, attachment: attachment.filename } });
           monthlySent = delivery.sent;
           if (delivery.sent) await service.from("event_automation_settings").update({ last_monthly_report_at: new Date().toISOString() }).eq("id", settings.id);
         } catch (error) { monthlyError = errorMessage(error); }
@@ -2130,10 +2604,12 @@ async function runEventAutomationOperation(request: Request) {
       if (settings.reminder_enabled) {
         const reminderDate = new Date(Date.parse(`${today.iso}T00:00:00Z`) + Number(settings.reminder_days_before || 30) * 86400_000).toISOString().slice(0, 10);
         for (const event of (upcoming || []).filter((entry) => entry.start_date === reminderDate)) {
-          const subject = `${Number(settings.reminder_days_before || 30)}-day planning reminder · ${event.name}`;
-          const html = eventReportHtml(organizationName, [event as JsonRecord], `${Number(settings.reminder_days_before || 30)}-day event reminder`);
+          const leadDays = Number(settings.reminder_days_before || 30);
+          const subject = `${leadDays}-day planning reminder · ${event.name}`;
+          const attachment = await buildEventWorkbook(organizationName, [event as JsonRecord], today.iso);
+          const html = eventReportHtml(organizationName, [event as JsonRecord], `${leadDays}-day event reminder`, { todayIso: today.iso, attachmentName: attachment.filename, rangeLabel: `${event.name} · ${event.start_date}` });
           try {
-            const delivery = await sendTrackedEventEmail({ orgId, eventId: event.id, kind: "event_reminder", key: `${event.id}:${today.iso}:${settings.reminder_days_before}`, recipients, subject, html, payload: { eventDate: event.start_date, reminderDaysBefore: settings.reminder_days_before } });
+            const delivery = await sendTrackedEventEmail({ orgId, eventId: event.id, kind: "event_reminder", key: `${event.id}:${today.iso}:${settings.reminder_days_before}`, recipients, subject, html, attachments: [{ filename: attachment.filename, content: attachment.content }], payload: { eventDate: event.start_date, reminderDaysBefore: leadDays, attachment: attachment.filename } });
             if (delivery.sent) remindersSent++;
           } catch (error) { reminderErrors.push(`${event.name}: ${errorMessage(error)}`); }
         }
@@ -2231,39 +2707,6 @@ async function syncOpenAiUsageOperation(request: Request, args: JsonRecord) {
   };
 }
 
-async function sendEventEmailOperation(request: Request, args: JsonRecord) {
-  const { workspace } = await workspaceFor(request);
-  const recipients = cleanEmails(args.recipients);
-  const subject = String(args.subject || "Event Update");
-  
-  const html = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px;">
-      <h2 style="color: #111827; font-size: 24px; font-weight: 600; margin-top: 0; margin-bottom: 16px;">${escapeHtml(subject)}</h2>
-      <div style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px; white-space: pre-wrap;">${escapeHtml(String(args.body || "Please find the attached event data."))}</div>
-      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
-      <p style="color: #6b7280; font-size: 14px; margin: 0;">Youthnic AI Studio Events Team</p>
-    </div>
-  `;
-
-  const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet('Event Data');
-  worksheet.columns = Array.isArray(args.excelColumns) ? args.excelColumns as Array<{header: string, key: string}> : [{header: 'Details', key: 'details'}];
-  worksheet.addRows(Array.isArray(args.excelRows) ? args.excelRows as any[] : []);
-  
-  const buffer = await workbook.xlsx.writeBuffer();
-  const base64Content = bytesToBase64(new Uint8Array(buffer as ArrayBuffer));
-  const filename = String(args.excelFilename || "event_data.xlsx");
-
-  const id = await sendEmail({
-    recipients,
-    subject,
-    html,
-    attachments: [{ filename, content: base64Content }]
-  });
-
-  return { success: true, emailId: id };
-}
-
 async function importMigrationArchiveOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request);
   if (!workspace.isAdmin) throw new Error("Only an administrator can import the migration archive.");
@@ -2323,9 +2766,9 @@ Deno.serve(async (request) => {
       "events.create": () => createEventOperation(request, args),
       "events.seed": () => seedEventsOperation(request),
       "events.research": () => runEventResearchOperation(request),
-      "events.digest": () => sendDigestOperation(request),
+      "events.digest": () => sendDigestOperation(request, args),
       "events.automation": () => runEventAutomationOperation(request),
-      "events.sendEmail": () => sendEventEmailOperation(request, args),
+      "events.sendEmail": () => sendDigestOperation(request, args),
       "migration.archive": () => importMigrationArchiveOperation(request, args),
     };
     const handler = handlers[operation];

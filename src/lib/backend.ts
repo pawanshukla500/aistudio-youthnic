@@ -424,6 +424,7 @@ async function roadmap(args: Record<string, any>) {
   const workspace = record(workspaceResult.data);
   const events = (eventsResult.data || []).map((event) => {
     const date = milliseconds(`${event.start_date}T06:30:00Z`);
+    const endDate = event.end_date ? milliseconds(`${event.end_date}T06:30:00Z`) : date;
     const prepDeadline = event.preparation_deadline ? milliseconds(`${event.preparation_deadline}T06:30:00Z`) : date - 21 * 86_400_000;
     const research = record(event.research_payload);
     return {
@@ -431,6 +432,10 @@ async function roadmap(args: Record<string, any>) {
       name: event.name,
       type: event.category || "seasonal",
       date,
+      endDate,
+      startDateIso: String(event.start_date || ""),
+      endDateIso: String(event.end_date || event.start_date || ""),
+      prepDeadlineIso: String(event.preparation_deadline || ""),
       prepDeadline,
       planningLeadDays: Math.max(1, Math.round((date - prepDeadline) / 86_400_000)),
       daysUntil: Math.ceil((date - now) / 86_400_000),
@@ -447,7 +452,14 @@ async function roadmap(args: Record<string, any>) {
       mood: research.mood || "",
       colorPalette: Array.isArray(event.color_palette) ? event.color_palette : [],
       themes: Array.isArray(event.visual_themes) ? event.visual_themes : [],
+      recommendedCategories: Array.isArray(event.recommended_categories) ? event.recommended_categories : [],
+      stylingProps: Array.isArray(event.styling_props) ? event.styling_props : [],
       source: event.source || "",
+      sourceDetail: event.source_detail || "",
+      planningWindow: research.planningWindow || "",
+      status: event.status || "active",
+      year: Number(event.year || new Date(date).getUTCFullYear()),
+      updatedAt: milliseconds(event.updated_at),
       confirmed: Number(event.confidence || 0) >= 0.9,
       verificationStatus: research.verificationStatus || (Number(event.confidence || 0) >= 0.9 ? "verified" : "estimated"),
       sourceUrls: Array.isArray(research.sourceUrls) ? research.sourceUrls : [],
