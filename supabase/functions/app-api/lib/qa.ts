@@ -15,10 +15,14 @@ const CRITICAL_CHECKS: readonly string[] = [
   "detail_placement", "absence_constraints",
 ];
 
-// A generation model reinterprets prints and embroidery confidently enough that a
-// boolean verdict misses it. These floors turn "looks like the same kind of
-// garment" into a measurable failure that the existing retry path can act on.
+// A critical attribute under this is worth surfacing, but on its own it is not
+// grounds to spend another generation: a validator that cannot name the defect is
+// hedging, not measuring.
 const CRITICAL_SCORE_FLOOR = 85;
+// This far below the reference is a claim rather than a hedge, so it fails even
+// when the validator's prose says the frame is fine.
+const SEVERE_SCORE_FLOOR = 60;
+// Used only to mark a delivered frame as worth a visual check, never to reject.
 const OVERALL_FIDELITY_FLOOR = 88;
 
 export function buildPoseQaPrompt(args: {
@@ -52,7 +56,13 @@ ${args.hasModelReference
 PRODUCT FIDELITY - the failure mode that matters most here is a garment that reads as the same style but is not the same SKU. Judge it against the product references, not against your sense of what such a garment usually looks like:
 - pattern_geometry: compare motif shape, motif scale relative to the body, spacing, orientation, repeat interval and density against the FABRIC / PATTERN DETAIL and FRONT references, panel by panel. Fail it when motifs are enlarged, simplified, redrawn, reduced to fewer larger shapes, re-angled, made denser or sparser, or when accent colours inside the print are missing - even when the print type and colour family are right.
 - embroidery_geometry: compare the internal construction - lattice or motif structure, the count and rhythm of repeated units, borders, coverage area relative to the garment, and the relationship to neckline, tie, drawstring and tassel. Fail it when the embroidery is a different arrangement of the same craft, when unit count or shape changes, or when its coverage grows or shrinks.
-Score every check from 0 to 100 in "scores", where 100 is indistinguishable from the reference and below 85 means a buyer comparing the listing to the delivered garment would notice. Score honestly: a plausible, attractive reinterpretation scores low.
+SCORING SCALE - anchor every number to these meanings, and never hand several attributes the same round number as a hedge:
+- 100: indistinguishable from the reference.
+- 95: the same garment; only rendering differences a photographer would accept.
+- 85: one attribute a buyer comparing the listing to the delivered garment would notice.
+- 70: clearly a different arrangement of the same idea - redrawn motifs, regrouped embroidery, shifted placement.
+- 40: a different product in the same category.
+A score below 85 on garment_identity, colors, print_pattern, pattern_geometry, embroidery_geometry, detail_placement or absence_constraints asserts that something is actually wrong, so it MUST come with "fail" for that check in "checks" and the specific defect named in "correction". If you cannot name the defect, that attribute is not below 85 - score it honestly rather than defensively. Do not lower every score together to signal general uncertainty; an image you describe as matching must score as matching.
 
 Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face. Fail any invented or moved button, tassel/latkan, closure, trim, pocket, logo, embroidery, jewelry, or hardware. For a back pose, fail unless it is a true back view matching the uploaded BACK; face_realism automatically passes for a back pose since the face is not visible. For pose 5 (the zoomed-in face & product detail highlight), fail pose_requirement if it is a full-body or wide shot that just repeats the hero framing instead of a genuine zoomed-in face-to-chest/face-to-waist crop, if the face is not sharp and clearly visible, if no real product detail is sharply highlighted in the same frame, or if the expression looks stiff or unnatural instead of a beautiful, cute, genuine Gen-Z smile or expression. If a stylist accessory suggestion was provided, fail styling_addition when it is missing, inconsistent across poses, or hides/replaces any garment detail, bottom wear, or footwear from the product references; pass styling_addition when no suggestion was provided and none was invented.
 
@@ -97,19 +107,33 @@ export function normalizePoseQaResult(raw: JsonRecord) {
     ? Math.round(weighted.reduce((sum, entry) => sum + entry.score * entry.weight, 0) / totalWeight)
     : Math.max(0, Math.min(100, Number(raw.score) || 0));
 
-  // Anything under the floor is a rejection even when the validator called it a
-  // pass: "attractive reinterpretation of the same style" is exactly the verdict
-  // that used to ship as a finished catalogue image.
-  const belowFloor = Object.entries(scores)
-    .filter(([key, score]) => CRITICAL_CHECKS.includes(key) && score < CRITICAL_SCORE_FLOOR)
-    .map(([key]) => key);
-  for (const key of belowFloor) failed.add(key);
+  // A mediocre number on its own is not evidence of drift. Rejecting on one
+  // rejected a frame the validator had just described as matching, and paid for
+  // another generation to find out. So a score only rejects when it is severe
+  // enough to be a claim in its own right; otherwise the frame ships with the
+  // number visible and flagged for a look.
+  const severe: string[] = [];
+  const lowConfidence: string[] = [];
+  for (const [key, score] of Object.entries(scores)) {
+    if (!CRITICAL_CHECKS.includes(key) || score >= CRITICAL_SCORE_FLOOR) continue;
+    if (score < SEVERE_SCORE_FLOOR) {
+      severe.push(key);
+      failed.add(key);
+    } else if (!failed.has(key)) {
+      lowConfidence.push(`${key} ${score}%`);
+    }
+  }
   const weakest = Object.entries(scores).sort((left, right) => left[1] - right[1]).slice(0, 3)
     .filter(([, score]) => score < 100)
     .map(([key, score]) => `${key} ${score}%`);
-  const pass = raw.pass !== false && failed.size === 0 && productFidelity >= OVERALL_FIDELITY_FLOOR;
-  const shortfall = !pass && !belowFloor.length && productFidelity < OVERALL_FIDELITY_FLOOR
-    ? `Product fidelity ${productFidelity}% is below the ${OVERALL_FIDELITY_FLOOR}% floor.`
+  const pass = raw.pass !== false && failed.size === 0;
+  const reviewRecommended = pass && (lowConfidence.length > 0 || productFidelity < OVERALL_FIDELITY_FLOOR);
+  // The deciding rule leads the message. Concatenating the validator's prose first
+  // produced "Consistency QA failed: Image A successfully aligns with ...".
+  const cause = failed.size
+    ? severe.length
+      ? `Critical attributes far below the product references: ${severe.join(", ")}.`
+      : `Failed checks: ${[...failed].join(", ")}.`
     : "";
 
   return {
@@ -118,12 +142,15 @@ export function normalizePoseQaResult(raw: JsonRecord) {
     productFidelity,
     scores,
     weakest,
+    lowConfidence,
+    reviewRecommended,
     checks,
     failed: [...failed],
     reason: [
-      String(raw.reason || (pass ? "All consistency checks passed." : [...failed].join(", "))),
-      shortfall,
+      cause,
+      String(raw.reason || (pass ? "All consistency checks passed." : "")),
       weakest.length ? `Lowest matches: ${weakest.join(", ")}.` : "",
+      reviewRecommended ? "Delivered, but fidelity is not exact - worth a visual check against the product references." : "",
     ].filter(Boolean).join(" ").slice(0, 500),
     correction: String(raw.correction || "").slice(0, 1000),
   };

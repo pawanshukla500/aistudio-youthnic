@@ -1060,7 +1060,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     attemptUsage = generated.usage;
     providerRequestId = generated.requestId;
     attemptCost = generated.costUsd;
-    let qa: ReturnType<typeof parseQaResponse> & { usageMetadata?: unknown } = { pass: true, score: 100, productFidelity: 100, scores: {}, weakest: [], checks: {}, failed: [], reason: "QA disabled.", correction: "" };
+    let qa: ReturnType<typeof parseQaResponse> & { usageMetadata?: unknown } = { pass: true, score: 100, productFidelity: 100, scores: {}, weakest: [], lowConfidence: [], reviewRecommended: false, checks: {}, failed: [], reason: "QA disabled.", correction: "" };
     // A QA call that cannot return a verdict - safety block, provider outage, malformed
     // response - is not evidence that the frame is wrong. The image is already generated
     // and paid for, so it ships flagged for human review instead of being destroyed and
@@ -1071,7 +1071,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData });
       } catch (error) {
         qaUnavailable = errorMessage(error);
-        qa = { pass: true, score: 0, productFidelity: 0, scores: {}, weakest: [], checks: {}, failed: [], reason: `Automatic consistency QA could not run: ${qaUnavailable}`, correction: "" };
+        qa = { pass: true, score: 0, productFidelity: 0, scores: {}, weakest: [], lowConfidence: [], reviewRecommended: true, checks: {}, failed: [], reason: `Automatic consistency QA could not run: ${qaUnavailable}`, correction: "" };
       }
     }
     await service.from("ai_runs").insert({
