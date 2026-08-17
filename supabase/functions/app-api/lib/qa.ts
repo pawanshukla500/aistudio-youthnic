@@ -83,6 +83,13 @@ export function normalizePoseQaResult(raw: JsonRecord) {
     if (Number.isFinite(reported)) scores[key] = Math.max(0, Math.min(100, Math.round(reported)));
     else if (verdict === "fail") scores[key] = 0;
     else if (verdict === "pass") scores[key] = 100;
+    else if (CRITICAL_CHECKS.includes(key)) {
+      // A verdict that says nothing about an SKU-defining attribute is not
+      // evidence that the attribute is right. Silence here used to average away:
+      // one non-critical score could carry the whole frame to a passing figure.
+      scores[key] = 0;
+      failed.add(key);
+    }
   }
   const weighted = Object.entries(scores).map(([key, score]) => ({ score, weight: CRITICAL_CHECKS.includes(key) ? 2 : 1 }));
   const totalWeight = weighted.reduce((sum, entry) => sum + entry.weight, 0);

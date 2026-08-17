@@ -194,7 +194,10 @@ async function getJob(jobId: string) {
       poseNumber,
       title: defaultTitles[Math.max(0, poseNumber - 1)] || `Pose ${poseNumber}`,
       status: "completed",
-      qaStatus: record(metadata.qa).passed === false ? "failed" : "passed",
+      // The producer records an explicit status and stores the verdict as `pass`.
+      // Reading a `passed` key that is never written made every asset-only pose
+      // report as QA-passed, including ones QA never cleared.
+      qaStatus: String(metadata.qaStatus || "") || (record(metadata.qa).pass === true ? "passed" : record(metadata.qa).pass === false ? "failed" : "unverified"),
       outputUrl: asset.image_url,
       storagePath: asset.storage_path || "",
       error: null,

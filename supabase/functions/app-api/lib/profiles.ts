@@ -183,7 +183,10 @@ export function parseJsonResponse(text: string): JsonRecord {
 function patternGeometry(product: JsonRecord): PatternGeometryProfile {
   const geometry = objectValue(product.patternGeometry ?? product.pattern_geometry);
   return {
-    type: stringValue(geometry.type, stringValue(product.pattern, "Solid - no repeating pattern visible")),
+    // A legacy profile may describe the print in `print` and leave `pattern`
+    // empty. Declaring such a garment solid would make the generation lock
+    // contradict the product.
+    type: stringValue(geometry.type, stringValue(product.pattern, stringValue(product.print, "Solid - no repeating pattern visible"))),
     scale: stringValue(geometry.scale),
     orientation: stringValue(geometry.orientation),
     density: stringValue(geometry.density),
