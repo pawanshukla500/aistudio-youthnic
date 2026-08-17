@@ -294,7 +294,7 @@ async function loadAvailableReferences(references: ReferenceInput[]): Promise<Lo
 
 function roleLabel(role: string) {
   const labels: Record<string, string> = {
-    model_identity: "MODEL FACE REFERENCE - the exact, non-negotiable face and identity for the model in every pose; reproduce it as closely as photographically possible, never invent or beautify a different face",
+    model_identity: "MODEL FACE REFERENCE - the exact, non-negotiable face and identity for the model in every pose; reproduce it as closely as photographically possible, never invent or beautify a different face. Take ONLY the face, skin tone, hair and body proportions from this image: any garment, colour, print, jewellery or styling visible in it belongs to a different product and must have zero influence on the garment being photographed",
     front: "FRONT PRODUCT - authoritative front product truth",
     back: "BACK PRODUCT - authoritative back design and construction",
     fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority texture, print, embroidery, stitching, trim and construction truth",
@@ -313,7 +313,7 @@ function extensionForMimeType(mimeType: string) {
 }
 
 function canonicalReferences(references: ReferenceInput[]) {
-  const order: Record<string, number> = { model_identity: 0, front: 1, back: 2, fabric_pattern: 3, additional_product: 4, style_reference: 5 };
+  const order: Record<string, number> = { model_identity: 0, front: 1, back: 2, fabric_pattern: 3, mannequin: 4, additional_product: 5, style_reference: 6 };
   return [...references].sort((left, right) => (order[left.role] ?? 99) - (order[right.role] ?? 99) || left.hash.localeCompare(right.hash));
 }
 
@@ -510,8 +510,31 @@ function selectReferences(references: LoadedReference[], approved: LoadedReferen
   // poses that also get an approved-pose-1 anchor.
   const modelRef = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
   const product = order.flatMap((role) => references.filter((reference) => reference.role === role));
-  const style = references.filter((reference) => reference.role === "style_reference").slice(0, 3);
-  return [...modelRef, ...product, ...approved.slice(0, 1), ...style].slice(0, MAX_REFERENCES);
+  // A close-up is where invented motifs and redrawn embroidery show up worst, and
+  // its scene is already fixed by the approved anchor - so those reference slots go
+  // to product truth instead of art direction. With no anchor yet, style still has
+  // to carry the scene.
+  const styleBudget = poseType === "closeup" && approved.length ? 0 : 3;
+  const style = references.filter((reference) => reference.role === "style_reference").slice(0, styleBudget);
+  // The anchor keeps the model and scene identical across the set, so it must
+  // survive truncation. Nothing caps how many additional_product or mannequin
+  // images a caller may attach, and enough of them would otherwise push the
+  // anchor past MAX_REFERENCES and silently break continuity.
+  const anchor = approved.slice(0, 1);
+  const productBudget = Math.max(1, MAX_REFERENCES - modelRef.length - anchor.length);
+  return [...modelRef, ...product.slice(0, productBudget), ...anchor, ...style].slice(0, MAX_REFERENCES);
+}
+
+// Analyses cached before the geometry profiles existed still flow through here,
+// so both readers fall back to the flat legacy fields instead of emitting null.
+function patternGeometryOf(product: JsonRecord) {
+  const geometry = product?.patternGeometry && typeof product.patternGeometry === "object" ? product.patternGeometry as JsonRecord : {};
+  return Object.keys(geometry).length ? geometry : { type: String(product?.pattern || ""), print: String(product?.print || "") };
+}
+
+function embroideryGeometryOf(product: JsonRecord) {
+  const geometry = product?.embroideryGeometry && typeof product.embroideryGeometry === "object" ? product.embroideryGeometry as JsonRecord : {};
+  return Object.keys(geometry).length ? geometry : { placement: String(product?.embroidery || "") };
 }
 
 function composeGenerationPrompt(args: {
@@ -566,6 +589,16 @@ Detail placement hard locks:
 ${placement.length ? placement.map((rule) => `- ${rule}`).join("\n") : "- Preserve every visible detail only in the exact region shown by the authoritative image."}
 Negative-evidence hard locks:
 ${absent.length ? absent.map((rule) => `- ${rule}`).join("\n") : "- Add no button, closure, tassel/latkan, trim, embroidery, pocket, logo, jewelry or hardware unless the authoritative product image proves it exists at that location."}
+
+PRINT AND EMBROIDERY GEOMETRY LOCK - the difference between photographing THIS garment and inventing a similar one:
+Pattern geometry: ${JSON.stringify(patternGeometryOf(product))}
+Embroidery geometry: ${JSON.stringify(embroideryGeometryOf(product))}
+- The FABRIC / PATTERN DETAIL image is the pixel-level authority for motif shape, motif scale, spacing, orientation and embroidery construction. Read the geometry off that image rather than reproducing a generic version of the same craft or style.
+- Reproduce motifs at the stated physical scale relative to the body. Do not enlarge, simplify, stylize, redraw or "clean up" a motif, and do not reduce a dense print to fewer, larger shapes.
+- Keep the print's orientation, repeat interval and density identical, including where panels differ - body, sleeves, yoke, bottom wear and dupatta each keep their own stated treatment.
+- Keep every accent colour inside the print. Small secondary-colour details within a motif field are part of this product's identity, not noise to average away.
+- Reproduce embroidery as the same internal geometry: same lattice or motif structure, same count and rhythm of repeated units, same borders, same coverage area, and the same relationship to the neckline, tie, drawstring and tassel.
+- If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".
 
 LOCKED ART DIRECTION - MUST NOT CHANGE BETWEEN POSES:
 ${JSON.stringify(creative)}
@@ -1027,7 +1060,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     attemptUsage = generated.usage;
     providerRequestId = generated.requestId;
     attemptCost = generated.costUsd;
-    let qa: ReturnType<typeof parseQaResponse> & { usageMetadata?: unknown } = { pass: true, score: 100, checks: {}, failed: [], reason: "QA disabled.", correction: "" };
+    let qa: ReturnType<typeof parseQaResponse> & { usageMetadata?: unknown } = { pass: true, score: 100, productFidelity: 100, scores: {}, weakest: [], checks: {}, failed: [], reason: "QA disabled.", correction: "" };
     // A QA call that cannot return a verdict - safety block, provider outage, malformed
     // response - is not evidence that the frame is wrong. The image is already generated
     // and paid for, so it ships flagged for human review instead of being destroyed and
@@ -1038,7 +1071,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData });
       } catch (error) {
         qaUnavailable = errorMessage(error);
-        qa = { pass: true, score: 0, checks: {}, failed: [], reason: `Automatic consistency QA could not run: ${qaUnavailable}`, correction: "" };
+        qa = { pass: true, score: 0, productFidelity: 0, scores: {}, weakest: [], checks: {}, failed: [], reason: `Automatic consistency QA could not run: ${qaUnavailable}`, correction: "" };
       }
     }
     await service.from("ai_runs").insert({
@@ -1053,10 +1086,21 @@ async function processWorker(request: Request, args: JsonRecord) {
       cost_usd: attemptCost, cost_source: generated.usage.providerReported ? "provider_reported_tokens_openai_public_rates" : "provider_not_reported",
     });
     if (!qa.pass) {
-      const defect = [qa.correction || qa.reason, qa.failed.length ? `Failed checks: ${qa.failed.join(", ")}.` : ""].filter(Boolean).join(" ").trim();
+      const defect = [
+        qa.correction || qa.reason,
+        qa.failed.length ? `Failed checks: ${qa.failed.join(", ")}.` : "",
+        qa.weakest.length ? `Weakest matches against the product references: ${qa.weakest.join(", ")} - rebuild these from the reference images rather than adjusting them by feel.` : "",
+        `Product fidelity scored ${qa.productFidelity}%.`,
+      ].filter(Boolean).join(" ").trim();
       qaCorrections = [...qaCorrections, `Attempt ${attempt}: ${defect}`].slice(-MAX_GENERATION_ATTEMPTS);
       const archived = await archiveRejectedAttempt({ job, pose, attempt, generated, qa });
       if (archived) rejectedAttempts = [...rejectedAttempts, archived].slice(-MAX_GENERATION_ATTEMPTS);
+      // The verdict is written now, not on the way out: neither deferPoseRetry nor
+      // failPoseAndJob touches qa_payload, so a pose that exhausts its retries
+      // would otherwise show an archived image with no fidelity breakdown.
+      await service.from("session_generations").update({
+        qa_status: "failed", qa_payload: { ...qa, attempt, qaUnavailable: "" }, updated_at: new Date().toISOString(),
+      }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
       lastError = `Consistency QA failed: ${qa.reason}`;
       await service.from("qa_reviews").insert({
         organization_id: job.org_id, planning_request_id: job.planning_request_id, generation_job_id: job.job_id,
@@ -1087,7 +1131,8 @@ async function processWorker(request: Request, args: JsonRecord) {
         prompt, image_url: stored.downloadUrl, storage_path: stored.storagePath, generation_job_id: job.job_id,
         sku_matched: true, asset_role: "generated", storage_backend: "firebase",
         metadata: {
-          poseIndex: pose.pose_index, poseType: pose.pose_type, qa, model: job.model, quality: job.quality,
+          poseIndex: pose.pose_index, poseType: pose.pose_type, qa, qaStatus: qaUnavailable ? "unverified" : "passed",
+          model: job.model, quality: job.quality,
           providerRequestId: generated.requestId, usage: generated.usage.raw, actualCostUsd: attemptCost,
         },
       }),
@@ -1115,7 +1160,23 @@ async function processWorker(request: Request, args: JsonRecord) {
         attempt_count: 0, available_at: completedAt, error_code: "", error_message: "",
         lock_expires_at: new Date(Date.now() + WORKER_LEASE_MS).toISOString(), updated_at: completedAt,
       }).eq("job_id", job.job_id),
-      service.from("catalog_sessions").update({ session_data: { ...sessionData, generatedAssets, approvedAssets: generatedAssets.filter((asset) => asset.poseIndex === 1) }, updated_at: completedAt }).eq("session_id", job.session_id),
+      // Supabase stays the single record of the shoot: the session carries the
+      // Product DNA version it was generated against plus the per-pose fidelity
+      // verdict, so a set can be audited later without replaying the job.
+      service.from("catalog_sessions").update({
+        session_data: {
+          ...sessionData, generatedAssets, approvedAssets: generatedAssets.filter((asset) => asset.poseIndex === 1),
+          productDnaVersion: ANALYSIS_VERSION,
+          validation: {
+            ...(sessionData.validation && typeof sessionData.validation === "object" ? sessionData.validation as JsonRecord : {}),
+            [`pose${pose.pose_index}`]: {
+              productFidelity: qa.productFidelity, scores: qa.scores, weakest: qa.weakest,
+              qaStatus: qaUnavailable ? "unverified" : "passed", attempt, checkedAt: Date.now(),
+            },
+          },
+        },
+        updated_at: completedAt,
+      }).eq("session_id", job.session_id),
       service.from("planning_requests").update({ error_message: "", updated_at: completedAt }).eq("id", job.planning_request_id),
     ]);
     scheduleBackground(kickWorker(String(job.job_id)));

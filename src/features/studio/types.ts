@@ -35,6 +35,29 @@ export type StudioPose = {
   enabled: boolean;
 };
 
+// Mirrors the geometry profiles the analysis stage now produces. Optional so a
+// session analysed before v9 still satisfies the type.
+export type PatternGeometryProfile = {
+  type: string;
+  scale: string;
+  orientation: string;
+  density: string;
+  repeat: string;
+  placementByPanel: string[];
+  accentColors: string[];
+  motifInventory: string[];
+};
+
+export type EmbroideryGeometryProfile = {
+  placement: string;
+  geometry: string;
+  motifStructure: string;
+  scaleRelativeToGarment: string;
+  colorsAndMaterial: string;
+  borders: string;
+  necklineRelation: string;
+};
+
 export type ProductIdentityProfile = {
   category: string;
   mainColor: string;
@@ -42,6 +65,8 @@ export type ProductIdentityProfile = {
   fabric: string;
   pattern: string;
   print: string;
+  patternGeometry?: PatternGeometryProfile;
+  embroideryGeometry?: EmbroideryGeometryProfile;
   texture: string;
   neckline: string;
   sleeveType: string;
