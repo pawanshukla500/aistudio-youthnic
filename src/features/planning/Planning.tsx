@@ -37,8 +37,11 @@ type CatalogDetail = Record<string, any> & { variants: CatalogVariant[]; styleRe
 
 const emptyCreate = {
   name: "",
-  modelDirection: "Same adult South Asian female fashion model across every variant",
-  sceneDirection: "Premium clean fashion catalog scene, consistent backdrop and lighting",
+  // Studio defers the scene to the uploaded style reference; this form used to ship
+  // "Premium clean fashion catalog scene", which is an instruction for a plain studio
+  // backdrop and quietly overrode whatever reference the catalog had attached.
+  modelDirection: "Use the uploaded model face reference exactly; keep that same model across every colourway",
+  sceneDirection: "Reproduce the scene, backdrop, props and lighting from the uploaded style reference",
   category: "ethnic/fusion",
   aspectRatio: "3:4",
   imageSize: "2K",
