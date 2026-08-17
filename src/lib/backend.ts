@@ -179,6 +179,7 @@ async function getJob(jobId: string) {
       productFidelity: Number(record(pose.qa_payload).productFidelity ?? record(pose.qa_payload).score ?? 0),
       fidelityScores: record(record(pose.qa_payload).scores) as Record<string, number>,
       fidelityWeakest: (Array.isArray(record(pose.qa_payload).weakest) ? record(pose.qa_payload).weakest : []) as string[],
+      fidelityReviewRecommended: record(pose.qa_payload).reviewRecommended === true,
       qaReason: String(record(pose.qa_payload).reason || ""),
     };
   });
@@ -214,6 +215,7 @@ async function getJob(jobId: string) {
       productFidelity: Number(record(metadata.qa).productFidelity ?? record(metadata.qa).score ?? 0),
       fidelityScores: record(record(metadata.qa).scores) as Record<string, number>,
       fidelityWeakest: (Array.isArray(record(metadata.qa).weakest) ? record(metadata.qa).weakest : []) as string[],
+      fidelityReviewRecommended: record(metadata.qa).reviewRecommended === true,
       qaReason: String(record(metadata.qa).reason || ""),
     });
   }

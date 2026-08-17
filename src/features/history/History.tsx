@@ -378,9 +378,11 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                       <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Product fidelity</p>
                       <p className={`font-syne text-lg font-bold ${fidelityTone(selectedPose.productFidelity)}`}>{selectedPose.productFidelity}%</p>
                     </div>
-                    {selectedPose.qaStatus === "unverified" && (
+                    {selectedPose.qaStatus === "unverified" ? (
                       <p className="mt-1 text-[10px] leading-4 text-warning">Automatic QA could not run for this frame, so it was delivered unverified. Check it against the product references yourself.</p>
-                    )}
+                    ) : selectedPose.fidelityReviewRecommended ? (
+                      <p className="mt-1 text-[10px] leading-4 text-warning">QA cleared this frame but did not rate it an exact match. Worth comparing against the product references before it goes live.</p>
+                    ) : null}
                     {Object.keys(selectedPose.fidelityScores || {}).length > 0 && (
                       <dl className="mt-3 space-y-1.5">
                         {Object.entries(selectedPose.fidelityScores as Record<string, number>)
