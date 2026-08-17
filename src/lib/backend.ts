@@ -176,6 +176,10 @@ async function getJob(jobId: string) {
       actualCost: Number(pose.actual_cost_usd || assetMetadata.actualCostUsd || 0),
       usageReported: Boolean(record(pose.usage_payload).providerReported || assetUsage.input_tokens || assetUsage.output_tokens),
       rejectedAttempts: (Array.isArray(record(pose.generation_data).rejectedAttempts) ? record(pose.generation_data).rejectedAttempts : []) as Record<string, any>[],
+      productFidelity: Number(record(pose.qa_payload).productFidelity ?? record(pose.qa_payload).score ?? 0),
+      fidelityScores: record(record(pose.qa_payload).scores) as Record<string, number>,
+      fidelityWeakest: (Array.isArray(record(pose.qa_payload).weakest) ? record(pose.qa_payload).weakest : []) as string[],
+      qaReason: String(record(pose.qa_payload).reason || ""),
     };
   });
   const knownPoseNumbers = new Set(mappedPoses.map((pose) => pose.poseNumber));
@@ -204,6 +208,10 @@ async function getJob(jobId: string) {
       actualCost: Number(metadata.actualCostUsd || 0),
       usageReported: Boolean(usage.input_tokens || usage.output_tokens),
       rejectedAttempts: [] as Record<string, any>[],
+      productFidelity: Number(record(metadata.qa).productFidelity ?? record(metadata.qa).score ?? 0),
+      fidelityScores: record(record(metadata.qa).scores) as Record<string, number>,
+      fidelityWeakest: (Array.isArray(record(metadata.qa).weakest) ? record(metadata.qa).weakest : []) as string[],
+      qaReason: String(record(metadata.qa).reason || ""),
     });
   }
   mappedPoses.sort((left, right) => left.poseNumber - right.poseNumber);

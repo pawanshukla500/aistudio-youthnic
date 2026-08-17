@@ -36,6 +36,12 @@ async function fetchPoseImageBlob(jobId: string, pose: any): Promise<Blob> {
   return response.blob();
 }
 
+function fidelityTone(score: number) {
+  if (score >= 95) return "text-success";
+  if (score >= 88) return "text-on-surface";
+  return "text-warning";
+}
+
 function statusClass(status: string) {
   if (status === "completed") return "bg-success/10 text-success border border-success/20";
   if (status === "failed") return "bg-danger/10 text-danger border border-danger/20";
@@ -333,6 +339,12 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
               )}
             </div>
             <h4 className="mt-3 text-xs font-semibold text-on-surface">{pose.poseNumber}. {pose.title}</h4>
+            {pose.outputUrl && pose.productFidelity > 0 && (
+              <p className={`mt-1 text-[10px] font-bold ${fidelityTone(pose.productFidelity)}`}>
+                Product fidelity {pose.productFidelity}%
+                {pose.qaStatus === "unverified" ? " · unverified" : ""}
+              </p>
+            )}
             {pose.outputUrl && (
               <div className="mt-1.5 space-y-0.5 text-[10px] text-secondary">
                 <p>{pose.usageReported ? `${pose.inputTokens.toLocaleString()} input · ${pose.outputTokens.toLocaleString()} output tokens` : "Provider token usage not returned"}</p>
@@ -358,6 +370,35 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   <div className="rounded-xl border border-danger/20 bg-danger-surface p-4">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-danger">Not delivered</p>
                     <p className="mt-1.5 text-[11px] leading-4 text-secondary">Consistency QA rejected this frame, so it was never added to the set. It is kept here because it was already generated and paid for — check it against the product before using it.</p>
+                  </div>
+                )}
+                {(selectedPose.productFidelity > 0 || Object.keys(selectedPose.fidelityScores || {}).length > 0) && (
+                  <div className="rounded-xl bg-surface-container-lowest p-4">
+                    <div className="flex items-baseline justify-between">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Product fidelity</p>
+                      <p className={`font-syne text-lg font-bold ${fidelityTone(selectedPose.productFidelity)}`}>{selectedPose.productFidelity}%</p>
+                    </div>
+                    {selectedPose.qaStatus === "unverified" && (
+                      <p className="mt-1 text-[10px] leading-4 text-warning">Automatic QA could not run for this frame, so it was delivered unverified. Check it against the product references yourself.</p>
+                    )}
+                    {Object.keys(selectedPose.fidelityScores || {}).length > 0 && (
+                      <dl className="mt-3 space-y-1.5">
+                        {Object.entries(selectedPose.fidelityScores as Record<string, number>)
+                          .sort((left, right) => left[1] - right[1])
+                          .map(([key, score]) => (
+                            <div key={key} className="flex items-center gap-2 text-[11px]">
+                              <dt className="w-32 shrink-0 truncate text-secondary" title={key}>{key.replace(/_/g, " ")}</dt>
+                              <dd className="flex flex-1 items-center gap-2">
+                                <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-container-high">
+                                  <span className={`block h-full rounded-full ${score >= 95 ? "bg-success" : score >= 88 ? "bg-primary" : "bg-warning"}`} style={{ width: `${Math.max(0, Math.min(100, score))}%` }} />
+                                </span>
+                                <span className="w-9 shrink-0 text-right font-bold text-on-surface">{score}%</span>
+                              </dd>
+                            </div>
+                          ))}
+                      </dl>
+                    )}
+                    {selectedPose.qaReason && <p className="mt-3 text-[10px] leading-4 text-secondary">{selectedPose.qaReason}</p>}
                   </div>
                 )}
                 <div className="rounded-xl bg-surface-container-lowest p-4">

@@ -1,5 +1,30 @@
 export type JsonRecord = Record<string, unknown>;
 
+// Print and embroidery are what make a garment this SKU rather than a similar
+// one, and a single free-text sentence cannot pin motif scale, spacing or the
+// geometry of an embroidered yoke. These structured profiles carry that detail
+// into every generation prompt and give QA something exact to measure against.
+export type PatternGeometryProfile = {
+  type: string;
+  scale: string;
+  orientation: string;
+  density: string;
+  repeat: string;
+  placementByPanel: string[];
+  accentColors: string[];
+  motifInventory: string[];
+};
+
+export type EmbroideryGeometryProfile = {
+  placement: string;
+  geometry: string;
+  motifStructure: string;
+  scaleRelativeToGarment: string;
+  colorsAndMaterial: string;
+  borders: string;
+  necklineRelation: string;
+};
+
 export type ProductIdentityProfile = {
   category: string;
   mainColor: string;
@@ -7,6 +32,8 @@ export type ProductIdentityProfile = {
   fabric: string;
   pattern: string;
   print: string;
+  patternGeometry: PatternGeometryProfile;
+  embroideryGeometry: EmbroideryGeometryProfile;
   texture: string;
   neckline: string;
   sleeveType: string;
@@ -153,6 +180,33 @@ export function parseJsonResponse(text: string): JsonRecord {
   return parsed as JsonRecord;
 }
 
+function patternGeometry(product: JsonRecord): PatternGeometryProfile {
+  const geometry = objectValue(product.patternGeometry ?? product.pattern_geometry);
+  return {
+    type: stringValue(geometry.type, stringValue(product.pattern, "Solid - no repeating pattern visible")),
+    scale: stringValue(geometry.scale),
+    orientation: stringValue(geometry.orientation),
+    density: stringValue(geometry.density),
+    repeat: stringValue(geometry.repeat),
+    placementByPanel: stringArray(geometry.placementByPanel ?? geometry.placement_by_panel),
+    accentColors: stringArray(geometry.accentColors ?? geometry.accent_colors),
+    motifInventory: stringArray(geometry.motifInventory ?? geometry.motif_inventory),
+  };
+}
+
+function embroideryGeometry(product: JsonRecord): EmbroideryGeometryProfile {
+  const geometry = objectValue(product.embroideryGeometry ?? product.embroidery_geometry);
+  return {
+    placement: stringValue(geometry.placement, stringValue(product.embroidery, "No embroidery visible")),
+    geometry: stringValue(geometry.geometry),
+    motifStructure: stringValue(geometry.motifStructure ?? geometry.motif_structure),
+    scaleRelativeToGarment: stringValue(geometry.scaleRelativeToGarment ?? geometry.scale_relative_to_garment),
+    colorsAndMaterial: stringValue(geometry.colorsAndMaterial ?? geometry.colors_and_material),
+    borders: stringValue(geometry.borders),
+    necklineRelation: stringValue(geometry.necklineRelation ?? geometry.neckline_relation),
+  };
+}
+
 export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
   const product = objectValue(raw.productIdentity ?? raw.product_identity);
   const creative = objectValue(raw.creativeDirection ?? raw.creative_direction);
@@ -164,6 +218,8 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
     mainColor: stringValue(product.mainColor ?? product.main_color),
     secondaryColors: stringArray(product.secondaryColors ?? product.secondary_colors),
     fabric: stringValue(product.fabric), pattern: stringValue(product.pattern), print: stringValue(product.print),
+    patternGeometry: patternGeometry(product),
+    embroideryGeometry: embroideryGeometry(product),
     texture: stringValue(product.texture), neckline: stringValue(product.neckline),
     sleeveType: stringValue(product.sleeveType ?? product.sleeve_type), length: stringValue(product.length),
     fit: stringValue(product.fit), silhouette: stringValue(product.silhouette),
@@ -265,6 +321,18 @@ User product notes: ${args.productDetails}
 Requested model direction: ${args.modelDirection || "one consistent professional adult fashion model"}
 Requested scene direction: ${args.sceneDirection || "derive one consistent commercial scene from style references"}
 
+PRINT AND EMBROIDERY GEOMETRY - the part that decides whether the output is this SKU or a lookalike. A sentence like "pink bandhani print with gold embroidery" is not enough to rebuild a garment, so measure the geometry from the highest-resolution image available (normally FABRIC / PATTERN DETAIL) and fill patternGeometry and embroideryGeometry concretely:
+- patternGeometry.scale: motif size relative to a body landmark, e.g. "each bandhani dot cluster is roughly 8-10 mm, about one fingernail width; the diagonal band repeats about every 4 cm".
+- patternGeometry.orientation and repeat: the direction bands or motifs run (vertical, diagonal at roughly 45 degrees, chevron, mirrored at the centre front) and how often the unit repeats.
+- patternGeometry.density: how much ground fabric shows between motifs.
+- patternGeometry.placementByPanel: one entry per panel - body front, body back, sleeves, yoke, bottom wear, dupatta - stating how the pattern sits on that panel, because sleeves and body frequently differ.
+- patternGeometry.accentColors: the small secondary colours inside the print that are easy to lose, e.g. "orange and yellow dots inside the pink bandhani field".
+- patternGeometry.motifInventory: name each distinct motif shape once.
+- embroideryGeometry.geometry and motifStructure: the actual internal construction, e.g. "square yoke panel of nested diamond lattice, each diamond about 2 cm, filled with a single floral sprig, bordered by a double scalloped gold line".
+- embroideryGeometry.scaleRelativeToGarment: how far the embroidery extends, e.g. "yoke covers from the neckline to roughly 20 percent of the kurta length, shoulder seam to shoulder seam".
+- embroideryGeometry.necklineRelation: exactly how the embroidery meets the neckline and where any tie, drawstring or tassel sits relative to it.
+Anything you genuinely cannot measure goes in uncertaintyNotes - never guess a geometry.
+
 Build a precise Product Identity Profile. If a detail is unclear, record it in uncertaintyNotes; do not invent it. Perform an evidence audit for closures and decoration placement. For buttons, zippers, hooks, ties, tassels/latkans, trim, beads, embroidery, pockets, piping, logos, stitching and hardware, record exactly where each detail IS visible and where it is ABSENT. Do not assume symmetry. Fill detailPlacementMap with region-specific hard locks and absenceConstraints with negative product facts.
 
 Build a Creative Direction Profile from style references, but never allow style to alter the product. Lock one lens family, camera height, perspective, exposure, white balance, color grade, light direction, shadow behavior, set geometry, and time-of-day so the results read as contact sheets from one real professional shoot. In realismRules, explicitly require natural skin texture with visible pores, anatomically correct and naturally shaped eyes and teeth, and no synthetic AI artifacts.
@@ -286,7 +354,7 @@ Create exactly five product-specific camera setups in one coherent commercial co
 Across all five, ONLY pose, angle, framing, and expression may change. Exact product, colors, pattern, bottom wear, face, hairstyle, makeup, accessories, footwear, scene, lighting, shadows, camera/lens feel, and color treatment remain locked.
 
 Return STRICT JSON only:
-{"productIdentity":{"category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[]},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"posePlan":[{"id":"full_front"},{"id":"angled"},{"id":"back"},{"id":"creative"},{"id":"closeup"}]}`;
+{"productIdentity":{"category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[]},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"posePlan":[{"id":"full_front"},{"id":"angled"},{"id":"back"},{"id":"creative"},{"id":"closeup"}]}`;
 }
 
 export const CONSISTENCY_RULES = [
@@ -308,7 +376,10 @@ export const CONSISTENCY_RULES = [
 // pose plan, the accessory-suggestion field, the face/photorealism locks, the
 // model-face-reference support, and the corrected zoomed-IN pose 5) take effect on the
 // next analysis run instead of quietly reusing a pre-change cache hit.
-export const ANALYSIS_VERSION = "generation-session-v8-pose5-zoomed-in";
+// Bumping this invalidates cached analyses, which is intended here: a profile
+// cached under v8 carries no pattern or embroidery geometry for the prompt locks
+// and the fidelity gate to work against.
+export const ANALYSIS_VERSION = "generation-session-v9-product-dna-geometry";
 
 export function smallHash(value: string) {
   let hash = 2166136261;
