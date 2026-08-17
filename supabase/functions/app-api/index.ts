@@ -300,7 +300,7 @@ function roleLabel(role: string) {
     fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority texture, print, embroidery, stitching, trim and construction truth",
     mannequin: "MANNEQUIN / FLAT-LAY SHOT - authoritative garment truth for this exact garment: on a mannequin or dress form it also sets worn shape, fit, proportion and drape; laid flat it sets outline, construction, panel layout and length only, since flat cloth shows no worn drape. Read the garment from it, never reproduce the mannequin, dress form, hanger, pins, clips or the flat surface itself",
     additional_product: "ADDITIONAL PRODUCT PHOTO - supporting product truth",
-    approved_pose: "APPROVED POSE 1 - shoot-continuity anchor (scene, lighting, styling); also the model identity anchor only when no MODEL FACE REFERENCE was supplied",
+    approved_pose: "APPROVED POSE 1 - shoot-continuity anchor: reproduce its exact set, backdrop, props, floor, light direction, camera height and colour grade, and the same model and styling; also the model identity anchor only when no MODEL FACE REFERENCE was supplied. In a catalog run this frame may show a DIFFERENT colourway or SKU - take the scene and the model from it and nothing else, never its garment, colour, print or trims",
     style_reference: "STYLE REFERENCE ONLY - background, composition, mood, lighting and creative direction; never product identity",
   };
   return labels[role] || role.toUpperCase();
@@ -602,6 +602,7 @@ Embroidery geometry: ${JSON.stringify(embroideryGeometryOf(product))}
 
 LOCKED ART DIRECTION - MUST NOT CHANGE BETWEEN POSES:
 ${JSON.stringify(creative)}
+- Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, camera height and distance, depth of field and colour grade. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
 
 STYLING ADDITION (optional, locked once chosen):
 ${creative.suggestedAccessories ? `The stylist has proposed adding: ${creative.suggestedAccessories}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}
@@ -1004,9 +1005,20 @@ async function processWorker(request: Request, args: JsonRecord) {
   const sessionData = session.session_data as JsonRecord;
   const sourceInputs = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
   const loadedReferences = await loadAvailableReferences(sourceInputs);
-  const { data: anchorPose } = Number(pose.pose_index) > 1
+  let { data: anchorPose } = Number(pose.pose_index) > 1
     ? await service.from("session_generations").select("output_url,storage_path,title").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
     : { data: null };
+  // A bulk catalog has to look like one shoot day across every colourway, but each
+  // SKU is its own session, so pose 1 of SKU 2 had no anchor at all - only text
+  // memory, which drifts. The batch keeps the first approved frame precisely so
+  // later SKUs can be pinned to that same set and model.
+  if (!anchorPose?.output_url && !anchorPose?.storage_path && job.batch_id) {
+    const { data: batchRow } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
+    const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
+    if (memory.anchorOutputUrl || memory.anchorStoragePath) {
+      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), title: "catalog anchor" };
+    }
+  }
   const approved: LoadedReference[] = [];
   if (anchorPose?.output_url || anchorPose?.storage_path) {
     // Load the reference first to determine the actual MIME type from the blob,
@@ -1663,7 +1675,14 @@ async function saveReferenceOperation(request: Request, args: JsonRecord) {
     });
     if (error) throw new Error(error.message);
     scheduleBackground(cleanupOrphanedBatchReferences(removed));
-    await service.from("planning_requests").update({ analysis_status: "stale", updated_at: new Date().toISOString() }).eq("batch_id", batchId).not("front_image_url", "is", null).not("back_image_url", "is", null);
+    // The batch memory holds the scene, model and anchor frame derived from the
+    // previous references, and applyCatalogMemory replays it over every later
+    // analysis. Leaving it in place is why uploading a new reference appeared to
+    // change nothing: the catalog kept photographing the old set.
+    await Promise.all([
+      service.from("planning_requests").update({ analysis_status: "stale", updated_at: new Date().toISOString() }).eq("batch_id", batchId).not("front_image_url", "is", null).not("back_image_url", "is", null),
+      service.from("planning_batches").update({ catalog_memory: {}, memory_source_request_id: null, memory_updated_at: null }).eq("id", batchId),
+    ]);
     scheduleBackground(kickCatalogPreflight(batchId));
     return `${role}:${reference.id}`;
   }
