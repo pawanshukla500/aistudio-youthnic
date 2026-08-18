@@ -327,7 +327,7 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
 
 export function buildCombinedAnalysisPrompt(args: {
   skuName: string; productDetails: string; category: string; modelDirection: string; sceneDirection: string;
-  referenceManifest: Array<{ number: number; role: string }>;
+  referenceManifest: Array<{ number: number; role: string }>; housePreferences?: string;
 }) {
   const manifest = args.referenceManifest.map(({ number, role }) => `IMAGE ${number}: ${role}`).join("\n");
   return `You are the visual merchandiser and shoot planner for a fashion e-commerce studio.
@@ -382,7 +382,10 @@ STYLING PLAN - decide what this model wears alongside the garment, and fill styl
 - makeup and hair: one look each, held across all five frames.
 - stylingNotes: the rule a stylist would need to avoid mistakes on this specific product, for example "keep the right wrist bare so the sleeve embroidery stays visible" or "no neckpiece over the embroidered yoke".
 - themeInterpretation: one sentence naming the aesthetic you read from the style reference and why this styling serves it.
-Every choice is a styling addition only: it must never be treated as part of the garment, must never hide, replace or contradict a detail from the product references, and must never contradict detailPlacementMap or absenceConstraints. When the product references already show footwear or accessories that ship with the product, keep those and say so rather than replacing them.
+${args.housePreferences ? `HOUSE STYLING PREFERENCE - drawn from styling plans this team has actually approved for this category, showing where they rewrote an earlier proposal:
+${args.housePreferences}
+Treat this as the house taste and start from it. It ranks below product truth and below the style reference: if this product or this reference genuinely calls for something else, choose what the images support and say why in stylingNotes. Never let it override a detail the product references show.
+` : ""}Every choice is a styling addition only: it must never be treated as part of the garment, must never hide, replace or contradict a detail from the product references, and must never contradict detailPlacementMap or absenceConstraints. When the product references already show footwear or accessories that ship with the product, keep those and say so rather than replacing them.
 
 Accessory styling suggestion: look at what footwear and accessories (if any) the product references actually show. If the product's own footwear/bag/accessories are missing, incomplete, or would not read well on camera, propose ONE tasteful, trend-right, Gen-Z-appropriate addition (for example a specific footwear style or a small bag) in creativeDirection.suggestedAccessories, described specifically enough for a stylist to execute identically across all five poses. Only suggest an addition when it genuinely fits the pose plan and category - if the product references already show adequate footwear/accessories, or nothing suits the shot, leave creativeDirection.suggestedAccessories empty. This is a styling addition only: it must never be treated as part of the garment, and it must never contradict detailPlacementMap or absenceConstraints.
 

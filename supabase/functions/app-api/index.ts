@@ -428,6 +428,7 @@ async function analyze(request: Request, args: JsonRecord) {
       skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
       category: String(args.category || "ethnic/fusion"), modelDirection: String(args.modelDirection || ""),
       sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest,
+      housePreferences: await stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion")),
     }) });
     const model = Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash";
     const result = await geminiJson(model, parts);
@@ -1909,6 +1910,7 @@ async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, ref
   parts.push({ text: buildCombinedAnalysisPrompt({
     skuName: String(variant.sku_name), productDetails: String(variant.product_description || ""), category: String(settings.category || variant.category || "ethnic/fusion"),
     modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
+    housePreferences: await stylingPreferenceBrief(String(batch.organization_id), String(settings.category || variant.category || "ethnic/fusion")),
   }) });
   const result = await geminiJson(Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash", parts);
   const normalized = normalizeAnalysis(result.json, String(settings.category || variant.category || "ethnic/fusion"));
@@ -1981,6 +1983,54 @@ async function proposeCatalogStylingPlan(batchId: string, batch: JsonRecord, sty
   if (error) throw new Error(error.message);
 }
 
+const STYLING_FIELDS: Array<keyof StylingPlanProfile> = ["footwear", "jewellery", "ornaments", "makeup", "hair", "stylingNotes", "themeInterpretation"];
+
+function stylingPlanDiff(proposed: StylingPlanProfile, approved: StylingPlanProfile) {
+  return STYLING_FIELDS.filter((field) => String(proposed[field] || "").trim() !== String(approved[field] || "").trim());
+}
+
+async function recordStylingDecision(args: {
+  orgId: string; scope: "studio" | "catalog"; batchId?: string | null; planningRequestId?: string | null;
+  sessionId?: string; category: string; themeSummary: string; proposed: StylingPlanProfile; approved: StylingPlanProfile;
+  approvedFlag: boolean; memberId: string;
+}) {
+  const changed = stylingPlanDiff(args.proposed, args.approved);
+  const { error } = await service.from("styling_decisions").insert({
+    organization_id: args.orgId, scope: args.scope, batch_id: args.batchId || null, planning_request_id: args.planningRequestId || null,
+    session_id: args.sessionId || "", category: args.category || "", theme_summary: args.themeSummary.slice(0, 400),
+    ai_plan: args.proposed, approved_plan: args.approved, changed_fields: changed, approved: args.approvedFlag,
+    decided_by_member_id: args.memberId,
+  });
+  // Memory is an enhancement, never a reason to fail the stylist's save.
+  if (error) console.error("Could not record the styling decision", error.message);
+}
+
+// Reads the memory back. Only fields a human actually rewrote are worth carrying
+// forward - an unchanged proposal says nothing about preference - and only the
+// most recent correction per field, so the brief stays a few hundred characters
+// no matter how long the history grows.
+async function stylingPreferenceBrief(orgId: string, category: string) {
+  const { data, error } = await service.from("styling_decisions")
+    .select("approved_plan,ai_plan,changed_fields,created_at")
+    .eq("organization_id", orgId).eq("category", category).eq("approved", true)
+    .order("created_at", { ascending: false }).limit(25);
+  if (error || !data?.length) return "";
+  const preferences: string[] = [];
+  const counts = new Map<string, number>();
+  for (const row of data) {
+    for (const field of (row.changed_fields || []) as string[]) counts.set(field, (counts.get(field) || 0) + 1);
+  }
+  for (const field of STYLING_FIELDS) {
+    if (!counts.get(field)) continue;
+    const latest = data.find((row) => ((row.changed_fields || []) as string[]).includes(field));
+    const approved = String(((latest?.approved_plan || {}) as JsonRecord)[field] || "").trim();
+    const proposed = String(((latest?.ai_plan || {}) as JsonRecord)[field] || "").trim();
+    if (!approved) continue;
+    preferences.push(`- ${field}: the stylist has rewritten this ${counts.get(field)} time(s); most recently "${proposed.slice(0, 120)}" became "${approved.slice(0, 160)}".`);
+  }
+  return preferences.length ? preferences.join("\n") : "";
+}
+
 async function saveCatalogStylingPlanOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const batch = await catalogBatch(workspace, String(args.catalogId || ""));
@@ -2013,6 +2063,14 @@ async function saveCatalogStylingPlanOperation(request: Request, args: JsonRecor
     resource_type: "planning_batch", resource_id: String(batch.id),
     metadata: { edited: Object.keys(plan).filter((key) => String((memory.stylingPlanProposed as JsonRecord | undefined)?.[key] ?? "") !== String((plan as unknown as JsonRecord)[key] ?? "")) },
   });
+  await recordStylingDecision({
+    orgId: workspace.organization.id, scope: "catalog", batchId: String(batch.id),
+    planningRequestId: memory.stylingPlanSourceRequestId ? String(memory.stylingPlanSourceRequestId) : null,
+    category: String(((batch.generation_settings || {}) as JsonRecord).category || ""),
+    themeSummary: plan.themeInterpretation,
+    proposed: normalizeStylingPlan(memory.stylingPlanProposed || memory.stylingPlan || plan),
+    approved: plan, approvedFlag: approve, memberId: workspace.member.id,
+  });
   if (approve) scheduleBackground(kickCatalogProcessor(String(batch.id)));
   return { success: true, stylingPlan: plan, approved: approve };
 }
@@ -2041,6 +2099,12 @@ async function updateSessionStylingPlanOperation(request: Request, args: JsonRec
       }).eq("id", session.planning_request_id);
     }
   }
+  await recordStylingDecision({
+    orgId: workspace.organization.id, scope: "studio", planningRequestId: session.planning_request_id ? String(session.planning_request_id) : null,
+    sessionId, category: String(sessionData.category || ""), themeSummary: plan.themeInterpretation,
+    proposed: normalizeStylingPlan(sessionData.stylingPlanProposed || sessionData.stylingPlan || plan),
+    approved: plan, approvedFlag: true, memberId: workspace.member.id,
+  });
   return { success: true, stylingPlan: plan };
 }
 
