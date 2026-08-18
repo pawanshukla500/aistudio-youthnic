@@ -61,8 +61,12 @@ export function StylingPlanEditor({
   saving?: boolean;
   saveLabel?: string;
   approveLabel?: string;
-  onSave: (plan: StylingPlan) => Promise<void> | void;
-  onApprove?: (plan: StylingPlan) => Promise<void> | void;
+  // Both callbacks report whether the write actually landed. They catch their own
+  // errors to show a notice, so an explicit `false` is the only way this component
+  // can tell a failed save from a successful one - and clearing the draft on a
+  // failure would throw away the edits and disable the retry.
+  onSave: (plan: StylingPlan) => Promise<boolean | void> | boolean | void;
+  onApprove?: (plan: StylingPlan) => Promise<boolean | void> | boolean | void;
   disabled?: boolean;
 }) {
   const [draft, setDraft] = useState<StylingPlan>(plan);
@@ -122,7 +126,7 @@ export function StylingPlanEditor({
         <button
           type="button"
           disabled={disabled || saving || !dirty}
-          onClick={async () => { await onSave(draft); setDirty(false); }}
+          onClick={async () => { if (await onSave(draft) !== false) setDirty(false); }}
           className="flex items-center gap-2 rounded-lg border border-outline-variant px-3 py-2 text-xs font-bold text-secondary transition hover:bg-surface-container disabled:opacity-50"
         >
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} {saveLabel}
@@ -131,7 +135,7 @@ export function StylingPlanEditor({
           <button
             type="button"
             disabled={disabled || saving}
-            onClick={async () => { await onApprove(draft); setDirty(false); }}
+            onClick={async () => { if (await onApprove(draft) !== false) setDirty(false); }}
             className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-xs font-bold text-white transition hover:bg-primary-container disabled:opacity-50"
           >
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {approveLabel || "Approve and start"}

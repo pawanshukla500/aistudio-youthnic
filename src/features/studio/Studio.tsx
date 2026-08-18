@@ -341,14 +341,16 @@ export function Studio() {
   // Saved onto the session rather than re-running analysis: styling is not a
   // product fact, so the analysis fingerprint stays valid and queueing still works.
   const handleSaveStylingPlan = async (plan: StylingPlan) => {
-    if (!analysis?.sessionId) return;
+    if (!analysis?.sessionId) return false;
     setSavingStylingPlan(true);
     try {
       const result = await updateStylingPlan({ sessionId: analysis.sessionId, stylingPlan: plan });
       setAnalysis((current) => (current ? { ...current, stylingPlan: result.stylingPlan } : current));
       setNotice({ tone: "success", text: "Styling plan saved for this shoot." });
+      return true;
     } catch (reason) {
       setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not save the styling plan." });
+      return false;
     } finally {
       setSavingStylingPlan(false);
     }

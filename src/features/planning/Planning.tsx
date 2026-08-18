@@ -282,10 +282,19 @@ export function Planning() {
     setBusy("styling-plan");
     setNotice(null);
     try {
-      await saveCatalogStylingPlan({ catalogId: selectedId, stylingPlan, approve });
-      notify("success", approve ? "Styling plan approved. Generation can start." : "Styling plan saved.");
+      const result = await saveCatalogStylingPlan({ catalogId: selectedId, stylingPlan, approve });
+      notify(
+        "success",
+        approve
+          ? "Styling plan approved. Generation can start."
+          : result?.approvalRevoked
+            ? "Styling plan saved. It needs approval again before this catalog generates."
+            : "Styling plan saved.",
+      );
+      return true;
     } catch (reason) {
       notify("error", getErrorMessage(reason, "Could not save the styling plan."));
+      return false;
     } finally {
       setBusy("");
     }

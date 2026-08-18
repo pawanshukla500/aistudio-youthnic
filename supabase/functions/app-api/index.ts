@@ -854,14 +854,16 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   });
   if (job.batch_id) {
     const batchId = String(job.batch_id);
-    const { data: batch } = await service.from("planning_batches").select("catalog_memory").eq("id", batchId).maybeSingle();
     const anchor = poses.find((pose) => Number(pose.pose_index) === 1 && pose.status === "completed");
     if (anchor?.output_url) {
-      const memory = ((batch?.catalog_memory || {}) as JsonRecord);
-      await service.from("planning_batches").update({
-        catalog_memory: { ...memory, anchorOutputUrl: anchor.output_url, anchorStoragePath: anchor.storage_path, anchorJobId: job.job_id },
-        memory_updated_at: now,
-      }).eq("id", batchId);
+      // Merged in the database for the same reason as the styling plan: a stylist
+      // approving a plan at this moment must not lose the anchor, and vice versa.
+      await service.rpc("merge_catalog_memory", {
+        p_batch_id: batchId,
+        p_patch: { anchorOutputUrl: anchor.output_url, anchorStoragePath: anchor.storage_path, anchorJobId: job.job_id },
+        p_require_absent: null,
+      });
+      await service.from("planning_batches").update({ memory_updated_at: now }).eq("id", batchId);
     }
     const { data: catalogVariants } = await service.from("planning_requests").select("generation_status").eq("batch_id", batchId);
     const completedVariants = (catalogVariants || []).filter((variant) => variant.generation_status === "completed").length;
@@ -1966,20 +1968,23 @@ function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof nor
   return normalized;
 }
 
-async function proposeCatalogStylingPlan(batchId: string, batch: JsonRecord, stylingPlan: StylingPlanProfile, variantId: string) {
-  const memory = (batch.catalog_memory || {}) as JsonRecord;
-  if (memory.stylingPlan) return;
-  const { error } = await service.from("planning_batches").update({
-    catalog_memory: {
-      ...memory, stylingPlan,
+async function proposeCatalogStylingPlan(batchId: string, _batch: JsonRecord, stylingPlan: StylingPlanProfile, variantId: string) {
+  // Guarded in the database, not here: two colourways can reach preflight at the
+  // same time, and a read-then-write would let the second overwrite the first
+  // one's proposal - or clobber an anchor frame recorded in between.
+  const { error } = await service.rpc("merge_catalog_memory", {
+    p_batch_id: batchId,
+    p_patch: {
+      stylingPlan,
       // Kept unedited alongside the working copy: comparing what the AI proposed
-      // with what the stylist approved is the raw material the learning layer
-      // needs, and it is unrecoverable once the plan is edited in place.
+      // with what the stylist approved is the raw material the memory needs, and
+      // it is unrecoverable once the plan is edited in place.
       stylingPlanProposed: stylingPlan,
-      stylingPlanProposedAt: new Date().toISOString(), stylingPlanSourceRequestId: variantId,
+      stylingPlanProposedAt: new Date().toISOString(),
+      stylingPlanSourceRequestId: variantId,
     },
-    updated_at: new Date().toISOString(),
-  }).eq("id", batchId);
+    p_require_absent: "stylingPlan",
+  });
   if (error) throw new Error(error.message);
 }
 
@@ -2038,15 +2043,21 @@ async function saveCatalogStylingPlanOperation(request: Request, args: JsonRecor
   const plan = normalizeStylingPlan(args.stylingPlan ?? memory.stylingPlan);
   const approve = args.approve === true;
   const now = new Date().toISOString();
-  const update: JsonRecord = {
-    catalog_memory: {
-      ...memory, stylingPlan: plan,
-      stylingPlanProposed: memory.stylingPlanProposed || memory.stylingPlan || plan,
-      stylingPlanProposedAt: memory.stylingPlanProposedAt || now,
-      ...(approve ? { stylingPlanApprovedAt: now, stylingPlanApprovedByMemberId: workspace.member.id } : {}),
-    },
-    updated_at: now,
+  const changed = stylingPlanDiff(normalizeStylingPlan(memory.stylingPlan), plan);
+  // Saving an edit without approving revokes the previous approval. Otherwise a
+  // plan approved yesterday keeps its tick after being rewritten today, and the
+  // catalogue carries on generating against a revision nobody reviewed.
+  const revokeApproval = !approve && changed.length > 0 && Boolean(memory.stylingPlanApprovedAt);
+  const patch: JsonRecord = {
+    stylingPlan: plan,
+    stylingPlanProposed: memory.stylingPlanProposed || memory.stylingPlan || plan,
+    stylingPlanProposedAt: memory.stylingPlanProposedAt || now,
+    ...(approve ? { stylingPlanApprovedAt: now, stylingPlanApprovedByMemberId: workspace.member.id } : {}),
+    ...(revokeApproval ? { stylingPlanApprovedAt: null, stylingPlanApprovedByMemberId: null } : {}),
   };
+  const { error: mergeError } = await service.rpc("merge_catalog_memory", { p_batch_id: batch.id, p_patch: patch, p_require_absent: null });
+  if (mergeError) throw new Error(mergeError.message);
+  const update: JsonRecord = { updated_at: now };
   if (approve) {
     update.schedule_error = "";
     // Releasing the gate has to hand the batch back to whichever runner owns it:
@@ -2054,6 +2065,9 @@ async function saveCatalogStylingPlanOperation(request: Request, args: JsonRecor
     if (batch.schedule_status === "awaiting_styling_approval") {
       update.schedule_status = batch.scheduled_at && Date.parse(String(batch.scheduled_at)) > Date.now() ? "scheduled" : "running";
     }
+  }
+  if (revokeApproval) {
+    update.schedule_error = "Styling plan was edited. Approve it again to resume generating.";
   }
   const { error } = await service.from("planning_batches").update(update).eq("id", batch.id);
   if (error) throw new Error(error.message);
@@ -2072,7 +2086,7 @@ async function saveCatalogStylingPlanOperation(request: Request, args: JsonRecor
     approved: plan, approvedFlag: approve, memberId: workspace.member.id,
   });
   if (approve) scheduleBackground(kickCatalogProcessor(String(batch.id)));
-  return { success: true, stylingPlan: plan, approved: approve };
+  return { success: true, stylingPlan: plan, approved: approve, approvalRevoked: revokeApproval };
 }
 
 async function updateSessionStylingPlanOperation(request: Request, args: JsonRecord) {
