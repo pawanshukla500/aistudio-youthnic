@@ -2281,6 +2281,21 @@ async function processCatalog(request: Request, args: JsonRecord) {
     const normalized = storedAnalysis && variant.analysis_status === "ready" && variant.analysis_fingerprint === hashes.fingerprint
       ? applyCatalogMemory(batch, normalizeAnalysis(storedAnalysis, String(((batch.generation_settings || {}) as JsonRecord).category || variant.category || "ethnic/fusion")))
       : await analyzeCatalogVariant(batch, variant, references);
+    // The gate above passed against a snapshot taken before the analysis, which can
+    // run for a minute. A stylist revising the plan in that window revokes approval,
+    // and queueing from the stale snapshot would shoot this colourway against a plan
+    // that is no longer approved. Re-read, and take the current plan while here.
+    const { data: freshBatch } = await service.from("planning_batches").select("catalog_memory").eq("id", batchId).maybeSingle();
+    const freshMemory = { catalog_memory: freshBatch?.catalog_memory || {} } as JsonRecord;
+    if (stylingPlanApproval(freshMemory).blocked) {
+      await service.from("planning_batches").update({
+        schedule_status: "awaiting_styling_approval", queue_status: "idle",
+        schedule_error: "Styling plan changed while this colourway was being analysed. Approve it again to resume generating.",
+        updated_at: new Date().toISOString(),
+      }).eq("id", batchId);
+      return { processed: false, reason: "styling_plan_unapproved", batchId };
+    }
+    applyCatalogMemory(freshMemory, normalized);
     const pHash = smallHash(`${hashes.pHash}|${JSON.stringify(normalized.productIdentity)}`);
     const rHash = hashes.rHash;
     const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}`);
