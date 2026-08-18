@@ -297,6 +297,9 @@ async function listNotifications(args: Record<string, any>) {
 }
 
 function catalogUiStatus(batch: Record<string, any>) {
+  // Checked before the running branches: a paused batch keeps whatever queue
+  // state it held when the gate stopped it, and would otherwise read as draft.
+  if (batch.schedule_status === "awaiting_styling_approval") return "awaiting_styling_approval";
   if (batch.schedule_status === "scheduled") return "scheduled";
   if (batch.schedule_status === "running" || batch.queue_status === "running") return "generating";
   if (batch.schedule_status === "failed" || batch.queue_status === "failed") return "failed";

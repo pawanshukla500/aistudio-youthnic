@@ -1,4 +1,7 @@
 import type { Id } from "../../lib/backend";
+// Aliased rather than redeclared: the editor owns the field list, and two copies
+// of the same seven fields in one bundle is a drift waiting to happen.
+import type { StylingPlan as StylingPlanProfile } from "../../components/ui/StylingPlanEditor";
 
 export type ProductReferenceRole = "front" | "back" | "fabric_pattern" | "mannequin" | "additional_product";
 // "model_identity" (not "model_reference") to match the existing planning_assets_asset_role_check
@@ -123,15 +126,7 @@ export type StudioAnalysis = {
   cacheHit: boolean;
 };
 
-export type StylingPlanProfile = {
-  footwear: string;
-  jewellery: string;
-  ornaments: string;
-  makeup: string;
-  hair: string;
-  stylingNotes: string;
-  themeInterpretation: string;
-};
+export type { StylingPlanProfile };
 
 export type OutputOptions = {
   model: "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1" | "gpt-image-1-mini";

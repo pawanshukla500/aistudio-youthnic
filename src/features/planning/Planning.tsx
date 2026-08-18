@@ -52,7 +52,12 @@ const emptyCreate = {
   skusText: "",
 };
 
+function statusLabel(status: string) {
+  return status === "awaiting_styling_approval" ? "awaiting styling approval" : status;
+}
+
 function statusChip(status: string) {
+  if (status === "awaiting_styling_approval") return "bg-warning-surface text-warning";
   if (status === "completed") return "bg-success-surface text-success";
   if (status === "failed") return "bg-danger-surface text-danger";
   if (["generating", "scheduled", "queued", "processing"].includes(status)) return "bg-info-surface text-info";
@@ -460,7 +465,7 @@ export function Planning() {
               <button key={catalog._id} onClick={() => { setSelectedId(catalog._id); setFocusSku(null); }} className="rounded-xl border border-outline-variant/40 bg-white p-5 text-left shadow-sm transition hover:-translate-y-px hover:shadow-md">
                 <div className="flex items-start justify-between">
                   <div className="grid h-10 w-10 place-items-center rounded-lg bg-soft-blush text-primary"><Layers className="h-5 w-5" /></div>
-                  <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${statusChip(catalog.status)}`}>{catalog.status}</span>
+                  <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${statusChip(catalog.status)}`}>{statusLabel(catalog.status)}</span>
                 </div>
                 <h3 className="mt-4 font-syne text-lg font-bold text-on-surface">{catalog.name}</h3>
                 <p className="mt-1 text-xs text-secondary">{catalog.eventName ? `${catalog.eventName} · ` : ""}{catalog.variantCount} colourway{catalog.variantCount === 1 ? "" : "s"}</p>
@@ -493,7 +498,7 @@ export function Planning() {
                   <div>
                     <div className="flex flex-wrap items-center gap-3">
                       <h2 className="font-syne text-2xl font-bold text-on-surface">{selected.name}</h2>
-                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${statusChip(selected.status)}`}>{selected.status}</span>
+                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${statusChip(selected.status)}`}>{statusLabel(selected.status)}</span>
                     </div>
                     <p className="mt-1 text-sm text-secondary">{selected.eventName ? `${selected.eventName} · ` : ""}{selected.variants.length} colourways · {readyCount} ready · {selected.completedSkus || 0} completed{selected.failedSkus ? ` · ${selected.failedSkus} failed` : ""}</p>
                     {selected.scheduledAt && selected.status === "scheduled" && <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-info"><Clock3 className="h-3.5 w-3.5" /> Automatic run: {new Date(selected.scheduledAt).toLocaleString("en-IN")} (Asia/Kolkata)</p>}

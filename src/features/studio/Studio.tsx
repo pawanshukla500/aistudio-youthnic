@@ -588,7 +588,10 @@ export function Studio() {
              />
           </section>
 
-          {analysis && (
+          {/* Hidden while the analysis is stale: analysis.sessionId still points at
+              the previous references, so a save would land on a session the next
+              auto-analysis replaces, losing the edit silently. */}
+          {analysis && analysisIsCurrent && (
             <StylingPlanEditor
               plan={normalizePlan(analysis.stylingPlan)}
               title="Footwear, jewellery & styling"

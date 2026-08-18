@@ -224,16 +224,26 @@ function embroideryGeometry(product: JsonRecord): EmbroideryGeometryProfile {
   };
 }
 
-export function normalizeStylingPlan(raw: unknown): StylingPlanProfile {
+/**
+ * `preserveEmpty` separates two different callers. Analysis output wants a
+ * default when the model left a field blank. A stylist's save does not: clearing
+ * a field is a decision, and refilling it with generated text would overwrite
+ * that decision on every round trip.
+ */
+export function normalizeStylingPlan(raw: unknown, options: { preserveEmpty?: boolean } = {}): StylingPlanProfile {
   const plan = objectValue(raw);
+  const field = (value: unknown, fallback: string) => {
+    if (options.preserveEmpty && (typeof value === "string" || value === null)) return String(value ?? "").trim();
+    return stringValue(value, fallback);
+  };
   return {
-    footwear: stringValue(plan.footwear, "Simple neutral footwear that suits the garment without competing with it"),
-    jewellery: stringValue(plan.jewellery, "Minimal jewellery appropriate to the garment and scene"),
-    ornaments: stringValue(plan.ornaments, "No additional ornaments"),
-    makeup: stringValue(plan.makeup, "Natural everyday makeup with soft definition"),
-    hair: stringValue(plan.hair, "Simple hairstyle that keeps the neckline and yoke visible"),
-    stylingNotes: stringValue(plan.stylingNotes ?? plan.styling_notes, ""),
-    themeInterpretation: stringValue(plan.themeInterpretation ?? plan.theme_interpretation, ""),
+    footwear: field(plan.footwear, "Simple neutral footwear that suits the garment without competing with it"),
+    jewellery: field(plan.jewellery, "Minimal jewellery appropriate to the garment and scene"),
+    ornaments: field(plan.ornaments, "No additional ornaments"),
+    makeup: field(plan.makeup, "Natural everyday makeup with soft definition"),
+    hair: field(plan.hair, "Simple hairstyle that keeps the neckline and yoke visible"),
+    stylingNotes: field(plan.stylingNotes ?? plan.styling_notes, ""),
+    themeInterpretation: field(plan.themeInterpretation ?? plan.theme_interpretation, ""),
   };
 }
 
