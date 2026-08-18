@@ -1,7 +1,7 @@
 import type { Id } from "../../lib/backend";
-// Aliased rather than redeclared: the editor owns the field list, and two copies
-// of the same seven fields in one bundle is a drift waiting to happen.
-import type { StylingPlan as StylingPlanProfile } from "../../components/ui/StylingPlanEditor";
+// Aliased rather than redeclared: one definition of the seven fields, shared by
+// the analysis contract, both features, and the editor that renders them.
+import type { StylingPlan as StylingPlanProfile } from "../../lib/stylingPlan";
 
 export type ProductReferenceRole = "front" | "back" | "fabric_pattern" | "mannequin" | "additional_product";
 // "model_identity" (not "model_reference") to match the existing planning_assets_asset_role_check

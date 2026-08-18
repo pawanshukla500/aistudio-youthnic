@@ -11,7 +11,8 @@ import { AnalysisProfile } from "./components/AnalysisProfile";
 import { OutputSettings } from "./components/OutputSettings";
 import { PosePlan } from "./components/PosePlan";
 import { ModelFaceReference, ProductReferences, StyleReferences } from "./components/ProductReferences";
-import { StylingPlanEditor, normalizePlan, type StylingPlan } from "../../components/ui/StylingPlanEditor";
+import { StylingPlanEditor } from "../../components/ui/StylingPlanEditor";
+import { normalizePlan, type StylingPlan } from "../../lib/stylingPlan";
 import type {
   OutputOptions,
   ProductReferenceRole,

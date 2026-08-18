@@ -24,7 +24,8 @@ import { useWorkspace } from "../../lib/WorkspaceContext";
 import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
 import { firebaseStorage } from "../../lib/firebase";
 import { getErrorMessage } from "../../lib/errors";
-import { StylingPlanEditor, normalizePlan, type StylingPlan } from "../../components/ui/StylingPlanEditor";
+import { StylingPlanEditor } from "../../components/ui/StylingPlanEditor";
+import { normalizePlan, type StylingPlan } from "../../lib/stylingPlan";
 
 const CATEGORIES = ["ethnic/fusion", "western/casual", "dress", "formal", "streetwear", "activewear"];
 const ASPECTS = ["3:4", "4:5", "2:3", "9:16", "1:1", "16:9"];

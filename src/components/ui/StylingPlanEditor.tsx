@@ -1,22 +1,6 @@
-// oxlint-disable react/only-export-components -- the plan type and its normalizer
-// belong with the editor that owns the field list; splitting them apart invites the
-// two shapes drifting from each other.
 import { useEffect, useState } from "react";
 import { Check, Loader2, Sparkles, Undo2 } from "lucide-react";
-
-export type StylingPlan = {
-  footwear: string;
-  jewellery: string;
-  ornaments: string;
-  makeup: string;
-  hair: string;
-  stylingNotes: string;
-  themeInterpretation: string;
-};
-
-export const emptyStylingPlan: StylingPlan = {
-  footwear: "", jewellery: "", ornaments: "", makeup: "", hair: "", stylingNotes: "", themeInterpretation: "",
-};
+import type { StylingPlan } from "../../lib/stylingPlan";
 
 const FIELDS: Array<[keyof StylingPlan, string, string]> = [
   ["footwear", "Footwear", "e.g. Minimal beige block heels, 2 inch"],
@@ -27,15 +11,6 @@ const FIELDS: Array<[keyof StylingPlan, string, string]> = [
   ["stylingNotes", "Styling notes", "e.g. Keep the right wrist bare so sleeve embroidery stays visible"],
   ["themeInterpretation", "Theme reading", "The aesthetic taken from the reference and why this styling serves it"],
 ];
-
-export function normalizePlan(value: unknown): StylingPlan {
-  const plan = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  return {
-    footwear: String(plan.footwear || ""), jewellery: String(plan.jewellery || ""), ornaments: String(plan.ornaments || ""),
-    makeup: String(plan.makeup || ""), hair: String(plan.hair || ""), stylingNotes: String(plan.stylingNotes || ""),
-    themeInterpretation: String(plan.themeInterpretation || ""),
-  };
-}
 
 /**
  * Shared by Studio (one shoot) and Planning (a whole catalogue) so a stylist sees
