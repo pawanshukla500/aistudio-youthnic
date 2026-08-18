@@ -11,6 +11,8 @@ import { AnalysisProfile } from "./components/AnalysisProfile";
 import { OutputSettings } from "./components/OutputSettings";
 import { PosePlan } from "./components/PosePlan";
 import { ModelFaceReference, ProductReferences, StyleReferences } from "./components/ProductReferences";
+import { StylingPlanEditor } from "../../components/ui/StylingPlanEditor";
+import { normalizePlan, type StylingPlan } from "../../lib/stylingPlan";
 import type {
   OutputOptions,
   ProductReferenceRole,
@@ -62,6 +64,7 @@ export function Studio() {
   const { organization, user } = useWorkspace();
   const { user: firebaseUser } = useFirebaseAuth();
   const analyzeReferences = useAction(api.analysis.analyzeReferences);
+  const updateStylingPlan = useMutation(api.styling.updateSessionPlan);
   const queueSku = useMutation(api.generation.queueSku);
   const cancelJob = useMutation(api.jobs.cancel);
 
@@ -70,6 +73,7 @@ export function Studio() {
   const [modelReference, setModelReference] = useState<StudioReference | null>(null);
   const [poses, setPoses] = useState(basePoses);
   const [analysis, setAnalysis] = useState<StudioAnalysis | null>(null);
+  const [savingStylingPlan, setSavingStylingPlan] = useState(false);
   const [analysisSourceKey, setAnalysisSourceKey] = useState<string | null>(null);
   // User-editable corrections layered onto the AI's own "Scene direction"/"Garment summary"
   // read-out in AnalysisProfile. Empty means "use whatever Gemini derived" (shown as a fallback
@@ -335,6 +339,24 @@ export function Studio() {
     void runAnalysis(analysisInputKey, false, Boolean(analysis));
   };
 
+  // Saved onto the session rather than re-running analysis: styling is not a
+  // product fact, so the analysis fingerprint stays valid and queueing still works.
+  const handleSaveStylingPlan = async (plan: StylingPlan) => {
+    if (!analysis?.sessionId) return false;
+    setSavingStylingPlan(true);
+    try {
+      const result = await updateStylingPlan({ sessionId: analysis.sessionId, stylingPlan: plan });
+      setAnalysis((current) => (current ? { ...current, stylingPlan: result.stylingPlan } : current));
+      setNotice({ tone: "success", text: "Styling plan saved for this shoot." });
+      return true;
+    } catch (reason) {
+      setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not save the styling plan." });
+      return false;
+    } finally {
+      setSavingStylingPlan(false);
+    }
+  };
+
   const handleImprovePosePlan = () => {
     if (autoAnalyzeTimerRef.current) clearTimeout(autoAnalyzeTimerRef.current);
     void runAnalysis(analysisInputKey, false, true);
@@ -566,6 +588,20 @@ export function Studio() {
                onGarmentSummaryChange={(value) => updateText(setGarmentSummaryNote, value)}
              />
           </section>
+
+          {/* Hidden while the analysis is stale: analysis.sessionId still points at
+              the previous references, so a save would land on a session the next
+              auto-analysis replaces, losing the edit silently. */}
+          {analysis && analysisIsCurrent && (
+            <StylingPlanEditor
+              plan={normalizePlan(analysis.stylingPlan)}
+              title="Footwear, jewellery & styling"
+              description="Proposed from your product photos and the style reference. Edit anything before you generate - these exact pieces are locked into all five frames."
+              saving={savingStylingPlan}
+              saveLabel="Save for this shoot"
+              onSave={handleSaveStylingPlan}
+            />
+          )}
         </div>
       </div>
 

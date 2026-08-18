@@ -25,6 +25,20 @@ export type EmbroideryGeometryProfile = {
   necklineRelation: string;
 };
 
+// What the model wears alongside the garment. Held apart from productIdentity,
+// which records what the product references actually show: footwear the customer
+// receives is product truth, footwear the stylist adds is a styling decision, and
+// conflating them let the generator treat a proposed accessory as part of the SKU.
+export type StylingPlanProfile = {
+  footwear: string;
+  jewellery: string;
+  ornaments: string;
+  makeup: string;
+  hair: string;
+  stylingNotes: string;
+  themeInterpretation: string;
+};
+
 export type ProductIdentityProfile = {
   category: string;
   mainColor: string;
@@ -210,6 +224,29 @@ function embroideryGeometry(product: JsonRecord): EmbroideryGeometryProfile {
   };
 }
 
+/**
+ * `preserveEmpty` separates two different callers. Analysis output wants a
+ * default when the model left a field blank. A stylist's save does not: clearing
+ * a field is a decision, and refilling it with generated text would overwrite
+ * that decision on every round trip.
+ */
+export function normalizeStylingPlan(raw: unknown, options: { preserveEmpty?: boolean } = {}): StylingPlanProfile {
+  const plan = objectValue(raw);
+  const field = (value: unknown, fallback: string) => {
+    if (options.preserveEmpty && (typeof value === "string" || value === null)) return String(value ?? "").trim();
+    return stringValue(value, fallback);
+  };
+  return {
+    footwear: field(plan.footwear, "Simple neutral footwear that suits the garment without competing with it"),
+    jewellery: field(plan.jewellery, "Minimal jewellery appropriate to the garment and scene"),
+    ornaments: field(plan.ornaments, "No additional ornaments"),
+    makeup: field(plan.makeup, "Natural everyday makeup with soft definition"),
+    hair: field(plan.hair, "Simple hairstyle that keeps the neckline and yoke visible"),
+    stylingNotes: field(plan.stylingNotes ?? plan.styling_notes, ""),
+    themeInterpretation: field(plan.themeInterpretation ?? plan.theme_interpretation, ""),
+  };
+}
+
 export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
   const product = objectValue(raw.productIdentity ?? raw.product_identity);
   const creative = objectValue(raw.creativeDirection ?? raw.creative_direction);
@@ -294,12 +331,13 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
       prompt: stringValue(candidate.prompt, fallback.prompt), enabled: candidate.enabled !== false,
     };
   });
-  return { productIdentity, creativeDirection, modelIdentity, posePlan };
+  const stylingPlan = normalizeStylingPlan(raw.stylingPlan ?? raw.styling_plan);
+  return { productIdentity, creativeDirection, modelIdentity, stylingPlan, posePlan };
 }
 
 export function buildCombinedAnalysisPrompt(args: {
   skuName: string; productDetails: string; category: string; modelDirection: string; sceneDirection: string;
-  referenceManifest: Array<{ number: number; role: string }>;
+  referenceManifest: Array<{ number: number; role: string }>; housePreferences?: string;
 }) {
   const manifest = args.referenceManifest.map(({ number, role }) => `IMAGE ${number}: ${role}`).join("\n");
   return `You are the visual merchandiser and shoot planner for a fashion e-commerce studio.
@@ -347,6 +385,18 @@ CASTING BRIEF: an adult fashion model who reads as a youthful young adult - late
 
 Overall pose energy: every one of the five poses should feel playful, warm, and Gen-Z-friendly - natural and full of genuine attitude, never stiff, robotic, or overly corporate-catalog.
 
+STYLING PLAN - decide what this model wears alongside the garment, and fill stylingPlan. Read both sources before choosing: the product references decide what the garment already includes, and the style reference decides the aesthetic the shoot is aiming at. State each choice specifically enough that a stylist could pull it from a shelf and repeat it identically in every frame - "oxidised silver jhumkas roughly 4 cm with a small matching cuff on the right wrist" is usable, "ethnic jewellery" is not.
+- footwear: one specific pair - style, heel height, colour, finish - that suits the garment length and hem. Say if the product references already show footwear that must be kept instead.
+- jewellery: choose the metal and family deliberately - oxidised silver, temple or antique gold, polished gold, kundan or polki, pearl, contemporary minimal - and name each piece worn (earrings, neckpiece, bangles, rings, maang tikka, nose ring). Pick what the reference theme and the garment's own embellishment support: heavy gold against dense zari competes, oxidised silver suits earthy prints and handloom, minimal metal suits pastels and modern indo-western.
+- ornaments: any remaining accessory decisions - belt, potli or bag, dupatta drape treatment, waist chain, hair ornament - or an explicit "none" so nothing is invented later.
+- makeup and hair: one look each, held across all five frames.
+- stylingNotes: the rule a stylist would need to avoid mistakes on this specific product, for example "keep the right wrist bare so the sleeve embroidery stays visible" or "no neckpiece over the embroidered yoke".
+- themeInterpretation: one sentence naming the aesthetic you read from the style reference and why this styling serves it.
+${args.housePreferences ? `HOUSE STYLING PREFERENCE - drawn from styling plans this team has actually approved for this category, showing where they rewrote an earlier proposal:
+${args.housePreferences}
+Treat this as the house taste and start from it. It ranks below product truth and below the style reference: if this product or this reference genuinely calls for something else, choose what the images support and say why in stylingNotes. Never let it override a detail the product references show.
+` : ""}Every choice is a styling addition only: it must never be treated as part of the garment, must never hide, replace or contradict a detail from the product references, and must never contradict detailPlacementMap or absenceConstraints. When the product references already show footwear or accessories that ship with the product, keep those and say so rather than replacing them.
+
 Accessory styling suggestion: look at what footwear and accessories (if any) the product references actually show. If the product's own footwear/bag/accessories are missing, incomplete, or would not read well on camera, propose ONE tasteful, trend-right, Gen-Z-appropriate addition (for example a specific footwear style or a small bag) in creativeDirection.suggestedAccessories, described specifically enough for a stylist to execute identically across all five poses. Only suggest an addition when it genuinely fits the pose plan and category - if the product references already show adequate footwear/accessories, or nothing suits the shot, leave creativeDirection.suggestedAccessories empty. This is a styling addition only: it must never be treated as part of the garment, and it must never contradict detailPlacementMap or absenceConstraints.
 
 Create exactly five product-specific camera setups in one coherent commercial coverage sequence, in this order and with these ids: full_front, angled, back, creative, closeup. They are not five unrelated concepts. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints.
@@ -360,7 +410,7 @@ Create exactly five product-specific camera setups in one coherent commercial co
 Across all five, ONLY pose, angle, framing, and expression may change. Exact product, colors, pattern, bottom wear, face, hairstyle, makeup, accessories, footwear, scene, lighting, shadows, camera/lens feel, and color treatment remain locked.
 
 Return STRICT JSON only:
-{"productIdentity":{"category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[]},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"posePlan":[{"id":"full_front"},{"id":"angled"},{"id":"back"},{"id":"creative"},{"id":"closeup"}]}`;
+{"productIdentity":{"category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[]},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front"},{"id":"angled"},{"id":"back"},{"id":"creative"},{"id":"closeup"}]}`;
 }
 
 export const CONSISTENCY_RULES = [
@@ -385,7 +435,7 @@ export const CONSISTENCY_RULES = [
 // Bumping this invalidates cached analyses, which is intended here: a profile
 // cached under v8 carries no pattern or embroidery geometry for the prompt locks
 // and the fidelity gate to work against.
-export const ANALYSIS_VERSION = "generation-session-v9-product-dna-geometry";
+export const ANALYSIS_VERSION = "generation-session-v10-styling-plan";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

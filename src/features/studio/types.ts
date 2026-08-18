@@ -1,4 +1,7 @@
 import type { Id } from "../../lib/backend";
+// Aliased rather than redeclared: one definition of the seven fields, shared by
+// the analysis contract, both features, and the editor that renders them.
+import type { StylingPlan as StylingPlanProfile } from "../../lib/stylingPlan";
 
 export type ProductReferenceRole = "front" | "back" | "fabric_pattern" | "mannequin" | "additional_product";
 // "model_identity" (not "model_reference") to match the existing planning_assets_asset_role_check
@@ -118,9 +121,12 @@ export type StudioAnalysis = {
   productIdentity: ProductIdentityProfile;
   creativeDirection: CreativeDirectionProfile;
   modelIdentity: Record<string, string>;
+  stylingPlan?: StylingPlanProfile;
   posePlan: StudioPose[];
   cacheHit: boolean;
 };
+
+export type { StylingPlanProfile };
 
 export type OutputOptions = {
   model: "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1" | "gpt-image-1-mini";

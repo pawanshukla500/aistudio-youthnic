@@ -15,7 +15,9 @@ export const api = {
     setVariantReferences: "catalog.setVariantReferences", removeVariant: "catalog.removeVariant", scheduleCatalog: "catalog.scheduleCatalog",
     cancelScheduledCatalog: "catalog.cancelScheduledCatalog", addCatalogStyleReference: "catalog.addCatalogStyleReference",
     removeCatalogStyleReference: "catalog.removeCatalogStyleReference", retryVariant: "catalog.retryVariant",
+    saveStylingPlan: "catalog.saveStylingPlan",
   },
+  styling: { updateSessionPlan: "studio.updateStylingPlan" },
   eventIntelligence: { roadmap: "eventIntelligence.roadmap", runResearch: "eventIntelligence.runResearch", seedCalendar: "eventIntelligence.seedCalendar" },
   eventDigest: { sendDigestNow: "eventDigest.sendDigestNow" },
   events: { create: "events.create" },
@@ -295,6 +297,9 @@ async function listNotifications(args: Record<string, any>) {
 }
 
 function catalogUiStatus(batch: Record<string, any>) {
+  // Checked before the running branches: a paused batch keeps whatever queue
+  // state it held when the gate stopped it, and would otherwise read as draft.
+  if (batch.schedule_status === "awaiting_styling_approval") return "awaiting_styling_approval";
   if (batch.schedule_status === "scheduled") return "scheduled";
   if (batch.schedule_status === "running" || batch.queue_status === "running") return "generating";
   if (batch.schedule_status === "failed" || batch.queue_status === "failed") return "failed";
@@ -426,6 +431,10 @@ async function getCatalog(catalogId: string) {
     styleReferences: styleEntries.map((entry: Record<string, any>) => ({ _id: `style:${entry.id}`, url: entry.downloadUrl || entry.image_url, filename: entry.filename || "Style reference" })),
     modelReference: modelEntry ? { _id: `model_identity:${modelEntry.id}`, url: modelEntry.downloadUrl || modelEntry.image_url, filename: modelEntry.filename || "Model face reference" } : null,
     hasLockedAnchor: Boolean(record(batch.catalog_memory).anchorOutputUrl),
+    stylingPlan: record(batch.catalog_memory).stylingPlan ? record(record(batch.catalog_memory).stylingPlan) : null,
+    stylingPlanProposed: record(batch.catalog_memory).stylingPlanProposed ? record(record(batch.catalog_memory).stylingPlanProposed) : null,
+    stylingPlanApprovedAt: record(batch.catalog_memory).stylingPlanApprovedAt ? milliseconds(record(batch.catalog_memory).stylingPlanApprovedAt) : null,
+    awaitingStylingApproval: Boolean(record(batch.catalog_memory).stylingPlan) && !record(batch.catalog_memory).stylingPlanApprovedAt,
   };
 }
 
@@ -561,6 +570,10 @@ async function mutateBackend(endpoint: BackendEndpoint, args: Record<string, any
       return invokeAppApi("catalog.cancelSchedule", args);
     case api.catalog.retryVariant:
       return invokeAppApi("catalog.retryVariant", args);
+    case api.catalog.saveStylingPlan:
+      return invokeAppApi("catalog.saveStylingPlan", args);
+    case api.styling.updateSessionPlan:
+      return invokeAppApi("studio.updateStylingPlan", args);
     case api.events.create:
       return invokeAppApi("events.create", args);
     case api.eventIntelligence.seedCalendar:

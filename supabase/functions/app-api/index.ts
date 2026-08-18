@@ -6,10 +6,12 @@ import {
   CONSISTENCY_RULES,
   buildCombinedAnalysisPrompt,
   normalizeAnalysis,
+  normalizeStylingPlan,
   parseJsonResponse,
   smallHash,
   type JsonRecord,
   type StudioPose,
+  type StylingPlanProfile,
 } from "./profiles.ts";
 import { buildPoseQaPrompt, parseQaResponse } from "./qa.ts";
 
@@ -401,7 +403,13 @@ async function analyze(request: Request, args: JsonRecord) {
   const rHash = referenceHash(references);
   const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}`);
   const orgId = workspace.organization.id;
-  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}`;
+  // House preference is an analysis input, so it belongs in the cache identity:
+  // otherwise a cached plan keeps proposing the styling a stylist corrected, for
+  // up to the cache's thirty days. It stays out of the fingerprint on purpose -
+  // that is queue-time validation of the references, and saving a plan writes a
+  // decision, which would change the fingerprint and reject its own session.
+  const housePreferences = await stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion"));
+  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${smallHash(housePreferences)}`;
   let cacheHit = false;
   let normalized: ReturnType<typeof normalizeAnalysis> | null = null;
   const forceRefresh = args.forceRefresh === true;
@@ -425,7 +433,7 @@ async function analyze(request: Request, args: JsonRecord) {
     parts.push({ text: buildCombinedAnalysisPrompt({
       skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
       category: String(args.category || "ethnic/fusion"), modelDirection: String(args.modelDirection || ""),
-      sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest,
+      sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences,
     }) });
     const model = Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash";
     const result = await geminiJson(model, parts);
@@ -467,7 +475,7 @@ async function analyze(request: Request, args: JsonRecord) {
       hash: String((asset.metadata as JsonRecord)?.hash || ""), filename: String((asset.metadata as JsonRecord)?.filename || `${asset.asset_role}.jpg`),
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     })), productIdentity: normalized.productIdentity, creativeDirection: normalized.creativeDirection,
-    modelIdentity: normalized.modelIdentity, posePlan: normalized.posePlan, consistencyRules: CONSISTENCY_RULES,
+    modelIdentity: normalized.modelIdentity, stylingPlan: normalized.stylingPlan, posePlan: normalized.posePlan, consistencyRules: CONSISTENCY_RULES,
     analysisModel: Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash", analysisVersion: ANALYSIS_VERSION,
     generatedAssets: [], approvedAssets: [],
   };
@@ -544,6 +552,9 @@ function composeGenerationPrompt(args: {
   const product = args.session.productIdentity as JsonRecord;
   const creative = args.session.creativeDirection as JsonRecord;
   const model = args.session.modelIdentity as JsonRecord;
+  // Null for sessions analysed before v10. They keep the old accessory line
+  // instead of being handed generated defaults dressed up as stylist decisions.
+  const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
   const rules = Array.isArray(args.session.consistencyRules) ? args.session.consistencyRules.map(String) : CONSISTENCY_RULES;
   const placement = Array.isArray(product?.detailPlacementMap) ? product.detailPlacementMap.map(String) : [];
   const absent = Array.isArray(product?.absenceConstraints) ? product.absenceConstraints.map(String) : [];
@@ -604,8 +615,19 @@ LOCKED ART DIRECTION - MUST NOT CHANGE BETWEEN POSES:
 ${JSON.stringify(creative)}
 - Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, camera height and distance, depth of field and colour grade. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
 
-STYLING ADDITION (optional, locked once chosen):
-${creative.suggestedAccessories ? `The stylist has proposed adding: ${creative.suggestedAccessories}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}
+${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in all five frames:
+- Footwear: ${styling.footwear}
+- Jewellery: ${styling.jewellery}
+- Ornaments and accessories: ${styling.ornaments}
+- Makeup: ${styling.makeup}
+- Hair: ${styling.hair}
+${styling.stylingNotes ? `- Stylist notes: ${styling.stylingNotes}` : ""}
+${styling.themeInterpretation ? `- Theme being served: ${styling.themeInterpretation}` : ""}
+- Style the model with exactly these pieces - the same metal, the same count, the same placement in every frame. Do not add a necklace, bangle, ring, belt, bag, hair ornament or any other accessory this plan does not list, and do not drop one it does.
+- This is styling only. It never becomes part of the garment, never hides or replaces a garment detail, bottom wear or footwear shown in the product references, and never contradicts the placement or absence locks above.
+${creative?.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${creative.suggestedAccessories}` : ""}`
+  : `STYLING ADDITION (optional, locked once chosen):
+${creative?.suggestedAccessories ? `The stylist has proposed adding: ${creative.suggestedAccessories}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}`}
 
 ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
 ${allowedDelta.map((value) => `- ${value}`).join("\n")}
@@ -708,10 +730,23 @@ async function validatePose(args: {
   approved: LoadedReference[]; session: JsonRecord; pose: StudioPose & { poseNumber: number };
 }) {
   const qaRefs = selectReferences(args.references, args.approved, args.pose.id);
+  // Only a session that actually stores a plan gets the plan rule. Appending it
+  // for a pre-v10 session would have QA judge styling against generated defaults
+  // like "minimal jewellery appropriate to the garment", failing frames on a plan
+  // no stylist ever wrote.
+  const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
   const prompt = buildPoseQaPrompt({
     poseNumber: args.pose.poseNumber, poseType: args.pose.id, poseTitle: args.pose.title, poseDirection: args.pose,
     productIdentity: args.session.productIdentity, creativeDirection: args.session.creativeDirection,
-    modelIdentity: args.session.modelIdentity, consistencyRules: (args.session.consistencyRules as string[]) || CONSISTENCY_RULES,
+    modelIdentity: args.session.modelIdentity,
+    // The approved plan rides in with the session rules so styling_addition has
+    // something exact to check rather than a general sense of "looks styled".
+    consistencyRules: [
+      ...((args.session.consistencyRules as string[]) || CONSISTENCY_RULES),
+      ...(styling
+        ? [`APPROVED STYLING PLAN - footwear: ${styling.footwear}; jewellery: ${styling.jewellery}; ornaments: ${styling.ornaments}; makeup: ${styling.makeup}; hair: ${styling.hair}.${styling.stylingNotes ? ` Stylist notes: ${styling.stylingNotes}` : ""}`]
+        : []),
+    ],
     hasApprovedAnchor: args.approved.length > 0,
     hasModelReference: qaRefs.some((reference) => reference.role === "model_identity"),
     referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`),
@@ -832,14 +867,20 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   });
   if (job.batch_id) {
     const batchId = String(job.batch_id);
-    const { data: batch } = await service.from("planning_batches").select("catalog_memory").eq("id", batchId).maybeSingle();
     const anchor = poses.find((pose) => Number(pose.pose_index) === 1 && pose.status === "completed");
     if (anchor?.output_url) {
-      const memory = ((batch?.catalog_memory || {}) as JsonRecord);
-      await service.from("planning_batches").update({
-        catalog_memory: { ...memory, anchorOutputUrl: anchor.output_url, anchorStoragePath: anchor.storage_path, anchorJobId: job.job_id },
-        memory_updated_at: now,
-      }).eq("id", batchId);
+      // Merged in the database for the same reason as the styling plan: a stylist
+      // approving a plan at this moment must not lose the anchor, and vice versa.
+      const { error: anchorError } = await service.rpc("merge_catalog_memory", {
+        p_batch_id: batchId,
+        p_patch: { anchorOutputUrl: anchor.output_url, anchorStoragePath: anchor.storage_path, anchorJobId: job.job_id },
+        p_require_absent: null,
+      });
+      // Stamping the memory as current after a failed merge would claim an anchor
+      // the batch does not have, and later colourways would drift from this set
+      // with nothing recording why.
+      if (anchorError) console.error("Could not record the catalog anchor frame", anchorError.message);
+      else await service.from("planning_batches").update({ memory_updated_at: now }).eq("id", batchId);
     }
     const { data: catalogVariants } = await service.from("planning_requests").select("generation_status").eq("batch_id", batchId);
     const completedVariants = (catalogVariants || []).filter((variant) => variant.generation_status === "completed").length;
@@ -1888,12 +1929,17 @@ async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, ref
   parts.push({ text: buildCombinedAnalysisPrompt({
     skuName: String(variant.sku_name), productDetails: String(variant.product_description || ""), category: String(settings.category || variant.category || "ethnic/fusion"),
     modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
+    housePreferences: await stylingPreferenceBrief(String(batch.organization_id), String(settings.category || variant.category || "ethnic/fusion")),
   }) });
   const result = await geminiJson(Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash", parts);
   const normalized = normalizeAnalysis(result.json, String(settings.category || variant.category || "ethnic/fusion"));
   const memory = (batch.catalog_memory || {}) as JsonRecord;
   if (memory.modelIdentity) normalized.modelIdentity = memory.modelIdentity as typeof normalized.modelIdentity;
   if (memory.creativeDirection) normalized.creativeDirection = memory.creativeDirection as typeof normalized.creativeDirection;
+  // The catalogue's approved styling plan outranks whatever this SKU's own
+  // analysis proposed: one catalogue is one stylist's set of decisions, and a
+  // per-SKU proposal is exactly the drift the plan exists to prevent.
+  if (memory.stylingPlan) normalized.stylingPlan = normalizeStylingPlan(memory.stylingPlan);
   if (Array.isArray(memory.posePlan)) normalized.posePlan = memory.posePlan as StudioPose[];
   return normalized;
 }
@@ -1931,8 +1977,179 @@ function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof nor
   const memory = (batch.catalog_memory || {}) as JsonRecord;
   if (memory.modelIdentity) normalized.modelIdentity = memory.modelIdentity as typeof normalized.modelIdentity;
   if (memory.creativeDirection) normalized.creativeDirection = memory.creativeDirection as typeof normalized.creativeDirection;
+  // The catalogue's approved styling plan outranks whatever this SKU's own
+  // analysis proposed: one catalogue is one stylist's set of decisions, and a
+  // per-SKU proposal is exactly the drift the plan exists to prevent.
+  if (memory.stylingPlan) normalized.stylingPlan = normalizeStylingPlan(memory.stylingPlan);
   if (Array.isArray(memory.posePlan)) normalized.posePlan = memory.posePlan as StudioPose[];
   return normalized;
+}
+
+async function proposeCatalogStylingPlan(batchId: string, _batch: JsonRecord, stylingPlan: StylingPlanProfile, variantId: string) {
+  // Guarded in the database, not here: two colourways can reach preflight at the
+  // same time, and a read-then-write would let the second overwrite the first
+  // one's proposal - or clobber an anchor frame recorded in between.
+  const { error } = await service.rpc("merge_catalog_memory", {
+    p_batch_id: batchId,
+    p_patch: {
+      stylingPlan,
+      // Kept unedited alongside the working copy: comparing what the AI proposed
+      // with what the stylist approved is the raw material the memory needs, and
+      // it is unrecoverable once the plan is edited in place.
+      stylingPlanProposed: stylingPlan,
+      stylingPlanProposedAt: new Date().toISOString(),
+      stylingPlanSourceRequestId: variantId,
+    },
+    p_require_absent: "stylingPlan",
+  });
+  if (error) throw new Error(error.message);
+}
+
+const STYLING_FIELDS: Array<keyof StylingPlanProfile> = ["footwear", "jewellery", "ornaments", "makeup", "hair", "stylingNotes", "themeInterpretation"];
+
+function stylingPlanDiff(proposed: StylingPlanProfile, approved: StylingPlanProfile) {
+  return STYLING_FIELDS.filter((field) => String(proposed[field] || "").trim() !== String(approved[field] || "").trim());
+}
+
+async function recordStylingDecision(args: {
+  orgId: string; scope: "studio" | "catalog"; batchId?: string | null; planningRequestId?: string | null;
+  sessionId?: string; category: string; themeSummary: string; proposed: StylingPlanProfile; approved: StylingPlanProfile;
+  approvedFlag: boolean; memberId: string;
+}) {
+  const changed = stylingPlanDiff(args.proposed, args.approved);
+  const { error } = await service.from("styling_decisions").insert({
+    organization_id: args.orgId, scope: args.scope, batch_id: args.batchId || null, planning_request_id: args.planningRequestId || null,
+    session_id: args.sessionId || "", category: args.category || "", theme_summary: args.themeSummary.slice(0, 400),
+    ai_plan: args.proposed, approved_plan: args.approved, changed_fields: changed, approved: args.approvedFlag,
+    decided_by_member_id: args.memberId,
+  });
+  // Memory is an enhancement, never a reason to fail the stylist's save.
+  if (error) console.error("Could not record the styling decision", error.message);
+}
+
+// Reads the memory back. Only fields a human actually rewrote are worth carrying
+// forward - an unchanged proposal says nothing about preference - and only the
+// most recent correction per field, so the brief stays a few hundred characters
+// no matter how long the history grows.
+async function stylingPreferenceBrief(orgId: string, category: string) {
+  const { data, error } = await service.from("styling_decisions")
+    .select("approved_plan,ai_plan,changed_fields,created_at")
+    .eq("organization_id", orgId).eq("category", category).eq("approved", true)
+    .order("created_at", { ascending: false }).limit(25);
+  if (error || !data?.length) return "";
+  const preferences: string[] = [];
+  const counts = new Map<string, number>();
+  for (const row of data) {
+    for (const field of (row.changed_fields || []) as string[]) counts.set(field, (counts.get(field) || 0) + 1);
+  }
+  for (const field of STYLING_FIELDS) {
+    if (!counts.get(field)) continue;
+    const latest = data.find((row) => ((row.changed_fields || []) as string[]).includes(field));
+    const approved = String(((latest?.approved_plan || {}) as JsonRecord)[field] || "").trim();
+    const proposed = String(((latest?.ai_plan || {}) as JsonRecord)[field] || "").trim();
+    if (!approved) continue;
+    preferences.push(`- ${field}: the stylist has rewritten this ${counts.get(field)} time(s); most recently "${proposed.slice(0, 120)}" became "${approved.slice(0, 160)}".`);
+  }
+  return preferences.length ? preferences.join("\n") : "";
+}
+
+async function saveCatalogStylingPlanOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.manage");
+  const batch = await catalogBatch(workspace, String(args.catalogId || ""));
+  const memory = (batch.catalog_memory || {}) as JsonRecord;
+  const plan = normalizeStylingPlan(args.stylingPlan ?? memory.stylingPlan, { preserveEmpty: Boolean(args.stylingPlan) });
+  const approve = args.approve === true;
+  const now = new Date().toISOString();
+  // Whether this save revokes approval is decided inside the database, under a row
+  // lock: comparing against a snapshot here let an overlapping edit and approval
+  // reach different conclusions and leave an unreviewed plan marked approved.
+  const { data: saveResult, error: mergeError } = await service.rpc("save_catalog_styling_plan", {
+    p_batch_id: batch.id, p_plan: plan, p_approve: approve, p_member_id: workspace.member.id,
+  });
+  if (mergeError) throw new Error(mergeError.message);
+  if (!saveResult) throw new Error("Catalog not found.");
+  const revokeApproval = Boolean((saveResult as JsonRecord).revoked);
+  const update: JsonRecord = { updated_at: now };
+  if (approve) {
+    update.schedule_error = "";
+    // Releasing the gate has to hand the batch back to whichever runner owns it:
+    // the scheduler only claims rows still marked scheduled.
+    if (batch.schedule_status === "awaiting_styling_approval") {
+      update.schedule_status = batch.scheduled_at && Date.parse(String(batch.scheduled_at)) > Date.now() ? "scheduled" : "running";
+    }
+  }
+  if (revokeApproval) {
+    update.schedule_error = "Styling plan was edited. Approve it again to resume generating.";
+  }
+  const { error } = await service.from("planning_batches").update(update).eq("id", batch.id);
+  if (error) throw new Error(error.message);
+  await service.from("audit_logs").insert({
+    organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
+    action: approve ? "catalog.styling_plan.approved" : "catalog.styling_plan.updated",
+    resource_type: "planning_batch", resource_id: String(batch.id),
+    // Diffed against the memory the write itself returned, not the pre-read
+    // snapshot, so the record matches what actually landed.
+    metadata: { edited: stylingPlanDiff(normalizeStylingPlan(((saveResult as JsonRecord).memory as JsonRecord)?.stylingPlanProposed), plan), revoked: revokeApproval },
+  });
+  await recordStylingDecision({
+    orgId: workspace.organization.id, scope: "catalog", batchId: String(batch.id),
+    planningRequestId: memory.stylingPlanSourceRequestId ? String(memory.stylingPlanSourceRequestId) : null,
+    category: String(((batch.generation_settings || {}) as JsonRecord).category || ""),
+    themeSummary: plan.themeInterpretation,
+    proposed: normalizeStylingPlan(((saveResult as JsonRecord).memory as JsonRecord)?.stylingPlanProposed),
+    approved: plan, approvedFlag: approve, memberId: workspace.member.id,
+  });
+  if (approve) scheduleBackground(kickCatalogProcessor(String(batch.id)));
+  return { success: true, stylingPlan: plan, approved: approve, approvalRevoked: revokeApproval };
+}
+
+async function updateSessionStylingPlanOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "studio.generate");
+  const sessionId = String(args.sessionId || "");
+  const { data: session } = await service.from("catalog_sessions").select("*").eq("session_id", sessionId).eq("organization_id", workspace.organization.id).maybeSingle();
+  if (!session) throw new Error("The generation session was not found.");
+  if (!["ready", "analyzed"].includes(String(session.status || "ready"))) throw new Error("This session is already generating; regenerate a pose instead.");
+  const sessionData = (session.session_data || {}) as JsonRecord;
+  const plan = normalizeStylingPlan(args.stylingPlan ?? sessionData.stylingPlan, { preserveEmpty: Boolean(args.stylingPlan) });
+  // Styling is not part of the product analysis, so the fingerprint stays put and
+  // queueing still validates against the analysis the references produced.
+  const { error } = await service.from("catalog_sessions").update({
+    session_data: { ...sessionData, stylingPlan: plan, stylingPlanProposed: sessionData.stylingPlanProposed || sessionData.stylingPlan || plan, stylingPlanEditedAt: new Date().toISOString() },
+    updated_at: new Date().toISOString(),
+  }).eq("session_id", sessionId);
+  if (error) throw new Error(error.message);
+  if (session.planning_request_id) {
+    // Each column is patched from its own stored value: writing ai_analysis into
+    // both would replace garment_analysis rather than update it.
+    const { data: planningRequest } = await service.from("planning_requests").select("ai_analysis,garment_analysis").eq("id", session.planning_request_id).maybeSingle();
+    const analysis = (planningRequest?.ai_analysis || {}) as JsonRecord;
+    const garment = (planningRequest?.garment_analysis || {}) as JsonRecord;
+    if (Object.keys(analysis).length || Object.keys(garment).length) {
+      await service.from("planning_requests").update({
+        ...(Object.keys(analysis).length ? { ai_analysis: { ...analysis, stylingPlan: plan } } : {}),
+        ...(Object.keys(garment).length ? { garment_analysis: { ...garment, stylingPlan: plan } } : {}),
+        updated_at: new Date().toISOString(),
+      }).eq("id", session.planning_request_id);
+    }
+  }
+  await recordStylingDecision({
+    orgId: workspace.organization.id, scope: "studio", planningRequestId: session.planning_request_id ? String(session.planning_request_id) : null,
+    sessionId, category: String(sessionData.category || ""), themeSummary: plan.themeInterpretation,
+    proposed: normalizeStylingPlan(sessionData.stylingPlanProposed || sessionData.stylingPlan || plan),
+    approved: plan, approvedFlag: true, memberId: workspace.member.id,
+  });
+  return { success: true, stylingPlan: plan };
+}
+
+// A catalogue only waits when it actually has a plan to look at. Batches created
+// before styling plans existed have none, and must keep running untouched.
+function stylingPlanApproval(batch: JsonRecord) {
+  const memory = (batch.catalog_memory || {}) as JsonRecord;
+  return {
+    hasPlan: Boolean(memory.stylingPlan),
+    approved: Boolean(memory.stylingPlanApprovedAt),
+    blocked: Boolean(memory.stylingPlan) && !memory.stylingPlanApprovedAt,
+  };
 }
 
 async function processCatalogPreflight(request: Request, args: JsonRecord) {
@@ -1982,6 +2199,14 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
         cost_usd: 0, cost_source: "provider_cost_not_available",
       }),
     ]);
+    // Proposed after the analysis is safely stored, and never inside its Promise.all:
+    // a failed proposal used to reject alongside it, marking a successful analysis as
+    // a Gemini failure and buying a second one on the next run.
+    try {
+      await proposeCatalogStylingPlan(batchId, batch as JsonRecord, normalized.stylingPlan, variant.id);
+    } catch (error) {
+      console.error("Could not propose the catalogue styling plan", errorMessage(error));
+    }
     if (!args.requestId) scheduleBackground(kickCatalogPreflight(batchId));
     return { processed: true, requestId: variant.id, fingerprint: hashes.fingerprint };
   } catch (error) {
@@ -2040,6 +2265,20 @@ async function processCatalog(request: Request, args: JsonRecord) {
     }).eq("id", batchId);
     return { processed: false, reason: "catalog_complete" };
   }
+  // Nothing is generated against a styling plan nobody has seen. The batch waits
+  // here, with the reason surfaced on the row, until the plan is approved.
+  const approval = stylingPlanApproval(batch);
+  if (approval.blocked) {
+    await service.from("planning_batches").update({
+      schedule_status: "awaiting_styling_approval",
+      // Left at "running" by the claim RPC, a paused batch reads as generating in
+      // the UI while nothing is queued behind it.
+      queue_status: "idle",
+      schedule_error: "Review and approve the catalogue styling plan to start generating.",
+      updated_at: new Date().toISOString(),
+    }).eq("id", batchId);
+    return { processed: false, reason: "styling_plan_unapproved", batchId };
+  }
   try {
     const { productRefs, references } = await catalogReferenceInputs(batch, variant);
     if (!references.some((entry) => entry.role === "front") || !references.some((entry) => entry.role === "back")) throw new Error("Front and back references are required.");
@@ -2048,6 +2287,41 @@ async function processCatalog(request: Request, args: JsonRecord) {
     const normalized = storedAnalysis && variant.analysis_status === "ready" && variant.analysis_fingerprint === hashes.fingerprint
       ? applyCatalogMemory(batch, normalizeAnalysis(storedAnalysis, String(((batch.generation_settings || {}) as JsonRecord).category || variant.category || "ethnic/fusion")))
       : await analyzeCatalogVariant(batch, variant, references);
+    // The gate above passed against a snapshot taken before the analysis, which can
+    // run for a minute. A stylist revising the plan in that window revokes approval,
+    // and queueing from the stale snapshot would shoot this colourway against a plan
+    // that is no longer approved. Re-read, and take the current plan while here.
+    // Preflight normally proposes the plan, but processCatalog can analyse a
+    // variant itself when preflight never ran - and would then queue a colourway
+    // whose styling nobody proposed, let alone approved. Propose it here so the
+    // gate below has something to hold. A batch that has already produced images
+    // is mid-run and keeps going: it gets a plan for the panel, not a stoppage.
+    const { data: proposalBatch } = await service.from("planning_batches").select("catalog_memory").eq("id", batchId).maybeSingle();
+    if (!((proposalBatch?.catalog_memory || {}) as JsonRecord).stylingPlan) {
+      const { count: generatedAlready } = await service.from("planning_requests")
+        .select("id", { count: "exact", head: true }).eq("batch_id", batchId).eq("generation_status", "completed");
+      try {
+        await proposeCatalogStylingPlan(batchId, { catalog_memory: proposalBatch?.catalog_memory || {} } as JsonRecord, normalized.stylingPlan, variant.id);
+        if (!generatedAlready) {
+          await service.rpc("save_catalog_styling_plan", { p_batch_id: batchId, p_plan: normalized.stylingPlan, p_approve: false, p_member_id: null });
+        } else {
+          await service.rpc("save_catalog_styling_plan", { p_batch_id: batchId, p_plan: normalized.stylingPlan, p_approve: true, p_member_id: null });
+        }
+      } catch (error) {
+        console.error("Could not propose the catalogue styling plan during processing", errorMessage(error));
+      }
+    }
+    const { data: freshBatch } = await service.from("planning_batches").select("catalog_memory").eq("id", batchId).maybeSingle();
+    const freshMemory = { catalog_memory: freshBatch?.catalog_memory || {} } as JsonRecord;
+    if (stylingPlanApproval(freshMemory).blocked) {
+      await service.from("planning_batches").update({
+        schedule_status: "awaiting_styling_approval", queue_status: "idle",
+        schedule_error: "Styling plan changed while this colourway was being analysed. Approve it again to resume generating.",
+        updated_at: new Date().toISOString(),
+      }).eq("id", batchId);
+      return { processed: false, reason: "styling_plan_unapproved", batchId };
+    }
+    applyCatalogMemory(freshMemory, normalized);
     const pHash = smallHash(`${hashes.pHash}|${JSON.stringify(normalized.productIdentity)}`);
     const rHash = hashes.rHash;
     const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}`);
@@ -2056,7 +2330,7 @@ async function processCatalog(request: Request, args: JsonRecord) {
     const sessionData = {
       skuId: variant.sku_name, skuName: variant.sku_name, productDetails: variant.product_description || "", category: settings.category || variant.category || "ethnic/fusion",
       referenceIds: productRefs.map((entry) => entry.id), references, productIdentity: normalized.productIdentity, creativeDirection: normalized.creativeDirection,
-      modelIdentity: normalized.modelIdentity, posePlan: normalized.posePlan, consistencyRules: CONSISTENCY_RULES, generatedAssets: [], approvedAssets: [],
+      modelIdentity: normalized.modelIdentity, stylingPlan: normalized.stylingPlan, posePlan: normalized.posePlan, consistencyRules: CONSISTENCY_RULES, generatedAssets: [], approvedAssets: [],
     };
     await service.from("catalog_sessions").insert({
       session_id: sessionId, job_id: "", user_id: "catalog-worker", organization_id: batch.organization_id, planning_request_id: variant.id,
@@ -2909,6 +3183,8 @@ Deno.serve(async (request) => {
       "catalog.schedule": () => scheduleCatalogOperation(request, args),
       "catalog.cancelSchedule": () => cancelScheduledCatalogOperation(request, args),
       "catalog.retryVariant": () => retryVariantOperation(request, args),
+      "catalog.saveStylingPlan": () => saveCatalogStylingPlanOperation(request, args),
+      "studio.updateStylingPlan": () => updateSessionStylingPlanOperation(request, args),
       "catalog.preflight": () => processCatalogPreflight(request, args),
       "catalog.process": () => processCatalog(request, args),
       "events.create": () => createEventOperation(request, args),
