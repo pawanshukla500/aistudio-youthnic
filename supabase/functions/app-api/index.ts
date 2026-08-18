@@ -403,7 +403,13 @@ async function analyze(request: Request, args: JsonRecord) {
   const rHash = referenceHash(references);
   const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}`);
   const orgId = workspace.organization.id;
-  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}`;
+  // House preference is an analysis input, so it belongs in the cache identity:
+  // otherwise a cached plan keeps proposing the styling a stylist corrected, for
+  // up to the cache's thirty days. It stays out of the fingerprint on purpose -
+  // that is queue-time validation of the references, and saving a plan writes a
+  // decision, which would change the fingerprint and reject its own session.
+  const housePreferences = await stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion"));
+  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${smallHash(housePreferences)}`;
   let cacheHit = false;
   let normalized: ReturnType<typeof normalizeAnalysis> | null = null;
   const forceRefresh = args.forceRefresh === true;
@@ -427,8 +433,7 @@ async function analyze(request: Request, args: JsonRecord) {
     parts.push({ text: buildCombinedAnalysisPrompt({
       skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
       category: String(args.category || "ethnic/fusion"), modelDirection: String(args.modelDirection || ""),
-      sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest,
-      housePreferences: await stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion")),
+      sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences,
     }) });
     const model = Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash";
     const result = await geminiJson(model, parts);
@@ -866,12 +871,16 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     if (anchor?.output_url) {
       // Merged in the database for the same reason as the styling plan: a stylist
       // approving a plan at this moment must not lose the anchor, and vice versa.
-      await service.rpc("merge_catalog_memory", {
+      const { error: anchorError } = await service.rpc("merge_catalog_memory", {
         p_batch_id: batchId,
         p_patch: { anchorOutputUrl: anchor.output_url, anchorStoragePath: anchor.storage_path, anchorJobId: job.job_id },
         p_require_absent: null,
       });
-      await service.from("planning_batches").update({ memory_updated_at: now }).eq("id", batchId);
+      // Stamping the memory as current after a failed merge would claim an anchor
+      // the batch does not have, and later colourways would drift from this set
+      // with nothing recording why.
+      if (anchorError) console.error("Could not record the catalog anchor frame", anchorError.message);
+      else await service.from("planning_batches").update({ memory_updated_at: now }).eq("id", batchId);
     }
     const { data: catalogVariants } = await service.from("planning_requests").select("generation_status").eq("batch_id", batchId);
     const completedVariants = (catalogVariants || []).filter((variant) => variant.generation_status === "completed").length;
@@ -2051,20 +2060,15 @@ async function saveCatalogStylingPlanOperation(request: Request, args: JsonRecor
   const plan = normalizeStylingPlan(args.stylingPlan ?? memory.stylingPlan, { preserveEmpty: Boolean(args.stylingPlan) });
   const approve = args.approve === true;
   const now = new Date().toISOString();
-  const changed = stylingPlanDiff(normalizeStylingPlan(memory.stylingPlan), plan);
-  // Saving an edit without approving revokes the previous approval. Otherwise a
-  // plan approved yesterday keeps its tick after being rewritten today, and the
-  // catalogue carries on generating against a revision nobody reviewed.
-  const revokeApproval = !approve && changed.length > 0 && Boolean(memory.stylingPlanApprovedAt);
-  const patch: JsonRecord = {
-    stylingPlan: plan,
-    stylingPlanProposed: memory.stylingPlanProposed || memory.stylingPlan || plan,
-    stylingPlanProposedAt: memory.stylingPlanProposedAt || now,
-    ...(approve ? { stylingPlanApprovedAt: now, stylingPlanApprovedByMemberId: workspace.member.id } : {}),
-    ...(revokeApproval ? { stylingPlanApprovedAt: null, stylingPlanApprovedByMemberId: null } : {}),
-  };
-  const { error: mergeError } = await service.rpc("merge_catalog_memory", { p_batch_id: batch.id, p_patch: patch, p_require_absent: null });
+  // Whether this save revokes approval is decided inside the database, under a row
+  // lock: comparing against a snapshot here let an overlapping edit and approval
+  // reach different conclusions and leave an unreviewed plan marked approved.
+  const { data: saveResult, error: mergeError } = await service.rpc("save_catalog_styling_plan", {
+    p_batch_id: batch.id, p_plan: plan, p_approve: approve, p_member_id: workspace.member.id,
+  });
   if (mergeError) throw new Error(mergeError.message);
+  if (!saveResult) throw new Error("Catalog not found.");
+  const revokeApproval = Boolean((saveResult as JsonRecord).revoked);
   const update: JsonRecord = { updated_at: now };
   if (approve) {
     update.schedule_error = "";
@@ -2083,14 +2087,16 @@ async function saveCatalogStylingPlanOperation(request: Request, args: JsonRecor
     organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
     action: approve ? "catalog.styling_plan.approved" : "catalog.styling_plan.updated",
     resource_type: "planning_batch", resource_id: String(batch.id),
-    metadata: { edited: Object.keys(plan).filter((key) => String((memory.stylingPlanProposed as JsonRecord | undefined)?.[key] ?? "") !== String((plan as unknown as JsonRecord)[key] ?? "")) },
+    // Diffed against the memory the write itself returned, not the pre-read
+    // snapshot, so the record matches what actually landed.
+    metadata: { edited: stylingPlanDiff(normalizeStylingPlan(((saveResult as JsonRecord).memory as JsonRecord)?.stylingPlanProposed), plan), revoked: revokeApproval },
   });
   await recordStylingDecision({
     orgId: workspace.organization.id, scope: "catalog", batchId: String(batch.id),
     planningRequestId: memory.stylingPlanSourceRequestId ? String(memory.stylingPlanSourceRequestId) : null,
     category: String(((batch.generation_settings || {}) as JsonRecord).category || ""),
     themeSummary: plan.themeInterpretation,
-    proposed: normalizeStylingPlan(memory.stylingPlanProposed || memory.stylingPlan || plan),
+    proposed: normalizeStylingPlan(((saveResult as JsonRecord).memory as JsonRecord)?.stylingPlanProposed),
     approved: plan, approvedFlag: approve, memberId: workspace.member.id,
   });
   if (approve) scheduleBackground(kickCatalogProcessor(String(batch.id)));
@@ -2285,6 +2291,26 @@ async function processCatalog(request: Request, args: JsonRecord) {
     // run for a minute. A stylist revising the plan in that window revokes approval,
     // and queueing from the stale snapshot would shoot this colourway against a plan
     // that is no longer approved. Re-read, and take the current plan while here.
+    // Preflight normally proposes the plan, but processCatalog can analyse a
+    // variant itself when preflight never ran - and would then queue a colourway
+    // whose styling nobody proposed, let alone approved. Propose it here so the
+    // gate below has something to hold. A batch that has already produced images
+    // is mid-run and keeps going: it gets a plan for the panel, not a stoppage.
+    const { data: proposalBatch } = await service.from("planning_batches").select("catalog_memory").eq("id", batchId).maybeSingle();
+    if (!((proposalBatch?.catalog_memory || {}) as JsonRecord).stylingPlan) {
+      const { count: generatedAlready } = await service.from("planning_requests")
+        .select("id", { count: "exact", head: true }).eq("batch_id", batchId).eq("generation_status", "completed");
+      try {
+        await proposeCatalogStylingPlan(batchId, { catalog_memory: proposalBatch?.catalog_memory || {} } as JsonRecord, normalized.stylingPlan, variant.id);
+        if (!generatedAlready) {
+          await service.rpc("save_catalog_styling_plan", { p_batch_id: batchId, p_plan: normalized.stylingPlan, p_approve: false, p_member_id: null });
+        } else {
+          await service.rpc("save_catalog_styling_plan", { p_batch_id: batchId, p_plan: normalized.stylingPlan, p_approve: true, p_member_id: null });
+        }
+      } catch (error) {
+        console.error("Could not propose the catalogue styling plan during processing", errorMessage(error));
+      }
+    }
     const { data: freshBatch } = await service.from("planning_batches").select("catalog_memory").eq("id", batchId).maybeSingle();
     const freshMemory = { catalog_memory: freshBatch?.catalog_memory || {} } as JsonRecord;
     if (stylingPlanApproval(freshMemory).blocked) {
