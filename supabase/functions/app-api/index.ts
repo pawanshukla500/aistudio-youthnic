@@ -6,10 +6,12 @@ import {
   CONSISTENCY_RULES,
   buildCombinedAnalysisPrompt,
   normalizeAnalysis,
+  normalizeStylingPlan,
   parseJsonResponse,
   smallHash,
   type JsonRecord,
   type StudioPose,
+  type StylingPlanProfile,
 } from "./profiles.ts";
 import { buildPoseQaPrompt, parseQaResponse } from "./qa.ts";
 
@@ -467,7 +469,7 @@ async function analyze(request: Request, args: JsonRecord) {
       hash: String((asset.metadata as JsonRecord)?.hash || ""), filename: String((asset.metadata as JsonRecord)?.filename || `${asset.asset_role}.jpg`),
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     })), productIdentity: normalized.productIdentity, creativeDirection: normalized.creativeDirection,
-    modelIdentity: normalized.modelIdentity, posePlan: normalized.posePlan, consistencyRules: CONSISTENCY_RULES,
+    modelIdentity: normalized.modelIdentity, stylingPlan: normalized.stylingPlan, posePlan: normalized.posePlan, consistencyRules: CONSISTENCY_RULES,
     analysisModel: Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash", analysisVersion: ANALYSIS_VERSION,
     generatedAssets: [], approvedAssets: [],
   };
@@ -544,6 +546,9 @@ function composeGenerationPrompt(args: {
   const product = args.session.productIdentity as JsonRecord;
   const creative = args.session.creativeDirection as JsonRecord;
   const model = args.session.modelIdentity as JsonRecord;
+  // Sessions analysed before v10 have no plan; normalizeStylingPlan fills the
+  // defaults so the prompt block never renders "undefined" at a stylist.
+  const styling = normalizeStylingPlan(args.session.stylingPlan);
   const rules = Array.isArray(args.session.consistencyRules) ? args.session.consistencyRules.map(String) : CONSISTENCY_RULES;
   const placement = Array.isArray(product?.detailPlacementMap) ? product.detailPlacementMap.map(String) : [];
   const absent = Array.isArray(product?.absenceConstraints) ? product.absenceConstraints.map(String) : [];
@@ -604,8 +609,17 @@ LOCKED ART DIRECTION - MUST NOT CHANGE BETWEEN POSES:
 ${JSON.stringify(creative)}
 - Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, camera height and distance, depth of field and colour grade. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
 
-STYLING ADDITION (optional, locked once chosen):
-${creative.suggestedAccessories ? `The stylist has proposed adding: ${creative.suggestedAccessories}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}
+APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in all five frames:
+- Footwear: ${styling.footwear}
+- Jewellery: ${styling.jewellery}
+- Ornaments and accessories: ${styling.ornaments}
+- Makeup: ${styling.makeup}
+- Hair: ${styling.hair}
+${styling.stylingNotes ? `- Stylist notes: ${styling.stylingNotes}` : ""}
+${styling.themeInterpretation ? `- Theme being served: ${styling.themeInterpretation}` : ""}
+- Style the model with exactly these pieces - the same metal, the same count, the same placement in every frame. Do not add a necklace, bangle, ring, belt, bag, hair ornament or any other accessory this plan does not list, and do not drop one it does.
+- This is styling only. It never becomes part of the garment, never hides or replaces a garment detail, bottom wear or footwear shown in the product references, and never contradicts the placement or absence locks above.
+${creative.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${creative.suggestedAccessories}` : ""}
 
 ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
 ${allowedDelta.map((value) => `- ${value}`).join("\n")}
@@ -708,10 +722,17 @@ async function validatePose(args: {
   approved: LoadedReference[]; session: JsonRecord; pose: StudioPose & { poseNumber: number };
 }) {
   const qaRefs = selectReferences(args.references, args.approved, args.pose.id);
+  const styling = normalizeStylingPlan(args.session.stylingPlan);
   const prompt = buildPoseQaPrompt({
     poseNumber: args.pose.poseNumber, poseType: args.pose.id, poseTitle: args.pose.title, poseDirection: args.pose,
     productIdentity: args.session.productIdentity, creativeDirection: args.session.creativeDirection,
-    modelIdentity: args.session.modelIdentity, consistencyRules: (args.session.consistencyRules as string[]) || CONSISTENCY_RULES,
+    modelIdentity: args.session.modelIdentity,
+    // The approved plan rides in with the session rules so styling_addition has
+    // something exact to check rather than a general sense of "looks styled".
+    consistencyRules: [
+      ...((args.session.consistencyRules as string[]) || CONSISTENCY_RULES),
+      `APPROVED STYLING PLAN - footwear: ${styling.footwear}; jewellery: ${styling.jewellery}; ornaments: ${styling.ornaments}; makeup: ${styling.makeup}; hair: ${styling.hair}.${styling.stylingNotes ? ` Stylist notes: ${styling.stylingNotes}` : ""}`,
+    ],
     hasApprovedAnchor: args.approved.length > 0,
     hasModelReference: qaRefs.some((reference) => reference.role === "model_identity"),
     referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`),
@@ -1894,6 +1915,10 @@ async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, ref
   const memory = (batch.catalog_memory || {}) as JsonRecord;
   if (memory.modelIdentity) normalized.modelIdentity = memory.modelIdentity as typeof normalized.modelIdentity;
   if (memory.creativeDirection) normalized.creativeDirection = memory.creativeDirection as typeof normalized.creativeDirection;
+  // The catalogue's approved styling plan outranks whatever this SKU's own
+  // analysis proposed: one catalogue is one stylist's set of decisions, and a
+  // per-SKU proposal is exactly the drift the plan exists to prevent.
+  if (memory.stylingPlan) normalized.stylingPlan = normalizeStylingPlan(memory.stylingPlan);
   if (Array.isArray(memory.posePlan)) normalized.posePlan = memory.posePlan as StudioPose[];
   return normalized;
 }
@@ -1931,8 +1956,103 @@ function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof nor
   const memory = (batch.catalog_memory || {}) as JsonRecord;
   if (memory.modelIdentity) normalized.modelIdentity = memory.modelIdentity as typeof normalized.modelIdentity;
   if (memory.creativeDirection) normalized.creativeDirection = memory.creativeDirection as typeof normalized.creativeDirection;
+  // The catalogue's approved styling plan outranks whatever this SKU's own
+  // analysis proposed: one catalogue is one stylist's set of decisions, and a
+  // per-SKU proposal is exactly the drift the plan exists to prevent.
+  if (memory.stylingPlan) normalized.stylingPlan = normalizeStylingPlan(memory.stylingPlan);
   if (Array.isArray(memory.posePlan)) normalized.posePlan = memory.posePlan as StudioPose[];
   return normalized;
+}
+
+async function proposeCatalogStylingPlan(batchId: string, batch: JsonRecord, stylingPlan: StylingPlanProfile, variantId: string) {
+  const memory = (batch.catalog_memory || {}) as JsonRecord;
+  if (memory.stylingPlan) return;
+  const { error } = await service.from("planning_batches").update({
+    catalog_memory: {
+      ...memory, stylingPlan,
+      // Kept unedited alongside the working copy: comparing what the AI proposed
+      // with what the stylist approved is the raw material the learning layer
+      // needs, and it is unrecoverable once the plan is edited in place.
+      stylingPlanProposed: stylingPlan,
+      stylingPlanProposedAt: new Date().toISOString(), stylingPlanSourceRequestId: variantId,
+    },
+    updated_at: new Date().toISOString(),
+  }).eq("id", batchId);
+  if (error) throw new Error(error.message);
+}
+
+async function saveCatalogStylingPlanOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.manage");
+  const batch = await catalogBatch(workspace, String(args.catalogId || ""));
+  const memory = (batch.catalog_memory || {}) as JsonRecord;
+  const plan = normalizeStylingPlan(args.stylingPlan ?? memory.stylingPlan);
+  const approve = args.approve === true;
+  const now = new Date().toISOString();
+  const update: JsonRecord = {
+    catalog_memory: {
+      ...memory, stylingPlan: plan,
+      stylingPlanProposed: memory.stylingPlanProposed || memory.stylingPlan || plan,
+      stylingPlanProposedAt: memory.stylingPlanProposedAt || now,
+      ...(approve ? { stylingPlanApprovedAt: now, stylingPlanApprovedByMemberId: workspace.member.id } : {}),
+    },
+    updated_at: now,
+  };
+  if (approve) {
+    update.schedule_error = "";
+    // Releasing the gate has to hand the batch back to whichever runner owns it:
+    // the scheduler only claims rows still marked scheduled.
+    if (batch.schedule_status === "awaiting_styling_approval") {
+      update.schedule_status = batch.scheduled_at && Date.parse(String(batch.scheduled_at)) > Date.now() ? "scheduled" : "running";
+    }
+  }
+  const { error } = await service.from("planning_batches").update(update).eq("id", batch.id);
+  if (error) throw new Error(error.message);
+  await service.from("audit_logs").insert({
+    organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
+    action: approve ? "catalog.styling_plan.approved" : "catalog.styling_plan.updated",
+    resource_type: "planning_batch", resource_id: String(batch.id),
+    metadata: { edited: Object.keys(plan).filter((key) => String((memory.stylingPlanProposed as JsonRecord | undefined)?.[key] ?? "") !== String((plan as unknown as JsonRecord)[key] ?? "")) },
+  });
+  if (approve) scheduleBackground(kickCatalogProcessor(String(batch.id)));
+  return { success: true, stylingPlan: plan, approved: approve };
+}
+
+async function updateSessionStylingPlanOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "studio.generate");
+  const sessionId = String(args.sessionId || "");
+  const { data: session } = await service.from("catalog_sessions").select("*").eq("session_id", sessionId).eq("organization_id", workspace.organization.id).maybeSingle();
+  if (!session) throw new Error("The generation session was not found.");
+  if (!["ready", "analyzed"].includes(String(session.status || "ready"))) throw new Error("This session is already generating; regenerate a pose instead.");
+  const sessionData = (session.session_data || {}) as JsonRecord;
+  const plan = normalizeStylingPlan(args.stylingPlan ?? sessionData.stylingPlan);
+  // Styling is not part of the product analysis, so the fingerprint stays put and
+  // queueing still validates against the analysis the references produced.
+  const { error } = await service.from("catalog_sessions").update({
+    session_data: { ...sessionData, stylingPlan: plan, stylingPlanProposed: sessionData.stylingPlanProposed || sessionData.stylingPlan || plan, stylingPlanEditedAt: new Date().toISOString() },
+    updated_at: new Date().toISOString(),
+  }).eq("session_id", sessionId);
+  if (error) throw new Error(error.message);
+  if (session.planning_request_id) {
+    const { data: planningRequest } = await service.from("planning_requests").select("ai_analysis").eq("id", session.planning_request_id).maybeSingle();
+    const analysis = (planningRequest?.ai_analysis || {}) as JsonRecord;
+    if (Object.keys(analysis).length) {
+      await service.from("planning_requests").update({
+        ai_analysis: { ...analysis, stylingPlan: plan }, garment_analysis: { ...analysis, stylingPlan: plan }, updated_at: new Date().toISOString(),
+      }).eq("id", session.planning_request_id);
+    }
+  }
+  return { success: true, stylingPlan: plan };
+}
+
+// A catalogue only waits when it actually has a plan to look at. Batches created
+// before styling plans existed have none, and must keep running untouched.
+function stylingPlanApproval(batch: JsonRecord) {
+  const memory = (batch.catalog_memory || {}) as JsonRecord;
+  return {
+    hasPlan: Boolean(memory.stylingPlan),
+    approved: Boolean(memory.stylingPlanApprovedAt),
+    blocked: Boolean(memory.stylingPlan) && !memory.stylingPlanApprovedAt,
+  };
 }
 
 async function processCatalogPreflight(request: Request, args: JsonRecord) {
@@ -1973,6 +2093,10 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
         garment_analysis: normalized, ai_analysis: normalized, pose_plan: normalized.posePlan,
         validation_status: "ready", error_message: "", updated_at: now,
       }).eq("id", variant.id),
+      // The first analysed colourway proposes the catalogue's styling plan. It is
+      // stored unapproved: nothing generates until a human has seen it, so one
+      // stylist decision covers the whole catalogue instead of each SKU guessing.
+      proposeCatalogStylingPlan(batchId, batch as JsonRecord, normalized.stylingPlan, variant.id),
       service.from("ai_runs").insert({
         organization_id: batch.organization_id, planning_request_id: variant.id, batch_id: batchId,
         job_id: "", run_kind: "catalog_product_preflight", model: Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash",
@@ -2040,6 +2164,17 @@ async function processCatalog(request: Request, args: JsonRecord) {
     }).eq("id", batchId);
     return { processed: false, reason: "catalog_complete" };
   }
+  // Nothing is generated against a styling plan nobody has seen. The batch waits
+  // here, with the reason surfaced on the row, until the plan is approved.
+  const approval = stylingPlanApproval(batch);
+  if (approval.blocked) {
+    await service.from("planning_batches").update({
+      schedule_status: "awaiting_styling_approval",
+      schedule_error: "Review and approve the catalogue styling plan to start generating.",
+      updated_at: new Date().toISOString(),
+    }).eq("id", batchId);
+    return { processed: false, reason: "styling_plan_unapproved", batchId };
+  }
   try {
     const { productRefs, references } = await catalogReferenceInputs(batch, variant);
     if (!references.some((entry) => entry.role === "front") || !references.some((entry) => entry.role === "back")) throw new Error("Front and back references are required.");
@@ -2056,7 +2191,7 @@ async function processCatalog(request: Request, args: JsonRecord) {
     const sessionData = {
       skuId: variant.sku_name, skuName: variant.sku_name, productDetails: variant.product_description || "", category: settings.category || variant.category || "ethnic/fusion",
       referenceIds: productRefs.map((entry) => entry.id), references, productIdentity: normalized.productIdentity, creativeDirection: normalized.creativeDirection,
-      modelIdentity: normalized.modelIdentity, posePlan: normalized.posePlan, consistencyRules: CONSISTENCY_RULES, generatedAssets: [], approvedAssets: [],
+      modelIdentity: normalized.modelIdentity, stylingPlan: normalized.stylingPlan, posePlan: normalized.posePlan, consistencyRules: CONSISTENCY_RULES, generatedAssets: [], approvedAssets: [],
     };
     await service.from("catalog_sessions").insert({
       session_id: sessionId, job_id: "", user_id: "catalog-worker", organization_id: batch.organization_id, planning_request_id: variant.id,
@@ -2909,6 +3044,8 @@ Deno.serve(async (request) => {
       "catalog.schedule": () => scheduleCatalogOperation(request, args),
       "catalog.cancelSchedule": () => cancelScheduledCatalogOperation(request, args),
       "catalog.retryVariant": () => retryVariantOperation(request, args),
+      "catalog.saveStylingPlan": () => saveCatalogStylingPlanOperation(request, args),
+      "studio.updateStylingPlan": () => updateSessionStylingPlanOperation(request, args),
       "catalog.preflight": () => processCatalogPreflight(request, args),
       "catalog.process": () => processCatalog(request, args),
       "events.create": () => createEventOperation(request, args),

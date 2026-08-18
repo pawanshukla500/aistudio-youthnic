@@ -118,8 +118,19 @@ export type StudioAnalysis = {
   productIdentity: ProductIdentityProfile;
   creativeDirection: CreativeDirectionProfile;
   modelIdentity: Record<string, string>;
+  stylingPlan?: StylingPlanProfile;
   posePlan: StudioPose[];
   cacheHit: boolean;
+};
+
+export type StylingPlanProfile = {
+  footwear: string;
+  jewellery: string;
+  ornaments: string;
+  makeup: string;
+  hair: string;
+  stylingNotes: string;
+  themeInterpretation: string;
 };
 
 export type OutputOptions = {

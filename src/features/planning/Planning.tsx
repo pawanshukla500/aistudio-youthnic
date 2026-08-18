@@ -24,6 +24,7 @@ import { useWorkspace } from "../../lib/WorkspaceContext";
 import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
 import { firebaseStorage } from "../../lib/firebase";
 import { getErrorMessage } from "../../lib/errors";
+import { StylingPlanEditor, normalizePlan, type StylingPlan } from "../../components/ui/StylingPlanEditor";
 
 const CATEGORIES = ["ethnic/fusion", "western/casual", "dress", "formal", "streetwear", "activewear"];
 const ASPECTS = ["3:4", "4:5", "2:3", "9:16", "1:1", "16:9"];
@@ -115,6 +116,7 @@ export function Planning() {
   const scheduleCatalog = useMutation(api.catalog.scheduleCatalog);
   const cancelScheduledCatalog = useMutation(api.catalog.cancelScheduledCatalog);
   const addCatalogStyleReference = useMutation(api.catalog.addCatalogStyleReference);
+  const saveCatalogStylingPlan = useMutation(api.catalog.saveStylingPlan);
   const removeCatalogStyleReference = useMutation(api.catalog.removeCatalogStyleReference);
   const retryVariant = useMutation(api.catalog.retryVariant);
   const cancelJob = useMutation(api.jobs.cancel);
@@ -270,6 +272,20 @@ export function Planning() {
       notify("success", `${role.replace("_", " ")} saved for ${sku}.`);
     } catch (reason) {
       notify("error", getErrorMessage(reason, "Upload failed."));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const saveStylingPlan = async (stylingPlan: StylingPlan, approve: boolean) => {
+    if (!selectedId) return;
+    setBusy("styling-plan");
+    setNotice(null);
+    try {
+      await saveCatalogStylingPlan({ catalogId: selectedId, stylingPlan, approve });
+      notify("success", approve ? "Styling plan approved. Generation can start." : "Styling plan saved.");
+    } catch (reason) {
+      notify("error", getErrorMessage(reason, "Could not save the styling plan."));
     } finally {
       setBusy("");
     }
@@ -530,6 +546,41 @@ export function Planning() {
                   <div className="mt-4 flex items-center gap-3 rounded-xl border border-dashed border-outline-variant/50 bg-surface-container-lowest p-4 text-xs text-secondary"><ImageIcon className="h-5 w-5 shrink-0" /><span>No style reference yet. Generation can use the written scene direction, but a visual reference gives Gemini a clearer creative target.</span></div>
                 )}
               </section>
+
+              {/* Catalogue styling plan - one stylist decision for every colourway */}
+              {selected.stylingPlan && (
+                <section className="rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-sm">
+                  <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Catalogue styling plan</p>
+                      <h3 className="mt-1 font-syne text-lg font-bold text-on-surface">Footwear, jewellery & styling</h3>
+                      <p className="mt-1 max-w-2xl text-xs leading-5 text-secondary">
+                        Proposed from the first analysed colourway and the shared references. Approve it once and every SKU in this catalog is styled identically.
+                      </p>
+                    </div>
+                    <span className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wider ${selected.awaitingStylingApproval ? "bg-warning-surface text-warning" : "bg-success-surface text-success"}`}>
+                      {selected.awaitingStylingApproval ? "Awaiting approval" : "Approved"}
+                    </span>
+                  </div>
+                  {selected.awaitingStylingApproval && (
+                    <p className="mb-3 rounded-lg bg-warning-surface px-3 py-2 text-[11px] font-semibold text-warning">
+                      Generation is paused for this catalog until the plan is approved.
+                    </p>
+                  )}
+                  <StylingPlanEditor
+                    plan={normalizePlan(selected.stylingPlan)}
+                    proposed={selected.stylingPlanProposed ? normalizePlan(selected.stylingPlanProposed) : null}
+                    title="Applies to every colourway"
+                    description="Edit anything the AI proposed. Uploading a new style or model reference resets this plan and asks for approval again."
+                    saving={busy === "styling-plan"}
+                    saveLabel="Save changes"
+                    approveLabel={selected.awaitingStylingApproval ? "Approve and start generating" : "Re-approve"}
+                    disabled={!canEditReferences}
+                    onSave={(plan) => saveStylingPlan(plan, false)}
+                    onApprove={(plan) => saveStylingPlan(plan, true)}
+                  />
+                </section>
+              )}
 
               {/* Shared model identity reference */}
               <section className="rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-sm">
