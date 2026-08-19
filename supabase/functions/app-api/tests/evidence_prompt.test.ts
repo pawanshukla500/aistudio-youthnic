@@ -49,3 +49,47 @@ Deno.test("Garment Truth Contract: Legacy placement and absence locks are preser
   assertStringIncludes(prompt, "- Absence Lock 1");
   assertStringIncludes(prompt, "- Absence Lock 2");
 });
+
+Deno.test("Garment Truth Contract: Generic placement and absence safeguards are preserved when legacy arrays are empty but garmentEvidence is populated", () => {
+  const sessionData = {
+    productIdentity: {
+      category: "ethnic/fusion",
+      garmentEvidence: [
+        {
+          region: "front hem",
+          state: "confirmed",
+          visibleDecoration: "gold lace trim",
+        }
+      ],
+      detailPlacementMap: [],
+      absenceConstraints: [],
+    }
+  };
+
+  const poseData = {
+    id: "pose_2",
+    title: "Test Pose 2",
+    poseNumber: 2,
+    description: "test",
+    highlightedDetails: [],
+    productVisibilityRules: [],
+    purpose: "test",
+    consistencyNotes: "test",
+    prompt: "Test generation prompt",
+  };
+
+  const prompt = composeGenerationPrompt({
+    skuName: "Test SKU",
+    productDetails: "Test details",
+    pose: poseData as any,
+    session: sessionData,
+    references: [],
+  });
+
+  // Verify that the explicitly populated garment evidence is present
+  assertStringIncludes(prompt, "Region FRONT HEM: [State: confirmed]");
+  
+  // Verify that the generic safeguards are printed because the legacy arrays are empty!
+  assertStringIncludes(prompt, "- Preserve every visible detail only in the exact region shown by the authoritative image.");
+  assertStringIncludes(prompt, "- Add no button, closure, tassel/latkan, trim, embroidery, pocket, logo, jewelry or hardware unless the authoritative product image proves it exists at that location.");
+});

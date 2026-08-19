@@ -604,9 +604,9 @@ ${evidence.length ? evidence.map((e) => `- Region ${String(e.region).toUpperCase
   Decoration/Trim: ${e.visibleDecoration || "None explicitly proven"}
   Closures: ${e.closures || "None"}
   Absent: ${(Array.isArray(e.explicitlyAbsent) ? e.explicitlyAbsent : []).join(", ") || "None"}
-  Uncertainty: ${e.uncertainty || "None"}`).join("\n") : (placement.length ? "" : "- Preserve every visible detail only in the exact region shown by the authoritative image.")}
-${placement.length ? `Detail placement hard locks:\n${placement.map((rule) => `- ${rule}`).join("\n")}` : ""}
-${absent.length ? `Negative-evidence hard locks:\n${absent.map((rule) => `- ${rule}`).join("\n")}` : (evidence.length ? "" : "- Add no button, closure, tassel/latkan, trim, embroidery, pocket, logo, jewelry or hardware unless the authoritative product image proves it exists at that location.")}
+  Uncertainty: ${e.uncertainty || "None"}`).join("\n") : ""}
+${placement.length ? `Detail placement hard locks:\n${placement.map((rule) => `- ${rule}`).join("\n")}` : "- Preserve every visible detail only in the exact region shown by the authoritative image."}
+${absent.length ? `Negative-evidence hard locks:\n${absent.map((rule) => `- ${rule}`).join("\n")}` : "- Add no button, closure, tassel/latkan, trim, embroidery, pocket, logo, jewelry or hardware unless the authoritative product image proves it exists at that location."}
 
 CRITICAL EVIDENCE RULES:
 - If a region's state is "confirmed_absent", do not render the decoration, trim, closure, or specialized construction represented by that region.
