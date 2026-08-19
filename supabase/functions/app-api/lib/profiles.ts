@@ -39,6 +39,16 @@ export type StylingPlanProfile = {
   themeInterpretation: string;
 };
 
+export type GarmentRegionEvidence = {
+  region: string;
+  state: "confirmed" | "confirmed_absent" | "unknown";
+  visibleConstruction: string;
+  visibleDecoration: string;
+  closures: string;
+  explicitlyAbsent: string[];
+  uncertainty: string;
+};
+
 export type ProductIdentityProfile = {
   category: string;
   mainColor: string;
@@ -68,6 +78,7 @@ export type ProductIdentityProfile = {
   absenceConstraints: string[];
   invariantDetails: string[];
   uncertaintyNotes: string[];
+  garmentEvidence: GarmentRegionEvidence[];
 };
 
 export type StudioPose = {
@@ -247,6 +258,23 @@ export function normalizeStylingPlan(raw: unknown, options: { preserveEmpty?: bo
   };
 }
 
+function garmentEvidence(product: JsonRecord): GarmentRegionEvidence[] {
+  const evidence = product.garmentEvidence ?? product.garment_evidence;
+  if (!Array.isArray(evidence)) return [];
+  return evidence.map((e: unknown) => {
+    const obj = objectValue(e);
+    return {
+      region: stringValue(obj.region),
+      state: ["confirmed", "confirmed_absent", "unknown"].includes(String(obj.state)) ? (obj.state as "confirmed" | "confirmed_absent" | "unknown") : "unknown",
+      visibleConstruction: stringValue(obj.visibleConstruction ?? obj.visible_construction),
+      visibleDecoration: stringValue(obj.visibleDecoration ?? obj.visible_decoration),
+      closures: stringValue(obj.closures),
+      explicitlyAbsent: stringArray(obj.explicitlyAbsent ?? obj.explicitly_absent),
+      uncertainty: stringValue(obj.uncertainty),
+    };
+  });
+}
+
 export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
   const product = objectValue(raw.productIdentity ?? raw.product_identity);
   const creative = objectValue(raw.creativeDirection ?? raw.creative_direction);
@@ -274,6 +302,7 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
     absenceConstraints: stringArray(product.absenceConstraints ?? product.absence_constraints),
     invariantDetails: stringArray(product.invariantDetails ?? product.invariant_details),
     uncertaintyNotes: stringArray(product.uncertaintyNotes ?? product.uncertainty_notes),
+    garmentEvidence: garmentEvidence(product),
   };
   const creativeDirection = {
     backgroundStyle: stringValue(creative.backgroundStyle ?? creative.background_style, "Clean premium catalog background"),
@@ -374,7 +403,21 @@ PRINT AND EMBROIDERY GEOMETRY - the part that decides whether the output is this
 - embroideryGeometry.necklineRelation: exactly how the embroidery meets the neckline and where any tie, drawstring or tassel sits relative to it.
 Anything you genuinely cannot measure goes in uncertaintyNotes - never guess a geometry.
 
-Build a precise Product Identity Profile. If a detail is unclear, record it in uncertaintyNotes; do not invent it. Perform an evidence audit for closures and decoration placement. For buttons, zippers, hooks, ties, tassels/latkans, trim, beads, embroidery, pockets, piping, logos, stitching and hardware, record exactly where each detail IS visible and where it is ABSENT. Do not assume symmetry. Fill detailPlacementMap with region-specific hard locks and absenceConstraints with negative product facts.
+Build a precise Product Identity Profile. Perform a rigorous geographic evidence audit for construction, closures and decoration placement. Break the garment into specific physical regions (e.g. front neckline, front chest/yoke, front body, front hem, center back, back neckline, back body, back hem, left side construction, right side construction, left sleeve/armhole, right sleeve/armhole, waist, bottom wear front, bottom wear back, footwear, included accessories).
+For each region, record its evidence in garmentEvidence:
+- region: the physical location.
+- state: "confirmed" (clearly visible in an authoritative reference), "confirmed_absent" (clearly proven to not exist there), or "unknown" (not visually proven either way).
+- visibleConstruction: explicitly what construction (seams, slits, folds) is proven there.
+- visibleDecoration: explicitly what trim, lace, embroidery, or print is proven there.
+- closures: any buttons, ties, zippers.
+- explicitlyAbsent: what is explicitly proven NOT to be there.
+- uncertainty: what cannot be seen or is ambiguous.
+
+Crucial Evidence Rules:
+- UNKNOWN DOES NOT MEAN INFER. If left/right side construction cannot be established, record state as "unknown" and state explicitly in uncertainty that it is unproven.
+- Do not use words like "probably", "likely", "usually", "typically", "symmetrical", or "same as the other side". If it is not proven, it is unknown.
+- Do not extrapolate decoration. If gold lace is confirmed at the front hem, but the side seam is unknown, do not assume the lace continues. Record the side seam as unknown.
+Fill detailPlacementMap with region-specific hard locks and absenceConstraints with negative product facts as well for backward compatibility.
 
 SCENE AUTHORITY: when a STYLE REFERENCE image is supplied, that image defines the shoot. Describe what it actually shows - wall colour and finish, floor or ground surface, every prop and its placement, plant or furniture presence, light direction and quality, camera height and distance, depth of field, colour grade - concretely enough to rebuild that set from the description alone. Never replace it with a generic "clean premium studio backdrop": a plain seamless-paper description when the reference shows a styled set is a failure of this analysis. A requested scene direction refines mood, styling and props on top of the referenced set; it does not replace the referenced backdrop. Only when no style reference is supplied does the requested scene direction define the scene by itself.
 
@@ -402,7 +445,7 @@ Accessory styling suggestion: look at what footwear and accessories (if any) the
 Create exactly five product-specific camera setups in one coherent commercial coverage sequence, in this order and with these ids: full_front, angled, back, creative, closeup. They are not five unrelated concepts. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints.
 
 - full_front: square, unobstructed head-to-toe hero; establishes face/hair/styling/footwear/scene/lighting anchor with playful, confident Gen-Z energy.
-- angled: best side or three-quarter orientation for THIS garment; prove depth, drape, seams/slits/pockets/layering without distortion.
+- angled: best side or three-quarter orientation for THIS garment; reveal side construction exactly as defined by the Garment Truth Contract / Product DNA. Show existing slits or pockets only when references prove they exist; never invent, extend, or extrapolate decoration into unknown side regions.
 - back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority.
 - creative: playful, scroll-stopping Gen-Z editorial movement tailored to this garment while keeping product completely readable.
 - closeup: a genuine zoomed-in face-to-chest or face-to-waist shot (never a repeat of the full-body hero framing) pairing a beautiful, cute, Gen-Z-style face with a genuine, natural expression AND one sharp, clearly visible real product detail (embroidery, neckline, drape, print, or fabric texture).
@@ -410,7 +453,7 @@ Create exactly five product-specific camera setups in one coherent commercial co
 Across all five, ONLY pose, angle, framing, and expression may change. Exact product, colors, pattern, bottom wear, face, hairstyle, makeup, accessories, footwear, scene, lighting, shadows, camera/lens feel, and color treatment remain locked.
 
 Return STRICT JSON only:
-{"productIdentity":{"category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[]},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front"},{"id":"angled"},{"id":"back"},{"id":"creative"},{"id":"closeup"}]}`;
+{"productIdentity":{"category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[],"garmentEvidence":[{"region":"","state":"","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front"},{"id":"angled"},{"id":"back"},{"id":"creative"},{"id":"closeup"}]}  `;
 }
 
 export const CONSISTENCY_RULES = [
@@ -435,7 +478,7 @@ export const CONSISTENCY_RULES = [
 // Bumping this invalidates cached analyses, which is intended here: a profile
 // cached under v8 carries no pattern or embroidery geometry for the prompt locks
 // and the fidelity gate to work against.
-export const ANALYSIS_VERSION = "generation-session-v10-styling-plan";
+export const ANALYSIS_VERSION = "generation-session-v11-garment-evidence";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

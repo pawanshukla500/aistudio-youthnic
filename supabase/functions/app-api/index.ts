@@ -545,9 +545,9 @@ function embroideryGeometryOf(product: JsonRecord) {
   return Object.keys(geometry).length ? geometry : { placement: String(product?.embroidery || "") };
 }
 
-function composeGenerationPrompt(args: {
+export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
-  session: JsonRecord; references: LoadedReference[]; correction?: string;
+  session: JsonRecord; references: LoadedReference[]; correction?: string; learnings?: string;
 }) {
   const product = args.session.productIdentity as JsonRecord;
   const creative = args.session.creativeDirection as JsonRecord;
@@ -558,6 +558,7 @@ function composeGenerationPrompt(args: {
   const rules = Array.isArray(args.session.consistencyRules) ? args.session.consistencyRules.map(String) : CONSISTENCY_RULES;
   const placement = Array.isArray(product?.detailPlacementMap) ? product.detailPlacementMap.map(String) : [];
   const absent = Array.isArray(product?.absenceConstraints) ? product.absenceConstraints.map(String) : [];
+  const evidence = Array.isArray(product?.garmentEvidence) ? product.garmentEvidence as JsonRecord[] : [];
   const manifest = args.references.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
   const hasApprovedAnchor = args.references.some((reference) => reference.role === "approved_pose");
   const hasModelReference = args.references.some((reference) => reference.role === "model_identity");
@@ -596,10 +597,21 @@ ${JSON.stringify(product)}
 User notes: ${args.productDetails}
 Reference authority: FRONT controls front construction; BACK solely controls rear construction; FABRIC/PATTERN resolves material and small construction; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion and drape, while a FLAT-LAY resolves outline, construction, panel layout and length only; ADDITIONAL supports product truth; STYLE controls art direction only.
 - Product references may be flat-lay, folded, pinned or shot on a mannequin or dress form. Rebuild the garment as it falls on a live human body, and never render a mannequin, dress form, hanger, clip, pin, prop stand, or the flat background surface in the output.
-Detail placement hard locks:
-${placement.length ? placement.map((rule) => `- ${rule}`).join("\n") : "- Preserve every visible detail only in the exact region shown by the authoritative image."}
-Negative-evidence hard locks:
-${absent.length ? absent.map((rule) => `- ${rule}`).join("\n") : "- Add no button, closure, tassel/latkan, trim, embroidery, pocket, logo, jewelry or hardware unless the authoritative product image proves it exists at that location."}
+
+GARMENT TRUTH CONTRACT (EVIDENCE BY REGION):
+${evidence.length ? evidence.map((e) => `- Region ${String(e.region).toUpperCase() || "UNKNOWN"}: [State: ${String(e.state)}]
+  Construction: ${e.visibleConstruction || "None explicitly proven"}
+  Decoration/Trim: ${e.visibleDecoration || "None explicitly proven"}
+  Closures: ${e.closures || "None"}
+  Absent: ${(Array.isArray(e.explicitlyAbsent) ? e.explicitlyAbsent : []).join(", ") || "None"}
+  Uncertainty: ${e.uncertainty || "None"}`).join("\n") : ""}
+${placement.length ? `Detail placement hard locks:\n${placement.map((rule) => `- ${rule}`).join("\n")}` : "- Preserve every visible detail only in the exact region shown by the authoritative image."}
+${absent.length ? `Negative-evidence hard locks:\n${absent.map((rule) => `- ${rule}`).join("\n")}` : "- Add no button, closure, tassel/latkan, trim, embroidery, pocket, logo, jewelry or hardware unless the authoritative product image proves it exists at that location."}
+
+CRITICAL EVIDENCE RULES:
+- If a region's state is "confirmed_absent", do not render the decoration, trim, closure, or specialized construction represented by that region.
+- If a region's state is "unknown", it MUST be rendered in plain base fabric without any unproven decoration, trim, or specialized construction. UNKNOWN DOES NOT MEAN INFER.
+- Do NOT extrapolate decoration. If trim is confirmed at the front hem but the side seam is unknown, do not extend the trim up the side.
 
 PRINT AND EMBROIDERY GEOMETRY LOCK - the difference between photographing THIS garment and inventing a similar one:
 Pattern geometry: ${JSON.stringify(patternGeometryOf(product))}
@@ -639,8 +651,20 @@ Description: ${args.pose.description}
 Details to highlight: ${args.pose.highlightedDetails.join(", ")}
 Visibility rules: ${args.pose.productVisibilityRules.join("; ")}
 Purpose: ${args.pose.purpose}
-Continuity: ${args.pose.consistencyNotes}
-Direction: ${args.pose.prompt}
+Consistency notes: ${args.pose.consistencyNotes}
+${args.correction ? `
+CORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:
+${args.correction}
+- Address this correction completely and literally. Do not change anything else that was working.` : ""}
+${args.learnings ? `
+CONTINUOUS LEARNING ADVISORY (PAST QA FEEDBACK FOR THIS CATEGORY):
+${args.learnings}
+- These are historical corrections from other products. They are ADVISORY only.
+- You MUST validate these learnings against the current product's GARMENT TRUTH CONTRACT. If a past correction contradicts the current authoritative product references or evidence, ignore the learning. The current product references ALWAYS override past learnings.
+` : ""}
+
+PROMPT:
+${args.pose.prompt}
 
 REALISTIC INTEGRATION:
 - Treat this as frame ${args.pose.poseNumber} from one photographed contact sheet, not a new image concept. Reuse the same physical set coordinates, time of day, camera family, focal-length character, camera height, exposure, white balance, light direction, shadow density, and color grade established by Pose 1.
@@ -858,7 +882,14 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     provider: job.provider || "openai", status, pose_count: completed, retry_count: poses.reduce((sum, pose) => sum + Math.max(0, Number(pose.attempt_count || 0) - 1), 0),
     processing_time_ms: job.started_at ? Date.now() - new Date(String(job.started_at)).getTime() : 0,
     actual_cost_usd: Number(job.actual_cost_usd || 0), quality_score: completed ? (completed / 5) * 100 : 0,
-    success_signals: { completedPoses: completed }, failure_signals: { failedPoses: failed },
+    success_signals: { completedPoses: completed },
+    failure_signals: {
+      failedPoses: failed,
+      feedback: poses.filter((p) => p.status === "failed").map((p) => {
+        const d = (p.generation_data || {}) as JsonRecord;
+        return { poseTitle: String(p.title || ""), corrections: Array.isArray(d.corrections) ? d.corrections : [String(d.correction || "")].filter(Boolean) };
+      }),
+    },
     pose_titles: poses.map((pose) => String(pose.title || "")), prompt_fingerprint: String(session.analysis_fingerprint || ""),
     scene_summary: String((sessionData.creativeDirection as JsonRecord | undefined)?.backgroundStyle || ""),
     footwear: String((sessionData.productIdentity as JsonRecord | undefined)?.footwearDetails || ""),
@@ -1098,11 +1129,28 @@ async function processWorker(request: Request, args: JsonRecord) {
     return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed" };
   }
   try {
+    const { data: pastLearnings } = await service.from("generation_learnings")
+      .select("failure_signals")
+      .eq("organization_id", job.org_id)
+      .eq("product_category", String(sessionData.category || ""))
+      .order("created_at", { ascending: false })
+      .limit(5);
+    const learningsArr: string[] = [];
+    for (const l of pastLearnings || []) {
+      const fb = ((l.failure_signals as JsonRecord)?.feedback as any[]) || [];
+      for (const f of fb) {
+        if (f.poseTitle === poseData.title && Array.isArray(f.corrections)) {
+          learningsArr.push(...f.corrections.map(String));
+        }
+      }
+    }
+    const learningsStr = learningsArr.slice(0, 3).map((c) => `- Past correction: ${c}`).join("\n");
+
     const selected = selectReferences(loadedReferences, approved, poseData.id);
     const prompt = composeGenerationPrompt({
       skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || "Untitled product"),
       productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
-      references: selected, correction: promptCorrection(),
+      references: selected, correction: promptCorrection(), learnings: learningsStr,
     });
     await service.from("session_generations").update({ full_prompt: prompt, attempt_count: attempt, updated_at: new Date().toISOString() }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
     const generatedStarted = Date.now();
@@ -1933,15 +1981,7 @@ async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, ref
   }) });
   const result = await geminiJson(Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash", parts);
   const normalized = normalizeAnalysis(result.json, String(settings.category || variant.category || "ethnic/fusion"));
-  const memory = (batch.catalog_memory || {}) as JsonRecord;
-  if (memory.modelIdentity) normalized.modelIdentity = memory.modelIdentity as typeof normalized.modelIdentity;
-  if (memory.creativeDirection) normalized.creativeDirection = memory.creativeDirection as typeof normalized.creativeDirection;
-  // The catalogue's approved styling plan outranks whatever this SKU's own
-  // analysis proposed: one catalogue is one stylist's set of decisions, and a
-  // per-SKU proposal is exactly the drift the plan exists to prevent.
-  if (memory.stylingPlan) normalized.stylingPlan = normalizeStylingPlan(memory.stylingPlan);
-  if (Array.isArray(memory.posePlan)) normalized.posePlan = memory.posePlan as StudioPose[];
-  return normalized;
+  return applyCatalogMemory(batch, normalized);
 }
 
 async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
@@ -1981,7 +2021,23 @@ function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof nor
   // analysis proposed: one catalogue is one stylist's set of decisions, and a
   // per-SKU proposal is exactly the drift the plan exists to prevent.
   if (memory.stylingPlan) normalized.stylingPlan = normalizeStylingPlan(memory.stylingPlan);
-  if (Array.isArray(memory.posePlan)) normalized.posePlan = memory.posePlan as StudioPose[];
+  if (Array.isArray(memory.posePlan) && memory.posePlan.length > 0) {
+    const memoryPoses = memory.posePlan as StudioPose[];
+    normalized.posePlan = normalized.posePlan.map(skuPose => {
+      const catPose = memoryPoses.find(p => p.id === skuPose.id);
+      if (!catPose) return skuPose;
+      // Lock shared shoot identity but preserve SKU-specific facts (visibility, reference, details)
+      return {
+        ...skuPose,
+        framing: catPose.framing !== undefined ? catPose.framing : skuPose.framing,
+        cameraAngle: catPose.cameraAngle !== undefined ? catPose.cameraAngle : skuPose.cameraAngle,
+        bodyPosition: catPose.bodyPosition !== undefined ? catPose.bodyPosition : skuPose.bodyPosition,
+        expression: catPose.expression !== undefined ? catPose.expression : skuPose.expression,
+        consistencyNotes: catPose.consistencyNotes !== undefined ? catPose.consistencyNotes : skuPose.consistencyNotes,
+        purpose: catPose.purpose !== undefined ? catPose.purpose : skuPose.purpose,
+      };
+    });
+  }
   return normalized;
 }
 
