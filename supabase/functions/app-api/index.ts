@@ -545,7 +545,7 @@ function embroideryGeometryOf(product: JsonRecord) {
   return Object.keys(geometry).length ? geometry : { placement: String(product?.embroidery || "") };
 }
 
-function composeGenerationPrompt(args: {
+export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
   session: JsonRecord; references: LoadedReference[]; correction?: string; learnings?: string;
 }) {
@@ -604,11 +604,12 @@ ${evidence.length ? evidence.map((e) => `- Region ${String(e.region).toUpperCase
   Decoration/Trim: ${e.visibleDecoration || "None explicitly proven"}
   Closures: ${e.closures || "None"}
   Absent: ${(Array.isArray(e.explicitlyAbsent) ? e.explicitlyAbsent : []).join(", ") || "None"}
-  Uncertainty: ${e.uncertainty || "None"}`).join("\n")
-  : `${placement.length ? `Detail placement hard locks:\n${placement.map((rule) => `- ${rule}`).join("\n")}` : "- Preserve every visible detail only in the exact region shown by the authoritative image."}
-${absent.length ? `Negative-evidence hard locks:\n${absent.map((rule) => `- ${rule}`).join("\n")}` : "- Add no button, closure, tassel/latkan, trim, embroidery, pocket, logo, jewelry or hardware unless the authoritative product image proves it exists at that location."}`}
+  Uncertainty: ${e.uncertainty || "None"}`).join("\n") : (placement.length ? "" : "- Preserve every visible detail only in the exact region shown by the authoritative image.")}
+${placement.length ? `Detail placement hard locks:\n${placement.map((rule) => `- ${rule}`).join("\n")}` : ""}
+${absent.length ? `Negative-evidence hard locks:\n${absent.map((rule) => `- ${rule}`).join("\n")}` : (evidence.length ? "" : "- Add no button, closure, tassel/latkan, trim, embroidery, pocket, logo, jewelry or hardware unless the authoritative product image proves it exists at that location.")}
 
 CRITICAL EVIDENCE RULES:
+- If a region's state is "confirmed_absent", do not render the decoration, trim, closure, or specialized construction represented by that region.
 - If a region's state is "unknown", it MUST be rendered in plain base fabric without any unproven decoration, trim, or specialized construction. UNKNOWN DOES NOT MEAN INFER.
 - Do NOT extrapolate decoration. If trim is confirmed at the front hem but the side seam is unknown, do not extend the trim up the side.
 
@@ -2028,12 +2029,12 @@ function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof nor
       // Lock shared shoot identity but preserve SKU-specific facts (visibility, reference, details)
       return {
         ...skuPose,
-        framing: catPose.framing,
-        cameraAngle: catPose.cameraAngle,
-        bodyPosition: catPose.bodyPosition,
-        expression: catPose.expression,
-        consistencyNotes: catPose.consistencyNotes,
-        purpose: catPose.purpose,
+        framing: catPose.framing !== undefined ? catPose.framing : skuPose.framing,
+        cameraAngle: catPose.cameraAngle !== undefined ? catPose.cameraAngle : skuPose.cameraAngle,
+        bodyPosition: catPose.bodyPosition !== undefined ? catPose.bodyPosition : skuPose.bodyPosition,
+        expression: catPose.expression !== undefined ? catPose.expression : skuPose.expression,
+        consistencyNotes: catPose.consistencyNotes !== undefined ? catPose.consistencyNotes : skuPose.consistencyNotes,
+        purpose: catPose.purpose !== undefined ? catPose.purpose : skuPose.purpose,
       };
     });
   }
