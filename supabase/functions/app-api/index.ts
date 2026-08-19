@@ -561,8 +561,8 @@ export function composeGenerationPrompt(args: {
   const evidence = Array.isArray(product?.garmentEvidence) ? product.garmentEvidence as JsonRecord[] : [];
   
   const isSaree = product?.garmentFamily === "saree";
-  const sareeTruth = isSaree ? args.session.sareeTruth as JsonRecord : null;
-  const sareeDrapePlan = isSaree ? args.session.sareeDrapePlan as JsonRecord : null;
+  const sareeTruth = isSaree ? product.sareeTruth as JsonRecord : null;
+  const sareeDrapePlan = isSaree ? product.sareeDrapePlan as JsonRecord : null;
   const manifest = args.references.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
   const hasApprovedAnchor = args.references.some((reference) => reference.role === "approved_pose");
   const hasModelReference = args.references.some((reference) => reference.role === "model_identity");
