@@ -1500,6 +1500,48 @@ async function downloadGeneratedAssets(request: Request, args: JsonRecord) {
   return { assets: assetResults };
 }
 
+async function adminGenerationFlowList(request: Request) {
+  const { workspace } = await workspaceFor(request);
+  if (!workspace.isAdmin && !workspace.permissions.some((p) => p.startsWith("admin."))) throw new Error("You do not have access to the admin console.");
+  
+  const { data: jobs, error } = await service.from("generation_jobs")
+    .select("job_id, session_id, sku_name, status, model, provider, actual_cost_usd, started_at, batch_id, current_pose")
+    .eq("org_id", workspace.organization.id)
+    .order("started_at", { ascending: false })
+    .limit(50);
+  if (error) throw new Error(error.message);
+  
+  return { jobs: jobs || [] };
+}
+
+async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request);
+  if (!workspace.isAdmin && !workspace.permissions.some((p) => p.startsWith("admin."))) throw new Error("You do not have access to the admin console.");
+  
+  const jobId = String(args.jobId || "");
+  if (!jobId) throw new Error("jobId is required.");
+
+  const { data: job, error: jobError } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  if (jobError || !job) throw new Error("Job not found.");
+
+  const [session, poses, aiRuns, qaReviews, learning] = await Promise.all([
+    service.from("catalog_sessions").select("*").eq("session_id", job.session_id).maybeSingle(),
+    service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index"),
+    service.from("ai_runs").select("*").eq("session_id", job.session_id).order("created_at"),
+    service.from("qa_reviews").select("*").eq("session_id", job.session_id).order("created_at"),
+    service.from("generation_learnings").select("*").eq("job_id", jobId).maybeSingle()
+  ]);
+
+  return {
+    summary: job,
+    session: session.data ? session.data.session_data : null,
+    poses: poses.data || [],
+    aiRuns: aiRuns.data || [],
+    qaReviews: qaReviews.data || [],
+    learning: learning.data || null,
+  };
+}
+
 async function adminOverview(request: Request) {
   const { workspace } = await workspaceFor(request);
   if (!workspace.isAdmin && !workspace.permissions.some((permission) => permission.startsWith("admin."))) throw new Error("You do not have access to the admin console.");
@@ -3238,6 +3280,8 @@ Deno.serve(async (request) => {
       "jobs.downloadAssets": () => downloadGeneratedAssets(request, args),
       "worker": () => processWorker(request, args),
       "admin.overview": () => adminOverview(request),
+      "admin.generationFlow.list": () => adminGenerationFlowList(request),
+      "admin.generationFlow.get": () => adminGenerationFlowGet(request, args),
       "admin.createUser": () => createUserOperation(request, args),
       "admin.updateMember": () => updateMemberOperation(request, args),
       "admin.deleteMember": () => deleteMemberOperation(request, args),

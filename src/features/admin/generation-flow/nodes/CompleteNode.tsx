@@ -1,0 +1,1 @@
+import { CheckCircle2 } from 'lucide-react'; export function CompleteNode({ data }: any) { return <div className='p-3 border rounded-lg bg-surface-container-lowest min-w-[200px] flex items-center gap-2'><CheckCircle2 className='h-5 w-5 text-success' /><div className='text-sm font-semibold'>{data.status === 'completed' ? 'Completed' : 'Failed'}</div></div>; }

@@ -1,0 +1,1 @@
+export function MemoryNode() { return <div className='p-3 border rounded-lg bg-surface-container-lowest min-w-[200px]'><div className='text-[10px] font-bold text-secondary uppercase tracking-wider mb-1'>Brain Memory</div><div className='text-xs text-secondary'>Candidate rejection history was not recorded for this generation.</div></div>; }

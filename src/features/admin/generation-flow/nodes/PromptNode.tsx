@@ -1,0 +1,1 @@
+export function PromptNode({ data }: any) { return <div className='p-3 border rounded-lg bg-surface-container-lowest min-w-[200px]'><div className='text-[10px] font-bold text-secondary uppercase tracking-wider mb-1'>Prompt Compilation</div><div className='text-xs text-secondary truncate max-w-[200px]'>{data.prompt}</div></div>; }

@@ -1,0 +1,1 @@
+export function PoseNode({ data }: any) { return <div className='p-3 border rounded-lg bg-surface-container-lowest border-primary/40 bg-primary-container/10 min-w-[200px]'><div className='text-[10px] font-bold text-primary uppercase tracking-wider mb-1'>Pose {data.pose?.pose_index}</div><div className='text-sm font-semibold'>{data.pose?.title}</div></div>; }

@@ -1,0 +1,1 @@
+export function AnalysisNode({ data }: any) { return <div className='p-3 border rounded-lg bg-surface-container-lowest min-w-[200px]'><div className='text-[10px] font-bold text-secondary uppercase tracking-wider mb-1'>Gemini Analysis</div><div className='text-xs text-on-surface'>Version: {data.session?.version || 'Unknown'}</div></div>; }

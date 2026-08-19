@@ -1,0 +1,1 @@
+export function PlanNode() { return <div className='p-3 border rounded-lg bg-surface-container-lowest min-w-[200px]'><div className='text-[10px] font-bold text-secondary uppercase tracking-wider mb-1'>Pose Plan</div><div className='text-xs text-on-surface'>Generates 5 distinct poses.</div></div>; }
