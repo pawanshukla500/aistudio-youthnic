@@ -1142,7 +1142,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         }
       }
     }
-    const learningsStr = learningsArr.slice(-3).map((c) => `- Past correction: ${c}`).join("\n");
+    const learningsStr = learningsArr.slice(0, 3).map((c) => `- Past correction: ${c}`).join("\n");
 
     const selected = selectReferences(loadedReferences, approved, poseData.id);
     const prompt = composeGenerationPrompt({
@@ -1979,15 +1979,7 @@ async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, ref
   }) });
   const result = await geminiJson(Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash", parts);
   const normalized = normalizeAnalysis(result.json, String(settings.category || variant.category || "ethnic/fusion"));
-  const memory = (batch.catalog_memory || {}) as JsonRecord;
-  if (memory.modelIdentity) normalized.modelIdentity = memory.modelIdentity as typeof normalized.modelIdentity;
-  if (memory.creativeDirection) normalized.creativeDirection = memory.creativeDirection as typeof normalized.creativeDirection;
-  // The catalogue's approved styling plan outranks whatever this SKU's own
-  // analysis proposed: one catalogue is one stylist's set of decisions, and a
-  // per-SKU proposal is exactly the drift the plan exists to prevent.
-  if (memory.stylingPlan) normalized.stylingPlan = normalizeStylingPlan(memory.stylingPlan);
-  if (Array.isArray(memory.posePlan)) normalized.posePlan = memory.posePlan as StudioPose[];
-  return normalized;
+  return applyCatalogMemory(batch, normalized);
 }
 
 async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {

@@ -122,10 +122,10 @@ export function normalizePoseQaResult(raw: JsonRecord) {
   const lowConfidence: string[] = [];
   for (const [key, score] of Object.entries(scores)) {
     if (!CRITICAL_CHECKS.includes(key) || score >= CRITICAL_SCORE_FLOOR) continue;
+    failed.add(key);
     if (score < SEVERE_SCORE_FLOOR) {
       severe.push(key);
-      failed.add(key);
-    } else if (!failed.has(key)) {
+    } else {
       lowConfidence.push(`${key} ${score}%`);
     }
   }
