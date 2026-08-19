@@ -656,9 +656,10 @@ CORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:
 ${args.correction}
 - Address this correction completely and literally. Do not change anything else that was working.` : ""}
 ${args.learnings ? `
-CONTINUOUS LEARNING (PAST QA FEEDBACK FOR THIS POSING/CATEGORY):
+CONTINUOUS LEARNING ADVISORY (PAST QA FEEDBACK FOR THIS CATEGORY):
 ${args.learnings}
-- Heed these historical learnings to avoid past hallucination patterns.
+- These are historical corrections from other products. They are ADVISORY only.
+- You MUST validate these learnings against the current product's GARMENT TRUTH CONTRACT. If a past correction contradicts the current authoritative product references or evidence, ignore the learning. The current product references ALWAYS override past learnings.
 ` : ""}
 
 PROMPT:

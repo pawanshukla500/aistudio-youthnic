@@ -113,11 +113,9 @@ export function normalizePoseQaResult(raw: JsonRecord) {
     ? Math.round(weighted.reduce((sum, entry) => sum + entry.score * entry.weight, 0) / totalWeight)
     : Math.max(0, Math.min(100, Number(raw.score) || 0));
 
-  // A mediocre number on its own is not evidence of drift. Rejecting on one
-  // rejected a frame the validator had just described as matching, and paid for
-  // another generation to find out. So a score only rejects when it is severe
-  // enough to be a claim in its own right; otherwise the frame ships with the
-  // number visible and flagged for a look.
+  // Any critical check scoring below CRITICAL_SCORE_FLOOR (85) causes the check
+  // to fail and triggers the retry path, preventing drift. Severe scores (below
+  // SEVERE_SCORE_FLOOR) remain separately classified to prioritize failure messages.
   const severe: string[] = [];
   const lowConfidence: string[] = [];
   for (const [key, score] of Object.entries(scores)) {
