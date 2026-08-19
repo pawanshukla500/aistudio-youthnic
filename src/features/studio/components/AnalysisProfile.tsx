@@ -198,6 +198,34 @@ export function AnalysisProfile({
                     </div>
                   )}
 
+                  {analysis.productIdentity.garmentFamily === "saree" && analysis.productIdentity.sareeTruth && (
+                    <div>
+                      <h3 className="mb-3 flex items-center gap-2 text-xs font-bold"><Shirt className="h-4 w-4 text-primary" /> Saree Truth</h3>
+                      <ProfileGrid items={[
+                        ["Main Fabric", analysis.productIdentity.sareeTruth.body.mainFabric],
+                        ["Pallu Type", analysis.productIdentity.sareeTruth.pallu.hasDistinctPallu ? "Distinct Pallu" : "Continuous Body"],
+                        ["Pallu Motif", analysis.productIdentity.sareeTruth.pallu.motifInventory],
+                        ["Border", analysis.productIdentity.sareeTruth.borders.upperBorder],
+                        ["Blouse Piece", analysis.productIdentity.sareeTruth.blouse.hasBlouse ? "Included" : "None"],
+                        ["Physics", analysis.productIdentity.sareeTruth.physics.expectedFall],
+                      ]} />
+                    </div>
+                  )}
+
+                  {analysis.productIdentity.garmentFamily === "saree" && analysis.productIdentity.sareeDrapePlan && (
+                    <div>
+                      <h3 className="mb-3 flex items-center gap-2 text-xs font-bold"><Palette className="h-4 w-4 text-primary" /> Saree Drape Plan</h3>
+                      <ProfileGrid items={[
+                        ["Base Drape", analysis.productIdentity.sareeDrapePlan.baseDrapeFamily],
+                        ["Shoulder", analysis.productIdentity.sareeDrapePlan.shoulderSide],
+                        ["Pallu Placement", analysis.productIdentity.sareeDrapePlan.palluShoulderPlacement],
+                        ["Pallu Style", analysis.productIdentity.sareeDrapePlan.openOrPleatedPallu],
+                        ["Pleat Treatment", analysis.productIdentity.sareeDrapePlan.frontPleatTreatment],
+                        ["Pallu Spread", analysis.productIdentity.sareeDrapePlan.palluSpread],
+                      ]} />
+                    </div>
+                  )}
+
                   <div>
                     <h3 className="mb-3 flex items-center gap-2 text-xs font-bold"><Aperture className="h-4 w-4 text-primary" /> Creative Direction Profile</h3>
                     <ProfileGrid items={creativeFields.map(([key, label]) => [label, analysis.creativeDirection[key]])} />

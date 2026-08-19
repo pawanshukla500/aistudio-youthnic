@@ -61,7 +61,98 @@ export type EmbroideryGeometryProfile = {
   necklineRelation: string;
 };
 
+export type SareeTruthProfile = {
+  body: {
+    mainFabric: string;
+    weave: string;
+    texture: string;
+    transparency: string;
+    baseColor: string;
+    pattern: string;
+    motifScale: string;
+    motifRepeat: string;
+    embellishment: string;
+    bodyOrientation: string;
+  };
+  borders: {
+    upperBorder: string;
+    lowerBorder: string;
+    borderWidth: string;
+    borderColors: string;
+    construction: string;
+    motifGeometry: string;
+    edgeTreatment: string;
+    continuityRules: string;
+  };
+  pallu: {
+    hasDistinctPallu: boolean;
+    startingRegion: string;
+    baseColor: string;
+    motifInventory: string;
+    motifDensity: string;
+    borders: string;
+    artwork: string;
+    zari: string;
+    embroidery: string;
+    tassels: string;
+    edgeTreatment: string;
+    visualOrientation: string;
+    evidenceReferences: string;
+    uncertainty: string;
+  };
+  pleatZone: {
+    patternBehavior: string;
+    borderBehavior: string;
+    embellishmentBehavior: string;
+    hasSpecialPanel: boolean;
+  };
+  blouse: {
+    hasBlouse: boolean;
+    color: string;
+    fabric: string;
+    frontConstruction: string;
+    backConstruction: string;
+    neckline: string;
+    sleeves: string;
+    closure: string;
+    embroidery: string;
+    border: string;
+    pattern: string;
+    fit: string;
+    isUnstitchedPiece: boolean;
+  };
+  physics: {
+    weight: string;
+    stiffness: string;
+    fluidity: string;
+    transparency: string;
+    shine: string;
+    creaseBehavior: string;
+    expectedFall: string;
+  };
+};
+
+export type SareeDrapePlan = {
+  baseDrapeFamily: string;
+  shoulderSide: string;
+  waistTuck: string;
+  frontPleatTreatment: string;
+  palluShoulderPlacement: string;
+  openOrPleatedPallu: string;
+  palluSpread: string;
+  palluFallDirection: string;
+  palluVisibleLength: string;
+  handInteraction: string;
+  movementAmount: string;
+  pinningBehavior: string;
+  borderVisibility: string;
+  blouseVisibility: string;
+  coverageConstraints: string;
+  poseSpecificDrapeState: string;
+};
+
 export type ProductIdentityProfile = {
+  garmentFamily?: string;
   category: string;
   mainColor: string;
   secondaryColors: string[];
@@ -90,6 +181,8 @@ export type ProductIdentityProfile = {
   absenceConstraints: string[];
   invariantDetails: string[];
   uncertaintyNotes: string[];
+  sareeTruth?: SareeTruthProfile;
+  sareeDrapePlan?: SareeDrapePlan;
 };
 
 export type CreativeDirectionProfile = {

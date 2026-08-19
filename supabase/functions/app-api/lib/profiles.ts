@@ -49,7 +49,98 @@ export type GarmentRegionEvidence = {
   uncertainty: string;
 };
 
+export type SareeTruthProfile = {
+  body: {
+    mainFabric: string;
+    weave: string;
+    texture: string;
+    transparency: string;
+    baseColor: string;
+    pattern: string;
+    motifScale: string;
+    motifRepeat: string;
+    embellishment: string;
+    bodyOrientation: string;
+  };
+  borders: {
+    upperBorder: string;
+    lowerBorder: string;
+    borderWidth: string;
+    borderColors: string;
+    construction: string;
+    motifGeometry: string;
+    edgeTreatment: string;
+    continuityRules: string;
+  };
+  pallu: {
+    hasDistinctPallu: boolean;
+    startingRegion: string;
+    baseColor: string;
+    motifInventory: string;
+    motifDensity: string;
+    borders: string;
+    artwork: string;
+    zari: string;
+    embroidery: string;
+    tassels: string;
+    edgeTreatment: string;
+    visualOrientation: string;
+    evidenceReferences: string;
+    uncertainty: string;
+  };
+  pleatZone: {
+    patternBehavior: string;
+    borderBehavior: string;
+    embellishmentBehavior: string;
+    hasSpecialPanel: boolean;
+  };
+  blouse: {
+    hasBlouse: boolean;
+    color: string;
+    fabric: string;
+    frontConstruction: string;
+    backConstruction: string;
+    neckline: string;
+    sleeves: string;
+    closure: string;
+    embroidery: string;
+    border: string;
+    pattern: string;
+    fit: string;
+    isUnstitchedPiece: boolean;
+  };
+  physics: {
+    weight: string;
+    stiffness: string;
+    fluidity: string;
+    transparency: string;
+    shine: string;
+    creaseBehavior: string;
+    expectedFall: string;
+  };
+};
+
+export type SareeDrapePlan = {
+  baseDrapeFamily: string;
+  shoulderSide: string;
+  waistTuck: string;
+  frontPleatTreatment: string;
+  palluShoulderPlacement: string;
+  openOrPleatedPallu: string;
+  palluSpread: string;
+  palluFallDirection: string;
+  palluVisibleLength: string;
+  handInteraction: string;
+  movementAmount: string;
+  pinningBehavior: string;
+  borderVisibility: string;
+  blouseVisibility: string;
+  coverageConstraints: string;
+  poseSpecificDrapeState: string;
+};
+
 export type ProductIdentityProfile = {
+  garmentFamily: string;
   category: string;
   mainColor: string;
   secondaryColors: string[];
@@ -79,6 +170,8 @@ export type ProductIdentityProfile = {
   invariantDetails: string[];
   uncertaintyNotes: string[];
   garmentEvidence: GarmentRegionEvidence[];
+  sareeTruth?: SareeTruthProfile;
+  sareeDrapePlan?: SareeDrapePlan;
 };
 
 export type StudioPose = {
@@ -99,88 +192,97 @@ export type StudioPose = {
   enabled: boolean;
 };
 
-const POSE_SLOTS = [
-  {
-    id: "full_front",
-    title: "Full Front Product View",
-    framing: "3:4 portrait, head-to-toe with footwear and garment hem fully inside frame",
-    bodyPosition: "Square to camera with balanced weight and a natural, playful Gen-Z catalog stance - relaxed and confident, never stiff or robotic",
-    handPlacement: "Hands relaxed beside the body without covering neckline, waist, pockets, or trims",
-    expression: "Playful, warm, confident Gen-Z energy while keeping the same face and hairstyle throughout the set",
-    productVisibilityRules: ["front construction unobstructed", "complete bottom wear visible", "no garment detail hidden by hands or hair"],
-    consistencyNotes: "Establish the model, face, hair, accessories, footwear, scene, lighting, and color-treatment anchor for poses 2-5",
-    description: "Straight-on full-body hero view with the complete product readable from head to hem.",
-    cameraAngle: "Eye-level straight-on full-body",
-    highlightedDetails: ["front construction", "overall silhouette", "complete outfit"],
-    primaryReference: "front",
-    purpose: "Primary e-commerce listing image",
-    prompt: "Create a straight-on full-body front hero image. Show the complete outfit, including the exact bottom wear and footwear, with a natural premium e-commerce stance.",
-  },
-  {
-    id: "angled",
-    title: "Professional Side / 3/4 View",
-    framing: "3:4 portrait, full-body with clear side silhouette and no crop at hem or footwear",
-    bodyPosition: "Rotate torso and hips together to a garment-appropriate three-quarter angle without twisting or deforming the product",
-    handPlacement: "Keep hands away from the side seam, sleeve shape, pockets, waist treatment, and drape being demonstrated",
-    expression: "Same recognizable face and styling, with a playful, natural Gen-Z variation on the hero expression - a genuine smile or confident smirk, not stiff studio energy",
-    productVisibilityRules: ["front and side construction remain readable", "silhouette is not compressed", "bottom wear remains unchanged and visible"],
-    consistencyNotes: "Use Pose 1 only as the model and shoot anchor; preserve the original product references as garment truth",
-    description: "A professional three-quarter or side view that reveals depth, drape, fit, and side construction.",
-    cameraAngle: "Eye-level 35-55 degree three-quarter view",
-    highlightedDetails: ["side silhouette", "fit", "drape and construction"],
-    primaryReference: "front",
-    purpose: "Show garment depth and fit",
-    prompt: "Create an intentional three-quarter or side fashion pose that is visibly different from the hero pose while keeping the full outfit readable.",
-  },
-  {
-    id: "back",
-    title: "Full Back View",
-    framing: "3:4 portrait, head-to-toe true rear view with the full back and hem visible",
-    bodyPosition: "Model faces fully away from camera with shoulders and hips square, weight relaxed and natural; no three-quarter cheat",
-    handPlacement: "Hands placed naturally where they do not cover the back neckline, closure, embroidery, waist, or rear silhouette",
-    expression: "Face is not forced toward camera; preserve identity and playful Gen-Z energy through hair, body, and styling continuity",
-    productVisibilityRules: ["uploaded back image is the sole back-design authority", "entire rear construction visible", "never infer back details from the front"],
-    consistencyNotes: "Keep the same model, hair, accessories, footwear, scene, lighting, and exact bottom wear while showing the authoritative back",
-    description: "A true full back view sourced from the uploaded back product photograph.",
-    cameraAngle: "Eye-level straight-on back view",
-    highlightedDetails: ["back construction", "back neckline", "rear pattern placement"],
-    primaryReference: "back",
-    purpose: "Document the real back design",
-    prompt: "Turn the model fully away from camera and reproduce the uploaded back reference exactly. This must be a true back view, never an invented rear design.",
-  },
-  {
-    id: "creative",
-    title: "Creative Gen-Z Fashion Pose",
-    framing: "3:4 portrait with a garment-appropriate full or three-quarter body editorial crop",
-    bodyPosition: "Use controlled movement selected for this category and construction, with anatomically natural posture and a readable silhouette",
-    handPlacement: "Expressive but intentional; hands must not cover the garment's key selling features or change its apparent shape",
-    expression: "Current, effortlessly cool Gen-Z editorial expression while retaining the exact same recognizable model face and hairstyle",
-    productVisibilityRules: ["product remains the visual subject", "no prop or limb hides key construction", "creative movement does not alter fit, length, or pattern"],
-    consistencyNotes: "Borrow only art direction from style references; garment, bottom wear, footwear, accessories, model, and shoot continuity remain locked",
-    description: "A current, expressive Gen-Z fashion pose that follows the selected creative direction without hiding the garment.",
-    cameraAngle: "Product-appropriate editorial angle",
-    highlightedDetails: ["movement", "silhouette", "creative direction"],
-    primaryReference: "front",
-    purpose: "Campaign and social-commerce storytelling",
-    prompt: "Create a bold, playful, scroll-stopping Gen-Z fashion pose suited to this exact product category, with genuine attitude and movement. Preserve the complete product while borrowing only mood, composition, and lighting from style references.",
-  },
-  {
-    id: "closeup",
-    title: "Zoomed-In Face & Product Highlight",
-    framing: "3:4 portrait, genuinely zoomed in to a face-to-chest or face-to-waist crop - visibly tighter in scale than the full-body hero pose, never a repeat of it",
-    bodyPosition: "Natural, relaxed upper-body angle, as if caught mid-moment, that keeps both the face and the chosen product highlight clearly readable",
-    handPlacement: "Hands relaxed and natural - resting near the highlighted detail without covering it, or away from frame if the detail is elsewhere",
-    expression: "A beautiful, cute, natural Gen-Z-style face with a genuine expression - a soft real smile or candid laugh, warm eyes, unfiltered and approachable, never stiff or over-posed",
-    productVisibilityRules: ["face is sharp and clearly visible", "one real product detail (embroidery, neckline, pallu/dupatta drape, print, trim, or fabric texture) is also sharp and unobstructed in the same frame", "this is a genuine zoomed-in shot, not the full-body hero framing repeated"],
-    consistencyNotes: "Keep the same face, hair, makeup, accessories, footwear, scene, lighting, and exact bottom wear established in Pose 1; only the framing zooms in tight enough to read both the face and the highlighted detail clearly",
-    description: "A zoomed-in shot that pairs a beautiful, natural face with a sharp highlight of the product's most important real detail.",
-    cameraAngle: "Eye-level, zoomed in to a face-to-chest or face-to-waist crop",
-    highlightedDetails: ["natural expression", "face", "key product detail"],
-    primaryReference: "fabric_pattern",
-    purpose: "Social-first beauty-and-product shot that sells both the face and the craftsmanship",
-    prompt: "Create a genuinely zoomed-in face-to-chest or face-to-waist shot - clearly tighter in scale than the full-body hero pose, never a repeat of it - pairing a beautiful, cute, Gen-Z-style face with a genuine, natural expression alongside one sharp, clearly visible highlight of the product's most important real detail (embroidery, neckline, drape, print, or fabric texture).",
-  },
-] as const;
+export function getPoseSlots(garmentFamily: string): readonly StudioPose[] {
+  const isSaree = garmentFamily === "saree";
+
+  return [
+    {
+      id: "full_front",
+      title: "Full Front Product View",
+      framing: "3:4 portrait, head-to-toe with footwear and garment hem fully inside frame",
+      bodyPosition: "Square to camera with balanced weight and a natural, playful Gen-Z catalog stance - relaxed and confident, never stiff or robotic",
+      handPlacement: "Hands relaxed beside the body without covering neckline, waist, pockets, or trims",
+      expression: "Playful, warm, confident Gen-Z energy while keeping the same face and hairstyle throughout the set",
+      productVisibilityRules: ["front construction unobstructed", "complete bottom wear visible", "no garment detail hidden by hands or hair"],
+      consistencyNotes: "Establish the model, face, hair, accessories, footwear, scene, lighting, and color-treatment anchor for poses 2-5",
+      description: "Straight-on full-body hero view with the complete product readable from head to hem.",
+      cameraAngle: "Eye-level straight-on full-body",
+      highlightedDetails: ["front construction", "overall silhouette", "complete outfit"],
+      primaryReference: "front",
+      purpose: "Primary e-commerce listing image",
+      prompt: "Create a straight-on full-body front hero image. Show the complete outfit, including the exact bottom wear and footwear, with a natural premium e-commerce stance.",
+      enabled: true,
+    },
+    {
+      id: "angled",
+      title: isSaree ? "Professional Drape & Fall View" : "Professional Side / 3/4 View",
+      framing: "3:4 portrait, full-body with clear side silhouette and no crop at hem or footwear",
+      bodyPosition: "Rotate torso and hips together to a garment-appropriate three-quarter angle without twisting or deforming the product",
+      handPlacement: "Keep hands away from the side seam, sleeve shape, pockets, waist treatment, and drape being demonstrated",
+      expression: "Same recognizable face and styling, with a playful, natural Gen-Z variation on the hero expression - a genuine smile or confident smirk, not stiff studio energy",
+      productVisibilityRules: isSaree ? ["drape depth and pallu fall clearly visible", "silhouette is not compressed", "bottom wear remains unchanged and visible"] : ["front and side construction remain readable", "silhouette is not compressed", "bottom wear remains unchanged and visible"],
+      consistencyNotes: "Use Pose 1 only as the model and shoot anchor; preserve the original product references as garment truth",
+      description: isSaree ? "A professional three-quarter or side view that reveals the drape depth, pleat structure, and pallu fall." : "A professional three-quarter or side view that reveals depth, drape, fit, and side construction.",
+      cameraAngle: "Eye-level 35-55 degree three-quarter view",
+      highlightedDetails: isSaree ? ["drape depth", "pallu fall", "pleats"] : ["side silhouette", "fit", "drape and construction"],
+      primaryReference: "front",
+      purpose: "Show garment depth and fit",
+      prompt: "Create an intentional three-quarter or side fashion pose that is visibly different from the hero pose while keeping the full outfit readable.",
+      enabled: true,
+    },
+    {
+      id: "back",
+      title: "Full Back View",
+      framing: "3:4 portrait, head-to-toe true rear view with the full back and hem visible",
+      bodyPosition: "Model faces fully away from camera with shoulders and hips square, weight relaxed and natural; no three-quarter cheat",
+      handPlacement: "Hands placed naturally where they do not cover the back neckline, closure, embroidery, waist, or rear silhouette",
+      expression: "Face is not forced toward camera; preserve identity and playful Gen-Z energy through hair, body, and styling continuity",
+      productVisibilityRules: isSaree ? ["uploaded back image is the sole back-design authority", "rear drape and pallu fall visible"] : ["uploaded back image is the sole back-design authority", "entire rear construction visible", "never infer back details from the front"],
+      consistencyNotes: "Keep the same model, hair, accessories, footwear, scene, lighting, and exact bottom wear while showing the authoritative back",
+      description: "A true full back view sourced from the uploaded back product photograph.",
+      cameraAngle: "Eye-level straight-on back view",
+      highlightedDetails: isSaree ? ["rear drape", "pallu fall", "back blouse details"] : ["back construction", "back neckline", "rear pattern placement"],
+      primaryReference: "back",
+      purpose: "Document the real back design",
+      prompt: "Turn the model fully away from camera and reproduce the uploaded back reference exactly. This must be a true back view, never an invented rear design.",
+      enabled: true,
+    },
+    {
+      id: "creative",
+      title: "Creative Gen-Z Fashion Pose",
+      framing: "3:4 portrait with a garment-appropriate full or three-quarter body editorial crop",
+      bodyPosition: "Use controlled movement selected for this category and construction, with anatomically natural posture and a readable silhouette",
+      handPlacement: "Expressive but intentional; hands must not cover the garment's key selling features or change its apparent shape",
+      expression: "Current, effortlessly cool Gen-Z editorial expression while retaining the exact same recognizable model face and hairstyle",
+      productVisibilityRules: isSaree ? ["product remains the visual subject", "creative movement highlights fabric fluidity and pallu", "no prop or limb hides key drape features"] : ["product remains the visual subject", "no prop or limb hides key construction", "creative movement does not alter fit, length, or pattern"],
+      consistencyNotes: "Borrow only art direction from style references; garment, bottom wear, footwear, accessories, model, and shoot continuity remain locked",
+      description: "A current, expressive Gen-Z fashion pose that follows the selected creative direction without hiding the garment.",
+      cameraAngle: "Product-appropriate editorial angle",
+      highlightedDetails: isSaree ? ["fabric movement", "fluidity", "creative direction"] : ["movement", "silhouette", "creative direction"],
+      primaryReference: "front",
+      purpose: "Campaign and social-commerce storytelling",
+      prompt: "Create a bold, playful, scroll-stopping Gen-Z fashion pose suited to this exact product category, with genuine attitude and movement. Preserve the complete product while borrowing only mood, composition, and lighting from style references.",
+      enabled: true,
+    },
+    {
+      id: "closeup",
+      title: "Zoomed-In Face & Product Highlight",
+      framing: "3:4 portrait, genuinely zoomed in to a face-to-chest or face-to-waist crop - visibly tighter in scale than the full-body hero pose, never a repeat of it",
+      bodyPosition: "Natural, relaxed upper-body angle, as if caught mid-moment, that keeps both the face and the chosen product highlight clearly readable",
+      handPlacement: "Hands relaxed and natural - resting near the highlighted detail without covering it, or away from frame if the detail is elsewhere",
+      expression: "A beautiful, cute, natural Gen-Z-style face with a genuine expression - a soft real smile or candid laugh, warm eyes, unfiltered and approachable, never stiff or over-posed",
+      productVisibilityRules: ["face is sharp and clearly visible", "one real product detail (embroidery, neckline, pallu/dupatta drape, print, trim, or fabric texture) is also sharp and unobstructed in the same frame", "this is a genuine zoomed-in shot, not the full-body hero framing repeated"],
+      consistencyNotes: "Keep the same face, hair, makeup, accessories, footwear, scene, lighting, and exact bottom wear established in Pose 1; only the framing zooms in tight enough to read both the face and the highlighted detail clearly",
+      description: "A zoomed-in shot that pairs a beautiful, natural face with a sharp highlight of the product's most important real detail.",
+      cameraAngle: "Eye-level, zoomed in to a face-to-chest or face-to-waist crop",
+      highlightedDetails: ["natural expression", "face", "key product detail"],
+      primaryReference: "fabric_pattern",
+      purpose: "Social-first beauty-and-product shot that sells both the face and the craftsmanship",
+      prompt: "Create a genuinely zoomed-in face-to-chest or face-to-waist shot - clearly tighter in scale than the full-body hero pose, never a repeat of it - pairing a beautiful, cute, Gen-Z-style face with a genuine, natural expression alongside one sharp, clearly visible highlight of the product's most important real detail (embroidery, neckline, drape, print, or fabric texture).",
+      enabled: true,
+    },
+  ];
+}
 
 function stringValue(value: unknown, fallback = "Not visible in the supplied references") {
   if (typeof value === "string" && value.trim()) return value.trim();
@@ -281,7 +383,15 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
   const model = objectValue(raw.modelIdentity ?? raw.model_identity);
   const rawPoseValue = raw.posePlan ?? raw.pose_plan;
   const rawPoses = Array.isArray(rawPoseValue) ? (rawPoseValue as unknown[]) : [];
+  
+  const sareeTruthRaw = objectValue(product.sareeTruth ?? product.saree_truth);
+  const sareeTruth = Object.keys(sareeTruthRaw).length > 0 ? (sareeTruthRaw as unknown as SareeTruthProfile) : undefined;
+  
+  const sareeDrapePlanRaw = objectValue(raw.sareeDrapePlan ?? raw.saree_drape_plan);
+  const sareeDrapePlan = Object.keys(sareeDrapePlanRaw).length > 0 ? (sareeDrapePlanRaw as unknown as SareeDrapePlan) : undefined;
+
   const productIdentity: ProductIdentityProfile = {
+    garmentFamily: stringValue(product.garmentFamily ?? product.garment_family, "unknown"),
     category: stringValue(product.category, categoryFallback),
     mainColor: stringValue(product.mainColor ?? product.main_color),
     secondaryColors: stringArray(product.secondaryColors ?? product.secondary_colors),
@@ -303,6 +413,8 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
     invariantDetails: stringArray(product.invariantDetails ?? product.invariant_details),
     uncertaintyNotes: stringArray(product.uncertaintyNotes ?? product.uncertainty_notes),
     garmentEvidence: garmentEvidence(product),
+    sareeTruth,
+    sareeDrapePlan,
   };
   const creativeDirection = {
     backgroundStyle: stringValue(creative.backgroundStyle ?? creative.background_style, "Clean premium catalog background"),
@@ -342,7 +454,8 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
     stylingLock: stringValue(model.stylingLock ?? model.styling_lock, "Keep footwear and accessories identical across every pose"),
   };
   const poses = Array.isArray(rawPoses) ? rawPoses : [];
-  const posePlan: StudioPose[] = POSE_SLOTS.map((fallback, index) => {
+  const poseSlots = getPoseSlots(productIdentity.garmentFamily);
+  const posePlan: StudioPose[] = poseSlots.map((fallback, index) => {
     const candidate = objectValue(poses.find((pose) => objectValue(pose).id === fallback.id) ?? poses[index]);
     return {
       id: fallback.id, title: stringValue(candidate.title ?? candidate.name, fallback.title),
@@ -385,6 +498,8 @@ REFERENCE AUTHORITY (highest to lowest):
 
 Product references are frequently flat-lay, folded, pinned, or shot on a mannequin or dress form. Read the garment through that presentation: infer how each panel, hem, sleeve and closure behaves once it is worn on a live human body, and record that in the profile. The mannequin, dress form, hanger, clips, pins and the flat surface are photography apparatus, never part of the product - never describe them as garment features and never let them appear in the pose plan.
 
+First, determine the garmentFamily from the references: "kurta_or_kurti_set", "saree", "dress", "western_or_casual", or "other".
+
 SKU: ${args.skuName}
 Declared category: ${args.category}
 User product notes: ${args.productDetails}
@@ -403,7 +518,7 @@ PRINT AND EMBROIDERY GEOMETRY - the part that decides whether the output is this
 - embroideryGeometry.necklineRelation: exactly how the embroidery meets the neckline and where any tie, drawstring or tassel sits relative to it.
 Anything you genuinely cannot measure goes in uncertaintyNotes - never guess a geometry.
 
-Build a precise Product Identity Profile. Perform a rigorous geographic evidence audit for construction, closures and decoration placement. Break the garment into specific physical regions (e.g. front neckline, front chest/yoke, front body, front hem, center back, back neckline, back body, back hem, left side construction, right side construction, left sleeve/armhole, right sleeve/armhole, waist, bottom wear front, bottom wear back, footwear, included accessories).
+Build a precise Product Identity Profile. Perform a rigorous geographic evidence audit for construction, closures and decoration placement. Break the garment into specific physical regions. For stitched garments use (e.g. front neckline, front chest/yoke, front body, front hem, center back, back neckline, back body, back hem, left side construction, right side construction, left sleeve/armhole, right sleeve/armhole, waist, bottom wear front, bottom wear back). For sarees use (e.g. inner pallu, outer pallu, pallu border, body upper border, body lower border, chest drape, front pleats, waist tuck, unstitched blouse piece).
 For each region, record its evidence in garmentEvidence:
 - region: the physical location.
 - state: "confirmed" (clearly visible in an authoritative reference), "confirmed_absent" (clearly proven to not exist there), or "unknown" (not visually proven either way).
@@ -445,15 +560,19 @@ Accessory styling suggestion: look at what footwear and accessories (if any) the
 Create exactly five product-specific camera setups in one coherent commercial coverage sequence, in this order and with these ids: full_front, angled, back, creative, closeup. They are not five unrelated concepts. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints.
 
 - full_front: square, unobstructed head-to-toe hero; establishes face/hair/styling/footwear/scene/lighting anchor with playful, confident Gen-Z energy.
-- angled: best side or three-quarter orientation for THIS garment; reveal side construction exactly as defined by the Garment Truth Contract / Product DNA. Show existing slits or pockets only when references prove they exist; never invent, extend, or extrapolate decoration into unknown side regions.
-- back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority.
-- creative: playful, scroll-stopping Gen-Z editorial movement tailored to this garment while keeping product completely readable.
+- angled: best side or three-quarter orientation for THIS garment; for stitched garments, reveal side construction; for sarees, reveal drape depth and pallu fall. Show existing slits or pockets only when references prove they exist; never invent, extend, or extrapolate decoration into unknown side regions.
+- back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees.
+- creative: playful, scroll-stopping Gen-Z editorial movement tailored to this garment while keeping product completely readable. For sarees, use safe pallu movement tailored to its fabric physics.
 - closeup: a genuine zoomed-in face-to-chest or face-to-waist shot (never a repeat of the full-body hero framing) pairing a beautiful, cute, Gen-Z-style face with a genuine, natural expression AND one sharp, clearly visible real product detail (embroidery, neckline, drape, print, or fabric texture).
+
+If the garmentFamily is "saree", you MUST also generate sareeTruth and sareeDrapePlan inside the JSON root.
+sareeTruth: Extract the mainFabric, weave, baseColor, pattern, embellishments, borders, pallu (hasDistinctPallu, startingRegion, motifInventory, edgeTreatment, artwork), pleat zone behavior, blouse (is it an unstitched piece? color, fabric), and fabric physics (stiffness, fluidity, expected fall).
+sareeDrapePlan: Choose a baseDrapeFamily (e.g., "shoulder-side/open-pallu" or "shoulder-side/pleated-pallu"), frontPleatTreatment, palluShoulderPlacement, handInteraction, borderVisibility, and poseSpecificDrapeState (e.g. how the angled pose shows the pallu fall).
 
 Across all five, ONLY pose, angle, framing, and expression may change. Exact product, colors, pattern, bottom wear, face, hairstyle, makeup, accessories, footwear, scene, lighting, shadows, camera/lens feel, and color treatment remain locked.
 
 Return STRICT JSON only:
-{"productIdentity":{"category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[],"garmentEvidence":[{"region":"","state":"","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front"},{"id":"angled"},{"id":"back"},{"id":"creative"},{"id":"closeup"}]}  `;
+{"productIdentity":{"garmentFamily":"","category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[],"garmentEvidence":[{"region":"","state":"","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeTruth":{"body":{"mainFabric":"","weave":"","texture":"","transparency":"","baseColor":"","pattern":"","motifScale":"","motifRepeat":"","embellishment":"","bodyOrientation":""},"borders":{"upperBorder":"","lowerBorder":"","borderWidth":"","borderColors":"","construction":"","motifGeometry":"","edgeTreatment":"","continuityRules":""},"pallu":{"hasDistinctPallu":false,"startingRegion":"","baseColor":"","motifInventory":"","motifDensity":"","borders":"","artwork":"","zari":"","embroidery":"","tassels":"","edgeTreatment":"","visualOrientation":"","evidenceReferences":"","uncertainty":""},"pleatZone":{"patternBehavior":"","borderBehavior":"","embellishmentBehavior":"","hasSpecialPanel":false},"blouse":{"hasBlouse":false,"color":"","fabric":"","frontConstruction":"","backConstruction":"","neckline":"","sleeves":"","closure":"","embroidery":"","border":"","pattern":"","fit":"","isUnstitchedPiece":false},"physics":{"weight":"","stiffness":"","fluidity":"","transparency":"","shine":"","creaseBehavior":"","expectedFall":""}},"sareeDrapePlan":{"baseDrapeFamily":"","shoulderSide":"","waistTuck":"","frontPleatTreatment":"","palluShoulderPlacement":"","openOrPleatedPallu":"","palluSpread":"","palluFallDirection":"","palluVisibleLength":"","handInteraction":"","movementAmount":"","pinningBehavior":"","borderVisibility":"","blouseVisibility":"","coverageConstraints":"","poseSpecificDrapeState":""},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front"},{"id":"angled"},{"id":"back"},{"id":"creative"},{"id":"closeup"}]}  `;
 }
 
 export const CONSISTENCY_RULES = [
@@ -478,7 +597,7 @@ export const CONSISTENCY_RULES = [
 // Bumping this invalidates cached analyses, which is intended here: a profile
 // cached under v8 carries no pattern or embroidery geometry for the prompt locks
 // and the fidelity gate to work against.
-export const ANALYSIS_VERSION = "generation-session-v11-garment-evidence";
+export const ANALYSIS_VERSION = "generation-session-v12-saree-truth";
 
 export function smallHash(value: string) {
   let hash = 2166136261;
