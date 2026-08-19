@@ -559,6 +559,10 @@ export function composeGenerationPrompt(args: {
   const placement = Array.isArray(product?.detailPlacementMap) ? product.detailPlacementMap.map(String) : [];
   const absent = Array.isArray(product?.absenceConstraints) ? product.absenceConstraints.map(String) : [];
   const evidence = Array.isArray(product?.garmentEvidence) ? product.garmentEvidence as JsonRecord[] : [];
+  
+  const isSaree = product?.garmentFamily === "saree";
+  const sareeTruth = isSaree ? args.session.sareeTruth as JsonRecord : null;
+  const sareeDrapePlan = isSaree ? args.session.sareeDrapePlan as JsonRecord : null;
   const manifest = args.references.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
   const hasApprovedAnchor = args.references.some((reference) => reference.role === "approved_pose");
   const hasModelReference = args.references.some((reference) => reference.role === "model_identity");
@@ -594,9 +598,14 @@ ${faceVisible
 
 LOCKED PRODUCT - MUST NOT CHANGE:
 ${JSON.stringify(product)}
+${isSaree ? `SAREE TRUTH - CRITICAL:
+${JSON.stringify(sareeTruth)}
+SAREE DRAPE PLAN:
+${JSON.stringify(sareeDrapePlan)}` : ""}
 User notes: ${args.productDetails}
 Reference authority: FRONT controls front construction; BACK solely controls rear construction; FABRIC/PATTERN resolves material and small construction; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion and drape, while a FLAT-LAY resolves outline, construction, panel layout and length only; ADDITIONAL supports product truth; STYLE controls art direction only.
 - Product references may be flat-lay, folded, pinned or shot on a mannequin or dress form. Rebuild the garment as it falls on a live human body, and never render a mannequin, dress form, hanger, clip, pin, prop stand, or the flat background surface in the output.
+${isSaree ? `- SAREE SPECIFIC RULES: Pallu artwork stays on the pallu, never bleed the border into the main body, do not duplicate the pallu into multiple loose cloth panels, border width stays identical, follow the drape plan explicitly.` : ""}
 
 GARMENT TRUTH CONTRACT (EVIDENCE BY REGION):
 ${evidence.length ? evidence.map((e) => `- Region ${String(e.region).toUpperCase() || "UNKNOWN"}: [State: ${String(e.state)}]
@@ -884,6 +893,7 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     actual_cost_usd: Number(job.actual_cost_usd || 0), quality_score: completed ? (completed / 5) * 100 : 0,
     success_signals: { completedPoses: completed },
     failure_signals: {
+      garmentFamily: String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""),
       failedPoses: failed,
       feedback: poses.filter((p) => p.status === "failed").map((p) => {
         const d = (p.generation_data || {}) as JsonRecord;
@@ -1134,10 +1144,16 @@ async function processWorker(request: Request, args: JsonRecord) {
       .eq("organization_id", job.org_id)
       .eq("product_category", String(sessionData.category || ""))
       .order("created_at", { ascending: false })
-      .limit(5);
+      .limit(20);
     const learningsArr: string[] = [];
+    const currentGarmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
     for (const l of pastLearnings || []) {
-      const fb = ((l.failure_signals as JsonRecord)?.feedback as any[]) || [];
+      const fs = (l.failure_signals as JsonRecord) || {};
+      const savedFamily = String(fs.garmentFamily || "");
+      if (currentGarmentFamily === "saree" && savedFamily !== "saree") continue;
+      if (currentGarmentFamily !== "saree" && savedFamily === "saree") continue;
+      
+      const fb = (fs.feedback as any[]) || [];
       for (const f of fb) {
         if (f.poseTitle === poseData.title && Array.isArray(f.corrections)) {
           learningsArr.push(...f.corrections.map(String));
