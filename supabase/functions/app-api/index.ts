@@ -2347,6 +2347,14 @@ async function processCatalog(request: Request, args: JsonRecord) {
       batch = { ...batch, schedule_status: "running", queue_status: "running" };
     }
   } else {
+    // Recover stalled cron runs: if a batch has been 'running' for more than 5 minutes (Edge Functions time out at 60s),
+    // it means the worker crashed or timed out. Reset it to 'scheduled' so it can be claimed again.
+    const { error: recoveryError } = await service.from("planning_batches")
+      .update({ schedule_status: "scheduled", queue_status: "idle", schedule_started_at: null })
+      .eq("schedule_status", "running")
+      .lt("schedule_started_at", new Date(Date.now() - 5 * 60000).toISOString());
+    if (recoveryError) console.error("Could not recover stalled catalog batches", recoveryError);
+
     const { data } = await service.rpc("claim_due_catalog_batch");
     batch = Array.isArray(data) ? (data[0] as JsonRecord | undefined) || null : data as JsonRecord | null;
   }
