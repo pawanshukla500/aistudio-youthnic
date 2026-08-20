@@ -1,0 +1,1 @@
+export function StorageNode() { return <div className='p-3 border rounded-lg bg-surface-container-lowest min-w-[200px]'><div className='text-[10px] font-bold text-secondary uppercase tracking-wider mb-1'>Storage</div></div>; }

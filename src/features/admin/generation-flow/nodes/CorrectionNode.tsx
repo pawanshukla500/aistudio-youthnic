@@ -1,0 +1,2 @@
+﻿import { Handle, Position } from '@xyflow/react';
+export function CorrectionNode({ data }: any) { return <div className='p-3 border rounded-lg bg-amber-50 border-amber-200 min-w-[200px]'><Handle type="target" position={Position.Top} /><div className='text-[10px] font-bold text-amber-800 uppercase tracking-wider mb-1'><Handle type="target" position={Position.Top} />Correction</div><div className='text-xs text-amber-900 truncate max-w-[200px]'><Handle type="target" position={Position.Top} />{data.correction}</div><Handle type="source" position={Position.Bottom} /></div>; }

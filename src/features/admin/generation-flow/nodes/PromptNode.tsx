@@ -1,0 +1,2 @@
+﻿import { Handle, Position } from '@xyflow/react';
+export function PromptNode({ data }: any) { return <div className='p-3 border rounded-lg bg-surface-container-lowest min-w-[200px]'><Handle type="target" position={Position.Top} /><div className='text-[10px] font-bold text-secondary uppercase tracking-wider mb-1'><Handle type="target" position={Position.Top} />Prompt Compilation</div><div className='text-xs text-secondary truncate max-w-[200px]'><Handle type="target" position={Position.Top} />{data.prompt}</div><Handle type="source" position={Position.Bottom} /></div>; }

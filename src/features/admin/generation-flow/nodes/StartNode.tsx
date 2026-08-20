@@ -1,0 +1,2 @@
+﻿import { Handle, Position } from '@xyflow/react';
+export function StartNode({ data }: any) { return <div className='p-3 border rounded-lg bg-surface-container-lowest min-w-[200px]'><div className='text-[10px] font-bold text-secondary uppercase tracking-wider mb-1'>Generation Start</div><div className='text-sm font-semibold'>{data.summary?.sku_name}</div><div className='text-xs text-secondary'>{data.summary?.job_id}</div><Handle type="source" position={Position.Bottom} /></div>; }

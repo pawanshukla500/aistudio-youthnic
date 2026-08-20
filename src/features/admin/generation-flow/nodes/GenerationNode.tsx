@@ -1,0 +1,16 @@
+import { Handle, Position } from '@xyflow/react';
+
+export function GenerationNode({ data }: any) { 
+  const latency = data.attempt?.latency_ms;
+  const isFiniteLatency = Number.isFinite(latency) && latency !== null;
+  return (
+    <div className='p-3 border rounded-lg bg-surface-container-lowest min-w-[200px]'>
+      <Handle type="target" position={Position.Top} />
+      <div className='text-[10px] font-bold text-secondary uppercase tracking-wider mb-1'>✨ {data.attempt?.model || 'GPT IMAGE 2'}</div>
+      <div className='text-xs text-on-surface'>{data.poseTitle} · Attempt {data.attempt?.attempt_index}</div>
+      <div className='mt-2 text-xs text-secondary'>{isFiniteLatency ? `${(latency / 1000).toFixed(1)} sec | ` : 'N/A | '}</div>
+      <div className='mt-1 text-xs font-semibold text-success'>✓ Generated</div>
+      <Handle type="source" position={Position.Bottom} />
+    </div>
+  ); 
+}
