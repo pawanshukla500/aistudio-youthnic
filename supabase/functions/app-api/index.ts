@@ -2350,7 +2350,7 @@ async function processCatalog(request: Request, args: JsonRecord) {
     // Recover stalled cron runs: if a batch has been 'running' for more than 5 minutes (Edge Functions time out at 60s),
     // it means the worker crashed or timed out. Reset it to 'scheduled' so it can be claimed again.
     const { error: recoveryError } = await service.from("planning_batches")
-      .update({ schedule_status: "scheduled" })
+      .update({ schedule_status: "scheduled", queue_status: "idle" })
       .eq("schedule_status", "running")
       .lt("schedule_started_at", new Date(Date.now() - 5 * 60000).toISOString());
     if (recoveryError) console.error("Could not recover stalled catalog batches", recoveryError);
