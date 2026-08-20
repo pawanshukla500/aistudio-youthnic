@@ -2021,7 +2021,9 @@ async function deleteCatalogOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const batchId = String(args.catalogId || "");
   // Ensure the batch belongs to this workspace before deleting
-  await catalogBatch(workspace, batchId);
+  const batch = await catalogBatch(workspace, batchId);
+  
+  if (String(batch.queue_status) === "running") throw new Error("A catalog that is currently generating cannot be deleted. Cancel its active job in History first.");
   
   // Delete all associated generation jobs to prevent orphaned jobs from continuing to run
   await service.from("generation_jobs").delete().eq("batch_id", batchId);
