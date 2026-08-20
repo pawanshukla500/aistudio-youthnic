@@ -2023,12 +2023,21 @@ async function deleteCatalogOperation(request: Request, args: JsonRecord) {
   // Ensure the batch belongs to this workspace before deleting
   const batch = await catalogBatch(workspace, batchId);
   
-  if (String(batch.queue_status) === "running") throw new Error("A catalog that is currently generating cannot be deleted. Cancel its active job in History first.");
+  if (String(batch.queue_status) === "running") throw new Error("A catalog that is currently scheduling cannot be deleted. Wait for it to finish or stall.");
   
-  // Delete all associated generation jobs to prevent orphaned jobs from continuing to run
-  await service.from("generation_jobs").delete().eq("batch_id", batchId);
+  // Check for active generation jobs that might be currently running in workers
+  const { data: activeJobs } = await service.from("generation_jobs").select("id").eq("batch_id", batchId).in("status", ["queued", "processing"]).limit(1);
+  if (activeJobs && activeJobs.length > 0) {
+    throw new Error("This catalog currently has active generation jobs. Please cancel them in the History tab before deleting.");
+  }
+  
+  // Delete all associated generation jobs to prevent orphaned job history
+  const { error: jobsError } = await service.from("generation_jobs").delete().eq("batch_id", batchId);
+  if (jobsError) throw new Error("Could not delete associated jobs: " + jobsError.message);
+  
   // Delete all colorway requests
-  await service.from("planning_requests").delete().eq("batch_id", batchId);
+  const { error: requestsError } = await service.from("planning_requests").delete().eq("batch_id", batchId);
+  if (requestsError) throw new Error("Could not delete associated requests: " + requestsError.message);
   
   const { error } = await service.from("planning_batches").delete().eq("id", batchId);
   if (error) throw new Error("Could not delete catalog: " + error.message);
