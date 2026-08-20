@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import { getErrorMessage } from "../../lib/errors";
-import { GenerationFlow } from "./generation-flow/GenerationFlow";
+
 
 type AdminRole = Record<string, any> & { _id: Id<"roles">; name: string; slug: string; description?: string; permissions: string[] };
 type AdminMember = Record<string, any> & { _id: string; status: string; user: { displayName: string; email: string } | null; roles: AdminRole[] };
@@ -507,7 +507,6 @@ export function Admin() {
             ["roles", KeyRound, "Roles & permissions"],
             ["automation", CalendarClock, "Events & reporting"],
             ["system", Activity, "System & audit"],
-            ["flow", Brain, "Generation flow"],
           ].map(([value, Icon, label]) => (
             <button
               key={String(value)}
@@ -860,11 +859,6 @@ export function Admin() {
           </section>
         )}
 
-        {tab === "flow" && (
-          <section className="h-[800px]">
-            <GenerationFlow />
-          </section>
-        )}
       </div>
 
       {showCreate && (

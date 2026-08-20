@@ -1780,6 +1780,54 @@ async function adminGenerationFlowList(request: Request) {
   return { jobs: combined };
 }
 
+async function historyGenerationFlowGet(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request);
+  
+  const jobId = String(args.jobId || "");
+  if (!jobId) throw new Error("jobId is required.");
+
+  if (jobId.startsWith("session_")) {
+    const [session, nodes, edges] = await Promise.all([
+      service.from("catalog_sessions").select("*").eq("session_id", jobId).eq("organization_id", workspace.organization.id).single(),
+      service.from("generation_flow_nodes").select("*").eq("session_id", jobId).order("created_at"),
+      service.from("generation_flow_edges").select("*").eq("session_id", jobId)
+    ]);
+    
+    if (session.error) throw new Error("Session not found.");
+    
+    return {
+      is_v2: true,
+      session: session.data,
+      nodes: nodes.data || [],
+      edges: edges.data || []
+    };
+  }
+
+  const { data: job, error: jobError } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  if (jobError || !job) throw new Error("Job not found.");
+
+  const [session, poses, aiRuns, qaReviews, learning] = await Promise.all([
+    service.from("catalog_sessions").select("*").eq("session_id", job.session_id).maybeSingle(),
+    service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index"),
+    service.from("ai_runs").select("*").eq("job_id", jobId).order("created_at"),
+    service.from("qa_reviews").select("*").eq("generation_job_id", jobId).order("created_at"),
+    service.from("generation_learnings").select("*").eq("job_id", jobId).maybeSingle()
+  ]);
+
+  for (const result of [session, poses, aiRuns, qaReviews, learning]) {
+    if (result.error) throw new Error(result.error.message);
+  }
+
+  return {
+    summary: job,
+    session: session.data?.session_data ?? null,
+    poses: poses.data || [],
+    aiRuns: aiRuns.data || [],
+    qaReviews: qaReviews.data || [],
+    learning: learning.data || null,
+  };
+}
+
 async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request);
   if (!workspace.isAdmin && !workspace.permissions.includes("admin.settings")) throw new Error("You do not have access to the admin console.");
@@ -3638,6 +3686,7 @@ Deno.serve(async (request) => {
       "admin.overview": () => adminOverview(request),
       "admin.generationFlow.list": () => adminGenerationFlowList(request),
       "admin.generationFlow.get": () => adminGenerationFlowGet(request, args),
+      "history.generationFlow.get": () => historyGenerationFlowGet(request, args),
       "admin.createUser": () => createUserOperation(request, args),
       "admin.updateMember": () => updateMemberOperation(request, args),
       "admin.deleteMember": () => deleteMemberOperation(request, args),

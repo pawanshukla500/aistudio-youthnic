@@ -5,6 +5,7 @@ import { Studio } from "./features/studio/Studio";
 import { Planning } from "./features/planning/Planning";
 import { Events } from "./features/events/Events";
 import { History } from "./features/history/History";
+import { GenerationFlowPage } from "./features/history/generation-flow/GenerationFlowPage";
 import { Admin } from "./features/admin/Admin";
 import { Notifications } from "./features/notifications/Notifications";
 import { Login } from "./features/auth/Login";
@@ -39,6 +40,7 @@ function AppRoutes() {
         <Route path="events" element={<Guard permission="planning.view"><Events /></Guard>} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="history" element={<Guard permission="studio.view"><History /></Guard>} />
+        <Route path="history/flow/:jobId" element={<Guard permission="studio.view"><GenerationFlowPage /></Guard>} />
         <Route path="admin" element={<Guard admin><Admin /></Guard>} />
         <Route path="*" element={<Navigate to={landing} replace />} />
       </Route>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Ban, ChevronDown, ChevronUp, Download, Image as ImageIcon, Images, RefreshCcw, Search, Trash2, User, Loader2, Sparkles, Clock, AlertCircle, X } from "lucide-react";
+import { Ban, ChevronDown, ChevronUp, Download, Image as ImageIcon, Images, RefreshCcw, Search, Trash2, User, Loader2, Sparkles, Clock, AlertCircle, X, Brain } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { api, getJobReferenceImages, invokeAppApi, useMutation, useQuery, type Id } from "../../lib/backend";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import JSZip from "jszip";
@@ -494,6 +495,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 
 export function History() {
   const { organization } = useWorkspace();
+  const navigate = useNavigate();
   const cancelJob = useMutation(api.jobs.cancel);
   const removeJob = useMutation(api.jobs.remove);
   const regenerateSession = useMutation(api.jobs.regenerateSession);
@@ -678,6 +680,9 @@ export function History() {
                          {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete
                       </button>
                    )}
+                   <button onClick={(e) => { e.stopPropagation(); navigate(`/history/flow/${job._id}`); }} title="View Generation Flow Graph" className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/10 hover:shadow-sm">
+                      <Brain className="h-4 w-4" /> View flow
+                   </button>
                    <button title="Toggle details" className={`rounded-lg p-2.5 transition-colors hover:shadow-sm ${open ? 'bg-primary/10 text-primary border border-primary/20' : 'text-primary hover:bg-primary/5 hover:border-primary/10 border border-transparent'}`}>
                       {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                    </button>
