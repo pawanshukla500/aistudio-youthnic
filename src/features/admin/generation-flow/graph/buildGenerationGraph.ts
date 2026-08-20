@@ -10,7 +10,7 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
   const learning = rawBackendData.learning || null;
 
   const poses: TracePose[] = rawPoses.map((p: any) => {
-    const poseAiRuns = aiRuns.filter((r: any) => r.purpose === "generation" && r.pose_index === p.pose_index);
+    const poseAiRuns = aiRuns.filter((r: any) => r.run_kind === "image_generation" && (r.pose_index === p.pose_index || r.input_summary?.pose === p.pose_index));
     const poseQaReviews = qaReviews.filter((q: any) => q.pose_index === p.pose_index);
     
     // session_generations.generation_data might contain corrections/rejected attempts
@@ -25,7 +25,8 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
       const qa = poseQaReviews[i - 1]; // Assume ordered
       
       const isLast = i === attemptCount;
-      const isRejected = !isLast && p.status !== "failed"; // Simplified heuristic
+      // Every attempt before the last one was rejected. A failed pose also rejects the last attempt.
+      const isRejected = !isLast || p.status === "failed";
       
       attempts.push({
         attempt_index: i,
@@ -97,8 +98,8 @@ export function buildGenerationGraph(trace: GenerationTraceViewModel) {
   };
 
   const startId = addNode(newId('start'), 'start', { summary: trace.summary }, 0);
-  const refId = addNode(newId('ref'), 'reference', { }, 1, startId);
-  const analysisId = addNode(newId('analysis'), 'analysis', { session: trace.session }, 2, refId);
+  // Reference node omitted until API supplies reference data
+  const analysisId = addNode(newId('analysis'), 'analysis', { session: trace.session }, 4, startId);
   const truthId = addNode(newId('truth'), 'truth', { productIdentity: trace.session?.productIdentity }, 3, analysisId);
   
   const memoryId = addNode(newId('memory'), 'memory', { learning: trace.learning }, 4, truthId);

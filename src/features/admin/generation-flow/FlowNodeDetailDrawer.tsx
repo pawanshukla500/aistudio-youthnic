@@ -13,7 +13,7 @@ export function FlowNodeDetailDrawer({
     <div className="absolute top-0 right-0 h-full w-96 bg-white border-l border-outline-variant/30 shadow-2xl z-50 flex flex-col">
       <div className="flex items-center justify-between p-4 border-b border-outline-variant/30">
         <h3 className="text-sm font-bold uppercase tracking-wider text-on-surface">Node Details</h3>
-        <button onClick={onClose} className="p-1 hover:bg-surface-container-low rounded-full">
+        <button type="button" aria-label="Close node details" onClick={onClose} className="p-1 hover:bg-surface-container-low rounded-full">
           <X className="w-5 h-5 text-secondary" />
         </button>
       </div>

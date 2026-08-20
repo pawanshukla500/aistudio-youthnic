@@ -1,3 +1,5 @@
+import type { StudioPose } from "../../../studio/types";
+
 export type GenerationTraceSummary = {
   job_id: string;
   session_id: string;
@@ -7,7 +9,7 @@ export type GenerationTraceSummary = {
   provider: string;
   status: string;
   started_at: string;
-  generation_finished_at: string;
+  completed_at: string | null;
   actual_cost_usd: number;
   batch_id?: string;
   error_message?: string;
@@ -18,7 +20,7 @@ export type TraceAnalysis = {
   version: string;
   productIdentity: any;
   creativeDirection: any;
-  posePlan?: boolean;
+  posePlan?: StudioPose[];
 };
 
 export type TraceAttempt = {

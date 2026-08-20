@@ -32,6 +32,7 @@ export function GenerationFlow() {
   const handleSelectJob = async (jobId: string) => {
     setIsLoadingTrace(true);
     setError(null);
+    setSelectedNode(null);
     try {
       const data = await invokeAppApi<any>('admin.generationFlow.get', { jobId });
       if (data) {
@@ -65,7 +66,13 @@ export function GenerationFlow() {
         <div className="flex-none p-4 border-b border-outline-variant/30 flex justify-between items-center bg-white z-10">
           <div>
             <div className="flex items-center gap-4">
-              <button onClick={() => setSelectedTrace(null)} className="p-2 hover:bg-surface-container-low rounded-full transition-colors">
+              <button 
+                onClick={() => {
+                  setSelectedTrace(null);
+                  setSelectedNode(null);
+                }} 
+                className="p-2 hover:bg-surface-container-low rounded-full transition-colors"
+              >
                 <ArrowLeft className="w-5 h-5 text-on-surface" />
               </button>
               <div>

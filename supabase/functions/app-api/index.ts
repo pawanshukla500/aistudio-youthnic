@@ -1193,7 +1193,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     }
     await service.from("ai_runs").insert({
       organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
-      job_id: job.job_id, run_kind: "image_generation", model: job.model, provider: "openai",
+      job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "image_generation", model: job.model, provider: "openai",
       input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt, referenceRoles: selected.map((reference) => reference.role) },
       output_json: { qa }, status: qa.pass ? "completed" : "rejected_by_qa", latency_ms: Date.now() - generatedStarted,
       provider_request_id: providerRequestId,
@@ -1502,7 +1502,7 @@ async function downloadGeneratedAssets(request: Request, args: JsonRecord) {
 
 async function adminGenerationFlowList(request: Request) {
   const { workspace } = await workspaceFor(request);
-  if (!workspace.isAdmin && !workspace.permissions.some((p) => p.startsWith("admin."))) throw new Error("You do not have access to the admin console.");
+  if (!workspace.isAdmin && !workspace.permissions.includes("admin.settings")) throw new Error("You do not have access to the admin console.");
   
   const { data: jobs, error } = await service.from("generation_jobs")
     .select("job_id, session_id, sku_name, status, model, provider, actual_cost_usd, started_at, batch_id, current_pose")
@@ -1516,7 +1516,7 @@ async function adminGenerationFlowList(request: Request) {
 
 async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request);
-  if (!workspace.isAdmin && !workspace.permissions.some((p) => p.startsWith("admin."))) throw new Error("You do not have access to the admin console.");
+  if (!workspace.isAdmin && !workspace.permissions.includes("admin.settings")) throw new Error("You do not have access to the admin console.");
   
   const jobId = String(args.jobId || "");
   if (!jobId) throw new Error("jobId is required.");
@@ -1532,9 +1532,13 @@ async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
     service.from("generation_learnings").select("*").eq("job_id", jobId).maybeSingle()
   ]);
 
+  for (const result of [session, poses, aiRuns, qaReviews, learning]) {
+    if (result.error) throw new Error(result.error.message);
+  }
+
   return {
     summary: job,
-    session: session.data ? session.data.session_data : null,
+    session: session.data?.session_data ?? null,
     poses: poses.data || [],
     aiRuns: aiRuns.data || [],
     qaReviews: qaReviews.data || [],

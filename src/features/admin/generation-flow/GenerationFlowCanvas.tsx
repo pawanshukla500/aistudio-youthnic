@@ -61,6 +61,7 @@ export function GenerationFlowCanvas({
         fitView
         nodesConnectable={false}
         elementsSelectable={true}
+        deleteKeyCode={null}
         minZoom={0.1}
         maxZoom={1.5}
       >
