@@ -1810,8 +1810,8 @@ async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
   const [session, poses, aiRuns, qaReviews, learning] = await Promise.all([
     service.from("catalog_sessions").select("*").eq("session_id", job.session_id).maybeSingle(),
     service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index"),
-    service.from("ai_runs").select("*").eq("session_id", job.session_id).order("created_at"),
-    service.from("qa_reviews").select("*").eq("session_id", job.session_id).order("created_at"),
+    service.from("ai_runs").select("*").eq("job_id", jobId).order("created_at"),
+    service.from("qa_reviews").select("*").eq("generation_job_id", jobId).order("created_at"),
     service.from("generation_learnings").select("*").eq("job_id", jobId).maybeSingle()
   ]);
 
