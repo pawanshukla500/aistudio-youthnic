@@ -1,6 +1,6 @@
 create table if not exists public.generation_flow_nodes (
   id uuid primary key default gen_random_uuid(),
-  session_id text not null references public.catalog_sessions(session_id) on delete cascade,
+  session_id text not null,
   node_type text not null,
   status text not null default 'pending',
   inputs jsonb not null default '{}'::jsonb,
@@ -15,7 +15,7 @@ create table if not exists public.generation_flow_nodes (
 
 create table if not exists public.generation_flow_edges (
   id uuid primary key default gen_random_uuid(),
-  session_id text not null references public.catalog_sessions(session_id) on delete cascade,
+  session_id text not null,
   source_node_id uuid not null references public.generation_flow_nodes(id) on delete cascade,
   target_node_id uuid not null references public.generation_flow_nodes(id) on delete cascade,
   created_at timestamptz not null default now()
@@ -34,22 +34,24 @@ alter table public.generation_flow_edges enable row level security;
 -- Basic policies for owners (inheriting from catalog_sessions)
 drop policy if exists generation_flow_nodes_select_owner on public.generation_flow_nodes;
 create policy generation_flow_nodes_select_owner on public.generation_flow_nodes
-  for select
-  using (
-    exists (
-      select 1 from public.catalog_sessions s
-      where s.session_id = generation_flow_nodes.session_id
-      and s.organization_id in (select organization_id from app_current_user_memberships())
-    )
-  );
+  for select to authenticated
+  using (exists (
+    select 1 from public.catalog_sessions as session
+    where session.session_id = generation_flow_nodes.session_id
+      and (
+        session.user_id = (select private.current_firebase_uid())
+        or session.organization_id = (select private.current_organization_id())
+      )
+  ));
 
 drop policy if exists generation_flow_edges_select_owner on public.generation_flow_edges;
 create policy generation_flow_edges_select_owner on public.generation_flow_edges
-  for select
-  using (
-    exists (
-      select 1 from public.catalog_sessions s
-      where s.session_id = generation_flow_edges.session_id
-      and s.organization_id in (select organization_id from app_current_user_memberships())
-    )
-  );
+  for select to authenticated
+  using (exists (
+    select 1 from public.catalog_sessions as session
+    where session.session_id = generation_flow_edges.session_id
+      and (
+        session.user_id = (select private.current_firebase_uid())
+        or session.organization_id = (select private.current_organization_id())
+      )
+  ));
