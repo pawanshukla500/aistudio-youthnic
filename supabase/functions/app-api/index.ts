@@ -1206,7 +1206,17 @@ async function handleFinalImageNode(node: JsonRecord, sessionId: string) {
 }
 async function handleLearningNode(node: JsonRecord, sessionId: string) { 
   const inputs = node.inputs as JsonRecord;
-  return { learned: true }; 
+  
+  // Update planning request to completed to finish the generation lifecycle
+  const { data: session } = await service.from("catalog_sessions").select("planning_request_id").eq("session_id", sessionId).single();
+  if (session?.planning_request_id) {
+    await service.from("planning_requests").update({ 
+      generation_status: "completed", 
+      updated_at: new Date().toISOString() 
+    }).eq("id", session.planning_request_id);
+  }
+
+  return { learned: true, catalogUpdated: true }; 
 }
 
 async function processNode(request: Request, args: JsonRecord) {
@@ -1766,7 +1776,7 @@ async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
 
   if (jobId.startsWith("session_")) {
     const [session, nodes, edges] = await Promise.all([
-      service.from("catalog_sessions").select("*").eq("session_id", jobId).single(),
+      service.from("catalog_sessions").select("*").eq("session_id", jobId).eq("organization_id", workspace.organization.id).single(),
       service.from("generation_flow_nodes").select("*").eq("session_id", jobId).order("created_at"),
       service.from("generation_flow_edges").select("*").eq("session_id", jobId)
     ]);
@@ -2683,8 +2693,8 @@ async function generateCatalogFlowGraph(batch: JsonRecord, variant: JsonRecord, 
   if (nodes.length > 0) {
     await service.from("generation_flow_nodes").insert(nodes);
     await service.from("generation_flow_edges").insert(edges);
-    // Kickstart the first node
-    await service.from("generation_flow_nodes").update({ status: "running", started_at: new Date().toISOString() }).eq("id", analysisId);
+    // Kickstart the orchestrator without marking the node as running, so the worker can pick it up
+    await kickNodeOrchestrator(sessionId);
   }
 }
 
