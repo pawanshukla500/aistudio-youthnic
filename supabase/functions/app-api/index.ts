@@ -2022,6 +2022,12 @@ async function deleteCatalogOperation(request: Request, args: JsonRecord) {
   const batchId = String(args.catalogId || "");
   // Ensure the batch belongs to this workspace before deleting
   await catalogBatch(workspace, batchId);
+  
+  // Delete all associated generation jobs to prevent orphaned jobs from continuing to run
+  await service.from("generation_jobs").delete().eq("batch_id", batchId);
+  // Delete all colorway requests
+  await service.from("planning_requests").delete().eq("batch_id", batchId);
+  
   const { error } = await service.from("planning_batches").delete().eq("id", batchId);
   if (error) throw new Error("Could not delete catalog: " + error.message);
   return { success: true };
