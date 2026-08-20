@@ -15,7 +15,7 @@ export const api = {
     setVariantReferences: "catalog.setVariantReferences", removeVariant: "catalog.removeVariant", scheduleCatalog: "catalog.scheduleCatalog",
     cancelScheduledCatalog: "catalog.cancelScheduledCatalog", addCatalogStyleReference: "catalog.addCatalogStyleReference",
     removeCatalogStyleReference: "catalog.removeCatalogStyleReference", retryVariant: "catalog.retryVariant",
-    saveStylingPlan: "catalog.saveStylingPlan", delete: "catalog.delete"
+    saveStylingPlan: "catalog.saveStylingPlan", delete: "catalog.delete", stopGeneration: "catalog.stopGeneration"
   },
   styling: { updateSessionPlan: "studio.updateStylingPlan" },
   eventIntelligence: { roadmap: "eventIntelligence.roadmap", runResearch: "eventIntelligence.runResearch", seedCalendar: "eventIntelligence.seedCalendar" },
@@ -570,6 +570,8 @@ async function mutateBackend(endpoint: BackendEndpoint, args: Record<string, any
       return invokeAppApi("catalog.cancelSchedule", args);
     case api.catalog.delete:
       return invokeAppApi("catalog.delete", args);
+    case api.catalog.stopGeneration:
+      return invokeAppApi("catalog.stopGeneration", args);
     case api.catalog.retryVariant:
       return invokeAppApi("catalog.retryVariant", args);
     case api.catalog.saveStylingPlan:

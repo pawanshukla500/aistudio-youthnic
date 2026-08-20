@@ -2044,6 +2044,23 @@ async function deleteCatalogOperation(request: Request, args: JsonRecord) {
   return { success: true };
 }
 
+async function stopCatalogGenerationOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.manage");
+  const batchId = String(args.catalogId || "");
+  await catalogBatch(workspace, batchId);
+  
+  const b = await service.from("planning_batches").update({ queue_status: "idle", updated_at: new Date().toISOString() }).eq("id", batchId);
+  if (b.error) throw new Error(b.error.message);
+
+  const j = await service.from("generation_jobs").update({ status: "cancelled", error_message: "Force stopped from Planning tab.", updated_at: new Date().toISOString() }).eq("batch_id", batchId).in("status", ["queued", "processing"]);
+  if (j.error) throw new Error(j.error.message);
+
+  const r = await service.from("planning_requests").update({ generation_status: "failed", error_message: "Force stopped from Planning tab.", updated_at: new Date().toISOString() }).eq("batch_id", batchId).in("generation_status", ["pending", "processing"]);
+  if (r.error) throw new Error(r.error.message);
+  
+  return { success: true };
+}
+
 async function retryVariantOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const requestId = String(args.skuId || "");
@@ -3334,6 +3351,7 @@ Deno.serve(async (request) => {
       "catalog.setVariantReferences": () => setVariantReferencesOperation(request, args),
       "catalog.removeVariant": () => removeVariantOperation(request, args),
       "catalog.delete": () => deleteCatalogOperation(request, args),
+      "catalog.stopGeneration": () => stopCatalogGenerationOperation(request, args),
       "catalog.addStyleReference": () => addCatalogStyleReferenceOperation(request, args),
       "catalog.removeStyleReference": () => removeCatalogStyleReferenceOperation(request, args),
       "catalog.schedule": () => scheduleCatalogOperation(request, args),
