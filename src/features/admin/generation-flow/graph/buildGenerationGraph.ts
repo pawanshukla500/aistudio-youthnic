@@ -134,3 +134,50 @@ export function buildGenerationGraph(trace: GenerationTraceViewModel) {
 
   return { nodes, edges };
 }
+
+export function buildV2GenerationGraph(rawBackendData: any) {
+  const nodes: Node[] = [];
+  const edges: Edge[] = [];
+  
+  if (!rawBackendData.nodes) return { nodes, edges };
+
+  // True Node-based parsing
+  rawBackendData.nodes.forEach((n: any) => {
+    // Map backend node_type to frontend node type
+    let type = n.node_type;
+    if (type === 'ai_visual_analysis') type = 'analysis';
+    if (type === 'product_truth') type = 'truth';
+    if (type === 'memory_and_planning') type = 'plan';
+    if (type === 'pose_reference') type = 'reference';
+    if (type === 'prompt_compilation') type = 'prompt';
+    if (type === 'gpt_image_2') type = 'generation';
+    if (type === 'gemini_qa') type = 'qa';
+    if (type === 'final_image') type = 'complete';
+
+    nodes.push({
+      id: n.id,
+      type: type,
+      data: {
+        id: n.id,
+        status: n.status,
+        inputs: n.inputs,
+        outputs: n.outputs,
+        started_at: n.started_at,
+        completed_at: n.completed_at,
+        error_message: n.error_message
+      },
+      position: { x: 0, y: 0 } // Layout handles this
+    });
+  });
+
+  rawBackendData.edges.forEach((e: any) => {
+    edges.push({
+      id: e.id,
+      source: e.source_node_id,
+      target: e.target_node_id,
+      type: 'smoothstep',
+    });
+  });
+
+  return { nodes, edges };
+}

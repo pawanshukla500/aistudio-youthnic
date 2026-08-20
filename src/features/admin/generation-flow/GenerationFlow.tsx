@@ -3,14 +3,14 @@ import { invokeAppApi } from '../../../lib/backend';
 import { GenerationFlowList } from './GenerationFlowList';
 import { GenerationFlowCanvas } from './GenerationFlowCanvas';
 import { FlowNodeDetailDrawer } from './FlowNodeDetailDrawer';
-import type { GenerationTraceViewModel } from './graph/types';
+// Removed GenerationTraceViewModel
 import { parseTrace } from './graph/buildGenerationGraph';
 import { ArrowLeft } from 'lucide-react';
 
 export function GenerationFlow() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [isLoadingJobs, setIsLoadingJobs] = useState(true);
-  const [selectedTrace, setSelectedTrace] = useState<GenerationTraceViewModel | null>(null);
+  const [selectedGraphData, setSelectedGraphData] = useState<any | null>(null);
   const [isLoadingTrace, setIsLoadingTrace] = useState(false);
   const [selectedNode, setSelectedNode] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,8 +36,12 @@ export function GenerationFlow() {
     try {
       const data = await invokeAppApi<any>('admin.generationFlow.get', { jobId });
       if (data) {
-        const trace = parseTrace(data);
-        setSelectedTrace(trace);
+        if (data.is_v2) {
+          setSelectedGraphData(data);
+        } else {
+          const trace = parseTrace(data);
+          setSelectedGraphData({ is_v2: false, trace });
+        }
       }
     } catch (err: any) {
       setError(err.message);
@@ -60,7 +64,18 @@ export function GenerationFlow() {
     );
   }
 
-  if (selectedTrace) {
+  if (selectedGraphData) {
+    const summarySku = selectedGraphData.is_v2 
+      ? (selectedGraphData.session?.session_data?.skuName || 'Unnamed Product') 
+      : (selectedGraphData.trace?.summary?.sku_name || 'Unnamed Product');
+      
+    const summaryJobId = selectedGraphData.is_v2 
+      ? selectedGraphData.session?.session_id 
+      : selectedGraphData.trace?.summary?.job_id;
+      
+    const summaryModel = selectedGraphData.is_v2 ? 'V2 Node Graph' : selectedGraphData.trace?.summary?.model;
+    const summaryCost = selectedGraphData.is_v2 ? 0 : (selectedGraphData.trace?.summary?.actual_cost_usd || 0);
+
     return (
       <div className="h-full flex flex-col relative overflow-hidden bg-surface-container-lowest">
         <div className="flex-none p-4 border-b border-outline-variant/30 flex justify-between items-center bg-white z-10">
@@ -68,7 +83,7 @@ export function GenerationFlow() {
             <div className="flex items-center gap-4">
               <button 
                 onClick={() => {
-                  setSelectedTrace(null);
+                  setSelectedGraphData(null);
                   setSelectedNode(null);
                 }} 
                 className="p-2 hover:bg-surface-container-low rounded-full transition-colors"
@@ -77,12 +92,12 @@ export function GenerationFlow() {
               </button>
               <div>
                 <h2 className="text-lg font-bold text-on-surface leading-tight">
-                  {selectedTrace.summary.sku_name || 'Unnamed Product'}
+                  {summarySku}
                 </h2>
                 <div className="text-xs text-secondary flex gap-3 mt-1 font-medium">
-                  <span>ID: {selectedTrace.summary.job_id}</span>
-                  <span>Model: {selectedTrace.summary.model}</span>
-                  <span>Cost: ${(selectedTrace.summary.actual_cost_usd || 0).toFixed(3)}</span>
+                  <span>ID: {summaryJobId}</span>
+                  <span>Model: {summaryModel}</span>
+                  <span>Cost: ${summaryCost.toFixed(3)}</span>
                 </div>
               </div>
             </div>
@@ -91,7 +106,7 @@ export function GenerationFlow() {
         
         <div className="flex-1 relative">
           <GenerationFlowCanvas 
-            trace={selectedTrace} 
+            data={selectedGraphData} 
             onNodeSelect={(node) => setSelectedNode(node)} 
           />
         </div>

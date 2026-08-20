@@ -9,8 +9,8 @@ import {
   BackgroundVariant
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import type { GenerationTraceViewModel } from './graph/types';
-import { buildGenerationGraph } from './graph/buildGenerationGraph';
+// Removed GenerationTraceViewModel
+import { buildGenerationGraph, buildV2GenerationGraph } from './graph/buildGenerationGraph';
 import { layoutGenerationGraph } from './graph/layoutGenerationGraph';
 import * as FlowNodes from './nodes';
 
@@ -31,16 +31,25 @@ const nodeTypes = {
 };
 
 export function GenerationFlowCanvas({
-  trace,
+  data,
   onNodeSelect
 }: {
-  trace: GenerationTraceViewModel;
+  data: any;
   onNodeSelect: (node: any) => void;
 }) {
   const initialData = useMemo(() => {
-    const { nodes, edges } = buildGenerationGraph(trace);
+    let nodes, edges;
+    if (data.is_v2) {
+      const graph = buildV2GenerationGraph(data);
+      nodes = graph.nodes;
+      edges = graph.edges;
+    } else {
+      const graph = buildGenerationGraph(data.trace);
+      nodes = graph.nodes;
+      edges = graph.edges;
+    }
     return layoutGenerationGraph(nodes, edges);
-  }, [trace]);
+  }, [data]);
 
   const [nodes, , onNodesChange] = useNodesState(initialData.nodes);
   const [edges, , onEdgesChange] = useEdgesState(initialData.edges);
