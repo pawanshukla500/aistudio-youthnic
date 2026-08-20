@@ -1201,7 +1201,14 @@ async function handleFinalImageNode(node: JsonRecord, sessionId: string) {
   const inputs = node.inputs as JsonRecord;
   // Find output URL from GPT node
   const { data: edges } = await service.from("generation_flow_edges").select("source_node_id").eq("target_node_id", node.id);
-  // Just pass it along
+  if (edges && edges.length > 0) {
+    const { data: sourceNode } = await service.from("generation_flow_nodes").select("outputs").eq("id", edges[0].source_node_id).single();
+    if (sourceNode?.outputs?.outputUrl) {
+      await service.from("session_generations").update({
+        status: "completed", output_url: sourceNode.outputs.outputUrl, storage_path: sourceNode.outputs.outputUrl, updated_at: new Date().toISOString()
+      }).eq("session_id", sessionId).eq("pose_index", inputs.poseIndex);
+    }
+  }
   return { finalized: true }; 
 }
 async function handleLearningNode(node: JsonRecord, sessionId: string) { 
@@ -1210,10 +1217,16 @@ async function handleLearningNode(node: JsonRecord, sessionId: string) {
   // Update planning request to completed to finish the generation lifecycle
   const { data: session } = await service.from("catalog_sessions").select("planning_request_id").eq("session_id", sessionId).single();
   if (session?.planning_request_id) {
-    await service.from("planning_requests").update({ 
-      generation_status: "completed", 
-      updated_at: new Date().toISOString() 
-    }).eq("id", session.planning_request_id);
+    await Promise.all([
+      service.from("planning_requests").update({ 
+        generation_status: "completed", 
+        updated_at: new Date().toISOString() 
+      }).eq("id", session.planning_request_id),
+      service.from("catalog_sessions").update({
+        status: "completed",
+        updated_at: new Date().toISOString()
+      }).eq("session_id", sessionId)
+    ]);
   }
 
   return { learned: true, catalogUpdated: true }; 
@@ -2670,23 +2683,41 @@ async function generateCatalogFlowGraph(batch: JsonRecord, variant: JsonRecord, 
   const memoryId = addNode("memory_and_planning", { batchId: batch.id, variantId: variant.id });
   addEdge(truthId, memoryId);
 
-  for (let i = 1; i <= 5; i++) {
-    const refId = addNode("pose_reference", { poseIndex: i });
+  const settings = (batch.generation_settings || {}) as JsonRecord;
+  const posePlan = Array.isArray(settings.posePlan) && settings.posePlan.length > 0
+    ? settings.posePlan 
+    : Array.from({ length: 5 }, (_, i) => ({ title: `Pose ${i + 1}`, id: `pose-${i+1}`, prompt: `Generate pose ${i + 1}` }));
+
+  const poseRows = posePlan.map((pose: any, index: number) => ({
+    session_id: sessionId, generation_id: `${sessionId}:pose:${index + 1}`, pose_index: index + 1,
+    title: pose.title, pose_type: pose.id, instructions: pose.prompt, status: "queued", attempt_count: 0,
+    generation_data: { ...pose, poseNumber: index + 1, jobId: sessionId },
+  }));
+  await service.from("session_generations").insert(poseRows);
+
+  const finalImageIds: string[] = [];
+
+  for (let i = 0; i < posePlan.length; i++) {
+    const poseIndex = i + 1;
+    const refId = addNode("pose_reference", { poseIndex });
     addEdge(memoryId, refId);
 
-    const promptId = addNode("prompt_compilation", { poseIndex: i });
+    const promptId = addNode("prompt_compilation", { poseIndex });
     addEdge(refId, promptId);
 
-    const genId = addNode("gpt_image_2", { poseIndex: i, attempt: 1 });
+    const genId = addNode("gpt_image_2", { poseIndex, attempt: 1 });
     addEdge(promptId, genId);
 
-    const qaId = addNode("gemini_qa", { poseIndex: i, attempt: 1 });
+    const qaId = addNode("gemini_qa", { poseIndex, attempt: 1 });
     addEdge(genId, qaId);
 
-    const finalId = addNode("final_image", { poseIndex: i });
+    const finalId = addNode("final_image", { poseIndex });
     addEdge(qaId, finalId);
+    finalImageIds.push(finalId);
+  }
 
-    const learnId = addNode("learning", { poseIndex: i });
+  const learnId = addNode("learning", {});
+  for (const finalId of finalImageIds) {
     addEdge(finalId, learnId);
   }
 
