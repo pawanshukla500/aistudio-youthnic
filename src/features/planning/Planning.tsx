@@ -122,6 +122,7 @@ export function Planning() {
   const scheduleCatalog = useMutation(api.catalog.scheduleCatalog);
   const cancelScheduledCatalog = useMutation(api.catalog.cancelScheduledCatalog);
   const deleteCatalog = useMutation(api.catalog.delete);
+  const stopCatalogGeneration = useMutation(api.catalog.stopGeneration);
   const addCatalogStyleReference = useMutation(api.catalog.addCatalogStyleReference);
   const saveCatalogStylingPlan = useMutation(api.catalog.saveStylingPlan);
   const removeCatalogStyleReference = useMutation(api.catalog.removeCatalogStyleReference);
@@ -412,6 +413,21 @@ export function Planning() {
     }
   };
 
+  const handleStopCatalogGeneration = async () => {
+    if (!selectedId) return;
+    if (!window.confirm("Are you sure you want to force-stop the generation of this catalog? Active generating images will be cancelled.")) return;
+    setBusy("stop-catalog-generation");
+    setNotice(null);
+    try {
+      await stopCatalogGeneration({ catalogId: selectedId });
+      notify("success", "Catalog generation stopped successfully.");
+    } catch (reason) {
+      notify("error", getErrorMessage(reason, "Could not stop catalog generation."));
+    } finally {
+      setBusy("");
+    }
+  };
+
   const stopActiveGeneration = async () => {
     if (!activeVariant?.jobId || !window.confirm(`Stop generation for ${activeVariant.sku}? Completed images will remain saved.`)) return;
     setBusy("stop-generation");
@@ -518,6 +534,11 @@ export function Planning() {
                     <div className="flex flex-wrap items-center gap-3">
                       <h2 className="font-syne text-2xl font-bold text-on-surface">{selected.name}</h2>
                       <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${statusChip(selected.status)}`}>{statusLabel(selected.status)}</span>
+                      {["scheduled", "queued", "processing", "generating"].includes(selected.status) && (
+                        <button disabled={busy === "stop-catalog-generation"} onClick={() => void handleStopCatalogGeneration()} className="flex items-center gap-1.5 rounded-lg border border-warning/20 px-2 py-1 text-[11px] font-semibold text-warning hover:bg-warning-surface disabled:opacity-50">
+                          {busy === "stop-catalog-generation" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Ban className="h-3 w-3" />} Stop generation
+                        </button>
+                      )}
                       <button disabled={busy === "delete-catalog"} onClick={() => void handleDeleteCatalog()} className="flex items-center gap-1.5 rounded-lg border border-danger/20 px-2 py-1 text-[11px] font-semibold text-danger hover:bg-danger-surface disabled:opacity-50">
                         {busy === "delete-catalog" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />} Delete
                       </button>
@@ -802,6 +823,60 @@ export function Planning() {
                       <div className="py-5 text-center"><CheckCircle2 className="mx-auto h-7 w-7 text-success" /><p className="mt-3 text-sm font-bold text-on-surface">Catalog workflow complete</p></div>
                     )}
                   </div>
+                </div>
+              </section>
+
+              {/* Trail of Generations & Session IDs */}
+              <section className="mt-6 rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-sm">
+                <div className="mb-4">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Proper Trail</p>
+                  <h3 className="mt-1 font-syne text-lg font-bold text-on-surface">Variants &amp; Session History</h3>
+                  <p className="mt-1 text-xs leading-5 text-secondary">
+                    Below are all the colourways in this catalog. Copy the <b>Session ID</b> to look up the exact generation trail, status, and logs in the History tab.
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm text-secondary">
+                    <thead className="bg-surface-container-lowest text-xs uppercase text-on-surface">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">SKU</th>
+                        <th className="px-4 py-3 font-semibold">Colour Label</th>
+                        <th className="px-4 py-3 font-semibold">Status</th>
+                        <th className="px-4 py-3 font-semibold">Session ID (jobId)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-outline-variant/30">
+                      {selected.variants.map((variant) => (
+                        <tr key={variant._id} className="hover:bg-surface-container-lowest/50">
+                          <td className="px-4 py-3 font-medium text-on-surface">{variant.sku}</td>
+                          <td className="px-4 py-3">{variant.colorLabel || "-"}</td>
+                          <td className="px-4 py-3">
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${statusChip(variant.status)}`}>
+                              {variant.status}
+                            </span>
+                            {variant.jobStatus && variant.jobStatus !== "idle" && (
+                              <span className="ml-2 text-[10px] uppercase text-info">({variant.jobStatus})</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-[11px]">
+                            {variant.jobId ? (
+                              <div className="flex items-center gap-2">
+                                {variant.jobId}
+                                <button
+                                  onClick={() => { navigator.clipboard.writeText(variant.jobId); notify("success", "Session ID copied to clipboard!"); }}
+                                  className="text-primary hover:underline"
+                                >
+                                  Copy
+                                </button>
+                              </div>
+                            ) : (
+                              "Not started"
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </section>
             </>
