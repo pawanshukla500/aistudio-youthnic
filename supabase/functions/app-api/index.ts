@@ -2049,9 +2049,14 @@ async function stopCatalogGenerationOperation(request: Request, args: JsonRecord
   const batchId = String(args.catalogId || "");
   await catalogBatch(workspace, batchId);
   
-  await service.from("planning_batches").update({ queue_status: "idle", updated_at: new Date().toISOString() }).eq("id", batchId);
-  await service.from("generation_jobs").update({ status: "cancelled", error_message: "Force stopped from Planning tab.", updated_at: new Date().toISOString() }).eq("batch_id", batchId).in("status", ["queued", "processing"]);
-  await service.from("planning_requests").update({ generation_status: "failed", error_message: "Force stopped from Planning tab.", updated_at: new Date().toISOString() }).eq("batch_id", batchId).in("generation_status", ["pending", "processing"]);
+  const b = await service.from("planning_batches").update({ queue_status: "idle", updated_at: new Date().toISOString() }).eq("id", batchId);
+  if (b.error) throw new Error(b.error.message);
+
+  const j = await service.from("generation_jobs").update({ status: "cancelled", error_message: "Force stopped from Planning tab.", updated_at: new Date().toISOString() }).eq("batch_id", batchId).in("status", ["queued", "processing"]);
+  if (j.error) throw new Error(j.error.message);
+
+  const r = await service.from("planning_requests").update({ generation_status: "failed", error_message: "Force stopped from Planning tab.", updated_at: new Date().toISOString() }).eq("batch_id", batchId).in("generation_status", ["pending", "processing"]);
+  if (r.error) throw new Error(r.error.message);
   
   return { success: true };
 }
