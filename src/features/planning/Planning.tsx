@@ -121,6 +121,7 @@ export function Planning() {
   const removeVariant = useMutation(api.catalog.removeVariant);
   const scheduleCatalog = useMutation(api.catalog.scheduleCatalog);
   const cancelScheduledCatalog = useMutation(api.catalog.cancelScheduledCatalog);
+  const deleteCatalog = useMutation(api.catalog.delete);
   const addCatalogStyleReference = useMutation(api.catalog.addCatalogStyleReference);
   const saveCatalogStylingPlan = useMutation(api.catalog.saveStylingPlan);
   const removeCatalogStyleReference = useMutation(api.catalog.removeCatalogStyleReference);
@@ -394,6 +395,23 @@ export function Planning() {
     }
   };
 
+  const handleDeleteCatalog = async () => {
+    if (!selectedId) return;
+    if (!window.confirm("Are you sure you want to delete this catalog and all its variants? This cannot be undone.")) return;
+    setBusy("delete-catalog");
+    setNotice(null);
+    try {
+      await deleteCatalog({ catalogId: selectedId });
+      setSelectedId(null);
+      setFocusSku(null);
+      notify("success", "Catalog deleted successfully.");
+    } catch (reason) {
+      notify("error", getErrorMessage(reason, "Could not delete catalog."));
+    } finally {
+      setBusy("");
+    }
+  };
+
   const stopActiveGeneration = async () => {
     if (!activeVariant?.jobId || !window.confirm(`Stop generation for ${activeVariant.sku}? Completed images will remain saved.`)) return;
     setBusy("stop-generation");
@@ -500,6 +518,9 @@ export function Planning() {
                     <div className="flex flex-wrap items-center gap-3">
                       <h2 className="font-syne text-2xl font-bold text-on-surface">{selected.name}</h2>
                       <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${statusChip(selected.status)}`}>{statusLabel(selected.status)}</span>
+                      <button disabled={busy === "delete-catalog"} onClick={() => void handleDeleteCatalog()} className="flex items-center gap-1.5 rounded-lg border border-danger/20 px-2 py-1 text-[11px] font-semibold text-danger hover:bg-danger-surface disabled:opacity-50">
+                        {busy === "delete-catalog" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />} Delete
+                      </button>
                     </div>
                     <p className="mt-1 text-sm text-secondary">{selected.eventName ? `${selected.eventName} · ` : ""}{selected.variants.length} colourways · {readyCount} ready · {selected.completedSkus || 0} completed{selected.failedSkus ? ` · ${selected.failedSkus} failed` : ""}</p>
                     {selected.scheduledAt && selected.status === "scheduled" && <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-info"><Clock3 className="h-3.5 w-3.5" /> Automatic run: {new Date(selected.scheduledAt).toLocaleString("en-IN")} (Asia/Kolkata)</p>}

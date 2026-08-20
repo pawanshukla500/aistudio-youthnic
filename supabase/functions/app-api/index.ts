@@ -2017,6 +2017,16 @@ async function cancelScheduledCatalogOperation(request: Request, args: JsonRecor
   return { success: true };
 }
 
+async function deleteCatalogOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.manage");
+  const batchId = String(args.catalogId || "");
+  // Ensure the batch belongs to this workspace before deleting
+  await catalogBatch(workspace, batchId);
+  const { error } = await service.from("planning_batches").delete().eq("id", batchId);
+  if (error) throw new Error("Could not delete catalog: " + error.message);
+  return { success: true };
+}
+
 async function retryVariantOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const requestId = String(args.skuId || "");
@@ -3306,6 +3316,7 @@ Deno.serve(async (request) => {
       "catalog.bulkAddVariants": () => bulkAddVariantsOperation(request, args),
       "catalog.setVariantReferences": () => setVariantReferencesOperation(request, args),
       "catalog.removeVariant": () => removeVariantOperation(request, args),
+      "catalog.delete": () => deleteCatalogOperation(request, args),
       "catalog.addStyleReference": () => addCatalogStyleReferenceOperation(request, args),
       "catalog.removeStyleReference": () => removeCatalogStyleReferenceOperation(request, args),
       "catalog.schedule": () => scheduleCatalogOperation(request, args),
