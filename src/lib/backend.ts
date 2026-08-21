@@ -651,8 +651,7 @@ export function useQuery(endpoint: BackendEndpoint, args: Record<string, any> | 
     };
   }, [endpoint, serializedArgs]);
 
-  if (error) throw error;
-  return value;
+  return { data: value, error, isLoading: value === undefined && !error };
 }
 
 export function useMutation(endpoint: BackendEndpoint) {

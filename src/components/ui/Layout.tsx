@@ -10,7 +10,7 @@ export function Layout() {
   const { organization, user, membership, permissions, roles, isAdmin } = useWorkspace();
   const { signOut } = useFirebaseAuth();
   const location = useLocation();
-  const notifications = useQuery(api.notifications.list, { organizationId: organization._id }) as any[] | undefined;
+  const { data: notifications } = useQuery(api.notifications.list, { organizationId: organization._id }) as { data: any[] | undefined, error: any };
   const unread = notifications?.filter((notification) => !notification.readAt).length || 0;
   const can = (permission: string) => isAdmin || permissions.includes(permission);
   const canAdmin = isAdmin || permissions.some((permission) => permission.startsWith("admin."));

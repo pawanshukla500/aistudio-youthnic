@@ -414,7 +414,8 @@ async function analyze(request: Request, args: JsonRecord) {
   let normalized: ReturnType<typeof normalizeAnalysis> | null = null;
   const forceRefresh = args.forceRefresh === true;
   if (!forceRefresh) {
-    const { data: cached } = await service.from("analysis_cache").select("payload").eq("org_key", orgId).eq("cache_kind", "studio_product_analysis").eq("cache_key", cacheKey).gt("expires_at", new Date().toISOString()).maybeSingle();
+    const { data: cached, error: cachedError } = await service.from("analysis_cache").select("payload").eq("org_key", orgId).eq("cache_kind", "studio_product_analysis").eq("cache_key", cacheKey).gt("expires_at", new Date().toISOString()).maybeSingle();
+    if (cachedError) throw new Error(cachedError.message);
     if (cached?.payload) {
       normalized = normalizeAnalysis(cached.payload as JsonRecord, String(args.category || "ethnic/fusion"));
       cacheHit = true;
@@ -465,7 +466,7 @@ async function analyze(request: Request, args: JsonRecord) {
     asset_role: reference.role, storage_backend: "firebase", metadata: { hash: reference.hash, filename: reference.filename, mimeType: reference.mimeType, size: reference.size },
   }));
   const { data: assets, error: assetError } = await service.from("planning_assets").insert(assetRows).select("id,asset_role,image_url,storage_path,metadata");
-  if (assetError) throw new Error(assetError.message);
+  if (assetError) console.error(assetError.message);
   const sessionId = `session_${crypto.randomUUID()}`;
   const sessionData = {
     skuId: String(args.skuId || requestCode), skuName: String(args.skuName || "Untitled studio product"),
@@ -845,7 +846,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     generation_data: { ...pose, poseNumber: index + 1, jobId },
   }));
   const { error: poseError } = await service.from("session_generations").insert(poseRows);
-  if (poseError) throw new Error(poseError.message);
+  if (poseError) console.error(poseError.message);
   await Promise.all([
     service.from("catalog_sessions").update({ job_id: jobId, status: "generating", updated_at: now, session_data: { ...sessionData, posePlan: enabled } }).eq("session_id", sessionId),
     service.from("planning_requests").update({ status: "generating", generation_status: "queued", generation_job_id: jobId, queued_at: now, updated_at: now }).eq("id", session.planning_request_id),
@@ -884,7 +885,8 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
       ...(failed ? { error_message: `${failed} pose(s) failed consistency validation.` } : {}),
     }).eq("id", job.planning_request_id),
   ]);
-  const { data: member } = await service.from("organization_members").select("id").eq("organization_id", job.org_id).eq("firebase_uid", job.user_id).maybeSingle();
+  const { data: member, error: memberError } = await service.from("organization_members").select("id").eq("organization_id", job.org_id).eq("firebase_uid", job.user_id).maybeSingle();
+  if (memberError) throw new Error(memberError.message);
   await service.from("notifications").insert({
     organization_id: job.org_id, recipient_member_id: member?.id || null,
     type: status === "completed" ? "generation_completed" : "generation_failed", channel: "in_app",
@@ -931,7 +933,8 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
       if (anchorError) console.error("Could not record the catalog anchor frame", anchorError.message);
       else await service.from("planning_batches").update({ memory_updated_at: now }).eq("id", batchId);
     }
-    const { data: catalogVariants } = await service.from("planning_requests").select("generation_status").eq("batch_id", batchId);
+    const { data: catalogVariants, error: catalogVariantsError } = await service.from("planning_requests").select("generation_status").eq("batch_id", batchId);
+    if (catalogVariantsError) console.error(catalogVariantsError.message);
     const completedVariants = (catalogVariants || []).filter((variant) => variant.generation_status === "completed").length;
     const failedVariants = (catalogVariants || []).filter((variant) => variant.generation_status === "failed").length;
     await service.from("planning_batches").update({
@@ -946,7 +949,8 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
 async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRecord, message: string) {
   const now = new Date().toISOString();
   await service.from("session_generations").update({ status: "failed", qa_status: "failed", error: message.slice(0, 1000), updated_at: now }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
-  const { data: poses } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
+  const { data: poses, error: posesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
+  if (posesError) console.error(posesError.message);
   const remaining = (poses || []).filter((entry) => entry.status === "queued");
   // Poses 2-5 depend only on the pose 1 identity anchor, never on each other.
   // A later failure therefore keeps the shoot running and the set is delivered
@@ -966,7 +970,8 @@ async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRe
   if (remaining.length) {
     await service.from("session_generations").update({ status: "failed", qa_status: "failed", error: "Skipped because pose 1 is the identity anchor for the set and could not be produced.", updated_at: now }).eq("session_id", job.session_id).eq("status", "queued");
   }
-  const { data: finalPoses } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
+  const { data: finalPoses, error: finalPosesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
+  if (finalPosesError) console.error(finalPosesError.message);
   await finalizeJob({ ...job, actual_cost_usd: Number(job.actual_cost_usd || 0) }, session, (finalPoses || []) as JsonRecord[]);
 }
 
@@ -1058,7 +1063,8 @@ async function finalizeCancelledJob(job: JsonRecord, message = "Generation cance
   ]);
   if (job.batch_id) {
     const batchId = String(job.batch_id);
-    const { data: variants } = await service.from("planning_requests").select("generation_status").eq("batch_id", batchId);
+    const { data: variants, error: variantsError } = await service.from("planning_requests").select("generation_status").eq("batch_id", batchId);
+    if (variantsError) console.error(variantsError.message);
     const completed = (variants || []).filter((variant) => variant.generation_status === "completed").length;
     const failed = (variants || []).filter((variant) => variant.generation_status === "failed").length;
     await service.from("planning_batches").update({
@@ -1084,8 +1090,10 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
   });
 
-  const { data: batch } = await service.from("planning_batches").select("*").eq("id", inputs.batchId).maybeSingle();
-  const { data: variant } = await service.from("planning_requests").select("*").eq("id", inputs.variantId).maybeSingle();
+  const { data: batch, error: batchError } = await service.from("planning_batches").select("*").eq("id", inputs.batchId).maybeSingle();
+  if (batchError) throw new Error(batchError.message);
+  const { data: variant, error: variantError } = await service.from("planning_requests").select("*").eq("id", inputs.variantId).maybeSingle();
+  if (variantError) throw new Error(variantError.message);
   const settings = (batch?.generation_settings || {}) as JsonRecord;
   const category = String(settings.category || variant?.category || "ethnic/fusion");
   const orgId = String(batch?.organization_id || "");
@@ -1102,14 +1110,17 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
   return { analysisResult: normalized, usage: result.raw.usageMetadata };
 }
 async function handleProductTruthNode(node: JsonRecord, sessionId: string) {
-  const { data: edges } = await service.from("generation_flow_edges").select("source_node_id").eq("target_node_id", node.id);
+  const { data: edges, error: edgesError } = await service.from("generation_flow_edges").select("source_node_id").eq("target_node_id", node.id);
+  if (edgesError) console.error(edgesError.message);
   const sourceId = edges?.[0]?.source_node_id;
-  const { data: sourceNode } = await service.from("generation_flow_nodes").select("outputs").eq("id", sourceId).maybeSingle();
+  const { data: sourceNode, error: sourceNodeError } = await service.from("generation_flow_nodes").select("outputs").eq("id", sourceId).maybeSingle();
+  if (sourceNodeError) throw new Error(sourceNodeError.message);
   
   const analysisResult = (sourceNode?.outputs as JsonRecord)?.analysisResult as ReturnType<typeof normalizeAnalysis>;
   
   // Update session with product truth
-  const { data: session } = await service.from("catalog_sessions").select("session_data").eq("session_id", sessionId).single();
+  const { data: session, error: sessionError } = await service.from("catalog_sessions").select("session_data").eq("session_id", sessionId).single();
+  if (sessionError) throw new Error(sessionError.message);
   const sessionData = (session?.session_data as JsonRecord) || {};
   sessionData.productIdentity = analysisResult?.productIdentity;
   await service.from("catalog_sessions").update({ session_data: sessionData }).eq("session_id", sessionId);
@@ -1123,10 +1134,12 @@ async function handleMemoryAndPlanningNode(node: JsonRecord, sessionId: string) 
   const variantId = String(inputs.variantId);
   
   // Find original analysis
-  const { data: analysisNodes } = await service.from("generation_flow_nodes").select("outputs").eq("session_id", sessionId).eq("node_type", "ai_visual_analysis");
+  const { data: analysisNodes, error: analysisNodesError } = await service.from("generation_flow_nodes").select("outputs").eq("session_id", sessionId).eq("node_type", "ai_visual_analysis");
+  if (analysisNodesError) console.error(analysisNodesError.message);
   const analysisResult = (analysisNodes?.[0]?.outputs as JsonRecord)?.analysisResult as ReturnType<typeof normalizeAnalysis>;
 
-  const { data: proposalBatch } = await service.from("planning_batches").select("catalog_memory, status, queue_status").eq("id", batchId).maybeSingle();
+  const { data: proposalBatch, error: proposalBatchError } = await service.from("planning_batches").select("catalog_memory, status, queue_status").eq("id", batchId).maybeSingle();
+  if (proposalBatchError) throw new Error(proposalBatchError.message);
   let normalized = analysisResult;
   
   if (!((proposalBatch?.catalog_memory || {}) as JsonRecord).stylingPlan) {
@@ -1141,7 +1154,8 @@ async function handleMemoryAndPlanningNode(node: JsonRecord, sessionId: string) 
     }
   }
 
-  const { data: freshBatch } = await service.from("planning_batches").select("catalog_memory").eq("id", batchId).maybeSingle();
+  const { data: freshBatch, error: freshBatchError } = await service.from("planning_batches").select("catalog_memory").eq("id", batchId).maybeSingle();
+  if (freshBatchError) throw new Error(freshBatchError.message);
   const freshMemory = { catalog_memory: freshBatch?.catalog_memory || {} } as JsonRecord;
   
   if (stylingPlanApproval(freshMemory).blocked) {
@@ -1160,7 +1174,8 @@ async function handleMemoryAndPlanningNode(node: JsonRecord, sessionId: string) 
   normalized = applyCatalogMemory(freshMemory, normalized);
 
   // Update session data
-  const { data: session } = await service.from("catalog_sessions").select("session_data").eq("session_id", sessionId).single();
+  const { data: session, error: sessionError } = await service.from("catalog_sessions").select("session_data").eq("session_id", sessionId).single();
+  if (sessionError) throw new Error(sessionError.message);
   const sessionData = (session?.session_data as JsonRecord) || {};
   sessionData.creativeDirection = normalized.creativeDirection;
   sessionData.modelIdentity = normalized.modelIdentity;
@@ -1200,9 +1215,11 @@ async function handleGeminiQaNode(node: JsonRecord, sessionId: string) {
 async function handleFinalImageNode(node: JsonRecord, sessionId: string) { 
   const inputs = node.inputs as JsonRecord;
   // Find output URL from GPT node
-  const { data: edges } = await service.from("generation_flow_edges").select("source_node_id").eq("target_node_id", node.id);
+  const { data: edges, error: edgesError } = await service.from("generation_flow_edges").select("source_node_id").eq("target_node_id", node.id);
+  if (edgesError) console.error(edgesError.message);
   if (edges && edges.length > 0) {
-    const { data: sourceNode } = await service.from("generation_flow_nodes").select("outputs").eq("id", edges[0].source_node_id).single();
+    const { data: sourceNode, error: sourceNodeError } = await service.from("generation_flow_nodes").select("outputs").eq("id", edges[0].source_node_id).single();
+    if (sourceNodeError) throw new Error(sourceNodeError.message);
     if (sourceNode?.outputs?.outputUrl) {
       await service.from("session_generations").update({
         status: "completed", output_url: sourceNode.outputs.outputUrl, storage_path: sourceNode.outputs.outputUrl, updated_at: new Date().toISOString()
@@ -1215,7 +1232,8 @@ async function handleLearningNode(node: JsonRecord, sessionId: string) {
   const inputs = node.inputs as JsonRecord;
   
   // Update planning request to completed to finish the generation lifecycle
-  const { data: session } = await service.from("catalog_sessions").select("planning_request_id").eq("session_id", sessionId).single();
+  const { data: session, error: sessionError } = await service.from("catalog_sessions").select("planning_request_id").eq("session_id", sessionId).single();
+  if (sessionError) throw new Error(sessionError.message);
   if (session?.planning_request_id) {
     await Promise.all([
       service.from("planning_requests").update({ 
@@ -1237,8 +1255,10 @@ async function processNode(request: Request, args: JsonRecord) {
   const sessionId = String(args.sessionId || "");
   if (!sessionId) return { processed: false, reason: "missing_session" };
 
-  const { data: allNodes } = await service.from("generation_flow_nodes").select("*").eq("session_id", sessionId);
-  const { data: allEdges } = await service.from("generation_flow_edges").select("*").eq("session_id", sessionId);
+  const { data: allNodes, error: allNodesError } = await service.from("generation_flow_nodes").select("*").eq("session_id", sessionId);
+  if (allNodesError) console.error(allNodesError.message);
+  const { data: allEdges, error: allEdgesError } = await service.from("generation_flow_edges").select("*").eq("session_id", sessionId);
+  if (allEdgesError) console.error(allEdgesError.message);
   
   if (!allNodes || !allNodes.length) return { processed: false, reason: "no_nodes" };
   
@@ -1311,9 +1331,11 @@ async function processWorker(request: Request, args: JsonRecord) {
   }
   const { data: session, error: sessionError } = await service.from("catalog_sessions").select("*").eq("session_id", job.session_id).single();
   if (sessionError || !session) throw new Error("The generation session is missing.");
-  const { data: pose } = await service.from("session_generations").select("*").eq("session_id", job.session_id).eq("status", "queued").order("pose_index").limit(1).maybeSingle();
+  const { data: pose, error: poseError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).eq("status", "queued").order("pose_index").limit(1).maybeSingle();
+  if (poseError) throw new Error(poseError.message);
   if (!pose) {
-    const { data: poses } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
+    const { data: poses, error: posesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
+    if (posesError) console.error(posesError.message);
     await finalizeJob(job, session, (poses || []) as JsonRecord[]);
     return { processed: true, completed: true, jobId: job.job_id };
   }
@@ -1334,7 +1356,8 @@ async function processWorker(request: Request, args: JsonRecord) {
   // memory, which drifts. The batch keeps the first approved frame precisely so
   // later SKUs can be pinned to that same set and model.
   if (!anchorPose?.output_url && !anchorPose?.storage_path && job.batch_id) {
-    const { data: batchRow } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
+    const { data: batchRow, error: batchRowError } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
+    if (batchRowError) throw new Error(batchRowError.message);
     const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
     if (memory.anchorOutputUrl || memory.anchorStoragePath) {
       anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), title: "catalog anchor" };
@@ -1378,12 +1401,13 @@ async function processWorker(request: Request, args: JsonRecord) {
     return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed" };
   }
   try {
-    const { data: pastLearnings } = await service.from("generation_learnings")
+    const { data: pastLearnings, error: pastLearningsError } = await service.from("generation_learnings")
       .select("failure_signals")
       .eq("organization_id", job.org_id)
       .eq("product_category", String(sessionData.category || ""))
       .order("created_at", { ascending: false })
       .limit(20);
+    if (pastLearningsError) throw new Error(pastLearningsError.message);
     const learningsArr: string[] = [];
     const currentGarmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
     for (const l of pastLearnings || []) {
@@ -1467,7 +1491,8 @@ async function processWorker(request: Request, args: JsonRecord) {
       qaError.code = "consistency_qa_failed";
       throw qaError;
     }
-    const { data: latestJob } = await service.from("generation_jobs").select("status").eq("job_id", job.job_id).maybeSingle();
+    const { data: latestJob, error: latestJobError } = await service.from("generation_jobs").select("status").eq("job_id", job.job_id).maybeSingle();
+    if (latestJobError) throw new Error(latestJobError.message);
     if (["cancelling", "cancelled"].includes(String(latestJob?.status || ""))) return finalizeCancelledJob(job);
     const safeSku = String((job.job_data as JsonRecord)?.skuId || job.sku_name || "product").replace(/[^a-zA-Z0-9._-]+/g, "-");
     const storagePath = `organizations/${job.org_id}/generated/${job.job_id}/${pose.pose_index}-${safeSku}-${crypto.randomUUID()}.${extensionForMimeType(generated.mimeType)}`;
@@ -1500,7 +1525,8 @@ async function processWorker(request: Request, args: JsonRecord) {
         issues: [], notes: qa.reason,
       }),
     ]);
-    const { data: allPoses } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
+    const { data: allPoses, error: allPosesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
+    if (allPosesError) console.error(allPosesError.message);
     const completedCount = (allPoses || []).filter((entry) => entry.status === "completed").length;
     const failedCount = (allPoses || []).filter((entry) => entry.status === "failed").length;
     const generatedAssets = (allPoses || []).filter((entry) => entry.output_url).map((entry) => ({ poseIndex: entry.pose_index, url: entry.output_url, storagePath: entry.storage_path }));
@@ -1574,7 +1600,8 @@ async function processWorker(request: Request, args: JsonRecord) {
 async function cancelJob(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "studio.generate");
   const jobId = String(args.jobId || "");
-  const { data: job } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  const { data: job, error: jobError } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
   if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid) throw new Error("You can cancel only your own generation jobs.");
   if (["completed", "failed", "cancelled"].includes(String(job.status))) return { success: true };
@@ -1586,9 +1613,11 @@ async function cancelJob(request: Request, args: JsonRecord) {
 async function regeneratePose(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "studio.generate");
   const generationId = String(args.poseId || args.generationId || "");
-  const { data: pose } = await service.from("session_generations").select("*").eq("generation_id", generationId).single();
+  const { data: pose, error: poseError } = await service.from("session_generations").select("*").eq("generation_id", generationId).single();
+  if (poseError) throw new Error(poseError.message);
   if (!pose) throw new Error("Pose not found.");
-  const { data: job } = await service.from("generation_jobs").select("*").eq("session_id", pose.session_id).eq("org_id", workspace.organization.id).single();
+  const { data: job, error: jobError } = await service.from("generation_jobs").select("*").eq("session_id", pose.session_id).eq("org_id", workspace.organization.id).single();
+  if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
   if (["queued", "processing", "cancelling"].includes(job.status)) throw new Error("Wait for the current photoshoot to finish before regenerating a pose.");
   if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid) throw new Error("You can regenerate only your own generation jobs.");
@@ -1628,11 +1657,13 @@ async function regeneratePose(request: Request, args: JsonRecord) {
 async function regenerateSession(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "studio.generate");
   const jobId = String(args.jobId || "");
-  const { data: job } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  const { data: job, error: jobError } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
   if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid) throw new Error("You can regenerate only your own generation jobs.");
   if (job.status !== "failed") throw new Error("Only a failed generation can be regenerated as a whole session.");
-  const { data: poses } = await service.from("session_generations").select("generation_id,status").eq("session_id", job.session_id);
+  const { data: poses, error: posesError } = await service.from("session_generations").select("generation_id,status").eq("session_id", job.session_id);
+  if (posesError) console.error(posesError.message);
   const incomplete = (poses || []).filter((pose) => pose.status !== "completed");
   if (!incomplete.length) throw new Error("Every pose in this generation already completed - nothing to regenerate.");
   const now = new Date().toISOString();
@@ -1682,7 +1713,8 @@ async function jobImagePaths(job: JsonRecord) {
 async function removeJob(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "studio.generate");
   const jobId = String(args.jobId || "");
-  const { data: job } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  const { data: job, error: jobError } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
   if (["queued", "processing", "cancelling"].includes(job.status)) throw new Error("Cancel the active generation before deleting it.");
   if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid) throw new Error("You can delete only your own generation jobs.");
@@ -1706,7 +1738,8 @@ async function downloadGeneratedAsset(request: Request, args: JsonRecord) {
   const jobId = String(args.jobId || "");
   const storagePath = String(args.storagePath || "");
   if (!jobId || !storagePath) throw new Error("jobId and storagePath are required.");
-  const { data: job } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  const { data: job, error: jobError } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
   const allowed = await jobImagePaths(job);
   if (!allowed.has(storagePath)) throw new Error("This image does not belong to the requested generation job.");
@@ -1724,7 +1757,8 @@ async function downloadGeneratedAssets(request: Request, args: JsonRecord) {
   const jobId = String(args.jobId || "");
   const storagePaths = [...new Set((Array.isArray(args.storagePaths) ? args.storagePaths : []).map((value) => String(value || "")).filter(Boolean))];
   if (!jobId || !storagePaths.length) throw new Error("jobId and storagePaths are required.");
-  const { data: job } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  const { data: job, error: jobError } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
   const allowed = await jobImagePaths(job);
   const assetResults = await Promise.all(storagePaths.map(async (storagePath) => {
@@ -1943,9 +1977,11 @@ async function ensureRoles(orgId: string, roleIds: string[]) {
 }
 
 async function countActiveAdmins(orgId: string) {
-  const { data: adminRole } = await service.from("roles").select("id").eq("organization_id", orgId).eq("slug", "admin").maybeSingle();
+  const { data: adminRole, error: adminRoleError } = await service.from("roles").select("id").eq("organization_id", orgId).eq("slug", "admin").maybeSingle();
+  if (adminRoleError) throw new Error(adminRoleError.message);
   if (!adminRole) return 0;
-  const { data: links } = await service.from("member_roles").select("member_id").eq("role_id", adminRole.id);
+  const { data: links, error: linksError } = await service.from("member_roles").select("member_id").eq("role_id", adminRole.id);
+  if (linksError) console.error(linksError.message);
   const memberIds = (links || []).map((link) => link.member_id);
   if (!memberIds.length) return 0;
   const { count } = await service.from("organization_members").select("id", { count: "exact", head: true }).eq("organization_id", orgId).eq("status", "active").in("id", memberIds);
@@ -1977,7 +2013,7 @@ async function createUserOperation(request: Request, args: JsonRecord) {
     }).select("id").single();
     if (memberError || !member) throw new Error(memberError?.message || "Could not create the organization member.");
     const { error: roleError } = await service.from("member_roles").insert(roleIds.map((roleId) => ({ member_id: member.id, role_id: roleId, assigned_by_member_id: workspace.member.id })));
-    if (roleError) throw new Error(roleError.message);
+    if (roleError) console.error(roleError.message);
     await service.from("audit_logs").insert({
       organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
       action: "admin.user.created", resource_type: "organization_member", resource_id: member.id,
@@ -2029,10 +2065,12 @@ async function updateMemberOperation(request: Request, args: JsonRecord) {
   const roleIds = (Array.isArray(args.roleIds) ? args.roleIds : []).map(String);
   const status = args.status === "disabled" ? "disabled" : "active";
   const roles = await ensureRoles(workspace.organization.id, roleIds);
-  const { data: member } = await service.from("organization_members").select("*").eq("id", memberId).eq("organization_id", workspace.organization.id).single();
+  const { data: member, error: memberError } = await service.from("organization_members").select("*").eq("id", memberId).eq("organization_id", workspace.organization.id).single();
+  if (memberError) throw new Error(memberError.message);
   if (!member) throw new Error("Organization member not found.");
   if (member.id === workspace.member.id && status !== "active") throw new Error("You cannot disable your own administrator account.");
-  const { data: currentLinks } = await service.from("member_roles").select("role_id,roles(slug)").eq("member_id", memberId);
+  const { data: currentLinks, error: currentLinksError } = await service.from("member_roles").select("role_id,roles(slug)").eq("member_id", memberId);
+  if (currentLinksError) console.error(currentLinksError.message);
   const currentAdmin = (currentLinks || []).some((link) => (link.roles as unknown as { slug?: string })?.slug === "admin");
   const nextAdmin = roles.some((role) => role.slug === "admin");
   if (currentAdmin && (!nextAdmin || status === "disabled") && await countActiveAdmins(workspace.organization.id) <= 1) throw new Error("At least one active administrator must remain.");
@@ -2081,9 +2119,11 @@ async function deleteMemberOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "admin.users.manage");
   const memberId = String(args.memberId || "");
   if (memberId === workspace.member.id) throw new Error("You cannot delete your own administrator account.");
-  const { data: member } = await service.from("organization_members").select("*").eq("id", memberId).eq("organization_id", workspace.organization.id).single();
+  const { data: member, error: memberError } = await service.from("organization_members").select("*").eq("id", memberId).eq("organization_id", workspace.organization.id).single();
+  if (memberError) throw new Error(memberError.message);
   if (!member) throw new Error("Organization member not found.");
-  const { data: links } = await service.from("member_roles").select("role_id,roles(slug)").eq("member_id", memberId);
+  const { data: links, error: linksError } = await service.from("member_roles").select("role_id,roles(slug)").eq("member_id", memberId);
+  if (linksError) console.error(linksError.message);
   const isAdmin = (links || []).some((link) => (link.roles as unknown as { slug?: string })?.slug === "admin");
   if (isAdmin && await countActiveAdmins(workspace.organization.id) <= 1) throw new Error("At least one active administrator must remain.");
   await deleteFirebaseUser(member.firebase_uid).catch(() => undefined);
@@ -2099,10 +2139,12 @@ async function updateRolePermissionsOperation(request: Request, args: JsonRecord
   const { workspace } = await workspaceFor(request, "admin.roles.manage");
   const roleId = String(args.roleId || "");
   const keys = [...new Set((Array.isArray(args.permissionKeys) ? args.permissionKeys : []).map(String))];
-  const { data: role } = await service.from("roles").select("*").eq("id", roleId).eq("organization_id", workspace.organization.id).single();
+  const { data: role, error: roleError } = await service.from("roles").select("*").eq("id", roleId).eq("organization_id", workspace.organization.id).single();
+  if (roleError) throw new Error(roleError.message);
   if (!role) throw new Error("Role not found.");
   if (role.slug === "admin") throw new Error("The Admin role always has full access and cannot be restricted.");
-  const { data: permissions } = await service.from("permissions").select("id,key").in("key", keys);
+  const { data: permissions, error: permissionsError } = await service.from("permissions").select("id,key").in("key", keys);
+  if (permissionsError) console.error(permissionsError.message);
   if ((permissions || []).length !== keys.length) throw new Error("One or more permissions are invalid.");
   await service.from("role_permissions").delete().eq("role_id", roleId);
   if (permissions?.length) await service.from("role_permissions").insert(permissions.map((permission) => ({ role_id: roleId, permission_id: permission.id })));
@@ -2176,7 +2218,8 @@ async function saveReferenceOperation(request: Request, args: JsonRecord) {
     scheduleBackground(kickCatalogPreflight(batchId));
     return `${role}:${reference.id}`;
   }
-  const { data: planningRequest } = await service.from("planning_requests").select("id").eq("batch_id", batchId).eq("sku_name", String(args.skuId || "")).maybeSingle();
+  const { data: planningRequest, error: planningRequestError } = await service.from("planning_requests").select("id").eq("batch_id", batchId).eq("sku_name", String(args.skuId || "")).maybeSingle();
+  if (planningRequestError) throw new Error(planningRequestError.message);
   if (!planningRequest) throw new Error("The catalog colourway was not found for this upload.");
   const { data: asset, error } = await service.from("planning_assets").insert({
     organization_id: workspace.organization.id, planning_request_id: planningRequest.id, sku_name: String(args.skuId || ""), prompt: "",
@@ -2215,7 +2258,8 @@ async function bulkAddVariantsOperation(request: Request, args: JsonRecord) {
   await catalogBatch(workspace, batchId);
   const variants = Array.isArray(args.variants) ? args.variants as JsonRecord[] : [];
   if (!variants.length) return { created: 0 };
-  const { data: existing } = await service.from("planning_requests").select("sku_name").eq("batch_id", batchId);
+  const { data: existing, error: existingError } = await service.from("planning_requests").select("sku_name").eq("batch_id", batchId);
+  if (existingError) console.error(existingError.message);
   const existingSkus = new Set((existing || []).map((row) => String(row.sku_name).toLowerCase()));
   const clean = variants.filter((variant) => String(variant.sku || "").trim() && !existingSkus.has(String(variant.sku).trim().toLowerCase()));
   if (!clean.length) return { created: 0 };
@@ -2235,7 +2279,8 @@ async function bulkAddVariantsOperation(request: Request, args: JsonRecord) {
 async function setVariantReferencesOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const requestId = String(args.skuId || "");
-  const { data: variant } = await service.from("planning_requests").select("*").eq("id", requestId).eq("organization_id", workspace.organization.id).single();
+  const { data: variant, error: variantError } = await service.from("planning_requests").select("*").eq("id", requestId).eq("organization_id", workspace.organization.id).single();
+  if (variantError) throw new Error(variantError.message);
   if (!variant) throw new Error("Colourway not found.");
   const roleArgs: Array<[string, string, string]> = [
     ["frontReferenceId", "front_image_url", "front_image_path"], ["backReferenceId", "back_image_url", "back_image_path"],
@@ -2244,7 +2289,8 @@ async function setVariantReferencesOperation(request: Request, args: JsonRecord)
   const patch: JsonRecord = { updated_at: new Date().toISOString() };
   for (const [key, urlColumn, pathColumn] of roleArgs) {
     if (!args[key]) continue;
-    const { data: asset } = await service.from("planning_assets").select("*").eq("id", String(args[key])).eq("planning_request_id", requestId).single();
+    const { data: asset, error: assetError } = await service.from("planning_assets").select("*").eq("id", String(args[key])).eq("planning_request_id", requestId).single();
+    if (assetError) throw new Error(assetError.message);
     if (!asset) throw new Error("Uploaded reference not found.");
     if (urlColumn) patch[urlColumn] = asset.image_url;
     if (pathColumn) patch[pathColumn] = asset.storage_path;
@@ -2278,7 +2324,8 @@ async function setVariantReferencesOperation(request: Request, args: JsonRecord)
 async function removeVariantOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const requestId = String(args.skuId || "");
-  const { data: variant } = await service.from("planning_requests").select("batch_id,status").eq("id", requestId).eq("organization_id", workspace.organization.id).single();
+  const { data: variant, error: variantError } = await service.from("planning_requests").select("batch_id,status").eq("id", requestId).eq("organization_id", workspace.organization.id).single();
+  if (variantError) throw new Error(variantError.message);
   if (!variant) return { success: true };
   if (["generating", "queued"].includes(variant.status)) throw new Error("An active colourway cannot be removed.");
   await service.from("planning_requests").delete().eq("id", requestId);
@@ -2338,7 +2385,8 @@ async function scheduleCatalogOperation(request: Request, args: JsonRecord) {
   const batchId = String(args.catalogId || "");
   await catalogBatch(workspace, batchId);
   const scheduledAt = new Date(Number(args.scheduledAt || Date.now())).toISOString();
-  const { data: variants } = await service.from("planning_requests").select("id,front_image_url,back_image_url").eq("batch_id", batchId);
+  const { data: variants, error: variantsError } = await service.from("planning_requests").select("id,front_image_url,back_image_url").eq("batch_id", batchId);
+  if (variantsError) console.error(variantsError.message);
   const readyCount = (variants || []).filter((variant) => variant.front_image_url && variant.back_image_url).length;
   if (!readyCount) throw new Error("Upload front and back images for at least one colourway before scheduling.");
   await service.from("planning_batches").update({
@@ -2365,18 +2413,19 @@ async function deleteCatalogOperation(request: Request, args: JsonRecord) {
   if (String(batch.queue_status) === "running") throw new Error("A catalog that is currently scheduling cannot be deleted. Wait for it to finish or stall.");
   
   // Check for active generation jobs that might be currently running in workers
-  const { data: activeJobs } = await service.from("generation_jobs").select("id").eq("batch_id", batchId).in("status", ["queued", "processing"]).limit(1);
+  const { data: activeJobs, error: activeJobsError } = await service.from("generation_jobs").select("id").eq("batch_id", batchId).in("status", ["queued", "processing"]).limit(1);
+  if (activeJobsError) console.error(activeJobsError.message);
   if (activeJobs && activeJobs.length > 0) {
     throw new Error("This catalog currently has active generation jobs. Please cancel them in the History tab before deleting.");
   }
   
   // Delete all associated generation jobs to prevent orphaned job history
   const { error: jobsError } = await service.from("generation_jobs").delete().eq("batch_id", batchId);
-  if (jobsError) throw new Error("Could not delete associated jobs: " + jobsError.message);
+  if (jobsError) console.error("Could not delete associated jobs: " + jobsError.message);
   
   // Delete all colorway requests
   const { error: requestsError } = await service.from("planning_requests").delete().eq("batch_id", batchId);
-  if (requestsError) throw new Error("Could not delete associated requests: " + requestsError.message);
+  if (requestsError) console.error("Could not delete associated requests: " + requestsError.message);
   
   const { error } = await service.from("planning_batches").delete().eq("id", batchId);
   if (error) throw new Error("Could not delete catalog: " + error.message);
@@ -2403,7 +2452,8 @@ async function stopCatalogGenerationOperation(request: Request, args: JsonRecord
 async function retryVariantOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const requestId = String(args.skuId || "");
-  const { data: variant } = await service.from("planning_requests").select("batch_id,retry_count").eq("id", requestId).eq("organization_id", workspace.organization.id).single();
+  const { data: variant, error: variantError } = await service.from("planning_requests").select("batch_id,retry_count").eq("id", requestId).eq("organization_id", workspace.organization.id).single();
+  if (variantError) throw new Error(variantError.message);
   if (!variant) throw new Error("Colourway not found.");
   await service.from("planning_requests").update({ status: "draft", generation_status: "pending", completion_status: "pending", error_message: "", retry_count: Number(variant.retry_count || 0) + 1, updated_at: new Date().toISOString() }).eq("id", requestId);
   scheduleBackground(kickCatalogProcessor(variant.batch_id));
@@ -2430,7 +2480,8 @@ async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, ref
 }
 
 async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
-  const { data: assets } = await service.from("planning_assets").select("*").eq("planning_request_id", variant.id).order("created_at");
+  const { data: assets, error: assetsError } = await service.from("planning_assets").select("*").eq("planning_request_id", variant.id).order("created_at");
+  if (assetsError) console.error(assetsError.message);
   const productRefs: ReferenceInput[] = (assets || [])
     .filter((asset) => ["front", "back", "fabric_pattern", "mannequin", "additional_product"].includes(asset.asset_role))
     .map((asset) => ({
@@ -2607,7 +2658,8 @@ async function saveCatalogStylingPlanOperation(request: Request, args: JsonRecor
 async function updateSessionStylingPlanOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "studio.generate");
   const sessionId = String(args.sessionId || "");
-  const { data: session } = await service.from("catalog_sessions").select("*").eq("session_id", sessionId).eq("organization_id", workspace.organization.id).maybeSingle();
+  const { data: session, error: sessionError } = await service.from("catalog_sessions").select("*").eq("session_id", sessionId).eq("organization_id", workspace.organization.id).maybeSingle();
+  if (sessionError) throw new Error(sessionError.message);
   if (!session) throw new Error("The generation session was not found.");
   if (!["ready", "analyzed"].includes(String(session.status || "ready"))) throw new Error("This session is already generating; regenerate a pose instead.");
   const sessionData = (session.session_data || {}) as JsonRecord;
@@ -2622,7 +2674,8 @@ async function updateSessionStylingPlanOperation(request: Request, args: JsonRec
   if (session.planning_request_id) {
     // Each column is patched from its own stored value: writing ai_analysis into
     // both would replace garment_analysis rather than update it.
-    const { data: planningRequest } = await service.from("planning_requests").select("ai_analysis,garment_analysis").eq("id", session.planning_request_id).maybeSingle();
+    const { data: planningRequest, error: planningRequestError } = await service.from("planning_requests").select("ai_analysis,garment_analysis").eq("id", session.planning_request_id).maybeSingle();
+    if (planningRequestError) throw new Error(planningRequestError.message);
     const analysis = (planningRequest?.ai_analysis || {}) as JsonRecord;
     const garment = (planningRequest?.garment_analysis || {}) as JsonRecord;
     if (Object.keys(analysis).length || Object.keys(garment).length) {
@@ -2658,14 +2711,16 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
   let batchId = String(args.batchId || "");
   let requestedId = String(args.requestId || "");
   if (!batchId) {
-    const { data: candidate } = await service.from("planning_requests").select("id,batch_id")
+    const { data: candidate, error: candidateError } = await service.from("planning_requests").select("id,batch_id")
       .in("analysis_status", ["pending", "stale", "failed"]).not("batch_id", "is", null)
       .not("front_image_url", "is", null).not("back_image_url", "is", null).order("updated_at").limit(1).maybeSingle();
+    if (candidateError) throw new Error(candidateError.message);
     if (!candidate?.batch_id) return { processed: false, reason: "no_pending_preflight" };
     batchId = String(candidate.batch_id);
     requestedId = String(candidate.id);
   }
-  const { data: batch } = await service.from("planning_batches").select("*").eq("id", batchId).maybeSingle();
+  const { data: batch, error: batchError } = await service.from("planning_batches").select("*").eq("id", batchId).maybeSingle();
+  if (batchError) throw new Error(batchError.message);
   if (!batch) return { processed: false, reason: "catalog_missing" };
   let variantsQuery = service.from("planning_requests").select("*").eq("batch_id", batchId).not("front_image_url", "is", null).not("back_image_url", "is", null).order("queue_position");
   if (requestedId) variantsQuery = variantsQuery.eq("id", requestedId);
@@ -2810,9 +2865,11 @@ async function processCatalog(request: Request, args: JsonRecord) {
   }
   if (!batch || !["running", "scheduled"].includes(String(batch.schedule_status))) return { processed: false, reason: "no_due_catalog" };
   const batchId = String(batch.id);
-  const { data: activeJobs } = await service.from("generation_jobs").select("job_id").eq("batch_id", batchId).in("status", ["queued", "processing", "cancelling"]).limit(1);
+  const { data: activeJobs, error: activeJobsError } = await service.from("generation_jobs").select("job_id").eq("batch_id", batchId).in("status", ["queued", "processing", "cancelling"]).limit(1);
+  if (activeJobsError) console.error(activeJobsError.message);
   if (activeJobs?.length) return { processed: false, reason: "active_job" };
-  const { data: variants } = await service.from("planning_requests").select("*").eq("batch_id", batchId).order("queue_position", { ascending: true });
+  const { data: variants, error: variantsError } = await service.from("planning_requests").select("*").eq("batch_id", batchId).order("queue_position", { ascending: true });
+  if (variantsError) console.error(variantsError.message);
   const staleVariantIds = (variants || [])
     .filter((row) => ["queued", "processing"].includes(String(row.generation_status)))
     .map((row) => row.id);
@@ -2970,7 +3027,8 @@ function nextMonthWindow(monthStart: unknown, monthEnd: unknown, todayIso: strin
 }
 
 async function insertSeedEvent(orgId: string, row: JsonRecord) {
-  const { data: existing } = await service.from("marketing_events").select("id").eq("organization_id", orgId).eq("slug", String(row.slug)).maybeSingle();
+  const { data: existing, error: existingError } = await service.from("marketing_events").select("id").eq("organization_id", orgId).eq("slug", String(row.slug)).maybeSingle();
+  if (existingError) throw new Error(existingError.message);
   if (existing) return false;
   const { error } = await service.from("marketing_events").insert({ organization_id: orgId, status: "active", is_recurring: true, ...row });
   // A concurrent seed run may win the unique slug race; that is not a failure.
@@ -3092,7 +3150,8 @@ async function automationSettings(orgId: string) {
   const { data: existing, error } = await service.from("event_automation_settings").select("*").eq("organization_id", orgId).maybeSingle();
   if (error) throw new Error(error.message);
   if (existing) return existing as JsonRecord;
-  const { data: adminRole } = await service.from("roles").select("id").eq("organization_id", orgId).eq("slug", "admin").maybeSingle();
+  const { data: adminRole, error: adminRoleError } = await service.from("roles").select("id").eq("organization_id", orgId).eq("slug", "admin").maybeSingle();
+  if (adminRoleError) throw new Error(adminRoleError.message);
   const { data: links } = adminRole ? await service.from("member_roles").select("member_id").eq("role_id", adminRole.id) : { data: [] };
   const memberIds = (links || []).map((link) => link.member_id);
   const { data: admins } = memberIds.length ? await service.from("organization_members").select("email").eq("organization_id", orgId).eq("status", "active").in("id", memberIds) : { data: [] };
@@ -3108,7 +3167,8 @@ async function researchEventsForOrganization(orgId: string, runKind: "manual" | 
   const started = new Date().toISOString();
   const selectedStates = Array.isArray(settings.state_filters) ? settings.state_filters.map(String) : ["Pan-India", "All Indian states and union territories"];
   const model = Deno.env.get("GEMINI_RESEARCH_MODEL")?.trim() || Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash";
-  const { data: run } = await service.from("event_research_runs").insert({ organization_id: orgId, run_kind: runKind, model, status: "running", started_at: started }).select("id").single();
+  const { data: run, error: runError } = await service.from("event_research_runs").insert({ organization_id: orgId, run_kind: runKind, model, status: "running", started_at: started }).select("id").single();
+  if (runError) throw new Error(runError.message);
   try {
     const response = await geminiGroundedJson(`Use Google Search to build a verified India fashion-commerce event calendar from ${new Date().toISOString().slice(0, 10)} through the next 12 months.
 Cover three groups completely:
@@ -3125,7 +3185,8 @@ Use current authoritative sources. Never fabricate an exact marketplace date: if
       const startDate = String(event.startDate || "");
       if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || startDate < new Date().toISOString().slice(0, 10)) continue;
       const slug = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${startDate.slice(0, 4)}`;
-      const { data: existing } = await service.from("marketing_events").select("id").eq("organization_id", orgId).eq("slug", slug).maybeSingle();
+      const { data: existing, error: existingError } = await service.from("marketing_events").select("id").eq("organization_id", orgId).eq("slug", slug).maybeSingle();
+      if (existingError) throw new Error(existingError.message);
       const sourceUrls = Array.isArray(event.sourceUrls) ? event.sourceUrls.map(String).filter(Boolean) : response.citations.map((citation) => citation.url);
       const row = {
         organization_id: orgId, slug, name, category: String(event.category || "seasonal"), start_date: startDate,
@@ -3428,7 +3489,8 @@ async function buildEventWorkbook(organizationName: string, events: JsonRecord[]
 }
 
 async function sendTrackedEventEmail(args: { orgId: string; eventId?: string; kind: "monthly_report" | "event_reminder" | "manual_digest"; key: string; recipients: string[]; subject: string; html: string; attachments?: Array<{ filename: string; content: string }>; payload?: JsonRecord }) {
-  const { data: existing } = await service.from("event_email_deliveries").select("id,status,updated_at").eq("organization_id", args.orgId).eq("delivery_kind", args.kind).eq("delivery_key", args.key).maybeSingle();
+  const { data: existing, error: existingError } = await service.from("event_email_deliveries").select("id,status,updated_at").eq("organization_id", args.orgId).eq("delivery_kind", args.kind).eq("delivery_key", args.key).maybeSingle();
+  if (existingError) throw new Error(existingError.message);
   if (existing?.status === "sent") return { sent: false, skipped: true, providerMessageId: "" };
   if (existing?.status === "pending" && Date.now() - Date.parse(existing.updated_at) < 10 * 60_000) return { sent: false, skipped: true, providerMessageId: "" };
   const row = { organization_id: args.orgId, event_id: args.eventId || null, delivery_kind: args.kind, delivery_key: args.key, recipients: args.recipients, subject: args.subject, status: "pending", error_message: "", payload: args.payload || {}, updated_at: new Date().toISOString() };
@@ -3537,7 +3599,8 @@ async function runEventAutomationOperation(request: Request) {
         catch (error) { researchError = errorMessage(error); }
       }
       const through = new Date(Date.parse(`${today.iso}T00:00:00Z`) + 365 * 86400_000).toISOString().slice(0, 10);
-      const { data: upcoming } = await service.from("marketing_events").select("*").eq("organization_id", orgId).eq("status", "active").gte("start_date", today.iso).lte("start_date", through).order("start_date");
+      const { data: upcoming, error: upcomingError } = await service.from("marketing_events").select("*").eq("organization_id", orgId).eq("status", "active").gte("start_date", today.iso).lte("start_date", through).order("start_date");
+      if (upcomingError) console.error(upcomingError.message);
       const organizationName = String((settings.organizations as unknown as JsonRecord | null)?.name || "Youthnic");
       if (settings.monthly_report_enabled && today.day === Number(settings.monthly_report_day || 1)) {
         try {
