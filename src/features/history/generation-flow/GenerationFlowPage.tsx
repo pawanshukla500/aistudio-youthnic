@@ -18,27 +18,39 @@ export function GenerationFlowPage() {
   useEffect(() => {
     if (!jobId) return;
     
+    let ignore = false;
+
     const fetchFlow = async () => {
       setIsLoadingTrace(true);
       setError(null);
       try {
         const data = await invokeAppApi<any>('history.generationFlow.get', { jobId });
-        if (data) {
-          if (data.is_v2) {
-            setSelectedGraphData(data);
-          } else {
-            const trace = parseTrace(data);
-            setSelectedGraphData({ is_v2: false, trace });
+        if (!ignore) {
+          if (data) {
+            if (data.is_v2) {
+              setSelectedGraphData(data);
+            } else {
+              const trace = parseTrace(data);
+              setSelectedGraphData({ is_v2: false, trace });
+            }
           }
         }
       } catch (err: any) {
-        setError(err.message);
+        if (!ignore) {
+          setError(err.message);
+        }
       } finally {
-        setIsLoadingTrace(false);
+        if (!ignore) {
+          setIsLoadingTrace(false);
+        }
       }
     };
     
     fetchFlow();
+
+    return () => {
+      ignore = true;
+    };
   }, [jobId]);
 
   if (error) {

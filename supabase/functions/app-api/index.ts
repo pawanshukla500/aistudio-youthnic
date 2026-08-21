@@ -1794,6 +1794,8 @@ async function historyGenerationFlowGet(request: Request, args: JsonRecord) {
     ]);
     
     if (session.error) throw new Error("Session not found.");
+    if (nodes.error) throw new Error(nodes.error.message);
+    if (edges.error) throw new Error(edges.error.message);
     
     return {
       is_v2: true,
@@ -1805,6 +1807,10 @@ async function historyGenerationFlowGet(request: Request, args: JsonRecord) {
 
   const { data: job, error: jobError } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
   if (jobError || !job) throw new Error("Job not found.");
+  
+  if (!workspace.isAdmin && !workspace.permissions.includes("admin.settings") && job.user_id !== workspace.user.firebaseUid) {
+    throw new Error("You do not have permission to view diagnostics for this job.");
+  }
 
   const [session, poses, aiRuns, qaReviews, learning] = await Promise.all([
     service.from("catalog_sessions").select("*").eq("session_id", job.session_id).maybeSingle(),
@@ -1843,6 +1849,8 @@ async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
     ]);
     
     if (session.error) throw new Error("Session not found.");
+    if (nodes.error) throw new Error(nodes.error.message);
+    if (edges.error) throw new Error(edges.error.message);
     
     return {
       is_v2: true,

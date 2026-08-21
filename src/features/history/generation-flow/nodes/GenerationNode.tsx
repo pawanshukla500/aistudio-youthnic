@@ -31,9 +31,9 @@ export function GenerationNode({ data }: any) {
           <img src={data.outputs.outputUrls?.[0] || data.outputs.url} alt="Generated preview" className="w-full h-full object-cover" />
         </div>
       )}
-      {!isV2 && data.attempt?.output_urls?.[0] && (
+      {!isV2 && data.attempt?.output_url && (
         <div className='mt-2 h-32 w-full overflow-hidden rounded bg-surface-container-low flex items-center justify-center border border-outline-variant/30'>
-          <img src={data.attempt.output_urls[0]} alt="Generated preview" className="w-full h-full object-cover" />
+          <img src={data.attempt.output_url} alt="Generated preview" className="w-full h-full object-cover" />
         </div>
       )}
       <Handle type="source" position={Position.Bottom} />
