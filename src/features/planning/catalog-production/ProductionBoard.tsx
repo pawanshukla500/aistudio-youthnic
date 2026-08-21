@@ -1,6 +1,6 @@
 
 
-export function ProductionBoard({ items }: { items: any[] }) {
+export function ProductionBoard({ items, onListingDone, onViewAssets }: { items: any[], onListingDone: (id: string) => void, onViewAssets: (sessionId: string) => void }) {
   const columns = [
     { id: "requested", title: "Requested", filter: (i: any) => i.generation_status === "not_required" && i.listing_status === "not_required" && i.status !== "blocked" },
     { id: "generation", title: "Generation", filter: (i: any) => ["ready", "queued", "generating"].includes(i.generation_status) && i.status !== "blocked" },
@@ -48,6 +48,27 @@ export function ProductionBoard({ items }: { items: any[] }) {
                         </div>
                       )}
                     </div>
+
+                    {(item.listing_status === 'pending' || (item.generation_status === 'completed' && item.catalog_session_id)) && (
+                      <div className="mt-3 pt-3 border-t border-outline-variant/20 flex gap-2">
+                        {item.listing_status === 'pending' && item.generation_status === 'completed' && (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); onListingDone(item.id); }}
+                            className="flex-1 px-2 py-1.5 bg-primary text-white text-xs font-medium rounded hover:bg-primary/90 transition-colors"
+                          >
+                            Listing Done
+                          </button>
+                        )}
+                        {item.generation_status === 'completed' && item.catalog_session_id && (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); onViewAssets(item.catalog_session_id); }}
+                            className="flex-1 px-2 py-1.5 border border-primary text-primary text-xs font-medium rounded hover:bg-primary/5 transition-colors"
+                          >
+                            View Assets
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {colItems.length === 0 && (
