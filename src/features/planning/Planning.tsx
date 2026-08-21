@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { CatalogProduction } from "./catalog-production/CatalogProduction";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -130,6 +131,7 @@ export function Planning() {
   const cancelJob = useMutation(api.jobs.cancel);
   const saveReference = useMutation(api.files.saveReference);
 
+  const [topTab, setTopTab] = useState<"classic" | "production">("production");
   const [selectedId, setSelectedId] = useState<Id<"catalogs"> | null>(null);
   const { data: selected, error: _selectedError } = useQuery(api.catalog.get, selectedId ? { catalogId: selectedId } : "skip") as { data: CatalogDetail | null | undefined, error: any };
   const selectedLoaded = selected !== undefined;
@@ -453,7 +455,28 @@ export function Planning() {
   const incompleteCount = Math.max(0, (selected?.variants.length || 0) - readyCount);
 
   return (
-    <div className="mx-auto max-w-[1280px] space-y-6">
+    <div className="mx-auto max-w-[1280px] space-y-6 flex flex-col h-[calc(100vh-2rem)]">
+      <div className="flex space-x-4 border-b border-outline-variant/40 pb-2">
+        <button 
+          onClick={() => setTopTab("production")} 
+          className={`pb-2 text-sm font-semibold border-b-2 ${topTab === "production" ? "border-primary text-primary" : "border-transparent text-secondary hover:text-on-surface"}`}
+        >
+          Catalog Production
+        </button>
+        <button 
+          onClick={() => setTopTab("classic")} 
+          className={`pb-2 text-sm font-semibold border-b-2 ${topTab === "classic" ? "border-primary text-primary" : "border-transparent text-secondary hover:text-on-surface"}`}
+        >
+          Planning V1
+        </button>
+      </div>
+
+      {topTab === "production" ? (
+        <div className="flex-1 overflow-hidden">
+          <CatalogProduction />
+        </div>
+      ) : (
+        <div className="space-y-6 overflow-y-auto pb-20">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <p className="mb-1 text-[11px] font-label-caps uppercase tracking-widest text-secondary">Planning</p>
