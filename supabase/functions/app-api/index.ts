@@ -1327,6 +1327,78 @@ async function processNode(request: Request, args: JsonRecord) {
   }
 }
 
+
+async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, pose: JsonRecord) {
+  const sourceInputs = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
+  const loadedReferences = await loadAvailableReferences(sourceInputs);
+  let { data: anchorPose } = Number(pose.pose_index) > 1
+    ? await service.from("session_generations").select("output_url,storage_path,title").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
+    : { data: null };
+  if (!anchorPose?.output_url && !anchorPose?.storage_path && job.batch_id) {
+    const { data: batchRow } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
+    const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
+    if (memory.anchorOutputUrl || memory.anchorStoragePath) {
+      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), title: "catalog anchor" };
+    }
+  }
+  const approved: LoadedReference[] = [];
+  if (anchorPose?.output_url || anchorPose?.storage_path) {
+    const loaded = await loadReference({
+      role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path,
+      hash: smallHash(String(anchorPose.output_url || anchorPose.storage_path)), filename: "approved-pose-1", mimeType: "", size: 0,
+    });
+    loaded.filename = `approved-pose-1.${extensionForMimeType(loaded.mimeType)}`;
+    approved.push(loaded);
+  }
+  const storedPoseData = (pose.generation_data || {}) as JsonRecord;
+  const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
+  const selected = selectReferences(loadedReferences, approved, poseData.id);
+  return { loadedReferences, approved, poseData, selected, storedPoseData };
+}
+
+async function compilePosePrompt(job: JsonRecord, sessionData: JsonRecord, pose: JsonRecord, poseData: any, selected: any[], storedPoseData: JsonRecord) {
+  const requestedCorrection = String(pose.regeneration_instructions || "").trim();
+  let qaCorrections = (Array.isArray(storedPoseData.corrections)
+    ? storedPoseData.corrections.map(String)
+    : [String(storedPoseData.correction || "")]).map((entry) => entry.trim()).filter(Boolean);
+  const promptCorrection = () => [
+    ...qaCorrections,
+    requestedCorrection ? `USER REGENERATION INSTRUCTION (apply only if compatible with original product truth): ${requestedCorrection}` : "",
+  ].filter(Boolean).join("\n");
+
+  const { data: pastLearnings, error: pastLearningsError } = await service.from("generation_learnings")
+    .select("failure_signals")
+    .eq("organization_id", job.org_id)
+    .eq("product_category", String(sessionData.category || ""))
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (pastLearningsError) throw new Error(pastLearningsError.message);
+  
+  const learningsArr: string[] = [];
+  const currentGarmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
+  for (const l of pastLearnings || []) {
+    const fs = (l.failure_signals as JsonRecord) || {};
+    const savedFamily = String(fs.garmentFamily || "");
+    if (currentGarmentFamily === "saree" && savedFamily !== "saree") continue;
+    if (currentGarmentFamily !== "saree" && savedFamily === "saree") continue;
+    const fb = (fs.feedback as any[]) || [];
+    for (const f of fb) {
+      if (f.poseTitle === poseData.title && Array.isArray(f.corrections)) {
+        learningsArr.push(...f.corrections.map(String));
+      }
+    }
+  }
+  const learningsStr = learningsArr.slice(0, 3).map((c) => `- Past correction: ${c}`).join("\n");
+
+  const prompt = composeGenerationPrompt({
+    skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || "Untitled product"),
+    productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
+    references: selected, correction: promptCorrection(), learnings: learningsStr,
+  });
+  return { prompt, qaCorrections, promptCorrectionStr: promptCorrection() };
+}
+
+
 async function processWorker(request: Request, args: JsonRecord) {
   assertInternal(request);
   const job = await nextJob(args) as JsonRecord | null;
