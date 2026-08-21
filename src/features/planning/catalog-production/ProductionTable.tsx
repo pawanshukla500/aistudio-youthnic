@@ -1,6 +1,6 @@
-import React from "react";
 
-export function ProductionTable({ items, refresh }: { items: any[], refresh: () => void }) {
+
+export function ProductionTable({ items }: { items: any[] }) {
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden h-full flex flex-col">
       <div className="overflow-auto flex-1">

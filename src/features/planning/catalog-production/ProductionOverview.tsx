@@ -1,4 +1,4 @@
-import React from "react";
+
 
 export function ProductionOverview({ items }: { items: any[] }) {
   const stats = {

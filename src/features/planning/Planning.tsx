@@ -932,6 +932,8 @@ export function Planning() {
           </form>
         </div>
       )}
+      </div>
+    )}
     </div>
   );
 }

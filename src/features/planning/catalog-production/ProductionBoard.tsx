@@ -1,6 +1,6 @@
-import React from "react";
 
-export function ProductionBoard({ items, refresh }: { items: any[], refresh: () => void }) {
+
+export function ProductionBoard({ items }: { items: any[] }) {
   const columns = [
     { id: "requested", title: "Requested", filter: (i: any) => i.generation_status === "not_required" && i.listing_status === "not_required" && i.status !== "blocked" },
     { id: "generation", title: "Generation", filter: (i: any) => ["ready", "queued", "generating"].includes(i.generation_status) && i.status !== "blocked" },

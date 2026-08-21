@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from "../../shared/supabase/supabaseClient";
+import { supabase } from "../../../lib/supabase";
 import { ProductionOverview } from "./ProductionOverview";
 import { ProductionBoard } from "./ProductionBoard";
 import { ProductionTable } from "./ProductionTable";
@@ -67,8 +67,8 @@ export function CatalogProduction() {
         ) : (
           <>
             {activeTab === "overview" && <ProductionOverview items={workItems} />}
-            {activeTab === "workflow" && <ProductionBoard items={workItems} refresh={fetchWorkItems} />}
-            {activeTab === "table" && <ProductionTable items={workItems} refresh={fetchWorkItems} />}
+            {activeTab === "workflow" && <ProductionBoard items={workItems} />}
+            {activeTab === "table" && <ProductionTable items={workItems} />}
           </>
         )}
       </div>
