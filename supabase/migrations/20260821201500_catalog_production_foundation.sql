@@ -109,28 +109,26 @@ alter table public.catalog_work_item_events enable row level security;
 alter table public.catalog_work_item_external_sources enable row level security;
 
 create policy catalog_work_items_select on public.catalog_work_items
-  for select using (organization_id in (select organization_id from public.organization_members where firebase_uid = auth.uid()));
+  for select using (organization_id = private.current_organization_id());
 
 create policy catalog_work_items_insert on public.catalog_work_items
-  for insert with check (organization_id in (select organization_id from public.organization_members where firebase_uid = auth.uid()));
+  for insert with check (organization_id = private.current_organization_id());
 
 create policy catalog_work_items_update on public.catalog_work_items
-  for update using (organization_id in (select organization_id from public.organization_members where firebase_uid = auth.uid()));
+  for update using (organization_id = private.current_organization_id());
 
 create policy catalog_work_items_delete on public.catalog_work_items
-  for delete using (organization_id in (select organization_id from public.organization_members where firebase_uid = auth.uid()));
+  for delete using (organization_id = private.current_organization_id());
 
 create policy catalog_work_item_events_select on public.catalog_work_item_events
-  for select using (organization_id in (select organization_id from public.organization_members where firebase_uid = auth.uid()));
+  for select using (organization_id = private.current_organization_id());
 
 create policy catalog_work_item_events_insert on public.catalog_work_item_events
-  for insert with check (organization_id in (select organization_id from public.organization_members where firebase_uid = auth.uid()));
+  for insert with check (organization_id = private.current_organization_id());
 
 create policy cwies_select on public.catalog_work_item_external_sources
   for select using (
     work_item_id in (
-      select id from public.catalog_work_items where organization_id in (
-        select organization_id from public.organization_members where firebase_uid = auth.uid()
-      )
+      select id from public.catalog_work_items where organization_id = private.current_organization_id()
     )
   );
