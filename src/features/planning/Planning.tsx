@@ -113,8 +113,8 @@ export function Planning() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
 
-  const catalogs = useQuery(api.catalog.list, { organizationId: organization._id }) as CatalogSummary[] | undefined;
-  const roadmap = useQuery(api.eventIntelligence.roadmap, { organizationId: organization._id }) as PlanningRoadmap | undefined;
+  const { data: catalogs, error: _catalogsError } = useQuery(api.catalog.list, { organizationId: organization._id }) as { data: CatalogSummary[] | undefined, error: any };
+  const { data: roadmap, error: _roadmapError } = useQuery(api.eventIntelligence.roadmap, { organizationId: organization._id }) as { data: PlanningRoadmap | undefined, error: any };
   const createCatalog = useMutation(api.catalog.createCatalog);
   const bulkAddVariants = useMutation(api.catalog.bulkAddVariants);
   const setVariantReferences = useMutation(api.catalog.setVariantReferences);
@@ -131,7 +131,7 @@ export function Planning() {
   const saveReference = useMutation(api.files.saveReference);
 
   const [selectedId, setSelectedId] = useState<Id<"catalogs"> | null>(null);
-  const selected = useQuery(api.catalog.get, selectedId ? { catalogId: selectedId } : "skip") as CatalogDetail | null | undefined;
+  const { data: selected, error: _selectedError } = useQuery(api.catalog.get, selectedId ? { catalogId: selectedId } : "skip") as { data: CatalogDetail | null | undefined, error: any };
   const selectedLoaded = selected !== undefined;
   const selectedPreferredSchedule = selected?.scheduledAt || selected?.preferredGenerationAt;
   const [focusSku, setFocusSku] = useState<Id<"catalogSkus"> | null>(null);

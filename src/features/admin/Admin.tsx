@@ -244,9 +244,9 @@ function MemberEditor({
 
 export function Admin() {
   const { organization, user } = useWorkspace();
-  const overview = useQuery(api.admin.overview, {
+  const { data: overview, error: _overviewError } = useQuery(api.admin.overview, {
     organizationId: organization._id,
-  }) as AdminOverview | undefined;
+  }) as { data: AdminOverview | undefined, error: any };
   const createUser = useAction(api.authActions.createUser);
   const updateMemberAccess = useAction(api.authActions.updateMemberAccess);
   const deleteMember = useAction(api.authActions.deleteMember);

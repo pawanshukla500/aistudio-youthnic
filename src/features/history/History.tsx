@@ -53,7 +53,7 @@ function statusClass(status: string) {
 }
 
 function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
-  const job = useQuery(api.jobs.get, { jobId });
+  const { data: job, error: _jobError } = useQuery(api.jobs.get, { jobId });
   const { user } = useWorkspace();
   const regeneratePose = useMutation(api.generation.regeneratePose);
   const [regeneratingId, setRegeneratingId] = useState<Id<"generationPoses"> | null>(null);
@@ -508,13 +508,13 @@ export function History() {
   const [expanded, setExpanded] = useState<Id<"generationJobs"> | null>(null);
   const [error, setError] = useState("");
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
-  const jobsPage = useQuery(api.jobs.list, {
+  const { data: jobsPage, error: _jobsPageError } = useQuery(api.jobs.list, {
     organizationId: organization._id,
     page,
     pageSize,
     search,
     status,
-  }) as { items: any[]; page: number; pageSize: number; total: number; totalPages: number } | undefined;
+  }) as { data: { items: any[]; page: number; pageSize: number; total: number; totalPages: number } | undefined, error: any };
   const jobs = jobsPage?.items;
 
   useEffect(() => {
@@ -588,7 +588,7 @@ export function History() {
            </div>
         )}
         
-        {(jobs || []).map((job) => { 
+        {(jobs || []).map((job: any) => { 
            const open = expanded === job._id; 
            const finished = job.completedPoses + job.failedPoses; 
            const inFlightCredit = job.status === "processing" && finished < job.totalPoses ? 0.5 : 0;

@@ -95,8 +95,8 @@ export function Studio() {
   const analysisRequestRef = useRef(0);
   const uploadPromisesRef = useRef(new Map<string, Promise<StudioReference>>());
   const autoAnalyzeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const submittedJob = useQuery(api.jobs.get, submittedJobId ? { jobId: submittedJobId } : "skip");
-  const queuePosition = useQuery(api.jobs.getQueuePosition, submittedJobId && submittedJob?.status === "queued" ? { jobId: submittedJobId } : "skip");
+  const { data: submittedJob, error: _submittedJobError } = useQuery(api.jobs.get, submittedJobId ? { jobId: submittedJobId } : "skip");
+  const { data: queuePosition, error: _queuePositionError } = useQuery(api.jobs.getQueuePosition, submittedJobId && submittedJob?.status === "queued" ? { jobId: submittedJobId } : "skip");
 
   const allReferences = useMemo(
     () => [...Object.values(productReferences).filter(Boolean), ...(modelReference ? [modelReference] : []), ...styleReferences] as StudioReference[],
