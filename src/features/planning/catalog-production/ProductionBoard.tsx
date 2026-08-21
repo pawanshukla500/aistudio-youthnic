@@ -16,34 +16,34 @@ export function ProductionBoard({ items }: { items: any[] }) {
         {columns.map(col => {
           const colItems = items.filter(col.filter);
           return (
-            <div key={col.id} className="flex-shrink-0 w-80 bg-gray-50 dark:bg-gray-800/50 rounded-lg flex flex-col max-h-full border border-gray-200 dark:border-gray-700">
-              <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-100 dark:bg-gray-800 rounded-t-lg">
-                <h3 className="font-semibold text-gray-700 dark:text-gray-300">{col.title}</h3>
-                <span className="bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 text-xs py-0.5 px-2 rounded-full font-medium">
+            <div key={col.id} className="flex-shrink-0 w-80 bg-surface-container/30 rounded-lg flex flex-col max-h-full border border-outline-variant/40">
+              <div className="p-3 border-b border-outline-variant/40 flex justify-between items-center bg-surface-container rounded-t-lg">
+                <h3 className="font-semibold text-on-surface">{col.title}</h3>
+                <span className="bg-outline-variant/30 text-secondary text-xs py-0.5 px-2 rounded-full font-medium">
                   {colItems.length}
                 </span>
               </div>
               <div className="p-3 flex-1 overflow-y-auto space-y-3">
                 {colItems.map(item => (
-                  <div key={item.id} className="bg-white dark:bg-gray-800 p-3 rounded shadow-sm border border-gray-200 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-500 cursor-pointer transition-colors">
+                  <div key={item.id} className="bg-white p-3 rounded shadow-sm border border-outline-variant/40 hover:border-primary cursor-pointer transition-colors">
                     <div className="flex justify-between items-start mb-2">
-                      <span className="font-medium text-sm text-gray-900 dark:text-white truncate">{item.sku_name}</span>
+                      <span className="font-medium text-sm text-on-surface truncate">{item.sku_name}</span>
                       {item.priority === 'urgent' && <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0 mt-1"></span>}
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-3 truncate">
+                    <div className="text-xs text-secondary mb-3 truncate">
                       {item.theme || item.work_type}
                     </div>
                     
                     <div className="flex justify-between items-center text-xs">
-                      <span className="text-gray-400">
+                      <span className="text-secondary">
                         {new Date(item.request_date).toLocaleDateString()}
                       </span>
                       {item.generation_assigned_member ? (
-                        <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold" title={item.generation_assigned_member.full_name}>
+                        <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold" title={item.generation_assigned_member.full_name}>
                           {item.generation_assigned_member.full_name?.charAt(0).toUpperCase()}
                         </div>
                       ) : (
-                        <div className="w-6 h-6 rounded-full border border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center text-gray-400">
+                        <div className="w-6 h-6 rounded-full border border-dashed border-outline-variant flex items-center justify-center text-secondary">
                           +
                         </div>
                       )}
@@ -51,7 +51,7 @@ export function ProductionBoard({ items }: { items: any[] }) {
                   </div>
                 ))}
                 {colItems.length === 0 && (
-                  <div className="text-center py-4 text-sm text-gray-400 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
+                  <div className="text-center py-4 text-sm text-secondary border-2 border-dashed border-outline-variant/40 rounded-lg">
                     No items
                   </div>
                 )}

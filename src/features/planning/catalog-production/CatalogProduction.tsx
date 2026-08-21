@@ -31,31 +31,36 @@ export function CatalogProduction() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-900 overflow-hidden">
-      <div className="flex items-center justify-between p-4 border-b dark:border-gray-800">
-        <h2 className="text-lg font-semibold dark:text-white">Catalog Production</h2>
+    <div className="flex flex-col h-full bg-transparent overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b border-outline-variant/40">
+        <h2 className="text-lg font-semibold text-on-surface">Catalog Production</h2>
         <div className="flex items-center space-x-2">
           <button 
             onClick={() => setActiveTab("overview")}
-            className={`px-3 py-1.5 text-sm font-medium rounded-md ${activeTab === "overview" ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"}`}
+            className={`px-3 py-1.5 text-sm font-medium rounded-md ${activeTab === "overview" ? "bg-primary/10 text-primary" : "text-secondary hover:bg-surface-container"}`}
           >
             Overview
           </button>
           <button 
             onClick={() => setActiveTab("workflow")}
-            className={`px-3 py-1.5 text-sm font-medium rounded-md ${activeTab === "workflow" ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"}`}
+            className={`px-3 py-1.5 text-sm font-medium rounded-md ${activeTab === "workflow" ? "bg-primary/10 text-primary" : "text-secondary hover:bg-surface-container"}`}
           >
             Workflow
           </button>
           <button 
             onClick={() => setActiveTab("table")}
-            className={`px-3 py-1.5 text-sm font-medium rounded-md ${activeTab === "table" ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"}`}
+            className={`px-3 py-1.5 text-sm font-medium rounded-md ${activeTab === "table" ? "bg-primary/10 text-primary" : "text-secondary hover:bg-surface-container"}`}
           >
             Table
           </button>
-          <button className="ml-4 px-4 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md shadow-sm transition-colors">
-            Import Google Sheet
-          </button>
+          <div className="ml-4 flex items-center gap-2">
+            <button className="px-4 py-1.5 text-sm font-medium text-primary border border-primary hover:bg-primary/5 rounded-md shadow-sm transition-colors">
+              Download Excel
+            </button>
+            <button className="px-4 py-1.5 text-sm font-medium text-white bg-primary hover:bg-primary/90 rounded-md shadow-sm transition-colors">
+              Upload Excel
+            </button>
+          </div>
         </div>
       </div>
       
