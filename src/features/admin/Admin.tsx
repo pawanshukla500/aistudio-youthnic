@@ -453,10 +453,16 @@ export function Admin() {
     } finally { setSaving(false); }
   };
 
+  if (_overviewError)
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-red-500 font-medium">Failed to load overview data. {String(_overviewError.message || _overviewError)}</div>
+      </div>
+    );
   if (!overview)
     return (
-      <div className="grid min-h-[60vh] place-items-center">
-        <Loader2 className="h-7 w-7 animate-spin text-primary" />
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
 

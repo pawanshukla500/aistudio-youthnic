@@ -810,7 +810,11 @@ export function Events() {
           <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] text-secondary">{visible.length}</span>
         </h3>
 
-        {data === undefined ? (
+        {_dataError ? (
+          <div className="rounded-xl border border-dashed border-red-500/50 bg-red-50 p-10 text-center text-sm text-red-500">
+            Failed to load roadmap data. {String(_dataError.message || _dataError)}
+          </div>
+        ) : data === undefined ? (
           <div className="space-y-3">
             {[0, 1, 2].map((row) => <div key={row} className="h-24 animate-pulse rounded-xl border border-outline-variant/30 bg-white" />)}
           </div>

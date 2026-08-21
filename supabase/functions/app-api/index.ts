@@ -886,7 +886,7 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     }).eq("id", job.planning_request_id),
   ]);
   const { data: member, error: memberError } = await service.from("organization_members").select("id").eq("organization_id", job.org_id).eq("firebase_uid", job.user_id).maybeSingle();
-  if (memberError) throw new Error(memberError.message);
+  if (memberError) console.error(memberError.message);
   await service.from("notifications").insert({
     organization_id: job.org_id, recipient_member_id: member?.id || null,
     type: status === "completed" ? "generation_completed" : "generation_failed", channel: "in_app",
