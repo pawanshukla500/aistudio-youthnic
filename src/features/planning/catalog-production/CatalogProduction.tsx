@@ -3,12 +3,14 @@ import { supabase } from "../../../lib/supabase";
 import { ProductionOverview } from "./ProductionOverview";
 import { ProductionBoard } from "./ProductionBoard";
 import { ProductionTable } from "./ProductionTable";
+import { AssetViewerModal } from "./AssetViewerModal";
 
 export function CatalogProduction() {
   const [activeTab, setActiveTab] = useState<"overview" | "workflow" | "table">("table");
   const [workItems, setWorkItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [viewingSessionId, setViewingSessionId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -27,9 +29,27 @@ export function CatalogProduction() {
       .order("created_at", { ascending: false });
 
     if (!error && data) {
-      setWorkItems(data);
+      const sortedData = [...data].sort((a, b) => {
+        const isACompleted = a.status === 'completed' || a.listing_status === 'completed';
+        const isBCompleted = b.status === 'completed' || b.listing_status === 'completed';
+        if (isACompleted && !isBCompleted) return 1;
+        if (!isACompleted && isBCompleted) return -1;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+      setWorkItems(sortedData);
     }
     setLoading(false);
+  };
+
+  const handleListingDone = async (id: string) => {
+    const { error } = await supabase.from("catalog_work_items").update({ 
+      listing_status: 'completed',
+      status: 'completed', 
+      listing_completed_at: new Date().toISOString()
+    }).eq("id", id);
+    if (!error) {
+      fetchWorkItems();
+    }
   };
 
   const downloadTemplate = async () => {
@@ -213,11 +233,14 @@ export function CatalogProduction() {
         ) : (
           <>
             {activeTab === "overview" && <ProductionOverview items={workItems} />}
-            {activeTab === "workflow" && <ProductionBoard items={workItems} />}
-            {activeTab === "table" && <ProductionTable items={workItems} />}
+            {activeTab === "workflow" && <ProductionBoard items={workItems} onListingDone={handleListingDone} onViewAssets={setViewingSessionId} />}
+            {activeTab === "table" && <ProductionTable items={workItems} onListingDone={handleListingDone} onViewAssets={setViewingSessionId} />}
           </>
         )}
       </div>
+      {viewingSessionId && (
+        <AssetViewerModal sessionId={viewingSessionId} onClose={() => setViewingSessionId(null)} />
+      )}
     </div>
   );
 }

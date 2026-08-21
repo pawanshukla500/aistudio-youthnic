@@ -1,6 +1,6 @@
 
 
-export function ProductionTable({ items }: { items: any[] }) {
+export function ProductionTable({ items, onListingDone, onViewAssets }: { items: any[], onListingDone: (id: string) => void, onViewAssets: (sessionId: string) => void }) {
   return (
     <div className="bg-white rounded-lg border border-outline-variant/40 shadow-sm overflow-hidden h-full flex flex-col">
       <div className="overflow-auto flex-1">
@@ -16,6 +16,7 @@ export function ProductionTable({ items }: { items: any[] }) {
               <th className="px-4 py-3 text-left text-xs font-medium text-secondary uppercase tracking-wider">Listing Status</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-secondary uppercase tracking-wider">AI Owner</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-secondary uppercase tracking-wider">Theme</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-secondary uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-outline-variant/20">
@@ -53,6 +54,24 @@ export function ProductionTable({ items }: { items: any[] }) {
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-secondary truncate max-w-[150px]">
                   {item.theme || '-'}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm flex gap-2">
+                  {item.listing_status === 'pending' && item.generation_status === 'completed' && (
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); onListingDone(item.id); }}
+                      className="px-2 py-1 bg-primary text-white text-xs font-medium rounded hover:bg-primary/90"
+                    >
+                      Listing Done
+                    </button>
+                  )}
+                  {item.generation_status === 'completed' && item.catalog_session_id && (
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); onViewAssets(item.catalog_session_id); }}
+                      className="px-2 py-1 border border-primary text-primary text-xs font-medium rounded hover:bg-primary/5"
+                    >
+                      View Assets
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
