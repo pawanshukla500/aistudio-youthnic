@@ -846,6 +846,16 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     pose_qa: args.poseQa !== false, estimated_cost_usd: 0.25, created_at: now, updated_at: now,
   });
   if (jobError) throw new Error(jobError.message);
+  
+  if (session.planning_request_id) {
+    await service.from("catalog_work_items").update({
+      generation_job_id: jobId,
+      catalog_session_id: sessionId,
+      generation_status: "queued",
+      generation_started_at: now
+    }).eq("planning_request_id", session.planning_request_id);
+  }
+
   const poseRows = enabled.map((pose, index) => ({
     session_id: sessionId, generation_id: `${jobId}:pose:${index + 1}`, pose_index: index + 1,
     title: pose.title, pose_type: pose.id, instructions: pose.prompt, status: "queued", attempt_count: 0,
@@ -890,6 +900,12 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
       generation_finished_at: now, generation_cost_usd: Number(job.actual_cost_usd || 0), updated_at: now,
       ...(failed ? { error_message: `${failed} pose(s) failed consistency validation.` } : {}),
     }).eq("id", job.planning_request_id),
+    service.from("catalog_work_items").update({
+      generation_status: status,
+      generation_completed_at: now,
+      qc_status: failed ? "needs_review" : "passed",
+      listing_status: failed ? "pending" : "ready"
+    }).eq("planning_request_id", job.planning_request_id),
   ]);
   const { data: member, error: memberError } = await service.from("organization_members").select("id").eq("organization_id", job.org_id).eq("firebase_uid", job.user_id).maybeSingle();
   if (memberError) throw new Error(memberError.message);
@@ -1249,7 +1265,12 @@ async function handleLearningNode(node: JsonRecord, sessionId: string) {
       service.from("catalog_sessions").update({
         status: "completed",
         updated_at: new Date().toISOString()
-      }).eq("session_id", sessionId)
+      }).eq("session_id", sessionId),
+      service.from("catalog_work_items").update({
+        generation_status: "completed",
+        generation_completed_at: new Date().toISOString(),
+        qc_status: "needs_review"
+      }).eq("planning_request_id", session.planning_request_id)
     ]);
   }
 
