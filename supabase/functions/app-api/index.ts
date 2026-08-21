@@ -14,6 +14,7 @@ import {
   type StylingPlanProfile,
 } from "./profiles.ts";
 import { buildPoseQaPrompt, parseQaResponse } from "./qa.ts";
+import { importGoogleSheet, importGoogleSheetDryRun, reconcileExistingGenerations } from "./catalogProduction.ts";
 
 const SUPABASE_URL = requiredEnv("SUPABASE_URL");
 const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -3867,6 +3868,15 @@ Deno.serve(async (request) => {
       "events.automation": () => runEventAutomationOperation(request),
       "events.sendEmail": () => sendDigestOperation(request, args),
       "migration.archive": () => importMigrationArchiveOperation(request, args),
+      "catalogProduction.importGoogleSheetDryRun": () => {
+        return importGoogleSheetDryRun(request, service, String(args.organizationId), args);
+      },
+      "catalogProduction.importGoogleSheet": () => {
+        return importGoogleSheet(request, service, String(args.organizationId), args);
+      },
+      "catalogProduction.reconcile": () => {
+        return reconcileExistingGenerations(request, service, String(args.organizationId), args);
+      },
     };
     const handler = handlers[operation];
     if (!handler) return json({ error: `Unknown operation: ${operation}` }, 404);
