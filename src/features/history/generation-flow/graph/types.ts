@@ -46,6 +46,7 @@ export type TraceAttempt = {
   
   rejected?: boolean;
   correction?: string;
+  is_historical_reconstruction?: boolean;
 };
 
 export type TracePose = {
@@ -63,4 +64,5 @@ export type GenerationTraceViewModel = {
   session: TraceAnalysis | null;
   poses: TracePose[];
   learning: any | null;
+  learnings?: any[];
 };

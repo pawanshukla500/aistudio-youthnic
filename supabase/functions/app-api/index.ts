@@ -35,6 +35,11 @@ const service = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+async function recordAiRun(args: JsonRecord) {
+  const { error } = await service.from("ai_runs").insert(args);
+  if (error) console.error(`Failed to record ai_run telemetry: ${error.message}`);
+}
+
 type ReferenceInput = {
   id?: string;
   role: string;
@@ -444,7 +449,7 @@ async function analyze(request: Request, args: JsonRecord) {
       sku_name: String(args.skuName || ""), product_category: String(args.category || ""), payload: normalized,
       expires_at: new Date(Date.now() + 30 * 86400_000).toISOString(), updated_at: new Date().toISOString(),
     }, { onConflict: "org_key,cache_kind,cache_key" });
-    await service.from("ai_runs").insert({
+    await recordAiRun({
       organization_id: orgId, job_id: "", run_kind: "product_reference_analysis", model, provider: "gemini",
       input_fingerprint: fingerprint, input_summary: { referenceCount: references.length, roles: references.map((reference) => reference.role) },
       output_json: normalized, status: "completed", latency_ms: Date.now() - started, cost_usd: 0, cost_source: "provider_not_reported",
@@ -1454,7 +1459,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         qa = { pass: true, score: 0, productFidelity: 0, scores: {}, weakest: [], lowConfidence: [], reviewRecommended: true, checks: {}, failed: [], reason: `Automatic consistency QA could not run: ${qaUnavailable}`, correction: "" };
       }
     }
-    await service.from("ai_runs").insert({
+    await recordAiRun({
       organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
       job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "image_generation", model: job.model, provider: "openai",
       input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt, referenceRoles: selected.map((reference) => reference.role) },
@@ -1851,7 +1856,7 @@ async function historyGenerationFlowGet(request: Request, args: JsonRecord) {
     service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index"),
     service.from("ai_runs").select("*").eq("job_id", jobId).order("created_at"),
     service.from("qa_reviews").select("*").eq("generation_job_id", jobId).order("created_at"),
-    service.from("generation_learnings").select("*").eq("job_id", jobId).maybeSingle()
+    service.from("generation_learnings").select("*").eq("job_id", jobId).order("created_at", { ascending: false })
   ]);
 
   for (const result of [session, poses, aiRuns, qaReviews, learning]) {
@@ -1864,7 +1869,8 @@ async function historyGenerationFlowGet(request: Request, args: JsonRecord) {
     poses: poses.data || [],
     aiRuns: aiRuns.data || [],
     qaReviews: qaReviews.data || [],
-    learning: learning.data || null,
+    learnings: learning.data || [],
+    learning: learning.data?.[0] ?? null,
   };
 }
 
@@ -1902,7 +1908,7 @@ async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
     service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index"),
     service.from("ai_runs").select("*").eq("job_id", jobId).order("created_at"),
     service.from("qa_reviews").select("*").eq("generation_job_id", jobId).order("created_at"),
-    service.from("generation_learnings").select("*").eq("job_id", jobId).maybeSingle()
+    service.from("generation_learnings").select("*").eq("job_id", jobId).order("created_at", { ascending: false })
   ]);
 
   for (const result of [session, poses, aiRuns, qaReviews, learning]) {
@@ -1915,7 +1921,8 @@ async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
     poses: poses.data || [],
     aiRuns: aiRuns.data || [],
     qaReviews: qaReviews.data || [],
-    learning: learning.data || null,
+    learnings: learning.data || [],
+    learning: learning.data?.[0] ?? null,
   };
 }
 
@@ -2746,7 +2753,7 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
         garment_analysis: normalized, ai_analysis: normalized, pose_plan: normalized.posePlan,
         validation_status: "ready", error_message: "", updated_at: now,
       }).eq("id", variant.id),
-      service.from("ai_runs").insert({
+      recordAiRun({
         organization_id: batch.organization_id, planning_request_id: variant.id, batch_id: batchId,
         job_id: "", run_kind: "catalog_product_preflight", model: Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash",
         provider: "gemini", input_fingerprint: hashes.fingerprint,

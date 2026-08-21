@@ -7,50 +7,75 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
   const rawPoses = rawBackendData.poses || [];
   const aiRuns = rawBackendData.aiRuns || [];
   const qaReviews = rawBackendData.qaReviews || [];
-  const learning = rawBackendData.learning || null;
+  const learnings = rawBackendData.learnings || (rawBackendData.learning ? [rawBackendData.learning] : []);
 
   const poses: TracePose[] = rawPoses.map((p: any) => {
     const poseAiRuns = aiRuns.filter((r: any) => r.run_kind === "image_generation" && (r.pose_index === p.pose_index || r.input_summary?.pose === p.pose_index));
     const poseQaReviews = qaReviews.filter((q: any) => q.pose_index === p.pose_index);
     
-    // session_generations.generation_data might contain corrections/rejected attempts
     const genData = p.generation_data || {};
     const corrections = genData.corrections || [];
+    const rejectedAttempts = genData.rejectedAttempts || [];
 
     const attempts: TraceAttempt[] = [];
-    const attemptCount = p.attempt_count || 1;
+    const attemptCount = Math.max(p.attempt_count || 1, rejectedAttempts.length + 1, poseAiRuns.length);
 
     for (let i = 1; i <= attemptCount; i++) {
-      const run = poseAiRuns[i - 1]; // Assume ordered
-      const qa = poseQaReviews[i - 1]; // Assume ordered
+      let run = poseAiRuns.find((r: any) => r.attempt_number === i);
+      if (!run && poseAiRuns[i - 1]) run = poseAiRuns[i - 1];
+
+      let qa = poseQaReviews.find((q: any) => q.attempt_number === i);
+      if (!qa && poseQaReviews[i - 1]) qa = poseQaReviews[i - 1];
       
       const isLast = i === attemptCount;
-      // Every attempt before the last one was rejected. A failed pose also rejects the last attempt.
       const isRejected = !isLast || p.status === "failed";
+      const rejectedData = rejectedAttempts[i - 1];
       
+      let qaViewModel = undefined;
+      if (isLast && p.qa_payload) {
+         qaViewModel = {
+            pass: p.qa_payload.pass,
+            score: p.qa_payload.score,
+            failed_checks: p.qa_payload.failed || p.qa_payload.checks || [],
+            reason: p.qa_payload.reason,
+            correction: p.qa_payload.correction,
+         };
+      } else if (rejectedData) {
+         qaViewModel = {
+            pass: false,
+            score: rejectedData.score,
+            failed_checks: [],
+            reason: rejectedData.reason,
+            correction: corrections[i - 1],
+         };
+      } else if (qa) {
+         qaViewModel = {
+            pass: qa.passed ?? qa.pass,
+            score: qa.score,
+            failed_checks: qa.issues || qa.failed_checks || [],
+            reason: qa.notes || qa.reason,
+            correction: qa.correction,
+         };
+      }
+
       attempts.push({
         attempt_index: i,
-        provider_request_id: run?.request_id,
+        provider_request_id: run?.provider_request_id || run?.request_id,
         model: run?.model || summary.model,
         provider: run?.provider || summary.provider,
-        prompt_tokens: run?.prompt_tokens,
-        completion_tokens: run?.completion_tokens,
+        prompt_tokens: run?.input_tokens || run?.prompt_tokens,
+        completion_tokens: run?.output_tokens || run?.completion_tokens,
         cost_usd: run?.cost_usd,
         latency_ms: run?.latency_ms,
         
-        output_url: isLast ? p.output_url : undefined, // Historic rejected image URLs might not be stored cleanly
-        storage_path: isLast ? p.storage_path : undefined,
+        output_url: isLast ? p.output_url : (rejectedData?.url || undefined),
+        storage_path: isLast ? p.storage_path : (rejectedData?.storagePath || undefined),
         
-        qa: qa ? {
-          pass: qa.pass,
-          score: qa.score,
-          failed_checks: qa.failed_checks,
-          reason: qa.reason,
-          correction: qa.correction,
-        } : undefined,
+        qa: qaViewModel,
         
         rejected: isRejected,
-        correction: corrections[i - 1],
+        correction: corrections[i - 1] || rejectedData?.correction,
+        is_historical_reconstruction: !run?.attempt_number
       });
     }
 
@@ -69,7 +94,8 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
     summary,
     session,
     poses,
-    learning,
+    learning: learnings[0] || null,
+    learnings,
   };
 }
 
