@@ -1,6 +1,4 @@
 import { Handle, Position } from '@xyflow/react';
-import { Image as ImageIcon } from 'lucide-react';
-
 export function GenerationNode({ data }: any) { 
   const isV2 = data.status !== undefined && data.inputs !== undefined;
   
