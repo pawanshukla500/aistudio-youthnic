@@ -44,12 +44,12 @@ function fidelityTone(score: number) {
 }
 
 function statusClass(status: string) {
-  if (status === "completed") return "bg-success/10 text-success border border-success/20";
-  if (status === "failed") return "bg-danger/10 text-danger border border-danger/20";
-  if (status === "cancelled") return "bg-neutral-surface text-secondary border border-outline-variant";
-  if (status === "processing") return "bg-info/10 text-info border border-info/20";
-  if (status === "queued") return "bg-warning/10 text-warning-dark border border-warning/20";
-  return "bg-surface-container text-on-surface";
+  if (status === "completed") return "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20";
+  if (status === "failed") return "bg-red-50 text-red-700 ring-1 ring-inset ring-red-600/10";
+  if (status === "cancelled") return "bg-surface-container text-secondary ring-1 ring-inset ring-outline-variant/50";
+  if (status === "processing") return "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-700/10";
+  if (status === "queued") return "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20";
+  return "bg-surface-container text-secondary ring-1 ring-inset ring-outline-variant/50";
 }
 
 function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
@@ -591,11 +591,11 @@ export function History() {
          </div>
       </div>
 
-      <div className="space-y-4">
+      <div className="flex flex-col overflow-hidden rounded-2xl border border-outline-variant/40 bg-white shadow-sm">
         {jobs === undefined && (
-           <div className="flex flex-col items-center justify-center rounded-2xl border border-outline-variant/30 bg-white py-20 text-secondary shadow-sm">
-              <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-              <span className="text-sm font-medium">Loading generation history...</span>
+           <div className="flex flex-col items-center justify-center py-20 text-secondary">
+              <Loader2 className="mb-4 h-8 w-8 animate-spin text-primary/50" />
+              <span className="text-sm font-medium">Loading history...</span>
            </div>
         )}
         
@@ -606,112 +606,93 @@ export function History() {
            const progress = Math.min(100, Math.round(((finished + inFlightCredit) / Math.max(1, job.totalPoses)) * 100));
            
            return (
-             <article key={job._id} className="overflow-hidden rounded-2xl border border-outline-variant/60 bg-white shadow-sm transition-all duration-200 hover:shadow-md hover:border-outline">
+             <article key={job._id} className="group relative border-b border-outline-variant/30 bg-white last:border-b-0 transition-colors duration-200 hover:bg-surface-container-lowest">
                <div 
                  onClick={() => setExpanded(open ? null : job._id)}
-                 className="grid cursor-pointer items-center gap-6 p-5 lg:grid-cols-[minmax(0,1fr)_200px_180px_auto]"
+                 className={`flex cursor-pointer items-center gap-4 p-4 lg:grid lg:grid-cols-[minmax(0,1fr)_160px_160px_auto] ${open ? 'bg-surface-container-lowest' : ''}`}
                >
                  
                  {/* COL 1: Image & Details */}
-                 <div className="flex items-start gap-4">
-                    <div className="h-16 w-16 overflow-hidden rounded-xl bg-surface-container-lowest flex-shrink-0 border border-outline-variant/40 shadow-inner">
+                 <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex-shrink-0 h-10 w-10 overflow-hidden rounded-lg bg-surface-container shadow-inner ring-1 ring-inset ring-black/5">
                        {job.thumbnailUrl ? (
-                          <img src={job.thumbnailUrl} alt="Thumbnail" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                          <img src={job.thumbnailUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
                        ) : (
-                          <ImageIcon className="h-6 w-6 m-5 text-secondary" />
+                          <ImageIcon className="m-2.5 h-5 w-5 text-secondary/40" />
                        )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-3">
-                        <h3 className="font-mono text-sm font-bold text-on-surface truncate">{job.skuId}</h3>
-                        <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${statusClass(job.status)}`}>
-                          {job.status === "queued" && <Clock className="h-3 w-3" />}
-                          {job.status === "processing" && <Loader2 className="h-3 w-3 animate-spin" />}
+                      <div className="flex items-center gap-2">
+                        <h3 className="truncate font-mono text-xs font-semibold text-on-surface">{job.skuId}</h3>
+                        <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${statusClass(job.status)}`}>
+                          {job.status === "queued" && <Clock className="h-2.5 w-2.5" />}
+                          {job.status === "processing" && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
                           {job.status}
                         </span>
                       </div>
-                      <p className="mt-1 text-sm font-semibold text-on-surface truncate">{job.skuName || 'Untitled product'}</p>
-                      {job.productDetails && (
-                        <p className="mt-1.5 text-xs text-secondary truncate flex items-center gap-1.5 bg-surface-container-lowest inline-flex px-2 py-1 rounded-md border border-outline-variant/30 max-w-full">
-                           <Sparkles className="h-3 w-3 flex-shrink-0 text-primary" /> 
-                           <span className="truncate">{job.productDetails}</span>
-                        </p>
-                      )}
+                      <p className="truncate text-sm text-secondary">{job.skuName || 'Untitled product'}</p>
                     </div>
                  </div>
 
-                 {/* COL 2: Queue / Progress */}
-                 <div>
-                   <span className="block text-[10px] font-bold uppercase tracking-widest text-secondary mb-2">Queue Status</span>
-                   {job.status === "queued" ? (
-                      <div className="flex items-center gap-2.5 text-sm font-medium text-warning-dark bg-warning/5 px-3 py-1.5 rounded-lg border border-warning/20">
-                         <span className="relative flex h-2.5 w-2.5">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning"></span>
-                         </span>
-                         Waiting in queue
-                      </div>
-                   ) : (
-                      <>
-                        <div className="flex justify-between text-xs mb-1.5">
-                          <span className="font-medium text-on-surface">{job.status === "processing" ? `Pose ${Math.max(1, job.currentPose || finished + 1)} generating · ` : ""}{finished} / {job.totalPoses} stored</span>
-                          <span className="text-secondary font-medium">{progress}%</span>
-                        </div>
-                        <div className="h-2 w-full rounded-full bg-surface-container-high overflow-hidden shadow-inner">
-                          <div className={`h-full rounded-full transition-all duration-500 ${job.status === "failed" ? "bg-danger" : job.status === "completed" ? "bg-success" : "bg-primary"}`} style={{ width: `${progress}%` }} />
-                        </div>
-                      </>
-                   )}
+                 {/* COL 2: Progress */}
+                 <div className="hidden lg:block">
+                    <div className="mb-1 flex items-center justify-between text-xs font-medium text-secondary">
+                      <span>{job.status === "processing" ? `Pose ${Math.max(1, job.currentPose || finished + 1)} · ` : ""}{finished} / {job.totalPoses} stored</span>
+                      <span>{progress}%</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-container-highest shadow-inner">
+                      <div className={`h-full rounded-full transition-all duration-500 ${job.status === "failed" ? "bg-red-500" : job.status === "completed" ? "bg-emerald-500" : "bg-primary"}`} style={{ width: `${progress}%` }} />
+                    </div>
                  </div>
 
                  {/* COL 3: User & Time */}
-                 <div>
-                   <span className="block text-[10px] font-bold uppercase tracking-widest text-secondary mb-2">Generated By</span>
-                   <div className="flex items-center gap-2.5 mb-1.5">
-                      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20"><User className="h-3.5 w-3.5 text-primary" /></div>
-                      <span className="text-sm font-medium text-on-surface truncate" title={job.creatorEmail}>{job.creatorName}</span>
-                   </div>
-                   <span className="block text-[11px] text-secondary font-medium pl-8">{new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(job.createdAt)}</span>
+                 <div className="hidden flex-col text-xs text-secondary lg:flex">
+                    <span className="truncate font-medium text-on-surface" title={job.creatorEmail}>{job.creatorName}</span>
+                    <span>{new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(job.createdAt)}</span>
                  </div>
 
                  {/* COL 4: Actions */}
-                 <div className="flex justify-end gap-2 border-l border-outline-variant/30 pl-4">
+                 <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 lg:pl-4">
                    {['queued', 'processing'].includes(job.status) && (
-                      <button disabled={busyJobId === job._id} title="Stop generation" onClick={(e) => { e.stopPropagation(); void stopGeneration(job._id); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-secondary transition-colors hover:bg-warning-surface hover:text-warning hover:shadow-sm disabled:opacity-50">
-                         {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Stop
+                      <button disabled={busyJobId === job._id} title="Stop generation" onClick={(e) => { e.stopPropagation(); void stopGeneration(job._id); }} className="rounded-md p-1.5 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
+                         {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
                       </button>
                    )}
                    {job.status === "failed" && (
-                      <button disabled={busyJobId === job._id} title="Re-attempt every pose that didn't complete; completed poses are kept" onClick={(e) => { e.stopPropagation(); void regenerateFailedSession(job._id); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-secondary transition-colors hover:bg-primary/10 hover:text-primary hover:shadow-sm disabled:opacity-50">
-                         {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />} Regenerate session
+                      <button disabled={busyJobId === job._id} title="Regenerate failed poses" onClick={(e) => { e.stopPropagation(); void regenerateFailedSession(job._id); }} className="rounded-md p-1.5 text-secondary hover:bg-primary/10 hover:text-primary disabled:opacity-50">
+                         {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
                       </button>
                    )}
                    {!['queued', 'processing'].includes(job.status) && (
-                      <button disabled={busyJobId === job._id} title="Delete job" onClick={(e) => { e.stopPropagation(); void deleteGeneration(job._id); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-secondary transition-colors hover:bg-danger/10 hover:text-danger hover:shadow-sm disabled:opacity-50">
-                         {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete
+                      <button disabled={busyJobId === job._id} title="Delete generation" onClick={(e) => { e.stopPropagation(); void deleteGeneration(job._id); }} className="rounded-md p-1.5 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
+                         {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                       </button>
                    )}
-                   <button onClick={(e) => { e.stopPropagation(); navigate(`/history/flow/${job._id}`); }} title="View Generation Flow Graph" className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/10 hover:shadow-sm">
-                      <Brain className="h-4 w-4" /> View flow
+                   <button onClick={(e) => { e.stopPropagation(); navigate(`/history/flow/${job._id}`); }} title="View Generation Flow" className="rounded-md p-1.5 text-secondary hover:bg-primary/10 hover:text-primary">
+                      <Brain className="h-4 w-4" />
                    </button>
-                   <button title="Toggle details" className={`rounded-lg p-2.5 transition-colors hover:shadow-sm ${open ? 'bg-primary/10 text-primary border border-primary/20' : 'text-primary hover:bg-primary/5 hover:border-primary/10 border border-transparent'}`}>
+                   <button title="Toggle details" className={`rounded-md p-1.5 transition-colors ${open ? 'bg-primary/10 text-primary' : 'text-secondary hover:bg-surface-container hover:text-on-surface'}`}>
                       {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                    </button>
                  </div>
                </div>
                
-               {open && <JobDetails jobId={job._id} />}
+               {open && (
+                  <div className="border-t border-outline-variant/30 bg-surface-container-lowest/50 p-6">
+                    <JobDetails jobId={job._id} />
+                  </div>
+               )}
              </article>
            );
         })}
         
         {jobs !== undefined && jobs.length === 0 && (
-           <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-outline-variant/60 bg-surface-container-lowest py-24 text-center">
-              <div className="h-12 w-12 rounded-full bg-primary/5 flex items-center justify-center mb-4">
-                 <RefreshCcw className="h-6 w-6 text-primary" />
+           <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-surface-container">
+                 <RefreshCcw className="h-5 w-5 text-secondary" />
               </div>
-              <p className="text-base font-semibold text-on-surface">No generations match this view</p>
-              <p className="mt-1 text-sm text-secondary max-w-md">Try adjusting your filters or search query. Queued Studio generations will appear here automatically.</p>
+              <p className="text-sm font-semibold text-on-surface">No generations match this view</p>
+              <p className="mt-1 text-xs text-secondary">Try adjusting your filters or search query.</p>
            </div>
         )}
       </div>

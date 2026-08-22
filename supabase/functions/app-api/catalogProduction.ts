@@ -33,6 +33,15 @@ function listingStatus(value: unknown, generated: string) {
   return "not_required";
 }
 
+function qcStatus(value: unknown, generated: string, listing: string) {
+  const status = text(value).toLowerCase();
+  if (["passed", "pass"].includes(status)) return "passed";
+  if (["rejected", "reject", "failed", "fail"].includes(status)) return "rejected";
+  if (["needs_review", "review"].includes(status) || (generated === "completed" && listing !== "completed")) return "needs_review";
+  if (listing === "completed") return "passed";
+  return "not_started";
+}
+
 function priority(value: unknown) {
   const candidate = text(value).toLowerCase();
   return ["low", "normal", "high", "urgent"].includes(candidate) ? candidate : "normal";
@@ -117,7 +126,7 @@ export async function importGoogleSheet(
     const row = candidate.row;
     const generated = generationStatus(row["Generation Status"]);
     const listing = listingStatus(row["Listing Status"], generated);
-    const qc = listing === "completed" ? "passed" : generated === "completed" ? "needs_review" : "not_started";
+    const qc = qcStatus(row["QC Status"], generated, listing);
     const now = new Date().toISOString();
     const { data: workItem, error: workItemError } = await service.from("catalog_work_items").insert({
       organization_id: workspace.organization.id,
@@ -308,7 +317,7 @@ export async function reconcileExistingGenerations(
   _args: JsonRecord,
 ) {
   const { data: workItems, error } = await service.from("catalog_work_items")
-    .select("id,sku_name,planning_request_id")
+    .select("id,sku_name,planning_request_id,qc_status")
     .eq("organization_id", workspace.organization.id)
     .is("generation_job_id", null);
   if (error) throw new Error(error.message);
@@ -319,7 +328,7 @@ export async function reconcileExistingGenerations(
     let job: JsonRecord | null = null;
     if (item.planning_request_id) {
       const result = await service.from("generation_jobs")
-        .select("job_id,session_id,status,started_at,completed_at,qa_status")
+        .select("job_id,session_id,status,started_at,completed_at")
         .eq("planning_request_id", item.planning_request_id)
         .order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (result.error) throw new Error(result.error.message);
@@ -327,7 +336,7 @@ export async function reconcileExistingGenerations(
     }
     if (!job) {
       const result = await service.from("generation_jobs")
-        .select("job_id,session_id,status,started_at,completed_at,qa_status")
+        .select("job_id,session_id,status,started_at,completed_at")
         .eq("org_id", workspace.organization.id).eq("sku_name", item.sku_name)
         .order("created_at", { ascending: false }).limit(2);
       if (result.error) throw new Error(result.error.message);
@@ -342,7 +351,7 @@ export async function reconcileExistingGenerations(
       generation_status: generated,
       generation_started_at: job.started_at || null,
       generation_completed_at: generated === "completed" ? job.completed_at || new Date().toISOString() : null,
-      qc_status: generated === "completed" ? job.qa_status === "passed" ? "passed" : "needs_review" : "not_started",
+      qc_status: generated === "completed" ? (item.qc_status === "passed" ? "passed" : "needs_review") : "not_started",
       listing_status: generated === "completed" ? "pending" : "not_required",
     }).eq("id", item.id).eq("organization_id", workspace.organization.id);
     if (updateError) throw new Error(updateError.message);

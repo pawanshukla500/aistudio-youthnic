@@ -175,6 +175,7 @@ export function CatalogProduction() {
         { header: "Priority", key: "priority", width: 15 },
         { header: "Theme", key: "theme", width: 20 },
         { header: "Generation Status", key: "genStatus", width: 20 },
+        { header: "QC Status", key: "qcStatus", width: 20 },
         { header: "Listing Status", key: "listingStatus", width: 20 },
         { header: "Remarks", key: "remarks", width: 30 },
         { header: "AI Gen Remarks", key: "aiRemarks", width: 30 },
@@ -187,8 +188,9 @@ export function CatalogProduction() {
       ];
       for (let row = 2; row <= 1000; row++) {
         worksheet.getCell(`C${row}`).dataValidation = { type: "list", allowBlank: true, formulae: ['"low,normal,high,urgent"'] };
-        worksheet.getCell(`E${row}`).dataValidation = { type: "list", allowBlank: true, formulae: ['"pending,queued,generating,completed,failed,not_required"'] };
-        worksheet.getCell(`F${row}`).dataValidation = { type: "list", allowBlank: true, formulae: ['"pending,completed,not_required"'] };
+        worksheet.getCell(`E${row}`).dataValidation = { type: "list", allowBlank: true, formulae: ['"ready,queued,generating,completed,failed,not_required"'] };
+        worksheet.getCell(`F${row}`).dataValidation = { type: "list", allowBlank: true, formulae: ['"not_started,pending,needs_review,passed,rejected"'] };
+        worksheet.getCell(`G${row}`).dataValidation = { type: "list", allowBlank: true, formulae: ['"pending,completed,not_required"'] };
       }
       worksheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
       worksheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF4F2457" } };
