@@ -109,8 +109,8 @@ async function listJobs(args: Record<string, any>) {
     .select("*", { count: "exact" })
     .eq("org_id", String(args.organizationId));
   if (status) jobsQuery = jobsQuery.eq("status", status);
-  if (sourceType === "catalog") jobsQuery = jobsQuery.not("planning_request_id", "is", null);
-  if (sourceType === "studio") jobsQuery = jobsQuery.is("planning_request_id", null);
+  if (sourceType === "catalog") jobsQuery = jobsQuery.eq("source_type", "catalog");
+  if (sourceType === "studio") jobsQuery = jobsQuery.eq("source_type", "studio");
   if (search) jobsQuery = jobsQuery.ilike("history_search", `%${search}%`);
   jobsQuery = jobsQuery.order("created_at", { ascending: false }).range(from, to);
   const [jobsResult, membersResult] = await Promise.all([
