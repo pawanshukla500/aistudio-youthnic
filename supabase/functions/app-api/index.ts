@@ -1576,10 +1576,14 @@ async function processWorker(request: Request, args: JsonRecord) {
     // response - is not evidence that the frame is wrong. The image is already generated
     // and paid for, so it ships flagged for human review instead of being destroyed and
     // regenerated three times into a total loss.
+    let qaStarted = 0;
+    let qaLatencyMs = 0;
     let qaUnavailable = "";
     if (job.pose_qa !== false) {
       try {
+        qaStarted = Date.now();
         qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData });
+        qaLatencyMs = Date.now() - qaStarted;
       } catch (error) {
         qaUnavailable = errorMessage(error);
         qa = { pass: true, score: 0, productFidelity: 0, scores: {}, weakest: [], lowConfidence: [], reviewRecommended: true, checks: {}, failed: [], reason: `Automatic consistency QA could not run: ${qaUnavailable}`, correction: "" };
@@ -1606,7 +1610,7 @@ async function processWorker(request: Request, args: JsonRecord) {
          organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
          job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: Deno.env.get("GEMINI_QA_MODEL")?.trim() || "gemini-3.6-flash", provider: "google",
          input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt },
-         output_json: { qa }, status: qa.pass ? "completed" : "rejected_by_qa", latency_ms: 0,
+         output_json: { qa }, status: qa.pass ? "completed" : "rejected_by_qa", latency_ms: qaLatencyMs,
          provider_request_id: "",
          input_tokens: inTok, input_text_tokens: inTok,
          input_image_tokens: 0, output_tokens: outTok,
