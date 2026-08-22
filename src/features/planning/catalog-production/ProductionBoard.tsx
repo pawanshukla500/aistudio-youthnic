@@ -1,83 +1,100 @@
+import { Check, Eye, ShieldCheck, X } from "lucide-react";
+import { formatDuration, productionStage, type ProductionActionProps } from "./types";
 
+const columns = [
+  { id: "requested", title: "Requested", hint: "Needs production setup" },
+  { id: "generation", title: "Generation", hint: "Ready, queued, or running" },
+  { id: "qc", title: "QC Review", hint: "Generated assets awaiting review" },
+  { id: "listing", title: "Listing Pending", hint: "QC passed and ready to list" },
+  { id: "blocked", title: "Blocked", hint: "Generation or QC needs attention" },
+  { id: "completed", title: "Completed", hint: "Listing finished" },
+] as const;
 
-export function ProductionBoard({ items, onListingDone, onViewAssets }: { items: any[], onListingDone: (id: string) => void, onViewAssets: (sessionId: string) => void }) {
-  const columns = [
-    { id: "requested", title: "Requested", filter: (i: any) => i.generation_status === "not_required" && i.listing_status === "not_required" && i.status !== "blocked" },
-    { id: "generation", title: "Generation", filter: (i: any) => ["ready", "queued", "generating"].includes(i.generation_status) && i.status !== "blocked" },
-    { id: "qc", title: "QC Review", filter: (i: any) => i.qc_status === "needs_review" && i.status !== "blocked" },
-    { id: "listing", title: "Listing Pending", filter: (i: any) => i.listing_status === "pending" || i.listing_status === "ready" && i.status !== "blocked" },
-    { id: "blocked", title: "Blocked", filter: (i: any) => i.status === "blocked" },
-    { id: "completed", title: "Completed", filter: (i: any) => i.status === "completed" || (i.generation_status === "completed" && i.listing_status === "completed") }
-  ];
-
+export function ProductionBoard({
+  items,
+  members,
+  canManage,
+  canReviewQc,
+  canCompleteListing,
+  busyKey,
+  onAssign,
+  onQc,
+  onListingDone,
+  onViewAssets,
+}: ProductionActionProps) {
   return (
-    <div className="h-full flex flex-col">
-      <div className="flex-1 flex overflow-x-auto pb-4 space-x-4">
-        {columns.map(col => {
-          const colItems = items.filter(col.filter);
+    <div className="flex h-full min-h-[580px] min-w-0 flex-col">
+      <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto pb-4">
+        {columns.map((column) => {
+          const columnItems = items.filter((item) => productionStage(item) === column.id);
           return (
-            <div key={col.id} className="flex-shrink-0 w-80 bg-surface-container/30 rounded-lg flex flex-col max-h-full border border-outline-variant/40">
-              <div className="p-3 border-b border-outline-variant/40 flex justify-between items-center bg-surface-container rounded-t-lg">
-                <h3 className="font-semibold text-on-surface">{col.title}</h3>
-                <span className="bg-outline-variant/30 text-secondary text-xs py-0.5 px-2 rounded-full font-medium">
-                  {colItems.length}
-                </span>
-              </div>
-              <div className="p-3 flex-1 overflow-y-auto space-y-3">
-                {colItems.map(item => (
-                  <div key={item.id} className="bg-white p-3 rounded shadow-sm border border-outline-variant/40 hover:border-primary cursor-pointer transition-colors">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="font-medium text-sm text-on-surface truncate">{item.sku_name}</span>
-                      {item.priority === 'urgent' && <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0 mt-1"></span>}
+            <section key={column.id} className="flex max-h-full w-80 shrink-0 flex-col overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container/30">
+              <header className="border-b border-outline-variant/40 bg-surface-container px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-bold text-on-surface">{column.title}</h3>
+                  <span className="rounded-full bg-white px-2 py-0.5 text-xs font-bold text-secondary shadow-sm">{columnItems.length}</span>
+                </div>
+                <p className="mt-1 text-[11px] text-secondary">{column.hint}</p>
+              </header>
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+                {columnItems.map((item) => (
+                  <article key={item.id} className={`rounded-xl border bg-white p-3 shadow-sm transition-colors ${column.id === "completed" ? "border-emerald-100 opacity-80" : "border-outline-variant/40 hover:border-primary/60"}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-on-surface">{item.sku_name}</p>
+                        <p className="mt-0.5 truncate text-[11px] text-secondary">{item.request_code}{item.color_label ? ` · ${item.color_label}` : ""}</p>
+                      </div>
+                      <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${item.priority === "urgent" ? "bg-red-500" : item.priority === "high" ? "bg-orange-400" : "bg-primary/30"}`} title={`${item.priority} priority`} />
                     </div>
-                    <div className="text-xs text-secondary mb-3 truncate">
-                      {item.theme || item.work_type}
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                      <div className="rounded-lg bg-surface-container/60 p-2"><p className="text-secondary">Generation</p><p className="mt-0.5 font-bold capitalize text-on-surface">{item.generation_status.replaceAll("_", " ")}</p></div>
+                      <div className="rounded-lg bg-surface-container/60 p-2"><p className="text-secondary">Elapsed</p><p className="mt-0.5 font-bold text-on-surface">{formatDuration(item.generation_started_at, item.generation_completed_at)}</p></div>
                     </div>
-                    
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-secondary">
-                        {new Date(item.request_date).toLocaleDateString()}
-                      </span>
-                      {item.generation_assigned_member ? (
-                        <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold" title={item.generation_assigned_member.full_name}>
-                          {item.generation_assigned_member.full_name?.charAt(0).toUpperCase()}
-                        </div>
+
+                    <div className="mt-3 space-y-2">
+                      {canManage ? (
+                        <>
+                          <label className="block text-[10px] font-bold uppercase tracking-wide text-secondary">
+                            AI owner
+                            <select value={item.generation_assigned_member_id || ""} disabled={busyKey === `assign:generation:${item.id}`} onChange={(event) => void onAssign(item.id, "generation", event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant bg-white px-2 py-1.5 text-xs font-semibold normal-case tracking-normal text-on-surface disabled:opacity-50">
+                              <option value="">Unassigned</option>
+                              {members.map((member) => <option key={member.id} value={member.id}>{member.display_name || member.email}</option>)}
+                            </select>
+                          </label>
+                          <label className="block text-[10px] font-bold uppercase tracking-wide text-secondary">
+                            Listing owner
+                            <select value={item.listing_assigned_member_id || ""} disabled={busyKey === `assign:listing:${item.id}`} onChange={(event) => void onAssign(item.id, "listing", event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant bg-white px-2 py-1.5 text-xs font-semibold normal-case tracking-normal text-on-surface disabled:opacity-50">
+                              <option value="">Unassigned</option>
+                              {members.map((member) => <option key={member.id} value={member.id}>{member.display_name || member.email}</option>)}
+                            </select>
+                          </label>
+                        </>
                       ) : (
-                        <div className="w-6 h-6 rounded-full border border-dashed border-outline-variant flex items-center justify-center text-secondary">
-                          +
-                        </div>
+                        <div className="flex items-center justify-between text-xs text-secondary"><span>Owner</span><span className="max-w-40 truncate font-semibold text-on-surface">{item.generation_assigned_member?.display_name || "Unassigned"}</span></div>
                       )}
                     </div>
 
-                    {(item.listing_status === 'pending' || (item.generation_status === 'completed' && item.catalog_session_id)) && (
-                      <div className="mt-3 pt-3 border-t border-outline-variant/20 flex gap-2">
-                        {item.listing_status === 'pending' && item.generation_status === 'completed' && (
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); onListingDone(item.id); }}
-                            className="flex-1 px-2 py-1.5 bg-primary text-white text-xs font-medium rounded hover:bg-primary/90 transition-colors"
-                          >
-                            Listing Done
-                          </button>
-                        )}
-                        {item.generation_status === 'completed' && item.catalog_session_id && (
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); onViewAssets(item.catalog_session_id); }}
-                            className="flex-1 px-2 py-1.5 border border-primary text-primary text-xs font-medium rounded hover:bg-primary/5 transition-colors"
-                          >
-                            View Assets
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                    <div className="mt-3 flex flex-wrap gap-2 border-t border-outline-variant/20 pt-3">
+                      {item.catalog_session_id && item.generation_status === "completed" && (
+                        <button onClick={() => onViewAssets(item)} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-primary px-2 py-1.5 text-xs font-bold text-primary hover:bg-primary/5"><Eye className="h-3.5 w-3.5" /> Assets</button>
+                      )}
+                      {canReviewQc && item.generation_status === "completed" && item.qc_status === "needs_review" && (
+                        <>
+                          <button disabled={busyKey === `qc:${item.id}`} onClick={() => void onQc(item.id, "passed")} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-2 py-1.5 text-xs font-bold text-white disabled:opacity-50"><ShieldCheck className="h-3.5 w-3.5" /> Pass</button>
+                          <button disabled={busyKey === `qc:${item.id}`} onClick={() => void onQc(item.id, "rejected")} className="inline-flex items-center justify-center rounded-lg border border-red-300 px-2 py-1.5 text-red-700 disabled:opacity-50" aria-label="Reject QC"><X className="h-3.5 w-3.5" /></button>
+                        </>
+                      )}
+                      {canCompleteListing && item.listing_status === "pending" && item.qc_status === "passed" && (
+                        <button disabled={busyKey === `listing:${item.id}`} onClick={() => void onListingDone(item.id)} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-2 py-1.5 text-xs font-bold text-white disabled:opacity-50"><Check className="h-3.5 w-3.5" /> Listing Done</button>
+                      )}
+                      {column.id === "completed" && <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700"><Check className="h-3.5 w-3.5" /> Finished</span>}
+                    </div>
+                  </article>
                 ))}
-                {colItems.length === 0 && (
-                  <div className="text-center py-4 text-sm text-secondary border-2 border-dashed border-outline-variant/40 rounded-lg">
-                    No items
-                  </div>
-                )}
+                {!columnItems.length && <div className="rounded-xl border-2 border-dashed border-outline-variant/40 px-3 py-8 text-center text-sm text-secondary">No items</div>}
               </div>
-            </div>
+            </section>
           );
         })}
       </div>

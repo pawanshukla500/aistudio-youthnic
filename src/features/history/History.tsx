@@ -505,6 +505,7 @@ export function History() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [sourceType, setSourceType] = useState("");
   const [expanded, setExpanded] = useState<Id<"generationJobs"> | null>(null);
   const [error, setError] = useState("");
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
@@ -514,6 +515,7 @@ export function History() {
     pageSize,
     search,
     status,
+    sourceType,
   }) as { data: { items: any[]; page: number; pageSize: number; total: number; totalPages: number } | undefined, error: any };
   const jobs = jobsPage?.items;
 
@@ -565,6 +567,15 @@ export function History() {
                   className="h-10 w-64 rounded-xl border border-outline-variant bg-white pl-10 pr-4 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20 shadow-sm" 
                />
             </div>
+            <select 
+               value={sourceType} 
+               onChange={(event) => { setSourceType(event.target.value); setPage(1); setExpanded(null); }} 
+               className="h-10 rounded-xl border border-outline-variant bg-white px-4 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20 shadow-sm cursor-pointer"
+            >
+               <option value="">All Sources</option>
+               <option value="studio">Studio</option>
+               <option value="catalog">Catalog Production</option>
+            </select>
             <select 
                value={status} 
                onChange={(event) => { setStatus(event.target.value); setPage(1); setExpanded(null); }} 
