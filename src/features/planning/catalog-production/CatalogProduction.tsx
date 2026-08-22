@@ -236,9 +236,21 @@ export function CatalogProduction() {
       );
       if (!confirmed) return;
       const result = await invokeAppApi<{ inserted: number; skipped: number; errors: unknown[] }>("catalogProduction.importGoogleSheet", { rows });
+      
+      let queuedMessage = "";
+      if (result.inserted > 0) {
+         // Auto-start prompt
+         const autoStartConfirmed = window.confirm(`Import finished: ${result.inserted} inserted. Would you like to automatically start generation for the ready SKUs?`);
+         if (autoStartConfirmed) {
+            await fetchWorkItems(true);
+            // We need the freshly fetched items to get their IDs. We can just tell the user to click the new Auto-Start button.
+            queuedMessage = " Please click 'Auto-Start Pending' to begin generation.";
+         }
+      }
+
       setNotice({
         tone: result.errors.length ? "error" : "success",
-        message: `Import finished: ${result.inserted} inserted, ${result.skipped} skipped${result.errors.length ? `, ${result.errors.length} failed` : ""}.`,
+        message: `Import finished: ${result.inserted} inserted, ${result.skipped} skipped${result.errors.length ? `, ${result.errors.length} failed` : ""}.${queuedMessage}`,
       });
       await fetchWorkItems(true);
     } catch (error) {
@@ -272,7 +284,6 @@ export function CatalogProduction() {
       current.size === queueableIds.size ? new Set() : new Set(queueableIds)
     )),
   };
-
   const handleBulkGenerate = async () => {
     if (!selectedTableIds.size) return;
     const confirmed = window.confirm(`Generate ${selectedTableIds.size} catalog item(s)?`);
@@ -287,6 +298,19 @@ export function CatalogProduction() {
       // runAction already surfaces the actionable backend error and preserves the
       // selection so the manager can fix the affected SKU and retry.
     }
+  };
+
+  const handleAutoStartPending = async () => {
+    if (!queueableIds.size) return;
+    const confirmed = window.confirm(`Auto-start generation for all ${queueableIds.size} pending catalog item(s)?`);
+    if (!confirmed) return;
+    
+    try {
+      await runAction("autoStart", () => invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", {
+        workItemIds: Array.from(queueableIds),
+      }), `Started generation for ${queueableIds.size} pending item(s).`);
+      setSelectedTableIds(new Set());
+    } catch {}
   };
 
   return (
@@ -319,7 +343,12 @@ export function CatalogProduction() {
             )}
             {canManage && selectedTableIds.size > 0 && (
               <button onClick={handleBulkGenerate} disabled={busyKey === "bulkGenerate"} className="inline-flex items-center gap-2 rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-50">
-                <RefreshCw className={`h-4 w-4 ${busyKey === "bulkGenerate" ? "animate-spin" : ""}`} /> Bulk Generate ({selectedTableIds.size})
+                <RefreshCw className={`h-4 w-4 ${busyKey === "bulkGenerate" ? "animate-spin" : ""}`} /> Generate Selected ({selectedTableIds.size})
+              </button>
+            )}
+            {canManage && queueableIds.size > 0 && selectedTableIds.size === 0 && (
+              <button onClick={handleAutoStartPending} disabled={busyKey === "autoStart"} className="inline-flex items-center gap-2 rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-50 shadow-sm shadow-primary/20 transition-all hover:shadow-md">
+                <RefreshCw className={`h-4 w-4 ${busyKey === "autoStart" ? "animate-spin" : ""}`} /> Auto-Start Pending ({queueableIds.size})
               </button>
             )}
             {canManage && (

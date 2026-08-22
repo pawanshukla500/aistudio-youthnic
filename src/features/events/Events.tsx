@@ -518,7 +518,7 @@ function DetailDrawer({ event, onClose }: { event: RoadmapEvent; onClose: () => 
 
 export function Events() {
   const { organization } = useWorkspace();
-  const { data: data, error: _dataError } = useQuery(api.eventIntelligence.roadmap, { organizationId: organization._id }) as { data: Roadmap | undefined, error: any };
+  const { data, error: _dataError } = useQuery(api.eventIntelligence.roadmap, { organizationId: organization._id }) as { data: Roadmap | undefined, error: any };
   const createEvent = useMutation(api.events.create);
   const runResearch = useAction(api.eventIntelligence.runResearch);
   const seedCalendar = useMutation(api.eventIntelligence.seedCalendar);
