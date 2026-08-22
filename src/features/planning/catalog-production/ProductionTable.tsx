@@ -1,5 +1,5 @@
 import { Check, Eye, ShieldCheck, X } from "lucide-react";
-import { formatDuration, isCompleted, type ProductionActionProps } from "./types";
+import { canQueueGeneration, formatDuration, isCompleted, type ProductionActionProps } from "./types";
 
 function statusTone(status: string) {
   if (["completed", "passed"].includes(status)) return "bg-emerald-50 text-emerald-700 ring-emerald-200";
@@ -27,8 +27,9 @@ export function ProductionTable({
   onToggleSelect,
   onToggleSelectAll,
 }: ProductionActionProps) {
-  const isAllSelected = items.length > 0 && selectedIds.size === items.length;
-  const isSomeSelected = selectedIds.size > 0 && selectedIds.size < items.length;
+  const selectableItems = canManage ? items.filter(canQueueGeneration) : [];
+  const isAllSelected = selectableItems.length > 0 && selectedIds.size === selectableItems.length;
+  const isSomeSelected = selectedIds.size > 0 && selectedIds.size < selectableItems.length;
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-outline-variant/40 bg-white shadow-sm">
@@ -42,6 +43,8 @@ export function ProductionTable({
                   checked={isAllSelected}
                   ref={(input) => { if (input) input.indeterminate = isSomeSelected; }}
                   onChange={onToggleSelectAll}
+                  disabled={!selectableItems.length}
+                  aria-label="Select all items available for generation"
                   className="h-4 w-4 rounded border-outline-variant text-primary focus:ring-primary"
                 />
               </th>
@@ -56,6 +59,7 @@ export function ProductionTable({
           <tbody className="divide-y divide-outline-variant/20 bg-white">
             {items.map((item) => {
               const completed = isCompleted(item);
+              const canSelect = canManage && canQueueGeneration(item);
               const assigningGeneration = busyKey === `assign:generation:${item.id}`;
               const assigningListing = busyKey === `assign:listing:${item.id}`;
               return (
@@ -65,6 +69,9 @@ export function ProductionTable({
                       type="checkbox"
                       checked={selectedIds.has(item.id)}
                       onChange={() => onToggleSelect(item.id)}
+                      disabled={!canSelect}
+                      aria-label={`Select ${item.sku_name} for generation`}
+                      title={canSelect ? "Select for generation" : "Generation is already active"}
                       className="h-4 w-4 rounded border-outline-variant text-primary focus:ring-primary"
                     />
                   </td>

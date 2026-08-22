@@ -850,7 +850,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
   const { error: jobError } = await service.from("generation_jobs").insert({
     job_id: jobId, user_id: workspace.user.firebaseUid, user_email: workspace.user.email, org_id: workspace.organization.id,
     status: "queued", readiness_status: "ready", readiness_reasons: [], sku_name: jobData.skuName, session_id: sessionId, job_data: jobData,
-    planning_request_id: session.planning_request_id, source_type: "studio", total_poses: 5, provider: "openai", model,
+    planning_request_id: session.planning_request_id, total_poses: 5, provider: "openai", model,
     aspect_ratio: String(args.aspectRatio || "3:4"), image_size: String(args.imageSize || "2K"), quality,
     pose_qa: args.poseQa !== false, estimated_cost_usd: 0.25, created_at: now, updated_at: now,
   });
@@ -912,8 +912,8 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     service.from("catalog_work_items").update({
       generation_status: status,
       generation_completed_at: now,
-      qc_status: failed ? "needs_review" : "passed",
-      listing_status: failed ? "pending" : "ready"
+      qc_status: "needs_review",
+      listing_status: failed ? "not_required" : "pending",
     }).eq("planning_request_id", job.planning_request_id),
   ]);
   const { data: member, error: memberError } = await service.from("organization_members").select("id").eq("organization_id", job.org_id).eq("firebase_uid", job.user_id).maybeSingle();
@@ -1195,11 +1195,14 @@ async function handleMemoryAndPlanningNode(node: JsonRecord, sessionId: string) 
       schedule_error: "Review and approve the catalogue styling plan to start generating.",
       updated_at: new Date().toISOString(),
     }).eq("id", batchId);
-    
+
+    await service.from("catalog_sessions").update({ status: "ready", updated_at: new Date().toISOString() }).eq("session_id", sessionId);
     // Halt the orchestrator for this session by throwing an error that pauses it,
     // or by intentionally returning failed (but really it should just wait).
     // For V2, we mark it failed with a specific message. When approved, it gets retried.
-    throw new Error("Awaiting styling approval. The graph is paused.");
+    const pause = new Error("Awaiting styling approval. The graph is paused.") as Error & { code?: string };
+    pause.code = "styling_approval_pause";
+    throw pause;
   }
 
   normalized = applyCatalogMemory(freshMemory, normalized);
@@ -1224,24 +1227,11 @@ async function handlePromptCompilationNode(node: JsonRecord, sessionId: string) 
   const inputs = node.inputs as JsonRecord;
   return { compiledPrompt: `Generate pose ${inputs.poseIndex} using the styled memory.` }; 
 }
-async function handleGptImage2Node(node: JsonRecord, sessionId: string) { 
-  const inputs = node.inputs as JsonRecord;
-  // Simulate OpenAI generation delay
-  await new Promise(r => setTimeout(r, 2000));
-  return { 
-    outputUrl: "https://storage.googleapis.com/eleven-public-cdn/images/flows/default-og-preview.webp", 
-    promptTokens: 150, 
-    completionTokens: 0, 
-    costUsd: 0.04 
-  }; 
+async function handleGptImage2Node(_node: JsonRecord, _sessionId: string): Promise<never> {
+  throw new Error("This legacy node-graph session cannot emit a verified catalog asset. Restart the SKU from Catalog Production.");
 }
-async function handleGeminiQaNode(node: JsonRecord, sessionId: string) { 
-  const inputs = node.inputs as JsonRecord;
-  return { 
-    pass: true, 
-    score: 95, 
-    reason: "Looks perfect." 
-  }; 
+async function handleGeminiQaNode(_node: JsonRecord, _sessionId: string): Promise<never> {
+  throw new Error("This legacy node-graph session cannot emit a verified QA result. Restart the SKU from Catalog Production.");
 }
 async function handleFinalImageNode(node: JsonRecord, sessionId: string) { 
   const inputs = node.inputs as JsonRecord;
@@ -1266,8 +1256,10 @@ async function handleLearningNode(node: JsonRecord, sessionId: string) {
   const { data: session, error: sessionError } = await service.from("catalog_sessions").select("planning_request_id").eq("session_id", sessionId).single();
   if (sessionError) throw new Error(sessionError.message);
   if (session?.planning_request_id) {
+    const { data: planningRequest, error: planningRequestError } = await service.from("planning_requests").select("batch_id").eq("id", session.planning_request_id).maybeSingle();
+    if (planningRequestError) throw new Error(planningRequestError.message);
     const completedAt = new Date().toISOString();
-    await Promise.all([
+    const completionUpdates = await Promise.all([
       service.from("planning_requests").update({ 
         status: "completed",
         generation_status: "completed",
@@ -1286,6 +1278,9 @@ async function handleLearningNode(node: JsonRecord, sessionId: string) {
         listing_status: "pending",
       }).eq("planning_request_id", session.planning_request_id)
     ]);
+    const completionError = completionUpdates.find((result) => result.error)?.error;
+    if (completionError) throw new Error(completionError.message);
+    if (planningRequest?.batch_id) scheduleBackground(kickCatalogProcessor(String(planningRequest.batch_id)));
   }
 
   return { learned: true, catalogUpdated: true }; 
@@ -1354,12 +1349,33 @@ async function processNode(request: Request, args: JsonRecord) {
     scheduleBackground(kickNodeOrchestrator(sessionId));
     return { processed: true, nodeId: claimed.id };
   } catch (err) {
-    await service.from("generation_flow_nodes").update({ 
+    const failureMessage = errorMessage(err);
+    await service.from("generation_flow_nodes").update({
       status: "failed", 
-      error_message: errorMessage(err),
+      error_message: failureMessage,
       completed_at: new Date().toISOString() 
     }).eq("id", claimed.id);
-    return { processed: false, reason: "node_failed", error: errorMessage(err) };
+    if ((err as any)?.code !== "styling_approval_pause") {
+      const failedAt = new Date().toISOString();
+      const { data: session } = await service.from("catalog_sessions").select("planning_request_id").eq("session_id", sessionId).maybeSingle();
+      let batchId = "";
+      if (session?.planning_request_id) {
+        const { data: planningRequest } = await service.from("planning_requests").select("batch_id").eq("id", session.planning_request_id).maybeSingle();
+        batchId = String(planningRequest?.batch_id || "");
+        await Promise.all([
+          service.from("planning_requests").update({
+            status: "failed", generation_status: "failed", completion_status: "failed",
+            error_message: failureMessage, generation_finished_at: failedAt, updated_at: failedAt,
+          }).eq("id", session.planning_request_id),
+          service.from("catalog_work_items").update({
+            generation_status: "failed", generation_completed_at: failedAt, qc_status: "needs_review",
+          }).eq("planning_request_id", session.planning_request_id),
+        ]);
+      }
+      await service.from("catalog_sessions").update({ status: "failed", updated_at: failedAt }).eq("session_id", sessionId);
+      if (batchId) scheduleBackground(kickCatalogProcessor(batchId));
+    }
+    return { processed: false, reason: "node_failed", error: failureMessage };
   }
 }
 
@@ -1392,20 +1408,7 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
   return { loadedReferences, approved, poseData, selected, storedPoseData };
 }
 
-async function compilePosePrompt(job: JsonRecord, sessionData: JsonRecord, pose: JsonRecord, loadedReferences: LoadedReference[], approved: LoadedReference[]) {
-  const storedPoseData = (pose.generation_data || {}) as JsonRecord;
-  const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
-  
-  const selected = selectReferences(loadedReferences, approved, poseData.id);
-  const currentFingerprint = selected.map((r) => String(r.hash || "").slice(0, 12)).join("-");
-
-  if (pose.reference_fingerprint && pose.reference_fingerprint !== currentFingerprint) {
-    // References changed! Invalidate QA memory for Product Truth.
-    storedPoseData.corrections = [];
-    storedPoseData.correction = "";
-    storedPoseData.rejectedAttempts = [];
-  }
-
+async function compilePosePrompt(job: JsonRecord, sessionData: JsonRecord, pose: JsonRecord, poseData: any, selected: any[], storedPoseData: JsonRecord) {
   const requestedCorrection = String(pose.regeneration_instructions || "").trim();
   let qaCorrections = (Array.isArray(storedPoseData.corrections)
     ? storedPoseData.corrections.map(String)
@@ -1414,7 +1417,6 @@ async function compilePosePrompt(job: JsonRecord, sessionData: JsonRecord, pose:
     ...qaCorrections,
     requestedCorrection ? `USER REGENERATION INSTRUCTION (apply only if compatible with original product truth): ${requestedCorrection}` : "",
   ].filter(Boolean).join("\n");
-  let rejectedAttempts = Array.isArray(storedPoseData.rejectedAttempts) ? storedPoseData.rejectedAttempts as JsonRecord[] : [];
 
   const { data: pastLearnings, error: pastLearningsError } = await service.from("generation_learnings")
     .select("failure_signals")
@@ -1445,7 +1447,7 @@ async function compilePosePrompt(job: JsonRecord, sessionData: JsonRecord, pose:
     productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
     references: selected, correction: promptCorrection(), learnings: learningsStr,
   });
-  return { prompt, qaCorrections, promptCorrectionStr: promptCorrection(), currentFingerprint, selected, storedPoseData, rejectedAttempts };
+  return { prompt, qaCorrections, promptCorrectionStr: promptCorrection() };
 }
 
 
@@ -1473,32 +1475,92 @@ async function processWorker(request: Request, args: JsonRecord) {
     service.from("planning_requests").update({ generation_status: "processing", generation_started_at: job.started_at || now, updated_at: now }).eq("id", job.planning_request_id),
   ]);
   const sessionData = session.session_data as JsonRecord;
-  const { loadedReferences, approved, poseData, selected, storedPoseData } = await resolvePoseReferences(job, sessionData, pose);
-  const { prompt, qaCorrections, currentFingerprint, rejectedAttempts } = await compilePosePrompt(job, sessionData, pose, loadedReferences, approved);
-  
+  const sourceInputs = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
+  const loadedReferences = await loadAvailableReferences(sourceInputs);
+  let { data: anchorPose } = Number(pose.pose_index) > 1
+    ? await service.from("session_generations").select("output_url,storage_path,title").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
+    : { data: null };
+  // A bulk catalog has to look like one shoot day across every colourway, but each
+  // SKU is its own session, so pose 1 of SKU 2 had no anchor at all - only text
+  // memory, which drifts. The batch keeps the first approved frame precisely so
+  // later SKUs can be pinned to that same set and model.
+  if (!anchorPose?.output_url && !anchorPose?.storage_path && job.batch_id) {
+    const { data: batchRow, error: batchRowError } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
+    if (batchRowError) throw new Error(batchRowError.message);
+    const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
+    if (memory.anchorOutputUrl || memory.anchorStoragePath) {
+      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), title: "catalog anchor" };
+    }
+  }
+  const approved: LoadedReference[] = [];
+  if (anchorPose?.output_url || anchorPose?.storage_path) {
+    // Load the reference first to determine the actual MIME type from the blob,
+    // then set the filename extension to match. No mimeType hint here on purpose:
+    // loadReference() falls back to the fetched blob's actual Content-Type.
+    // Pose 1 is now stored as JPEG, but could be PNG or WebP for legacy data.
+    const loaded = await loadReference({
+      role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path,
+      hash: smallHash(String(anchorPose.output_url || anchorPose.storage_path)), filename: "approved-pose-1", mimeType: "", size: 0,
+    });
+    // Update filename to include the correct extension based on resolved MIME type
+    loaded.filename = `approved-pose-1.${extensionForMimeType(loaded.mimeType)}`;
+    approved.push(loaded);
+  }
+  const storedPoseData = (pose.generation_data || {}) as JsonRecord;
+  const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
+  const requestedCorrection = String(pose.regeneration_instructions || "").trim();
+  // Every earlier QA verdict for this pose stays in the prompt. Carrying only
+  // the newest one let a retry fix the latest defect while reintroducing the
+  // one the previous attempt had already corrected.
+  let qaCorrections = (Array.isArray(storedPoseData.corrections)
+    ? storedPoseData.corrections.map(String)
+    : [String(storedPoseData.correction || "")]).map((entry) => entry.trim()).filter(Boolean);
+  const promptCorrection = () => [
+    ...qaCorrections,
+    requestedCorrection ? `USER REGENERATION INSTRUCTION (apply only if compatible with original product truth): ${requestedCorrection}` : "",
+  ].filter(Boolean).join("\n");
+  let rejectedAttempts = Array.isArray(storedPoseData.rejectedAttempts) ? storedPoseData.rejectedAttempts as JsonRecord[] : [];
   let lastError = "Generation did not complete.";
   let attemptCost = 0;
   let attemptUsage: ProviderUsage | undefined;
   let providerRequestId = "";
-
-  // Use immutable ledger for attempt calculation instead of a mutable counter
-  const payload = (pose.usage_payload || {}) as JsonRecord;
-  const pastAttempts = Array.isArray(payload.attempts) ? payload.attempts : [];
-  const attempt = pastAttempts.length + 1;
-  const MAX_POSE_BUDGET_USD = 1.00;
-  const cumulativeCost = Number(pose.actual_cost_usd || 0);
-
+  const attempt = Number(pose.attempt_count || 0) + 1;
   if (attempt > MAX_GENERATION_ATTEMPTS) {
     await failPoseAndJob(job, session, pose, `Pose ${pose.pose_index} exhausted ${MAX_GENERATION_ATTEMPTS} generation attempts.`);
     return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed" };
   }
-
-  if (cumulativeCost >= MAX_POSE_BUDGET_USD) {
-    await failPoseAndJob(job, session, pose, `Pose ${pose.pose_index} exhausted the maximum QA retry budget of $${MAX_POSE_BUDGET_USD.toFixed(2)}.`);
-    return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed" };
-  }
   try {
-    await service.from("session_generations").update({ full_prompt: prompt, reference_fingerprint: currentFingerprint, attempt_count: attempt, updated_at: new Date().toISOString() }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
+    const { data: pastLearnings, error: pastLearningsError } = await service.from("generation_learnings")
+      .select("failure_signals")
+      .eq("organization_id", job.org_id)
+      .eq("product_category", String(sessionData.category || ""))
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (pastLearningsError) throw new Error(pastLearningsError.message);
+    const learningsArr: string[] = [];
+    const currentGarmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
+    for (const l of pastLearnings || []) {
+      const fs = (l.failure_signals as JsonRecord) || {};
+      const savedFamily = String(fs.garmentFamily || "");
+      if (currentGarmentFamily === "saree" && savedFamily !== "saree") continue;
+      if (currentGarmentFamily !== "saree" && savedFamily === "saree") continue;
+      
+      const fb = (fs.feedback as any[]) || [];
+      for (const f of fb) {
+        if (f.poseTitle === poseData.title && Array.isArray(f.corrections)) {
+          learningsArr.push(...f.corrections.map(String));
+        }
+      }
+    }
+    const learningsStr = learningsArr.slice(0, 3).map((c) => `- Past correction: ${c}`).join("\n");
+
+    const selected = selectReferences(loadedReferences, approved, poseData.id);
+    const prompt = composeGenerationPrompt({
+      skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || "Untitled product"),
+      productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
+      references: selected, correction: promptCorrection(), learnings: learningsStr,
+    });
+    await service.from("session_generations").update({ full_prompt: prompt, attempt_count: attempt, updated_at: new Date().toISOString() }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
     const generatedStarted = Date.now();
     const generated = await generateImage({
       prompt, model: String(job.model || OPENAI_MODEL), size: normalizeImageSize(String(job.aspect_ratio || "3:4"), String(job.image_size || "2K"), String(job.model || OPENAI_MODEL)),
@@ -1531,7 +1593,6 @@ async function processWorker(request: Request, args: JsonRecord) {
       input_image_tokens: generated.usage.inputImageTokens, output_tokens: generated.usage.outputTokens,
       total_tokens: generated.usage.totalTokens, usage_payload: { openai: generated.usage.raw, geminiQa: qa.usageMetadata || {} },
       cost_usd: attemptCost, cost_source: generated.usage.providerReported ? "provider_reported_tokens_openai_public_rates" : "provider_not_reported",
-      generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt,
     });
     if (!qa.pass) {
       const defect = [
@@ -1554,7 +1615,6 @@ async function processWorker(request: Request, args: JsonRecord) {
         organization_id: job.org_id, planning_request_id: job.planning_request_id, generation_job_id: job.job_id,
         pose_index: pose.pose_index, reviewer_type: "gemini_auto", score: qa.score, passed: false,
         issues: qa.failed, notes: qa.reason,
-        generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt,
       });
       const qaError = new Error(lastError) as Error & { code?: string };
       qaError.code = "consistency_qa_failed";
@@ -1699,7 +1759,6 @@ async function regeneratePose(request: Request, args: JsonRecord) {
       output_url: "", storage_path: "",
       regeneration_instructions: extraInstructions,
       regeneration_history: [...history, { instructions: extraInstructions, previousOutputUrl: pose.output_url || "", previousStoragePath: pose.storage_path || "", requestedAt: new Date().toISOString(), requestedByMemberId: workspace.member.id }].slice(-20),
-      generation_epoch: Number(pose.generation_epoch || 1) + 1,
       updated_at: new Date().toISOString(),
     }).eq("generation_id", generationId),
     service.from("generation_jobs").update({
@@ -1732,16 +1791,16 @@ async function regenerateSession(request: Request, args: JsonRecord) {
   if (!job) throw new Error("Generation job not found.");
   if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid) throw new Error("You can regenerate only your own generation jobs.");
   if (job.status !== "failed") throw new Error("Only a failed generation can be regenerated as a whole session.");
-  const { data: poses, error: posesError } = await service.from("session_generations").select("generation_id,status,generation_epoch").eq("session_id", job.session_id);
+  const { data: poses, error: posesError } = await service.from("session_generations").select("generation_id,status").eq("session_id", job.session_id);
   if (posesError) console.error(posesError.message);
   const incomplete = (poses || []).filter((pose) => pose.status !== "completed");
   if (!incomplete.length) throw new Error("Every pose in this generation already completed - nothing to regenerate.");
   const now = new Date().toISOString();
   await Promise.all([
-    ...incomplete.map((pose) => service.from("session_generations").update({
+    service.from("session_generations").update({
       status: "queued", attempt_count: 0, qa_status: "pending", error: "", regeneration_instructions: "",
-      output_url: "", storage_path: "", generation_epoch: Number(pose.generation_epoch || 1) + 1, updated_at: now,
-    }).eq("generation_id", pose.generation_id)),
+      output_url: "", storage_path: "", updated_at: now,
+    }).eq("session_id", job.session_id).neq("status", "completed"),
     service.from("generation_jobs").update({
       status: "queued", readiness_status: "ready", readiness_reasons: [], attempt_count: 0, failed_poses: 0,
       current_pose: null, available_at: now, error_code: "", error_message: "", completed_at: null,
@@ -2626,6 +2685,25 @@ async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
       hash: String((asset.metadata as JsonRecord)?.hash || asset.id), filename: String((asset.metadata as JsonRecord)?.filename || `${asset.asset_role}.jpg`),
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     }));
+  for (const [role, urlKey, pathKey] of [
+    ["front", "front_image_url", "front_image_path"],
+    ["back", "back_image_url", "back_image_path"],
+  ] as const) {
+    if (productRefs.some((reference) => reference.role === role)) continue;
+    const downloadUrl = String(variant[urlKey] || "");
+    const storagePath = String(variant[pathKey] || "");
+    if (!downloadUrl && !storagePath) continue;
+    productRefs.push({
+      id: `${variant.id}:${role}`,
+      role,
+      downloadUrl,
+      storagePath,
+      hash: smallHash(`${downloadUrl}|${storagePath}`),
+      filename: `${role}.jpg`,
+      mimeType: "image/jpeg",
+      size: 0,
+    });
+  }
   // batch.reference_images holds every batch-level shared reference (style_reference and, now,
   // model_identity) tagged with its own role - preserve that tag instead of collapsing
   // everything to "style_reference", or a model-identity upload would silently be treated as
@@ -2996,7 +3074,7 @@ async function queueCatalogVariantGeneration(
     && Boolean(variant.ai_analysis);
   const analysisStartedAt = Date.now();
   let normalized = hasCurrentAnalysis
-    ? applyCatalogMemory(batch, normalizeAnalysis(variant.ai_analysis, category))
+    ? applyCatalogMemory(batch, normalizeAnalysis(variant.ai_analysis as JsonRecord, category))
     : await analyzeCatalogVariant(batch, variant, references);
 
   if (!hasCurrentAnalysis) {
@@ -3033,7 +3111,7 @@ async function queueCatalogVariantGeneration(
 
   const memory = (batch.catalog_memory || {}) as JsonRecord;
   if (!memory.stylingPlan) {
-    await proposeCatalogStylingPlan(batchId, batch, normalized.stylingPlan, variant.id);
+    await proposeCatalogStylingPlan(batchId, batch, normalized.stylingPlan, String(variant.id));
     const generatedAlready = variants.some((entry) => entry.generation_status === "completed");
     const { data: saveResult, error: saveError } = await service.rpc("save_catalog_styling_plan", {
       p_batch_id: batchId,
@@ -3121,7 +3199,6 @@ async function queueCatalogVariantGeneration(
     readiness_reasons: [],
     sku_name: variant.sku_name,
     session_id: sessionId,
-    source_type: "catalog",
     job_data: jobData,
     planning_request_id: variant.id,
     total_poses: 5,
@@ -3201,12 +3278,34 @@ async function processCatalog(request: Request, args: JsonRecord) {
   }
   if (!batch || !["running", "scheduled"].includes(String(batch.schedule_status))) return { processed: false, reason: "no_due_catalog" };
   const batchId = String(batch.id);
+  const generationSettings = (batch.generation_settings || {}) as JsonRecord;
+  const selectedRequestIds = Array.isArray(generationSettings.catalogProductionRequestIds)
+    ? [...new Set((generationSettings.catalogProductionRequestIds as unknown[]).map(String).filter(Boolean))]
+    : [];
+  const selectedRequestIdSet = new Set(selectedRequestIds);
   const { data: activeJobs, error: activeJobsError } = await service.from("generation_jobs").select("job_id").eq("batch_id", batchId).in("status", ["queued", "processing", "cancelling"]).limit(1);
   if (activeJobsError) console.error(activeJobsError.message);
   if (activeJobs?.length) return { processed: false, reason: "active_job" };
   const { data: variants, error: variantsError } = await service.from("planning_requests").select("*").eq("batch_id", batchId).order("queue_position", { ascending: true });
   if (variantsError) console.error(variantsError.message);
-  const staleVariantIds = (variants || [])
+  const targetVariants = selectedRequestIds.length
+    ? (variants || []).filter((row) => selectedRequestIdSet.has(String(row.id)))
+    : variants || [];
+  if (selectedRequestIds.length && targetVariants.length !== selectedRequestIds.length) {
+    const missingIds = selectedRequestIds.filter((id) => !targetVariants.some((v) => String(v.id) === id));
+    await service.from("planning_batches").update({
+      schedule_error: `Skipped ${missingIds.length} missing or moved request(s) from this batch selection.`,
+      updated_at: new Date().toISOString(),
+    }).eq("id", batchId);
+  }
+  const batchRequestIds = (variants || []).map((row) => String(row.id));
+  const { data: activeSessions, error: activeSessionsError } = batchRequestIds.length
+    ? await service.from("catalog_sessions").select("session_id").in("planning_request_id", batchRequestIds).eq("status", "generating").limit(1)
+    : { data: [], error: null };
+  if (activeSessionsError) console.error(activeSessionsError.message);
+  if (activeSessions?.length) return { processed: false, reason: "active_session" };
+
+  const staleVariantIds = targetVariants
     .filter((row) => ["queued", "processing"].includes(String(row.generation_status)))
     .map((row) => row.id);
   if (staleVariantIds.length) {
@@ -3223,15 +3322,27 @@ async function processCatalog(request: Request, args: JsonRecord) {
       row.generation_job_id = null;
     }
   }
-  const variant = (variants || []).find((row) => row.front_image_url && row.back_image_url && !["completed", "queued", "processing", "failed"].includes(String(row.generation_status)));
+  const variant = targetVariants.find((row) => row.front_image_url && row.back_image_url && !["completed", "queued", "processing", "failed"].includes(String(row.generation_status)));
   if (!variant) {
     const completed = (variants || []).filter((row) => row.generation_status === "completed").length;
     const failed = (variants || []).filter((row) => row.generation_status === "failed").length;
-    await service.from("planning_batches").update({
-      generated_count: completed, failed_count: failed, pending_count: Math.max(0, (variants || []).length - completed - failed),
-      queue_status: failed ? "failed" : "completed", schedule_status: failed ? "failed" : "completed",
-      schedule_finished_at: new Date().toISOString(), status: failed ? "active" : "completed", updated_at: new Date().toISOString(),
-    }).eq("id", batchId);
+    const pending = Math.max(0, (variants || []).length - completed - failed);
+    const batchUpdate: JsonRecord = {
+      generated_count: completed,
+      failed_count: failed,
+      pending_count: pending,
+      queue_status: failed ? "failed" : pending ? "idle" : "completed",
+      schedule_status: failed ? "failed" : pending ? "none" : "completed",
+      schedule_finished_at: new Date().toISOString(),
+      status: failed || pending ? "active" : "completed",
+      updated_at: new Date().toISOString(),
+    };
+    if (selectedRequestIds.length) {
+      const nextGenerationSettings = { ...generationSettings };
+      delete nextGenerationSettings.catalogProductionRequestIds;
+      batchUpdate.generation_settings = nextGenerationSettings;
+    }
+    await service.from("planning_batches").update(batchUpdate).eq("id", batchId);
     return { processed: false, reason: "catalog_complete" };
   }
   // Nothing is generated against a styling plan nobody has seen. The batch waits
@@ -3271,6 +3382,10 @@ async function processCatalog(request: Request, args: JsonRecord) {
         generation_finished_at: failedAt,
         updated_at: failedAt,
       }).eq("id", variant.id),
+      service.from("catalog_work_items").update({
+        generation_status: "failed",
+        updated_at: failedAt,
+      }).eq("planning_request_id", variant.id),
     ]);
     scheduleBackground(kickCatalogProcessor(batchId));
     return { processed: false, reason: "variant_failed", error: failureMessage };
@@ -4315,12 +4430,16 @@ Deno.serve(async (request) => {
       "catalogProduction.bulkGenerate": async () => {
         const { workspace } = await workspaceFor(request, "planning.manage");
         const result = await bulkGenerateCatalogWorkItems(service, workspace, args);
-        if (Array.isArray(result.batchesToSchedule)) {
-          for (const batchId of result.batchesToSchedule) {
+        const scheduleOutcomes: Array<{ batchId: string; success: boolean; error?: string }> = [];
+        for (const batchId of result.batchIdsToSchedule) {
+          try {
             await scheduleCatalogOperation(request, { catalogId: batchId });
+            scheduleOutcomes.push({ batchId, success: true });
+          } catch (err: any) {
+            scheduleOutcomes.push({ batchId, success: false, error: err.message });
           }
         }
-        return result;
+        return { ...result, scheduleOutcomes };
       },
       "catalogProduction.automation": () => runCatalogProductionAutomationOperation(request),
     };

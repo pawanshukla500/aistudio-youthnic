@@ -8,6 +8,7 @@ import { ProductionBoard } from "./ProductionBoard";
 import { ProductionTable } from "./ProductionTable";
 import { AssetViewerModal } from "./AssetViewerModal";
 import {
+  canQueueGeneration,
   isCompleted,
   sortProductionItems,
   type CatalogMember,
@@ -90,6 +91,17 @@ export function CatalogProduction() {
   );
   const activeCount = workItems.filter((item) => !isCompleted(item)).length;
   const completedCount = workItems.length - activeCount;
+  const queueableIds = useMemo(
+    () => new Set(workItems.filter(canQueueGeneration).map((item) => item.id)),
+    [workItems],
+  );
+
+  useEffect(() => {
+    setSelectedTableIds((current) => {
+      const next = new Set([...current].filter((id) => queueableIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [queueableIds]);
 
   const runAction = async (key: string, action: () => Promise<unknown>, successMessage: string) => {
     setBusyKey(key);
@@ -248,12 +260,15 @@ export function CatalogProduction() {
     onViewAssets: setViewingItem,
     selectedIds: selectedTableIds,
     onToggleSelect: (id: string) => setSelectedTableIds(prev => {
+      if (!canManage || !queueableIds.has(id)) return prev;
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     }),
-    onToggleSelectAll: () => setSelectedTableIds(prev => prev.size === workItems.length ? new Set() : new Set(workItems.map(item => item.id))),
+    onToggleSelectAll: () => setSelectedTableIds((current) => (
+      current.size === queueableIds.size ? new Set() : new Set(queueableIds)
+    )),
   };
 
   const handleBulkGenerate = async () => {
@@ -261,13 +276,15 @@ export function CatalogProduction() {
     const confirmed = window.confirm(`Generate ${selectedTableIds.size} catalog item(s)?`);
     if (!confirmed) return;
     
-    await runAction("bulkGenerate", async () => {
-      const result = await invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", {
-        workItemIds: Array.from(selectedTableIds)
-      });
-      return result;
-    }, "Bulk generation started successfully.");
-    setSelectedTableIds(new Set());
+    try {
+      await runAction("bulkGenerate", () => invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", {
+        workItemIds: Array.from(selectedTableIds),
+      }), "Bulk generation started successfully.");
+      setSelectedTableIds(new Set());
+    } catch {
+      // runAction already surfaces the actionable backend error and preserves the
+      // selection so the manager can fix the affected SKU and retry.
+    }
   };
 
   return (
