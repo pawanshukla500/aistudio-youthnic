@@ -80,6 +80,50 @@ const IMAGE_TOKEN_RATES: Record<string, { textInput: number; imageInput: number;
   "gpt-image-1-mini": { textInput: 2, imageInput: 2.5, imageOutput: 8 },
 };
 
+const GEMINI_PRICING: Record<string, { input: number; output: number; version: string; source: string }> = {
+  "gemini-3.6-flash": { input: 0.15, output: 0.60, version: "2024-08", source: "google_standard_flash" },
+  "gemini-3.1-pro-preview": { input: 1.25, output: 5.00, version: "2024-08", source: "google_standard_pro" },
+};
+
+type GeminiPurpose = "product_truth" | "shoot_planning" | "qa" | "qa_recheck" | "qa_escalation";
+
+type GeminiPolicy = {
+  purpose: GeminiPurpose;
+  model: string;
+  thinkingLevel: "high" | "medium";
+};
+
+function resolveGeminiPolicy(args: { purpose: GeminiPurpose; garmentFamily?: string; uncertainty?: boolean; referenceCount?: number; }): GeminiPolicy {
+  const PT_MODEL = Deno.env.get("GEMINI_PRODUCT_TRUTH_MODEL")?.trim() || "gemini-3.1-pro-preview";
+  const PT_THINKING = (Deno.env.get("GEMINI_PRODUCT_TRUTH_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
+
+  const SIMPLE_MODEL = Deno.env.get("GEMINI_SIMPLE_PLANNER_MODEL")?.trim() || "gemini-3.6-flash";
+  const SIMPLE_THINKING = (Deno.env.get("GEMINI_SIMPLE_PLANNER_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
+
+  const COMPLEX_MODEL = Deno.env.get("GEMINI_COMPLEX_PLANNER_MODEL")?.trim() || "gemini-3.1-pro-preview";
+  const COMPLEX_THINKING = (Deno.env.get("GEMINI_COMPLEX_PLANNER_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
+
+  const QA_MODEL = Deno.env.get("GEMINI_QA_MODEL")?.trim() || "gemini-3.6-flash";
+  const QA_THINKING = (Deno.env.get("GEMINI_QA_THINKING_LEVEL")?.trim() as "high" | "medium") || "medium";
+
+  const QA_RECHECK_MODEL = Deno.env.get("GEMINI_QA_RECHECK_MODEL")?.trim() || "gemini-3.6-flash";
+  const QA_RECHECK_THINKING = (Deno.env.get("GEMINI_QA_RECHECK_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
+
+  const QA_ESCALATION_MODEL = Deno.env.get("GEMINI_QA_ESCALATION_MODEL")?.trim() || "gemini-3.1-pro-preview";
+  const QA_ESCALATION_THINKING = (Deno.env.get("GEMINI_QA_ESCALATION_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
+
+  if (args.purpose === "product_truth") return { purpose: args.purpose, model: PT_MODEL, thinkingLevel: PT_THINKING };
+  if (args.purpose === "shoot_planning") {
+    const isComplex = ["saree", "lehenga", "suit", "multi-piece"].some((fam) => args.garmentFamily?.toLowerCase().includes(fam)) || args.uncertainty || (args.referenceCount && args.referenceCount > 3);
+    return isComplex ? { purpose: args.purpose, model: COMPLEX_MODEL, thinkingLevel: COMPLEX_THINKING } : { purpose: args.purpose, model: SIMPLE_MODEL, thinkingLevel: SIMPLE_THINKING };
+  }
+  if (args.purpose === "qa") return { purpose: args.purpose, model: QA_MODEL, thinkingLevel: QA_THINKING };
+  if (args.purpose === "qa_recheck") return { purpose: args.purpose, model: QA_RECHECK_MODEL, thinkingLevel: QA_RECHECK_THINKING };
+  if (args.purpose === "qa_escalation") return { purpose: args.purpose, model: QA_ESCALATION_MODEL, thinkingLevel: QA_ESCALATION_THINKING };
+
+  return { purpose: args.purpose, model: "gemini-3.6-flash", thinkingLevel: "high" };
+}
+
 function requiredEnv(name: string) {
   const value = Deno.env.get(name)?.trim();
   if (!value) throw new Error(`${name} is not configured in the Supabase Edge Function.`);
@@ -384,8 +428,8 @@ const GEMINI_SAFETY_SETTINGS = [
 // $0.05-0.07 OpenAI image generation attempt via the outer per-pose retry loop, since QA runs
 // after the (expensive) image already exists. Retry the (cheap, no-image-cost) Gemini call a
 // few times first so a transient hiccup doesn't waste that budget or fail poses needlessly.
-async function geminiJson(model: string, parts: JsonRecord[], attempt = 1): Promise<{ raw: JsonRecord; text: string; json: JsonRecord }> {
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+async function geminiJson(policy: GeminiPolicy, parts: JsonRecord[], attempt = 1): Promise<{ raw: JsonRecord; text: string; json: JsonRecord; policy: GeminiPolicy }> {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(policy.model)}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": requiredEnv("GEMINI_API_KEY") },
     body: JSON.stringify({
@@ -399,14 +443,14 @@ async function geminiJson(model: string, parts: JsonRecord[], attempt = 1): Prom
   const text = response.ok ? extractGeminiText(data) : "";
   if ((retryableStatus || (response.ok && !text)) && attempt < 3) {
     await sleep(500 * attempt);
-    return geminiJson(model, parts, attempt + 1);
+    return geminiJson(policy, parts, attempt + 1);
   }
   if (!response.ok) throw new Error(String((data.error as JsonRecord | undefined)?.message || `Gemini failed (${response.status}).`));
   if (!text) {
     const reason = geminiBlockReason(data);
     throw new Error(`Gemini returned no structured response${reason ? ` (${reason})` : ""}.`);
   }
-  return { raw: data, text, json: parseJsonResponse(text) };
+  return { raw: data, text, json: parseJsonResponse(text), policy };
 }
 
 async function analyze(request: Request, args: JsonRecord) {
@@ -424,7 +468,8 @@ async function analyze(request: Request, args: JsonRecord) {
   // that is queue-time validation of the references, and saving a plan writes a
   // decision, which would change the fingerprint and reject its own session.
   const housePreferences = await stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion"));
-  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${smallHash(housePreferences)}`;
+  const policy = resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: String(args.category || "") });
+  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${policy.model}:${smallHash(housePreferences)}`;
   let cacheHit = false;
   let normalized: ReturnType<typeof normalizeAnalysis> | null = null;
   const forceRefresh = args.forceRefresh === true;
@@ -451,18 +496,28 @@ async function analyze(request: Request, args: JsonRecord) {
       category: String(args.category || "ethnic/fusion"), modelDirection: String(args.modelDirection || ""),
       sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences,
     }) });
-    const model = Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash";
-    const result = await geminiJson(model, parts);
+
+    const result = await geminiJson(policy, parts);
     normalized = normalizeAnalysis(result.json, String(args.category || "ethnic/fusion"));
     await service.from("analysis_cache").upsert({
       organization_id: orgId, org_key: orgId, cache_kind: "studio_product_analysis", cache_key: cacheKey,
       sku_name: String(args.skuName || ""), product_category: String(args.category || ""), payload: normalized,
       expires_at: new Date(Date.now() + 30 * 86400_000).toISOString(), updated_at: new Date().toISOString(),
     }, { onConflict: "org_key,cache_kind,cache_key" });
+    const usage = result.raw.usageMetadata as any || {};
+    const inTok = Number(usage.promptTokenCount || 0);
+    const outTok = Number(usage.candidatesTokenCount || 0);
+    const pricing = GEMINI_PRICING[policy.model] || GEMINI_PRICING["gemini-3.6-flash"];
+    const estCost = (inTok * pricing.input + outTok * pricing.output) / 1000000;
+    
     await recordAiRun({
-      organization_id: orgId, job_id: "", run_kind: "product_reference_analysis", model, provider: "gemini",
-      input_fingerprint: fingerprint, input_summary: { referenceCount: references.length, roles: references.map((reference) => reference.role) },
-      output_json: normalized, status: "completed", latency_ms: Date.now() - started, cost_usd: 0, cost_source: "provider_not_reported",
+      organization_id: orgId, job_id: "", run_kind: "product_reference_analysis", model: policy.model, provider: "gemini",
+      purpose: policy.purpose, thinking_level: policy.thinkingLevel,
+      input_fingerprint: fingerprint, input_summary: { referenceCount: references.length, roles: references.map((reference) => reference.role), policy },
+      output_json: normalized, status: "completed", latency_ms: Date.now() - started, cost_usd: estCost, cost_source: `estimated_public_rates_${pricing.version}`,
+      input_tokens: inTok, input_text_tokens: inTok, input_image_tokens: 0, output_tokens: outTok,
+      total_tokens: Number(usage.totalTokenCount || 0), thoughts_token_count: Number(usage.thoughtsTokenCount || 0),
+      usage_payload: { geminiAnalysis: usage },
     });
   }
 
@@ -492,7 +547,7 @@ async function analyze(request: Request, args: JsonRecord) {
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     })), productIdentity: normalized.productIdentity, creativeDirection: normalized.creativeDirection,
     modelIdentity: normalized.modelIdentity, stylingPlan: normalized.stylingPlan, posePlan: normalized.posePlan, consistencyRules: CONSISTENCY_RULES,
-    analysisModel: Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash", analysisVersion: ANALYSIS_VERSION,
+    analysisModel: resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: String(args.category || "") }).model, analysisVersion: ANALYSIS_VERSION,
     generatedAssets: [], approvedAssets: [],
   };
   const { error: sessionError } = await service.from("catalog_sessions").insert({
@@ -805,8 +860,51 @@ async function validatePose(args: {
     parts.push({ text: roleLabel(reference.role) });
     parts.push({ inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
   });
-  const result = await geminiJson(Deno.env.get("GEMINI_QA_MODEL")?.trim() || "gemini-3.6-flash", parts);
-  return { ...parseQaResponse(result.text), usageMetadata: result.raw.usageMetadata || {} };
+  const policyMedium = resolveGeminiPolicy({ purpose: "qa" });
+  let result = await geminiJson(policyMedium, parts);
+  let qa = parseQaResponse(result.text);
+  let usageMetadata = result.raw.usageMetadata || {};
+
+  // Escalation Step 1: Flash Medium
+  // If clear pass or clear severe defect, return immediately.
+  const hasSevereDefects = qa.reason.includes("Critical attributes far below");
+  if (qa.pass || hasSevereDefects) {
+    return { ...qa, usageMetadata, policy: result.policy };
+  }
+
+  // Escalation Step 2: Flash High (Recheck)
+  // The medium model was uncertain or gave borderline scores.
+  const policyHigh = resolveGeminiPolicy({ purpose: "qa_recheck" });
+  result = await geminiJson(policyHigh, parts);
+  qa = parseQaResponse(result.text);
+  usageMetadata = {
+    ...usageMetadata,
+    promptTokenCount: (usageMetadata.promptTokenCount || 0) + (result.raw.usageMetadata?.promptTokenCount || 0),
+    candidatesTokenCount: (usageMetadata.candidatesTokenCount || 0) + (result.raw.usageMetadata?.candidatesTokenCount || 0),
+    totalTokenCount: (usageMetadata.totalTokenCount || 0) + (result.raw.usageMetadata?.totalTokenCount || 0),
+  };
+
+  const hasSevereDefectsHigh = qa.reason.includes("Critical attributes far below");
+  if (qa.pass || hasSevereDefectsHigh) {
+    return { ...qa, usageMetadata, policy: result.policy };
+  }
+
+  // Escalation Step 3: Pro High (Escalation)
+  // Still uncertain. Only escalate to Pro if the defect is a Product Truth issue that would trigger a paid retry.
+  const isProductTruthIssue = qa.failed.some((f) => ["garment_identity", "colors", "print_pattern", "pattern_geometry", "embroidery_geometry", "side_construction", "unknown_region_invention"].includes(f));
+  if (isProductTruthIssue && (args.session.attemptNumber || 1) < MAX_GENERATION_ATTEMPTS) {
+    const policyPro = resolveGeminiPolicy({ purpose: "qa_escalation" });
+    result = await geminiJson(policyPro, parts);
+    qa = parseQaResponse(result.text);
+    usageMetadata = {
+      ...usageMetadata,
+      promptTokenCount: (usageMetadata.promptTokenCount || 0) + (result.raw.usageMetadata?.promptTokenCount || 0),
+      candidatesTokenCount: (usageMetadata.candidatesTokenCount || 0) + (result.raw.usageMetadata?.candidatesTokenCount || 0),
+      totalTokenCount: (usageMetadata.totalTokenCount || 0) + (result.raw.usageMetadata?.totalTokenCount || 0),
+    };
+  }
+
+  return { ...qa, usageMetadata, policy: result.policy };
 }
 
 async function kickWorker(jobId?: string) {
@@ -1137,7 +1235,8 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     housePreferences: await stylingPreferenceBrief(orgId, category),
   }) });
 
-  const result = await geminiJson(Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash", parts);
+  const policy = resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: category });
+  const result = await geminiJson(policy, parts);
   const normalized = normalizeAnalysis(result.json, category);
   
   return { analysisResult: normalized, usage: result.raw.usageMetadata };
@@ -1605,17 +1704,21 @@ async function processWorker(request: Request, args: JsonRecord) {
        const qaUsage = (qa.usageMetadata || {}) as any;
        const inTok = Number(qaUsage?.promptTokenCount || 0);
        const outTok = Number(qaUsage?.candidatesTokenCount || 0);
-       const estCost = (inTok * 0.15 + outTok * 0.60) / 1000000;
+       const policy = (qa as any).policy || resolveGeminiPolicy({ purpose: "qa" });
+       const pricing = GEMINI_PRICING[policy.model] || GEMINI_PRICING["gemini-3.6-flash"];
+       const estCost = (inTok * pricing.input + outTok * pricing.output) / 1000000;
        await recordAiRun({
          organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
-         job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: Deno.env.get("GEMINI_QA_MODEL")?.trim() || "gemini-3.6-flash", provider: "google",
-         input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt },
+         job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: policy.model, provider: "google",
+         purpose: policy.purpose, thinking_level: policy.thinkingLevel,
+         input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt, policy },
          output_json: { qa }, status: qa.pass ? "completed" : "rejected_by_qa", latency_ms: qaLatencyMs,
          provider_request_id: "",
          input_tokens: inTok, input_text_tokens: inTok,
          input_image_tokens: 0, output_tokens: outTok,
-         total_tokens: Number(qaUsage?.totalTokenCount || 0), usage_payload: { geminiQa: qaUsage },
-         cost_usd: estCost, cost_source: "estimated_public_rates",
+         total_tokens: Number(qaUsage?.totalTokenCount || 0), thoughts_token_count: Number(qaUsage?.thoughtsTokenCount || 0),
+         usage_payload: { geminiQa: qaUsage },
+         cost_usd: estCost, cost_source: `estimated_public_rates_${pricing.version}`,
        });
     }
     if (!qa.pass) {
@@ -2697,7 +2800,8 @@ async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, ref
     modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
     housePreferences: await stylingPreferenceBrief(String(batch.organization_id), String(settings.category || variant.category || "ethnic/fusion")),
   }) });
-  const result = await geminiJson(Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash", parts);
+  const policy = resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: String(settings.category || variant.category || "ethnic/fusion") });
+  const result = await geminiJson(policy, parts);
   const normalized = normalizeAnalysis(result.json, String(settings.category || variant.category || "ethnic/fusion"));
   return applyCatalogMemory(batch, normalized);
 }
@@ -2990,7 +3094,7 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
       }).eq("id", variant.id),
       recordAiRun({
         organization_id: batch.organization_id, planning_request_id: variant.id, batch_id: batchId,
-        job_id: "", run_kind: "catalog_product_preflight", model: Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash",
+        job_id: "", run_kind: "catalog_product_preflight", model: resolveGeminiPolicy({ purpose: "product_truth" }).model,
         provider: "gemini", input_fingerprint: hashes.fingerprint,
         input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role) },
         output_json: normalized, status: "completed", latency_ms: Date.now() - started,
@@ -3124,7 +3228,7 @@ async function queueCatalogVariantGeneration(
       batch_id: batchId,
       job_id: "",
       run_kind: "catalog_product_preflight",
-      model: Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash",
+      model: resolveGeminiPolicy({ purpose: "product_truth" }).model,
       provider: "gemini",
       input_fingerprint: analysisHashes.fingerprint,
       input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role) },
@@ -3186,7 +3290,7 @@ async function queueCatalogVariantGeneration(
     stylingPlan: normalized.stylingPlan,
     posePlan: poses,
     consistencyRules: CONSISTENCY_RULES,
-    analysisModel: Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash",
+    analysisModel: resolveGeminiPolicy({ purpose: "product_truth" }).model,
     analysisVersion: ANALYSIS_VERSION,
     generatedAssets: [],
     approvedAssets: [],
