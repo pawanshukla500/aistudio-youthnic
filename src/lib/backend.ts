@@ -17,6 +17,16 @@ export const api = {
     removeCatalogStyleReference: "catalog.removeCatalogStyleReference", retryVariant: "catalog.retryVariant",
     saveStylingPlan: "catalog.saveStylingPlan", delete: "catalog.delete", stopGeneration: "catalog.stopGeneration"
   },
+  catalogProduction: {
+    importGoogleSheetDryRun: "catalogProduction.importGoogleSheetDryRun",
+    importGoogleSheet: "catalogProduction.importGoogleSheet",
+    createFromPlanning: "catalogProduction.createFromPlanning",
+    assign: "catalogProduction.assign",
+    reviewQc: "catalogProduction.reviewQc",
+    markListingDone: "catalogProduction.markListingDone",
+    reconcile: "catalogProduction.reconcile",
+    bulkGenerate: "catalogProduction.bulkGenerate",
+  },
   styling: { updateSessionPlan: "studio.updateStylingPlan" },
   eventIntelligence: { roadmap: "eventIntelligence.roadmap", runResearch: "eventIntelligence.runResearch", seedCalendar: "eventIntelligence.seedCalendar" },
   eventDigest: { sendDigestNow: "eventDigest.sendDigestNow" },
@@ -93,11 +103,14 @@ async function listJobs(args: Record<string, any>) {
   const to = from + pageSize - 1;
   const search = String(args.search || "").replace(/[%_]/g, "").trim().toLowerCase();
   const status = String(args.status || "").trim();
+  const sourceType = String(args.sourceType || "").trim();
   let jobsQuery = supabase
     .from("generation_jobs")
     .select("*", { count: "exact" })
     .eq("org_id", String(args.organizationId));
   if (status) jobsQuery = jobsQuery.eq("status", status);
+  if (sourceType === "catalog") jobsQuery = jobsQuery.not("planning_request_id", "is", null);
+  if (sourceType === "studio") jobsQuery = jobsQuery.is("planning_request_id", null);
   if (search) jobsQuery = jobsQuery.ilike("history_search", `%${search}%`);
   jobsQuery = jobsQuery.order("created_at", { ascending: false }).range(from, to);
   const [jobsResult, membersResult] = await Promise.all([

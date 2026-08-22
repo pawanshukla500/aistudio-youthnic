@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.112.2";
-import ExcelJS from "https://esm.sh/exceljs@4.4.0";
+import * as ExcelJS from "https://esm.sh/exceljs@4.4.0";
 import { deleteFirebaseObject, downloadFirebaseObject, uploadFirebaseObject, createFirebaseUser, updateFirebaseUser, deleteFirebaseUser } from "./firebase-admin.ts";
 import {
   ANALYSIS_VERSION,
@@ -14,7 +14,16 @@ import {
   type StylingPlanProfile,
 } from "./profiles.ts";
 import { buildPoseQaPrompt, parseQaResponse } from "./qa.ts";
-import { importGoogleSheet, importGoogleSheetDryRun, reconcileExistingGenerations } from "./catalogProduction.ts";
+import {
+  assignCatalogWorkItem,
+  bulkGenerateCatalogWorkItems,
+  createFromPlanningRequests,
+  importGoogleSheet,
+  importGoogleSheetDryRun,
+  markListingDone,
+  reconcileExistingGenerations,
+  reviewCatalogQc,
+} from "./catalogProduction.ts";
 
 const SUPABASE_URL = requiredEnv("SUPABASE_URL");
 const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -1257,19 +1266,24 @@ async function handleLearningNode(node: JsonRecord, sessionId: string) {
   const { data: session, error: sessionError } = await service.from("catalog_sessions").select("planning_request_id").eq("session_id", sessionId).single();
   if (sessionError) throw new Error(sessionError.message);
   if (session?.planning_request_id) {
+    const completedAt = new Date().toISOString();
     await Promise.all([
       service.from("planning_requests").update({ 
-        generation_status: "completed", 
-        updated_at: new Date().toISOString() 
+        status: "completed",
+        generation_status: "completed",
+        completion_status: "completed",
+        generation_finished_at: completedAt,
+        updated_at: completedAt,
       }).eq("id", session.planning_request_id),
       service.from("catalog_sessions").update({
         status: "completed",
-        updated_at: new Date().toISOString()
+        updated_at: completedAt,
       }).eq("session_id", sessionId),
       service.from("catalog_work_items").update({
         generation_status: "completed",
-        generation_completed_at: new Date().toISOString(),
-        qc_status: "needs_review"
+        generation_completed_at: completedAt,
+        qc_status: "needs_review",
+        listing_status: "pending",
       }).eq("planning_request_id", session.planning_request_id)
     ]);
   }
@@ -1870,6 +1884,71 @@ async function downloadGeneratedAssets(request: Request, args: JsonRecord) {
     }
   }));
   return { assets: assetResults };
+}
+
+async function downloadCatalogProductionAssets(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.view");
+  const workItemId = String(args.workItemId || "");
+  const requestedPaths = new Set(
+    (Array.isArray(args.storagePaths) ? args.storagePaths : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean),
+  );
+  const requestedPoseIndexes = new Set(
+    (Array.isArray(args.poseIndexes) ? args.poseIndexes : [])
+      .map((value) => Number(value || 0))
+      .filter((value) => Number.isInteger(value) && value > 0),
+  );
+  if (!workItemId) throw new Error("A catalog work item is required.");
+  const { data: workItem, error: workItemError } = await service.from("catalog_work_items")
+    .select("id,catalog_session_id")
+    .eq("id", workItemId)
+    .eq("organization_id", workspace.organization.id)
+    .maybeSingle();
+  if (workItemError) throw new Error(workItemError.message);
+  if (!workItem?.catalog_session_id) throw new Error("This work item has no generated session assets.");
+  const { data: poses, error: posesError } = await service.from("session_generations")
+    .select("generation_id,pose_index,title,storage_path,output_url,status")
+    .eq("session_id", workItem.catalog_session_id)
+    .eq("status", "completed")
+    .order("pose_index");
+  if (posesError) throw new Error(posesError.message);
+  const selected = (poses || []).filter((pose) => {
+    const storagePath = String(pose.storage_path || "");
+    if (requestedPoseIndexes.size && !requestedPoseIndexes.has(Number(pose.pose_index || 0))) return false;
+    return !requestedPaths.size || requestedPaths.has(storagePath);
+  }).slice(0, 10);
+  if (!selected.length) throw new Error("No completed generated assets were selected.");
+
+  const assets = await Promise.all(selected.map(async (pose) => {
+    const storagePath = String(pose.storage_path || "");
+    const outputUrl = String(pose.output_url || "");
+    try {
+      let blob: Blob;
+      if (storagePath && !/^https?:\/\//i.test(storagePath)) {
+        blob = await downloadFirebaseObject(storagePath);
+      } else {
+        const response = await fetch(outputUrl || storagePath);
+        if (!response.ok) throw new Error(`Asset download failed (${response.status}).`);
+        blob = await response.blob();
+      }
+      return {
+        storagePath,
+        poseIndex: Number(pose.pose_index || 0),
+        title: String(pose.title || ""),
+        base64: await blobToBase64(blob),
+        mimeType: blob.type || "image/png",
+      };
+    } catch (error) {
+      return {
+        storagePath,
+        poseIndex: Number(pose.pose_index || 0),
+        title: String(pose.title || ""),
+        error: errorMessage(error),
+      };
+    }
+  }));
+  return { assets };
 }
 
 async function adminGenerationFlowList(request: Request) {
@@ -3612,6 +3691,169 @@ async function sendTrackedEventEmail(args: { orgId: string; eventId?: string; ki
   }
 }
 
+function catalogDuration(startedAt: unknown, completedAt: unknown) {
+  const started = Date.parse(String(startedAt || ""));
+  const completed = Date.parse(String(completedAt || ""));
+  if (!Number.isFinite(started) || !Number.isFinite(completed) || completed < started) return "Not recorded";
+  const totalSeconds = Math.max(0, Math.round((completed - started) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours ? `${hours}h` : "", minutes ? `${minutes}m` : "", `${seconds}s`].filter(Boolean).join(" ");
+}
+
+function catalogProductionReportHtml(organizationName: string, reportDate: string, rows: JsonRecord[]) {
+  const itemRows = rows.map((row) => {
+    const poses = Array.isArray(row.poses) ? row.poses as JsonRecord[] : [];
+    const poseLinks = poses.map((pose) => {
+      const url = String(pose.outputUrl || "");
+      const label = `Pose ${Number(pose.poseIndex || 0) || ""}`.trim();
+      return /^https?:\/\//i.test(url)
+        ? `<a href="${escapeHtml(url)}" style="color:#7c3aed;text-decoration:none;font-weight:700">${escapeHtml(label)}</a>`
+        : escapeHtml(label);
+    }).join(" · ") || "No pose links recorded";
+    return `<tr>
+      <td style="padding:12px;border-bottom:1px solid #e7e2ee;font:700 13px/1.4 Arial,sans-serif;color:#211a24">${escapeHtml(row.skuName)}</td>
+      <td style="padding:12px;border-bottom:1px solid #e7e2ee;font:400 12px/1.5 Arial,sans-serif;color:#655d6b">${escapeHtml(row.generationOwner || "Unassigned")}</td>
+      <td style="padding:12px;border-bottom:1px solid #e7e2ee;font:600 12px/1.5 Arial,sans-serif;color:#655d6b">${escapeHtml(row.duration)}</td>
+      <td style="padding:12px;border-bottom:1px solid #e7e2ee;font:400 12px/1.7 Arial,sans-serif;color:#655d6b">${poseLinks}</td>
+    </tr>`;
+  }).join("");
+  return `<div style="margin:0;padding:24px 12px;background:#f7f3f8;font-family:Arial,Helvetica,sans-serif">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:900px;margin:0 auto;border-collapse:collapse">
+      <tr><td style="border-radius:18px;background:#4f2457;padding:24px">
+        <div style="font:700 11px/1.5 Arial,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#f0c9f2">Catalog production</div>
+        <div style="font:700 24px/1.3 Arial,sans-serif;color:#ffffff;padding-top:5px">Generation completed report</div>
+        <div style="font:400 13px/1.6 Arial,sans-serif;color:#eadfea;padding-top:6px">${escapeHtml(organizationName)} · ${escapeHtml(reportDate)} · ${rows.length} SKU${rows.length === 1 ? "" : "s"}</div>
+      </td></tr>
+      <tr><td style="padding-top:16px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e7e2ee;border-radius:14px;background:#ffffff;overflow:hidden">
+        <thead><tr style="background:#f0eaf2">
+          <th align="left" style="padding:12px;font:700 10px/1.4 Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#655d6b">SKU</th>
+          <th align="left" style="padding:12px;font:700 10px/1.4 Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#655d6b">Generation owner</th>
+          <th align="left" style="padding:12px;font:700 10px/1.4 Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#655d6b">Time</th>
+          <th align="left" style="padding:12px;font:700 10px/1.4 Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#655d6b">Assets</th>
+        </tr></thead><tbody>${itemRows}</tbody>
+      </table></td></tr>
+      <tr><td style="padding:16px 8px 0;font:400 12px/1.6 Arial,sans-serif;color:#655d6b">QC must pass before the Listing Done action is available. Open Catalog Production to review prompts, references, and download the full pose set.</td></tr>
+    </table>
+  </div>`;
+}
+
+async function listingTeamRecipients(orgId: string) {
+  const { data: roles, error: rolesError } = await service.from("roles").select("id").eq("organization_id", orgId).eq("slug", "listing-team");
+  if (rolesError) throw new Error(rolesError.message);
+  const roleIds = (roles || []).map((role) => role.id);
+  if (!roleIds.length) return [];
+  const { data: memberRoles, error: memberRolesError } = await service.from("member_roles").select("member_id").in("role_id", roleIds);
+  if (memberRolesError) throw new Error(memberRolesError.message);
+  const memberIds = [...new Set((memberRoles || []).map((row) => String(row.member_id)).filter(Boolean))];
+  if (!memberIds.length) return [];
+  const { data: members, error: membersError } = await service.from("organization_members")
+    .select("email").eq("organization_id", orgId).eq("status", "active").in("id", memberIds);
+  if (membersError) throw new Error(membersError.message);
+  return cleanEmails((members || []).map((member) => member.email));
+}
+
+async function sendTrackedCatalogReport(args: { orgId: string; reportDate: string; recipients: string[]; subject: string; html: string; payload: JsonRecord }) {
+  const { data: existing, error: existingError } = await service.from("catalog_report_deliveries")
+    .select("id,status,updated_at").eq("organization_id", args.orgId).eq("report_date", args.reportDate).maybeSingle();
+  if (existingError) throw new Error(existingError.message);
+  if (existing?.status === "sent") return { sent: false, skipped: true };
+  if (existing?.status === "pending" && Date.now() - Date.parse(existing.updated_at) < 10 * 60_000) return { sent: false, skipped: true };
+  const row = {
+    organization_id: args.orgId,
+    report_date: args.reportDate,
+    recipients: args.recipients,
+    subject: args.subject,
+    status: "pending",
+    error_message: "",
+    payload: args.payload,
+    updated_at: new Date().toISOString(),
+  };
+  const { data: delivery, error } = existing
+    ? await service.from("catalog_report_deliveries").update(row).eq("id", existing.id).select("id").single()
+    : await service.from("catalog_report_deliveries").insert(row).select("id").single();
+  if (error || !delivery) {
+    if (error?.code === "23505") return { sent: false, skipped: true };
+    throw new Error(error?.message || "Could not reserve the catalog report delivery.");
+  }
+  try {
+    const providerMessageId = await sendEmail({ recipients: args.recipients, subject: args.subject, html: args.html });
+    await service.from("catalog_report_deliveries").update({
+      status: "sent", provider_message_id: providerMessageId, sent_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }).eq("id", delivery.id);
+    return { sent: true, skipped: false };
+  } catch (error) {
+    await service.from("catalog_report_deliveries").update({
+      status: "failed", error_message: errorMessage(error), updated_at: new Date().toISOString(),
+    }).eq("id", delivery.id);
+    throw error;
+  }
+}
+
+async function runCatalogProductionAutomationOperation(request: Request) {
+  assertInternal(request);
+  const { data: organizations, error } = await service.from("organizations").select("id,name");
+  if (error) throw new Error(error.message);
+  const results: JsonRecord[] = [];
+  for (const organization of organizations || []) {
+    const orgId = String(organization.id);
+    try {
+      const settings = await automationSettings(orgId);
+      const timezone = String(settings.timezone || "Asia/Kolkata");
+      const reportDate = shiftIsoDate(localDateParts(timezone).iso, -1);
+      const candidateSince = new Date(Date.now() - 72 * 60 * 60_000).toISOString();
+      const { data: items, error: itemsError } = await service.from("catalog_work_items")
+        .select("id,sku_name,generation_started_at,generation_completed_at,catalog_session_id,generation_assigned_member:generation_assigned_member_id(display_name,email)")
+        .eq("organization_id", orgId)
+        .eq("generation_status", "completed")
+        .gte("generation_completed_at", candidateSince)
+        .order("generation_completed_at");
+      if (itemsError) throw new Error(itemsError.message);
+      const completed = (items || []).filter((item) => localDateParts(timezone, new Date(item.generation_completed_at)).iso === reportDate);
+      if (!completed.length) {
+        results.push({ orgId, reportDate, sent: false, reason: "no_completed_generation" });
+        continue;
+      }
+      const sessionIds = completed.map((item) => String(item.catalog_session_id || "")).filter(Boolean);
+      const posesResult = sessionIds.length
+        ? await service.from("session_generations").select("session_id,pose_index,output_url,status").in("session_id", sessionIds).eq("status", "completed").order("pose_index")
+        : { data: [], error: null };
+      if (posesResult.error) throw new Error(posesResult.error.message);
+      const rows = completed.map((item) => {
+        const owner = item.generation_assigned_member as unknown as JsonRecord | null;
+        return {
+          workItemId: item.id,
+          skuName: item.sku_name,
+          generationOwner: String(owner?.display_name || owner?.email || "Unassigned"),
+          duration: catalogDuration(item.generation_started_at, item.generation_completed_at),
+          completedAt: item.generation_completed_at,
+          poses: (posesResult.data || []).filter((pose) => pose.session_id === item.catalog_session_id).map((pose) => ({
+            poseIndex: pose.pose_index,
+            outputUrl: pose.output_url,
+          })),
+        };
+      });
+      const listingRecipients = await listingTeamRecipients(orgId);
+      const recipients = listingRecipients.length ? listingRecipients : cleanEmails(settings.report_recipients);
+      if (!recipients.length) throw new Error("No active Listing Team member or fallback report recipient is configured.");
+      const subject = `${organization.name} · ${rows.length} catalog generation${rows.length === 1 ? "" : "s"} completed · ${reportDate}`;
+      const delivery = await sendTrackedCatalogReport({
+        orgId,
+        reportDate,
+        recipients,
+        subject,
+        html: catalogProductionReportHtml(String(organization.name || "Youthnic"), reportDate, rows),
+        payload: { itemCount: rows.length, workItemIds: rows.map((row) => row.workItemId), timezone, listingTeamRecipients: listingRecipients.length },
+      });
+      results.push({ orgId, reportDate, sent: delivery.sent, skipped: delivery.skipped, itemCount: rows.length, recipients: recipients.length });
+    } catch (automationError) {
+      results.push({ orgId, error: errorMessage(automationError) });
+    }
+  }
+  return { processed: results.length, results };
+}
+
 function matchesFilterList(values: unknown, selected: string[]) {
   if (!selected.length) return true;
   const entries = (Array.isArray(values) ? values : []).map((entry) => String(entry).toLowerCase());
@@ -3889,15 +4131,48 @@ Deno.serve(async (request) => {
       "events.automation": () => runEventAutomationOperation(request),
       "events.sendEmail": () => sendDigestOperation(request, args),
       "migration.archive": () => importMigrationArchiveOperation(request, args),
-      "catalogProduction.importGoogleSheetDryRun": () => {
-        return importGoogleSheetDryRun(request, service, String(args.organizationId), args);
+      "catalogProduction.importGoogleSheetDryRun": async () => {
+        const { workspace } = await workspaceFor(request, "planning.manage");
+        return importGoogleSheetDryRun(service, workspace, args);
       },
-      "catalogProduction.importGoogleSheet": () => {
-        return importGoogleSheet(request, service, String(args.organizationId), args);
+      "catalogProduction.importGoogleSheet": async () => {
+        const { workspace } = await workspaceFor(request, "planning.manage");
+        return importGoogleSheet(service, workspace, args);
       },
-      "catalogProduction.reconcile": () => {
-        return reconcileExistingGenerations(request, service, String(args.organizationId), args);
+      "catalogProduction.createFromPlanning": async () => {
+        const { workspace } = await workspaceFor(request, "planning.manage");
+        return createFromPlanningRequests(service, workspace, args);
       },
+      "catalogProduction.assign": async () => {
+        const { workspace } = await workspaceFor(request, "planning.manage");
+        return assignCatalogWorkItem(service, workspace, args);
+      },
+      "catalogProduction.reviewQc": async () => {
+        const { workspace } = await workspaceFor(request, "planning.approve");
+        return reviewCatalogQc(service, workspace, args);
+      },
+      "catalogProduction.markListingDone": async () => {
+        const { workspace } = await workspaceFor(request, "planning.view");
+        const canCompleteListing = workspace.isAdmin
+          || workspace.permissions.includes("planning.manage")
+          || workspace.roles.some((role) => role.slug === "listing-team");
+        if (!canCompleteListing) throw new Error("Only the Listing Team or a planning manager can complete listing work.");
+        return markListingDone(service, workspace, args);
+      },
+      "catalogProduction.downloadAssets": () => downloadCatalogProductionAssets(request, args),
+      "catalogProduction.reconcile": async () => {
+        const { workspace } = await workspaceFor(request, "planning.manage");
+        return reconcileExistingGenerations(service, workspace, args);
+      },
+      "catalogProduction.bulkGenerate": async () => {
+        const { workspace } = await workspaceFor(request, "planning.manage");
+        const result = await bulkGenerateCatalogWorkItems(service, workspace, args);
+        if (result.batchIdToSchedule) {
+          await scheduleCatalogOperation(request, { catalogId: result.batchIdToSchedule });
+        }
+        return result;
+      },
+      "catalogProduction.automation": () => runCatalogProductionAutomationOperation(request),
     };
     const handler = handlers[operation];
     if (!handler) return json({ error: `Unknown operation: ${operation}` }, 404);
