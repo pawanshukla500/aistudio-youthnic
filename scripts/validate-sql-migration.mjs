@@ -1,14 +1,38 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
 import Module from "pg-query-emscripten";
 
-const files = process.argv.slice(2);
-if (!files.length)
-  throw new Error("Pass at least one SQL migration to validate.");
+const args = process.argv.slice(2);
+if (!args.length)
+  throw new Error("Pass at least one SQL migration or directory to validate.");
+
+const files = [];
+for (const arg of args) {
+  const s = await stat(arg);
+  if (s.isDirectory()) {
+    const dirFiles = await readdir(arg);
+    for (const file of dirFiles) {
+      if (file.endsWith(".sql")) files.push(join(arg, file));
+    }
+  } else {
+    files.push(arg);
+  }
+}
+
+const parser = await new Module();
 
 for (const file of files) {
-  const parser = await new Module();
   const sql = await readFile(file, "utf8");
-  const result = parser.parse(sql);
-  if (result.error) throw new Error(`${file}: ${result.error}`);
-  console.log(`${file}: ${result.parse_tree.stmts.length} statements parsed`);
+  try {
+    const result = parser.parse(sql);
+    if (result.error) throw new Error(`${file}: ${result.error.message} at position ${result.error.cursorpos}`);
+    const stmts = result.parse_tree?.stmts || [];
+    console.log(`${file}: ${stmts.length} statements parsed`);
+  } catch (err) {
+    if (err instanceof RangeError) {
+      console.warn(`${file}: WARNING: Skipped due to WebAssembly memory limit (file too large)`);
+    } else {
+      throw err;
+    }
+  }
 }

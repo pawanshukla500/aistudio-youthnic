@@ -1200,7 +1200,9 @@ async function handleMemoryAndPlanningNode(node: JsonRecord, sessionId: string) 
     // Halt the orchestrator for this session by throwing an error that pauses it,
     // or by intentionally returning failed (but really it should just wait).
     // For V2, we mark it failed with a specific message. When approved, it gets retried.
-    throw new Error("Awaiting styling approval. The graph is paused.");
+    const pause = new Error("Awaiting styling approval. The graph is paused.") as Error & { code?: string };
+    pause.code = "styling_approval_pause";
+    throw pause;
   }
 
   normalized = applyCatalogMemory(freshMemory, normalized);
@@ -1353,7 +1355,7 @@ async function processNode(request: Request, args: JsonRecord) {
       error_message: failureMessage,
       completed_at: new Date().toISOString() 
     }).eq("id", claimed.id);
-    if (!(claimed.node_type === "memory_and_planning" && failureMessage.includes("Awaiting styling approval"))) {
+    if ((err as any)?.code !== "styling_approval_pause") {
       const failedAt = new Date().toISOString();
       const { data: session } = await service.from("catalog_sessions").select("planning_request_id").eq("session_id", sessionId).maybeSingle();
       let batchId = "";
@@ -3290,7 +3292,11 @@ async function processCatalog(request: Request, args: JsonRecord) {
     ? (variants || []).filter((row) => selectedRequestIdSet.has(String(row.id)))
     : variants || [];
   if (selectedRequestIds.length && targetVariants.length !== selectedRequestIds.length) {
-    throw new Error("One or more selected catalog requests no longer belong to this batch.");
+    const missingIds = selectedRequestIds.filter((id) => !targetVariants.some((v) => String(v.id) === id));
+    await service.from("planning_batches").update({
+      schedule_error: `Skipped ${missingIds.length} missing or moved request(s) from this batch selection.`,
+      updated_at: new Date().toISOString(),
+    }).eq("id", batchId);
   }
   const batchRequestIds = (variants || []).map((row) => String(row.id));
   const { data: activeSessions, error: activeSessionsError } = batchRequestIds.length
@@ -3376,6 +3382,10 @@ async function processCatalog(request: Request, args: JsonRecord) {
         generation_finished_at: failedAt,
         updated_at: failedAt,
       }).eq("id", variant.id),
+      service.from("catalog_work_items").update({
+        generation_status: "failed",
+        updated_at: failedAt,
+      }).eq("planning_request_id", variant.id),
     ]);
     scheduleBackground(kickCatalogProcessor(batchId));
     return { processed: false, reason: "variant_failed", error: failureMessage };
@@ -4420,10 +4430,16 @@ Deno.serve(async (request) => {
       "catalogProduction.bulkGenerate": async () => {
         const { workspace } = await workspaceFor(request, "planning.manage");
         const result = await bulkGenerateCatalogWorkItems(service, workspace, args);
+        const scheduleOutcomes: Array<{ batchId: string; success: boolean; error?: string }> = [];
         for (const batchId of result.batchIdsToSchedule) {
-          await scheduleCatalogOperation(request, { catalogId: batchId });
+          try {
+            await scheduleCatalogOperation(request, { catalogId: batchId });
+            scheduleOutcomes.push({ batchId, success: true });
+          } catch (err: any) {
+            scheduleOutcomes.push({ batchId, success: false, error: err.message });
+          }
         }
-        return result;
+        return { ...result, scheduleOutcomes };
       },
       "catalogProduction.automation": () => runCatalogProductionAutomationOperation(request),
     };
