@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Ban, ChevronDown, ChevronUp, Download, Image as ImageIcon, Images, RefreshCcw, Search, Trash2, User, Loader2, Sparkles, Clock, AlertCircle, X, Brain } from "lucide-react";
+import { Ban, ChevronDown, ChevronUp, Download, Image as ImageIcon, Images, RefreshCcw, Search, Trash2, Loader2, Clock, AlertCircle, X, Brain } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, getJobReferenceImages, invokeAppApi, useMutation, useQuery, type Id } from "../../lib/backend";
 import { useWorkspace } from "../../lib/WorkspaceContext";
