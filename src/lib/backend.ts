@@ -80,6 +80,7 @@ function jobSummary(row: Record<string, any>, members: Record<string, any>[] = [
     skuId: jobData.skuId || row.sku_name || row.planning_request_id,
     skuName: row.sku_name || jobData.skuName || "Untitled product",
     status: row.status,
+    detailedStatus: String(jobData.detailedStatus || ""),
     createdAt: milliseconds(row.created_at),
     totalPoses: Number(row.total_poses || 5),
     completedPoses: Number(row.completed_poses || 0),

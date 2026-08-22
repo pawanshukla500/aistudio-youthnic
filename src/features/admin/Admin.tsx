@@ -39,8 +39,9 @@ type AdminOverview = {
   automationSettings?: Record<string, any> | null;
   recentEventDeliveries?: any[];
   openaiUsage?: { images: number; requests: number; costUsd: number; lastSyncedAt?: string | null };
+  recentAiRuns?: any[];
 };
-type Tab = "users" | "roles" | "automation" | "system" | "flow";
+type Tab = "users" | "roles" | "automation" | "system" | "flow" | "costs";
 
 function HealthCard({
   label,
@@ -503,15 +504,16 @@ export function Admin() {
 
         <div className="flex gap-1 rounded-xl border border-outline-variant/40 bg-white p-1 shadow-sm">
           {[
-            ["users", Users, "Users & access"],
-            ["roles", KeyRound, "Roles & permissions"],
-            ["automation", CalendarClock, "Events & reporting"],
-            ["system", Activity, "System & audit"],
-          ].map(([value, Icon, label]) => (
+            { id: "users", label: "Users & access", icon: Users },
+            { id: "roles", label: "Roles", icon: Shield },
+            { id: "automation", label: "Automation", icon: CalendarClock },
+            { id: "system", label: "System", icon: Activity },
+            { id: "costs", label: "Cost Breakdown", icon: Database },
+          ].map(({ id, label, icon: Icon }) => (
             <button
-              key={String(value)}
-              onClick={() => setTab(value as Tab)}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold transition ${tab === value ? "bg-primary text-white shadow-sm" : "text-secondary hover:bg-surface-container"}`}
+              key={id}
+              onClick={() => setTab(id as Tab)}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold transition ${tab === id ? "bg-primary text-white shadow-sm" : "text-secondary hover:bg-surface-container"}`}
             >
               <Icon className="h-4 w-4" />
               {String(label)}
@@ -854,6 +856,48 @@ export function Admin() {
                   generation sessions, and audit logs; provider keys remain
                   server-only.
                 </p>
+              </div>
+            </div>
+          </section>
+        )}
+        
+        {tab === "costs" && (
+          <section className="space-y-6">
+            <div>
+              <h2 className="text-xl font-bold text-on-surface">AI Cost Breakdown</h2>
+              <p className="mt-1 text-sm text-secondary">Recent generation and QA costs grouped by job and pose.</p>
+            </div>
+            <div className="rounded-2xl border border-outline-variant/40 bg-white overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-outline-variant/40 text-left text-sm">
+                  <thead className="bg-surface-container-lowest">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold text-secondary">Job ID</th>
+                      <th className="px-4 py-3 font-semibold text-secondary">Pose</th>
+                      <th className="px-4 py-3 font-semibold text-secondary">Run Kind</th>
+                      <th className="px-4 py-3 font-semibold text-secondary">Provider / Model</th>
+                      <th className="px-4 py-3 font-semibold text-secondary text-right">Tokens (In/Out)</th>
+                      <th className="px-4 py-3 font-semibold text-secondary text-right">Cost (USD)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-outline-variant/20">
+                    {overview.recentAiRuns?.map((run, idx) => (
+                      <tr key={idx} className="hover:bg-surface-container-lowest">
+                        <td className="px-4 py-3 font-mono text-[11px] truncate max-w-[120px]">{run.job_id}</td>
+                        <td className="px-4 py-3">{run.pose_index ?? "-"}</td>
+                        <td className="px-4 py-3 capitalize">{String(run.run_kind).replace(/_/g, " ")}</td>
+                        <td className="px-4 py-3 text-[11px] font-mono">{run.provider} / {run.model}</td>
+                        <td className="px-4 py-3 text-right text-secondary text-xs">{run.input_tokens} / {run.output_tokens}</td>
+                        <td className="px-4 py-3 text-right font-medium">${Number(run.cost_usd || 0).toFixed(4)}</td>
+                      </tr>
+                    ))}
+                    {!overview.recentAiRuns?.length && (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-8 text-center text-secondary">No AI runs recorded recently.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           </section>

@@ -6,6 +6,7 @@ type JsonObject = Record<string, unknown>;
 type DashboardJob = {
   _id: string;
   status: string;
+  detailedStatus?: string;
   skuId: string;
   skuName: string;
   completedPoses: number;
@@ -86,6 +87,7 @@ function mapGenerationJob(row: GenerationJobRow): DashboardJob {
   return {
     _id: row.job_id,
     status: row.status,
+    detailedStatus: String(data.detailedStatus || ""),
     skuId: row.sku_name || row.job_id,
     skuName: row.sku_name,
     completedPoses: numberFrom(data.completedPoses),
