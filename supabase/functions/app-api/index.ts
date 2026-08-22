@@ -771,7 +771,7 @@ async function generateImage(args: { prompt: string; model: string; size: string
 function permanentProviderError(error: unknown) {
   const code = String((error as { code?: string })?.code || "").toLowerCase();
   const status = Number((error as { status?: number })?.status || 0);
-  return ["moderation_blocked", "invalid_api_key", "image_generation_user_error"].includes(code) || [400, 401, 403, 404].includes(status);
+  return ["moderation_blocked", "invalid_api_key", "image_generation_user_error", "same_defect_repeated"].includes(code) || [400, 401, 403, 404].includes(status);
 }
 
 async function validatePose(args: {
@@ -992,6 +992,7 @@ async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRe
         status: "queued", available_at: now, locked_at: null, lock_expires_at: null,
         failed_poses: (poses || []).filter((entry) => entry.status === "failed").length,
         error_code: "pose_consistency_failed", error_message: message.slice(0, 1000), updated_at: now,
+        job_data: { ...((job.job_data as JsonRecord) || {}), detailedStatus: `Pose ${pose.pose_index} QA failed. Moving to next pose.` },
       }).eq("job_id", job.job_id),
       service.from("planning_requests").update({ generation_status: "queued", error_message: message.slice(0, 1000), updated_at: now }).eq("id", job.planning_request_id),
     ]);
@@ -1068,6 +1069,7 @@ async function deferPoseRetry(args: {
       total_tokens: Number(args.job.total_tokens || 0) + Number(args.usage?.totalTokens || 0),
       error_code: Number((args.error as { status?: number })?.status || 0) === 429 ? "openai_rate_limited" : "generation_attempt_retry",
       error_message: retryMessage, updated_at: now,
+      job_data: { ...((args.job.job_data as JsonRecord) || {}), detailedStatus: `Pose ${args.pose.pose_index} QA failed. Retrying...` },
     }).eq("job_id", args.job.job_id),
     service.from("planning_requests").update({
       generation_status: "queued", error_message: retryMessage, updated_at: now,
@@ -1471,7 +1473,7 @@ async function processWorker(request: Request, args: JsonRecord) {
   const now = new Date().toISOString();
   await Promise.all([
     service.from("session_generations").update({ status: "processing", attempt_count: Number(pose.attempt_count || 0), updated_at: now }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id),
-    service.from("generation_jobs").update({ current_pose: pose.pose_index, lock_expires_at: new Date(Date.now() + WORKER_LEASE_MS).toISOString(), updated_at: now }).eq("job_id", job.job_id),
+    service.from("generation_jobs").update({ current_pose: pose.pose_index, lock_expires_at: new Date(Date.now() + WORKER_LEASE_MS).toISOString(), updated_at: now, job_data: { ...((job.job_data as JsonRecord) || {}), detailedStatus: `Pose ${pose.pose_index} generating (Attempt ${Number(pose.attempt_count || 0) + 1})` } }).eq("job_id", job.job_id),
     service.from("planning_requests").update({ generation_status: "processing", generation_started_at: job.started_at || now, updated_at: now }).eq("id", job.planning_request_id),
   ]);
   const sessionData = session.session_data as JsonRecord;
@@ -1509,12 +1511,12 @@ async function processWorker(request: Request, args: JsonRecord) {
   const storedPoseData = (pose.generation_data || {}) as JsonRecord;
   const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
   const requestedCorrection = String(pose.regeneration_instructions || "").trim();
-  // Every earlier QA verdict for this pose stays in the prompt. Carrying only
-  // the newest one let a retry fix the latest defect while reintroducing the
-  // one the previous attempt had already corrected.
   let qaCorrections = (Array.isArray(storedPoseData.corrections)
     ? storedPoseData.corrections.map(String)
     : [String(storedPoseData.correction || "")]).map((entry) => entry.trim()).filter(Boolean);
+  // Keep only the most recent QA correction to avoid context bloat with resolved errors
+  if (qaCorrections.length > 1) qaCorrections = [qaCorrections[qaCorrections.length - 1]];
+  
   const promptCorrection = () => [
     ...qaCorrections,
     requestedCorrection ? `USER REGENERATION INSTRUCTION (apply only if compatible with original product truth): ${requestedCorrection}` : "",
@@ -1587,13 +1589,31 @@ async function processWorker(request: Request, args: JsonRecord) {
       organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
       job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "image_generation", model: job.model, provider: "openai",
       input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt, referenceRoles: selected.map((reference) => reference.role) },
-      output_json: { qa }, status: qa.pass ? "completed" : "rejected_by_qa", latency_ms: Date.now() - generatedStarted,
+      output_json: { generated: true }, status: "completed", latency_ms: Date.now() - generatedStarted,
       provider_request_id: providerRequestId,
       input_tokens: generated.usage.inputTokens, input_text_tokens: generated.usage.inputTextTokens,
       input_image_tokens: generated.usage.inputImageTokens, output_tokens: generated.usage.outputTokens,
-      total_tokens: generated.usage.totalTokens, usage_payload: { openai: generated.usage.raw, geminiQa: qa.usageMetadata || {} },
+      total_tokens: generated.usage.totalTokens, usage_payload: { openai: generated.usage.raw },
       cost_usd: attemptCost, cost_source: generated.usage.providerReported ? "provider_reported_tokens_openai_public_rates" : "provider_not_reported",
     });
+    
+    if (!qaUnavailable) {
+       const qaUsage = (qa.usageMetadata || {}) as any;
+       const inTok = Number(qaUsage?.promptTokenCount || 0);
+       const outTok = Number(qaUsage?.candidatesTokenCount || 0);
+       const estCost = (inTok * 0.15 + outTok * 0.60) / 1000000;
+       await recordAiRun({
+         organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
+         job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: Deno.env.get("GEMINI_QA_MODEL")?.trim() || "gemini-3.6-flash", provider: "google",
+         input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt },
+         output_json: { qa }, status: qa.pass ? "completed" : "rejected_by_qa", latency_ms: 0,
+         provider_request_id: "",
+         input_tokens: inTok, input_text_tokens: inTok,
+         input_image_tokens: 0, output_tokens: outTok,
+         total_tokens: Number(qaUsage?.totalTokenCount || 0), usage_payload: { geminiQa: qaUsage },
+         cost_usd: estCost, cost_source: "estimated_public_rates",
+       });
+    }
     if (!qa.pass) {
       const defect = [
         qa.correction || qa.reason,
@@ -1601,6 +1621,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         qa.weakest.length ? `Weakest matches against the product references: ${qa.weakest.join(", ")} - rebuild these from the reference images rather than adjusting them by feel.` : "",
         `Product fidelity scored ${qa.productFidelity}%.`,
       ].filter(Boolean).join(" ").trim();
+      const isRepeatedDefect = qaCorrections.length > 0 && qaCorrections[qaCorrections.length - 1].includes(defect);
       qaCorrections = [...qaCorrections, `Attempt ${attempt}: ${defect}`].slice(-MAX_GENERATION_ATTEMPTS);
       const archived = await archiveRejectedAttempt({ job, pose, attempt, generated, qa });
       if (archived) rejectedAttempts = [...rejectedAttempts, archived].slice(-MAX_GENERATION_ATTEMPTS);
@@ -1617,7 +1638,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         issues: qa.failed, notes: qa.reason,
       });
       const qaError = new Error(lastError) as Error & { code?: string };
-      qaError.code = "consistency_qa_failed";
+      qaError.code = isRepeatedDefect ? "same_defect_repeated" : "consistency_qa_failed";
       throw qaError;
     }
     const { data: latestJob, error: latestJobError } = await service.from("generation_jobs").select("status").eq("job_id", job.job_id).maybeSingle();
@@ -2119,7 +2140,7 @@ async function adminOverview(request: Request) {
   const { workspace } = await workspaceFor(request);
   if (!workspace.isAdmin && !workspace.permissions.some((permission) => permission.startsWith("admin."))) throw new Error("You do not have access to the admin console.");
   const orgId = workspace.organization.id;
-  const [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, auditsResult, automationResult, deliveriesResult, usageResult] = await Promise.all([
+  const [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult] = await Promise.all([
     service.from("organization_members").select("*").eq("organization_id", orgId).order("display_name"),
     service.from("roles").select("*").eq("organization_id", orgId).order("name"),
     service.from("permissions").select("*").order("module").order("key"),
@@ -2129,8 +2150,9 @@ async function adminOverview(request: Request) {
     service.from("event_automation_settings").select("*").eq("organization_id", orgId).maybeSingle(),
     service.from("event_email_deliveries").select("*").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(10),
     service.from("openai_usage_daily").select("usage_date,image_count,request_count,actual_cost_usd,synced_at").eq("organization_id", orgId).order("usage_date", { ascending: false }).limit(100),
+    service.from("ai_runs").select("job_id, session_id, pose_index, run_kind, provider, model, input_tokens, output_tokens, cost_usd, created_at").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(200),
   ]);
-  for (const result of [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, auditsResult, automationResult, deliveriesResult, usageResult]) if (result.error) throw new Error(result.error.message);
+  for (const result of [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult]) if (result.error) throw new Error(result.error.message);
   const permissions = permissionsResult.data || [];
   const roles = (rolesResult.data || []).map((role) => ({
     ...role,
@@ -2162,6 +2184,7 @@ async function adminOverview(request: Request) {
       costUsd: (usageResult.data || []).reduce((total, row) => total + Number(row.actual_cost_usd || 0), 0),
       lastSyncedAt: (usageResult.data || []).map((row) => row.synced_at).filter(Boolean).sort().at(-1) || null,
     },
+    recentAiRuns: aiRunsResult.data || [],
   };
 }
 

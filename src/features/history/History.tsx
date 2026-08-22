@@ -627,7 +627,7 @@ export function History() {
                         <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${statusClass(job.status)}`}>
                           {job.status === "queued" && <Clock className="h-2.5 w-2.5" />}
                           {job.status === "processing" && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
-                          {job.status}
+                          {job.detailedStatus || job.status}
                         </span>
                       </div>
                       <p className="truncate text-sm text-secondary">{job.skuName || 'Untitled product'}</p>

@@ -369,6 +369,9 @@ export function CatalogProduction() {
                 </button>
               </>
             )}
+            <a href="/history?source=catalog" className="inline-flex items-center gap-2 rounded-lg border border-outline-variant px-3 py-2 text-sm font-semibold text-secondary hover:bg-surface-container">
+              View Tasks in History
+            </a>
           </div>
         </div>
         {notice && (
