@@ -8,7 +8,6 @@ import {
   ChevronRight,
   Database,
   Image as ImageIcon,
-  KeyRound,
   Loader2,
   LockKeyhole,
   Plus,
