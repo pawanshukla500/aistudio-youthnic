@@ -912,8 +912,8 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     service.from("catalog_work_items").update({
       generation_status: status,
       generation_completed_at: now,
-      qc_status: failed ? "needs_review" : "passed",
-      listing_status: failed ? "pending" : "ready"
+      qc_status: "needs_review",
+      listing_status: failed ? "not_required" : "pending",
     }).eq("planning_request_id", job.planning_request_id),
   ]);
   const { data: member, error: memberError } = await service.from("organization_members").select("id").eq("organization_id", job.org_id).eq("firebase_uid", job.user_id).maybeSingle();
@@ -1195,7 +1195,8 @@ async function handleMemoryAndPlanningNode(node: JsonRecord, sessionId: string) 
       schedule_error: "Review and approve the catalogue styling plan to start generating.",
       updated_at: new Date().toISOString(),
     }).eq("id", batchId);
-    
+
+    await service.from("catalog_sessions").update({ status: "ready", updated_at: new Date().toISOString() }).eq("session_id", sessionId);
     // Halt the orchestrator for this session by throwing an error that pauses it,
     // or by intentionally returning failed (but really it should just wait).
     // For V2, we mark it failed with a specific message. When approved, it gets retried.
@@ -1224,24 +1225,11 @@ async function handlePromptCompilationNode(node: JsonRecord, sessionId: string) 
   const inputs = node.inputs as JsonRecord;
   return { compiledPrompt: `Generate pose ${inputs.poseIndex} using the styled memory.` }; 
 }
-async function handleGptImage2Node(node: JsonRecord, sessionId: string) { 
-  const inputs = node.inputs as JsonRecord;
-  // Simulate OpenAI generation delay
-  await new Promise(r => setTimeout(r, 2000));
-  return { 
-    outputUrl: "https://storage.googleapis.com/eleven-public-cdn/images/flows/default-og-preview.webp", 
-    promptTokens: 150, 
-    completionTokens: 0, 
-    costUsd: 0.04 
-  }; 
+async function handleGptImage2Node(_node: JsonRecord, _sessionId: string): Promise<never> {
+  throw new Error("This legacy node-graph session cannot emit a verified catalog asset. Restart the SKU from Catalog Production.");
 }
-async function handleGeminiQaNode(node: JsonRecord, sessionId: string) { 
-  const inputs = node.inputs as JsonRecord;
-  return { 
-    pass: true, 
-    score: 95, 
-    reason: "Looks perfect." 
-  }; 
+async function handleGeminiQaNode(_node: JsonRecord, _sessionId: string): Promise<never> {
+  throw new Error("This legacy node-graph session cannot emit a verified QA result. Restart the SKU from Catalog Production.");
 }
 async function handleFinalImageNode(node: JsonRecord, sessionId: string) { 
   const inputs = node.inputs as JsonRecord;
@@ -1266,8 +1254,10 @@ async function handleLearningNode(node: JsonRecord, sessionId: string) {
   const { data: session, error: sessionError } = await service.from("catalog_sessions").select("planning_request_id").eq("session_id", sessionId).single();
   if (sessionError) throw new Error(sessionError.message);
   if (session?.planning_request_id) {
+    const { data: planningRequest, error: planningRequestError } = await service.from("planning_requests").select("batch_id").eq("id", session.planning_request_id).maybeSingle();
+    if (planningRequestError) throw new Error(planningRequestError.message);
     const completedAt = new Date().toISOString();
-    await Promise.all([
+    const completionUpdates = await Promise.all([
       service.from("planning_requests").update({ 
         status: "completed",
         generation_status: "completed",
@@ -1286,6 +1276,9 @@ async function handleLearningNode(node: JsonRecord, sessionId: string) {
         listing_status: "pending",
       }).eq("planning_request_id", session.planning_request_id)
     ]);
+    const completionError = completionUpdates.find((result) => result.error)?.error;
+    if (completionError) throw new Error(completionError.message);
+    if (planningRequest?.batch_id) scheduleBackground(kickCatalogProcessor(String(planningRequest.batch_id)));
   }
 
   return { learned: true, catalogUpdated: true }; 
@@ -1354,12 +1347,33 @@ async function processNode(request: Request, args: JsonRecord) {
     scheduleBackground(kickNodeOrchestrator(sessionId));
     return { processed: true, nodeId: claimed.id };
   } catch (err) {
-    await service.from("generation_flow_nodes").update({ 
+    const failureMessage = errorMessage(err);
+    await service.from("generation_flow_nodes").update({
       status: "failed", 
-      error_message: errorMessage(err),
+      error_message: failureMessage,
       completed_at: new Date().toISOString() 
     }).eq("id", claimed.id);
-    return { processed: false, reason: "node_failed", error: errorMessage(err) };
+    if (!(claimed.node_type === "memory_and_planning" && failureMessage.includes("Awaiting styling approval"))) {
+      const failedAt = new Date().toISOString();
+      const { data: session } = await service.from("catalog_sessions").select("planning_request_id").eq("session_id", sessionId).maybeSingle();
+      let batchId = "";
+      if (session?.planning_request_id) {
+        const { data: planningRequest } = await service.from("planning_requests").select("batch_id").eq("id", session.planning_request_id).maybeSingle();
+        batchId = String(planningRequest?.batch_id || "");
+        await Promise.all([
+          service.from("planning_requests").update({
+            status: "failed", generation_status: "failed", completion_status: "failed",
+            error_message: failureMessage, generation_finished_at: failedAt, updated_at: failedAt,
+          }).eq("id", session.planning_request_id),
+          service.from("catalog_work_items").update({
+            generation_status: "failed", generation_completed_at: failedAt, qc_status: "needs_review",
+          }).eq("planning_request_id", session.planning_request_id),
+        ]);
+      }
+      await service.from("catalog_sessions").update({ status: "failed", updated_at: failedAt }).eq("session_id", sessionId);
+      if (batchId) scheduleBackground(kickCatalogProcessor(batchId));
+    }
+    return { processed: false, reason: "node_failed", error: failureMessage };
   }
 }
 
@@ -2669,6 +2683,25 @@ async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
       hash: String((asset.metadata as JsonRecord)?.hash || asset.id), filename: String((asset.metadata as JsonRecord)?.filename || `${asset.asset_role}.jpg`),
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     }));
+  for (const [role, urlKey, pathKey] of [
+    ["front", "front_image_url", "front_image_path"],
+    ["back", "back_image_url", "back_image_path"],
+  ] as const) {
+    if (productRefs.some((reference) => reference.role === role)) continue;
+    const downloadUrl = String(variant[urlKey] || "");
+    const storagePath = String(variant[pathKey] || "");
+    if (!downloadUrl && !storagePath) continue;
+    productRefs.push({
+      id: `${variant.id}:${role}`,
+      role,
+      downloadUrl,
+      storagePath,
+      hash: smallHash(`${downloadUrl}|${storagePath}`),
+      filename: `${role}.jpg`,
+      mimeType: "image/jpeg",
+      size: 0,
+    });
+  }
   // batch.reference_images holds every batch-level shared reference (style_reference and, now,
   // model_identity) tagged with its own role - preserve that tag instead of collapsing
   // everything to "style_reference", or a model-identity upload would silently be treated as
@@ -3020,6 +3053,204 @@ async function generateCatalogFlowGraph(batch: JsonRecord, variant: JsonRecord, 
   }
 }
 
+async function queueCatalogVariantGeneration(
+  batch: JsonRecord,
+  variant: JsonRecord,
+  variants: JsonRecord[],
+  batchId: string,
+  generationSettings: JsonRecord,
+) {
+  const { productRefs, references } = await catalogReferenceInputs(batch, variant);
+  if (!references.some((entry) => entry.role === "front") || !references.some((entry) => entry.role === "back")) {
+    throw new Error("Front and back references are required.");
+  }
+
+  const analysisHashes = catalogAnalysisFingerprint(batch, variant, references);
+  const category = String(generationSettings.category || variant.category || "ethnic/fusion");
+  const hasCurrentAnalysis = variant.analysis_status === "ready"
+    && variant.analysis_fingerprint === analysisHashes.fingerprint
+    && Boolean(variant.ai_analysis);
+  const analysisStartedAt = Date.now();
+  let normalized = hasCurrentAnalysis
+    ? applyCatalogMemory(batch, normalizeAnalysis(variant.ai_analysis as JsonRecord, category))
+    : await analyzeCatalogVariant(batch, variant, references);
+
+  if (!hasCurrentAnalysis) {
+    const analyzedAt = new Date().toISOString();
+    const { error: analysisUpdateError } = await service.from("planning_requests").update({
+      analysis_status: "ready",
+      analysis_fingerprint: analysisHashes.fingerprint,
+      analysis_updated_at: analyzedAt,
+      garment_analysis: normalized,
+      ai_analysis: normalized,
+      pose_plan: normalized.posePlan,
+      validation_status: "ready",
+      error_message: "",
+      updated_at: analyzedAt,
+    }).eq("id", variant.id);
+    if (analysisUpdateError) throw new Error(analysisUpdateError.message);
+    await recordAiRun({
+      organization_id: batch.organization_id,
+      planning_request_id: variant.id,
+      batch_id: batchId,
+      job_id: "",
+      run_kind: "catalog_product_preflight",
+      model: Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash",
+      provider: "gemini",
+      input_fingerprint: analysisHashes.fingerprint,
+      input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role) },
+      output_json: normalized,
+      status: "completed",
+      latency_ms: Date.now() - analysisStartedAt,
+      cost_usd: 0,
+      cost_source: "provider_cost_not_available",
+    });
+  }
+
+  const memory = (batch.catalog_memory || {}) as JsonRecord;
+  if (!memory.stylingPlan) {
+    await proposeCatalogStylingPlan(batchId, batch, normalized.stylingPlan, String(variant.id));
+    const generatedAlready = variants.some((entry) => entry.generation_status === "completed");
+    const { data: saveResult, error: saveError } = await service.rpc("save_catalog_styling_plan", {
+      p_batch_id: batchId,
+      p_plan: normalized.stylingPlan,
+      p_approve: generatedAlready,
+      p_member_id: null,
+    });
+    if (saveError) throw new Error(saveError.message);
+    const savedMemory = ((saveResult || {}) as JsonRecord).memory as JsonRecord | undefined;
+    batch = { ...batch, catalog_memory: savedMemory || batch.catalog_memory };
+    normalized = applyCatalogMemory(batch, normalized);
+    if (!generatedAlready) {
+      const { error: waitingError } = await service.from("planning_batches").update({
+        schedule_status: "awaiting_styling_approval",
+        queue_status: "idle",
+        schedule_error: "Review and approve the catalogue styling plan to start generating.",
+        updated_at: new Date().toISOString(),
+      }).eq("id", batchId);
+      if (waitingError) throw new Error(waitingError.message);
+      return { processed: false, reason: "styling_plan_approval_required", batchId, planningRequestId: variant.id };
+    }
+  }
+
+  const poses = normalized.posePlan.filter((pose) => pose.enabled !== false && pose.prompt?.trim());
+  if (poses.length !== 5 || poses.map((pose) => pose.id).join(",") !== "full_front,angled,back,creative,closeup") {
+    throw new Error("Catalog analysis did not produce the required ordered five-pose plan.");
+  }
+
+  const sessionId = `session_${crypto.randomUUID()}`;
+  const jobId = `job_${crypto.randomUUID()}`;
+  const queuedAt = new Date().toISOString();
+  const allowedModels = ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"];
+  const model = allowedModels.includes(String(generationSettings.model)) ? String(generationSettings.model) : OPENAI_MODEL;
+  const quality = ["low", "medium", "high"].includes(String(generationSettings.quality)) ? String(generationSettings.quality) : "medium";
+  const sessionData = {
+    skuId: String(variant.request_code || variant.id),
+    skuName: String(variant.sku_name),
+    productDetails: String(variant.product_description || ""),
+    category,
+    referenceIds: productRefs.map((entry) => entry.id),
+    references,
+    productIdentity: normalized.productIdentity,
+    creativeDirection: normalized.creativeDirection,
+    modelIdentity: normalized.modelIdentity,
+    stylingPlan: normalized.stylingPlan,
+    posePlan: poses,
+    consistencyRules: CONSISTENCY_RULES,
+    analysisModel: Deno.env.get("GEMINI_ANALYSIS_MODEL")?.trim() || "gemini-3.6-flash",
+    analysisVersion: ANALYSIS_VERSION,
+    generatedAssets: [],
+    approvedAssets: [],
+  };
+  const { error: sessionInsertError } = await service.from("catalog_sessions").insert({
+    session_id: sessionId,
+    job_id: jobId,
+    user_id: "catalog-worker",
+    organization_id: batch.organization_id,
+    planning_request_id: variant.id,
+    status: "ready",
+    analysis_fingerprint: analysisHashes.fingerprint,
+    product_hash: analysisHashes.pHash,
+    reference_hash: analysisHashes.rHash,
+    session_data: sessionData,
+  });
+  if (sessionInsertError) throw new Error(sessionInsertError.message);
+
+  const jobData = {
+    skuId: String(variant.request_code || variant.id),
+    skuName: String(variant.sku_name),
+    productDetails: String(variant.product_description || ""),
+    category,
+    backgroundStyle: String(generationSettings.sceneDirection || ""),
+    modelIdentityDirection: String(generationSettings.modelDirection || ""),
+    references,
+    analysisFingerprint: analysisHashes.fingerprint,
+  };
+  const { error: jobInsertError } = await service.from("generation_jobs").insert({
+    job_id: jobId,
+    user_id: "catalog-worker",
+    user_email: "",
+    org_id: batch.organization_id,
+    batch_id: batchId,
+    status: "queued",
+    readiness_status: "ready",
+    readiness_reasons: [],
+    sku_name: variant.sku_name,
+    session_id: sessionId,
+    job_data: jobData,
+    planning_request_id: variant.id,
+    total_poses: 5,
+    provider: "openai",
+    model,
+    aspect_ratio: String(generationSettings.aspectRatio || "3:4"),
+    image_size: String(generationSettings.imageSize || "2K"),
+    quality,
+    pose_qa: generationSettings.poseQa !== false,
+    estimated_cost_usd: 0.25,
+    created_at: queuedAt,
+    updated_at: queuedAt,
+  });
+  if (jobInsertError) throw new Error(jobInsertError.message);
+
+  const { error: poseInsertError } = await service.from("session_generations").insert(poses.map((pose, index) => ({
+    session_id: sessionId,
+    generation_id: `${jobId}:pose:${index + 1}`,
+    pose_index: index + 1,
+    title: pose.title,
+    pose_type: pose.id,
+    instructions: pose.prompt,
+    status: "queued",
+    attempt_count: 0,
+    generation_data: { ...pose, poseNumber: index + 1, jobId },
+  })));
+  if (poseInsertError) throw new Error(poseInsertError.message);
+
+  const queueUpdates = await Promise.all([
+    service.from("catalog_sessions").update({ status: "generating", updated_at: queuedAt }).eq("session_id", sessionId),
+    service.from("planning_requests").update({
+      status: "generating",
+      generation_status: "queued",
+      generation_job_id: jobId,
+      queued_at: queuedAt,
+      updated_at: queuedAt,
+    }).eq("id", variant.id),
+    service.from("catalog_work_items").update({
+      generation_job_id: jobId,
+      catalog_session_id: sessionId,
+      generation_status: "queued",
+      generation_started_at: queuedAt,
+      generation_completed_at: null,
+      qc_status: "not_started",
+      listing_status: "not_required",
+    }).eq("organization_id", batch.organization_id).eq("planning_request_id", variant.id),
+  ]);
+  const queueError = queueUpdates.find((result) => result.error)?.error;
+  if (queueError) throw new Error(queueError.message);
+
+  scheduleBackground(kickWorker());
+  return { processed: true, sessionId, jobId, planningRequestId: variant.id };
+}
+
 async function processCatalog(request: Request, args: JsonRecord) {
   if (!internalWorkerAuthorized(request)) throw new Error("Catalog worker authorization failed.");
   let batch: JsonRecord | null = null;
@@ -3045,12 +3276,30 @@ async function processCatalog(request: Request, args: JsonRecord) {
   }
   if (!batch || !["running", "scheduled"].includes(String(batch.schedule_status))) return { processed: false, reason: "no_due_catalog" };
   const batchId = String(batch.id);
+  const generationSettings = (batch.generation_settings || {}) as JsonRecord;
+  const selectedRequestIds = Array.isArray(generationSettings.catalogProductionRequestIds)
+    ? [...new Set((generationSettings.catalogProductionRequestIds as unknown[]).map(String).filter(Boolean))]
+    : [];
+  const selectedRequestIdSet = new Set(selectedRequestIds);
   const { data: activeJobs, error: activeJobsError } = await service.from("generation_jobs").select("job_id").eq("batch_id", batchId).in("status", ["queued", "processing", "cancelling"]).limit(1);
   if (activeJobsError) console.error(activeJobsError.message);
   if (activeJobs?.length) return { processed: false, reason: "active_job" };
   const { data: variants, error: variantsError } = await service.from("planning_requests").select("*").eq("batch_id", batchId).order("queue_position", { ascending: true });
   if (variantsError) console.error(variantsError.message);
-  const staleVariantIds = (variants || [])
+  const targetVariants = selectedRequestIds.length
+    ? (variants || []).filter((row) => selectedRequestIdSet.has(String(row.id)))
+    : variants || [];
+  if (selectedRequestIds.length && targetVariants.length !== selectedRequestIds.length) {
+    throw new Error("One or more selected catalog requests no longer belong to this batch.");
+  }
+  const batchRequestIds = (variants || []).map((row) => String(row.id));
+  const { data: activeSessions, error: activeSessionsError } = batchRequestIds.length
+    ? await service.from("catalog_sessions").select("session_id").in("planning_request_id", batchRequestIds).eq("status", "generating").limit(1)
+    : { data: [], error: null };
+  if (activeSessionsError) console.error(activeSessionsError.message);
+  if (activeSessions?.length) return { processed: false, reason: "active_session" };
+
+  const staleVariantIds = targetVariants
     .filter((row) => ["queued", "processing"].includes(String(row.generation_status)))
     .map((row) => row.id);
   if (staleVariantIds.length) {
@@ -3067,15 +3316,27 @@ async function processCatalog(request: Request, args: JsonRecord) {
       row.generation_job_id = null;
     }
   }
-  const variant = (variants || []).find((row) => row.front_image_url && row.back_image_url && !["completed", "queued", "processing", "failed"].includes(String(row.generation_status)));
+  const variant = targetVariants.find((row) => row.front_image_url && row.back_image_url && !["completed", "queued", "processing", "failed"].includes(String(row.generation_status)));
   if (!variant) {
     const completed = (variants || []).filter((row) => row.generation_status === "completed").length;
     const failed = (variants || []).filter((row) => row.generation_status === "failed").length;
-    await service.from("planning_batches").update({
-      generated_count: completed, failed_count: failed, pending_count: Math.max(0, (variants || []).length - completed - failed),
-      queue_status: failed ? "failed" : "completed", schedule_status: failed ? "failed" : "completed",
-      schedule_finished_at: new Date().toISOString(), status: failed ? "active" : "completed", updated_at: new Date().toISOString(),
-    }).eq("id", batchId);
+    const pending = Math.max(0, (variants || []).length - completed - failed);
+    const batchUpdate: JsonRecord = {
+      generated_count: completed,
+      failed_count: failed,
+      pending_count: pending,
+      queue_status: failed ? "failed" : pending ? "idle" : "completed",
+      schedule_status: failed ? "failed" : pending ? "none" : "completed",
+      schedule_finished_at: new Date().toISOString(),
+      status: failed || pending ? "active" : "completed",
+      updated_at: new Date().toISOString(),
+    };
+    if (selectedRequestIds.length) {
+      const nextGenerationSettings = { ...generationSettings };
+      delete nextGenerationSettings.catalogProductionRequestIds;
+      batchUpdate.generation_settings = nextGenerationSettings;
+    }
+    await service.from("planning_batches").update(batchUpdate).eq("id", batchId);
     return { processed: false, reason: "catalog_complete" };
   }
   // Nothing is generated against a styling plan nobody has seen. The batch waits
@@ -3093,39 +3354,31 @@ async function processCatalog(request: Request, args: JsonRecord) {
     return { processed: false, reason: "styling_plan_unapproved", batchId };
   }
   try {
-    const { productRefs, references } = await catalogReferenceInputs(batch, variant);
-    if (!references.some((entry) => entry.role === "front") || !references.some((entry) => entry.role === "back")) throw new Error("Front and back references are required.");
-    
-    const sessionId = `session_${crypto.randomUUID()}`;
-    const settings = (batch.generation_settings || {}) as JsonRecord;
-    
-    // Insert session without blocking for analysis
-    await service.from("catalog_sessions").insert({
-      session_id: sessionId, job_id: "", user_id: "catalog-worker", organization_id: batch.organization_id, planning_request_id: variant.id,
-      status: "generating", session_data: { 
-        skuId: variant.sku_name, 
-        skuName: variant.sku_name, 
-        productDetails: variant.product_description || "", 
-        category: settings.category || variant.category || "ethnic/fusion",
-        referenceIds: productRefs.map((entry) => entry.id), 
-        references
-      },
-    });
-
-    // Generate the entire DAG
-    await generateCatalogFlowGraph(batch, variant, references, sessionId);
-
-    // Update variant status
-    await service.from("planning_requests").update({
-      status: "generating", generation_status: "queued", queued_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-    }).eq("id", variant.id);
-
-    scheduleBackground(kickNodeOrchestrator(sessionId));
-    return { processed: true, sessionId, planningRequestId: variant.id };
+    return await queueCatalogVariantGeneration(batch, variant as JsonRecord, (variants || []) as JsonRecord[], batchId, generationSettings);
   } catch (error) {
-    await service.from("planning_requests").update({ status: "failed", generation_status: "failed", completion_status: "failed", error_message: errorMessage(error), generation_finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", variant.id);
+    const failedAt = new Date().toISOString();
+    const failureMessage = errorMessage(error);
+    await Promise.all([
+      service.from("generation_jobs").update({
+        status: "failed",
+        error_code: "catalog_queue_failed",
+        error_message: failureMessage,
+        completed_at: failedAt,
+        updated_at: failedAt,
+      }).eq("batch_id", batchId).eq("planning_request_id", variant.id).in("status", ["queued", "processing"]),
+      service.from("catalog_sessions").update({ status: "failed", updated_at: failedAt })
+        .eq("planning_request_id", variant.id).in("status", ["ready", "generating"]),
+      service.from("planning_requests").update({
+        status: "failed",
+        generation_status: "failed",
+        completion_status: "failed",
+        error_message: failureMessage,
+        generation_finished_at: failedAt,
+        updated_at: failedAt,
+      }).eq("id", variant.id),
+    ]);
     scheduleBackground(kickCatalogProcessor(batchId));
-    return { processed: false, reason: "variant_failed", error: errorMessage(error) };
+    return { processed: false, reason: "variant_failed", error: failureMessage };
   }
 }
 
@@ -4167,8 +4420,8 @@ Deno.serve(async (request) => {
       "catalogProduction.bulkGenerate": async () => {
         const { workspace } = await workspaceFor(request, "planning.manage");
         const result = await bulkGenerateCatalogWorkItems(service, workspace, args);
-        if (result.batchIdToSchedule) {
-          await scheduleCatalogOperation(request, { catalogId: result.batchIdToSchedule });
+        for (const batchId of result.batchIdsToSchedule) {
+          await scheduleCatalogOperation(request, { catalogId: batchId });
         }
         return result;
       },

@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: cloud-run-production
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'production' }}
   cancel-in-progress: true
 
 permissions:
@@ -24,7 +24,7 @@ jobs:
   validate:
     name: Validate application
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -38,6 +38,16 @@ jobs:
 
       - name: Lint application
         run: npm run lint
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.5
+
+      - name: Validate catalog migration SQL
+        run: npm run validate:catalog-sql
+
+      - name: Type-check application Edge Function
+        run: deno check --frozen supabase/functions/app-api/index.ts
 
       - name: Build application
         run: npm run build

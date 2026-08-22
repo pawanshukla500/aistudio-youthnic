@@ -66,6 +66,10 @@ export function isCompleted(item: CatalogWorkItem) {
   return item.status === "completed" || item.listing_status === "completed";
 }
 
+export function canQueueGeneration(item: CatalogWorkItem) {
+  return !["queued", "generating", "processing"].includes(item.generation_status);
+}
+
 export function sortProductionItems(items: CatalogWorkItem[]) {
   return [...items].sort((left, right) => {
     const completionOrder = Number(isCompleted(left)) - Number(isCompleted(right));

@@ -358,76 +358,218 @@ export async function bulkGenerateCatalogWorkItems(
 ) {
   const workItemIds = [...new Set((Array.isArray(args.workItemIds) ? args.workItemIds : []).map((id) => text(id)).filter(Boolean))].slice(0, 100);
   if (!workItemIds.length) throw new Error("Select at least one catalog item.");
-  
+
   const { data: workItems, error } = await service.from("catalog_work_items")
     .select("*")
     .eq("organization_id", workspace.organization.id)
     .in("id", workItemIds);
   if (error) throw new Error(error.message);
+  if ((workItems || []).length !== workItemIds.length) {
+    throw new Error("One or more selected catalog items are unavailable in this workspace.");
+  }
 
-  let queued = 0;
-  let batchIdToSchedule = null;
+  const activeItems = (workItems || []).filter((item) => ["queued", "generating", "processing"].includes(text(item.generation_status)));
+  if (activeItems.length) {
+    throw new Error(`${activeItems.length} selected SKU${activeItems.length === 1 ? " is" : "s are"} already generating. Wait for the active run to finish.`);
+  }
 
-  // Find or create an ad-hoc batch for isolated catalog bulk generation
-  const { data: existingBatch } = await service.from("planning_batches")
-    .select("id")
-    .eq("organization_id", workspace.organization.id)
-    .eq("name", "Ad-hoc Catalog Generation")
-    .limit(1)
-    .maybeSingle();
-    
-  let batchId = existingBatch?.id;
-  if (!batchId) {
+  const linkedRequestIds = (workItems || []).map((item) => text(item.planning_request_id)).filter(Boolean);
+  const { data: linkedRequests, error: requestsError } = linkedRequestIds.length
+    ? await service.from("planning_requests")
+      .select("id,batch_id,front_image_url,back_image_url,generation_status")
+      .eq("organization_id", workspace.organization.id)
+      .in("id", linkedRequestIds)
+    : { data: [], error: null };
+  if (requestsError) throw new Error(requestsError.message);
+  if ((linkedRequests || []).length !== linkedRequestIds.length) {
+    throw new Error("One or more selected SKUs link to a missing planning request.");
+  }
+
+  const { data: linkedAssets, error: linkedAssetsError } = linkedRequestIds.length
+    ? await service.from("planning_assets")
+      .select("planning_request_id,asset_role,image_url,storage_path")
+      .eq("organization_id", workspace.organization.id)
+      .in("planning_request_id", linkedRequestIds)
+      .in("asset_role", ["front", "back"])
+    : { data: [], error: null };
+  if (linkedAssetsError) throw new Error(linkedAssetsError.message);
+
+  const requestById = new Map((linkedRequests || []).map((request) => [String(request.id), request]));
+  for (const item of workItems || []) {
+    const requestId = text(item.planning_request_id);
+    if (!requestId) {
+      if (!text(item.reference_image_url)) throw new Error(`${item.sku_name} needs a reference image before generation can start.`);
+      continue;
+    }
+    const request = requestById.get(requestId);
+    const requestAssets = (linkedAssets || []).filter((asset) => String(asset.planning_request_id) === requestId);
+    const hasFront = Boolean(request?.front_image_url) || requestAssets.some((asset) => asset.asset_role === "front" && (asset.image_url || asset.storage_path));
+    const hasBack = Boolean(request?.back_image_url) || requestAssets.some((asset) => asset.asset_role === "back" && (asset.image_url || asset.storage_path));
+    if (!hasFront || !hasBack) throw new Error(`${item.sku_name} needs both front and back references before generation can start.`);
+  }
+
+  const existingBatchIds = [...new Set((linkedRequests || []).map((request) => text(request.batch_id)).filter(Boolean))];
+  const { data: existingBatches, error: batchesError } = existingBatchIds.length
+    ? await service.from("planning_batches")
+      .select("id,generation_settings,queue_status,schedule_status")
+      .eq("organization_id", workspace.organization.id)
+      .in("id", existingBatchIds)
+    : { data: [], error: null };
+  if (batchesError) throw new Error(batchesError.message);
+  if ((existingBatches || []).length !== existingBatchIds.length) {
+    throw new Error("One or more selected SKUs link to a missing catalog.");
+  }
+  const busyBatches = (existingBatches || []).filter((batch) => (
+    batch.queue_status === "running"
+    || ["scheduled", "running", "awaiting_styling_approval"].includes(String(batch.schedule_status))
+  ));
+  if (busyBatches.length) throw new Error("A selected catalog already has scheduled or active generation. Let it finish before starting another selection.");
+
+  const needsAdHocBatch = (workItems || []).some((item) => {
+    const requestId = text(item.planning_request_id);
+    return !requestId || !text(requestById.get(requestId)?.batch_id);
+  });
+  const adHocGenerationSettings: JsonRecord = {
+    modelDirection: "",
+    sceneDirection: "",
+    category: "ethnic/fusion",
+    aspectRatio: "3:4",
+    imageSize: "2K",
+    quality: "medium",
+    poseQa: true,
+  };
+  let adHocBatchId = "";
+  const now = new Date().toISOString();
+  if (needsAdHocBatch) {
+    const suffix = crypto.randomUUID().slice(0, 8);
     const { data: newBatch, error: batchError } = await service.from("planning_batches").insert({
       organization_id: workspace.organization.id,
-      batch_code: `CAT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
-      name: "Ad-hoc Catalog Generation",
-      total_skus: 0, pending_count: 0, status: "active", created_by_member_id: workspace.member.id,
-      catalog_key: "adhoc-catalog", queue_status: "idle", schedule_status: "none",
-      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      batch_code: `CAT-${suffix.toUpperCase()}`,
+      name: `Catalog Production ${now.slice(0, 10)} ${suffix}`,
+      total_skus: 0,
+      generated_count: 0,
+      pending_count: 0,
+      failed_count: 0,
+      status: "active",
+      created_by_member_id: workspace.member.id,
+      catalog_key: `catalog-production-${suffix}`,
+      queue_status: "idle",
+      schedule_status: "none",
+      generation_settings: adHocGenerationSettings,
+      created_at: now,
+      updated_at: now,
     }).select("id").single();
-    if (batchError) throw new Error(batchError.message);
-    batchId = newBatch?.id;
+    if (batchError || !newBatch) throw new Error(batchError?.message || "Could not create the generation catalog.");
+    adHocBatchId = String(newBatch.id);
   }
-  
-  const now = new Date().toISOString();
 
+  const requestIdsByBatch = new Map<string, string[]>();
   for (const item of workItems || []) {
-    if (["queued", "generating", "completed"].includes(item.generation_status)) continue;
-    
-    let requestId = item.planning_request_id;
+    let requestId = text(item.planning_request_id);
+    let request = requestId ? requestById.get(requestId) : undefined;
+    let batchId = text(request?.batch_id) || adHocBatchId;
     if (!requestId) {
       const { data: newRequest, error: reqError } = await service.from("planning_requests").insert({
         organization_id: workspace.organization.id,
         created_by_member_id: workspace.member.id,
-        batch_id: batchId,
+        batch_id: adHocBatchId,
         sku_name: item.sku_name,
         color_label: item.color_label || "",
         photoshoot_type: "catalog_colourway_5_pose",
         request_code: item.request_code || `SKU-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+        status: "draft",
         generation_status: "pending",
-        front_image_url: item.reference_image_url || null,
-        back_image_url: item.reference_image_url || null, // Best effort fallback
-        validation_status: item.reference_image_url ? "ready" : "pending",
-        analysis_status: item.reference_image_url ? "stale" : "pending",
+        completion_status: "pending",
+        front_image_url: item.reference_image_url,
+        back_image_url: item.reference_image_url,
+        validation_status: "ready",
+        validation_report: { ready: true, reasons: [] },
+        analysis_status: "stale",
       }).select("id").single();
-      if (reqError) throw new Error(reqError.message);
-      requestId = newRequest?.id;
-      
-      await service.from("catalog_work_items").update({ 
-        planning_request_id: requestId, 
-        planning_batch_id: batchId,
-        generation_status: "queued",
-      }).eq("id", item.id);
-      queued++;
-    } else {
-      await service.from("catalog_work_items").update({ 
-        generation_status: "queued",
-      }).eq("id", item.id);
-      queued++;
+      if (reqError || !newRequest) throw new Error(reqError?.message || `Could not create a planning request for ${item.sku_name}.`);
+      requestId = String(newRequest.id);
+      batchId = adHocBatchId;
+      const referenceUrl = text(item.reference_image_url);
+      const { error: referenceError } = await service.from("planning_assets").insert(["front", "back"].map((role) => ({
+        organization_id: workspace.organization.id,
+        planning_request_id: requestId,
+        sku_name: item.sku_name,
+        prompt: "",
+        image_url: referenceUrl,
+        storage_path: "",
+        sku_matched: true,
+        asset_role: role,
+        storage_backend: "firebase",
+        metadata: { source: "catalog_production_import", role },
+      })));
+      if (referenceError) throw new Error(referenceError.message);
+    } else if (!request?.batch_id) {
+      const { error: attachError } = await service.from("planning_requests").update({ batch_id: adHocBatchId, updated_at: now }).eq("id", requestId);
+      if (attachError) throw new Error(attachError.message);
+      batchId = adHocBatchId;
     }
-    batchIdToSchedule = item.planning_batch_id || batchId;
+
+    const requestAssets = (linkedAssets || []).filter((asset) => String(asset.planning_request_id) === requestId);
+    const frontAsset = requestAssets.find((asset) => asset.asset_role === "front");
+    const backAsset = requestAssets.find((asset) => asset.asset_role === "back");
+    const referencePatch: JsonRecord = {};
+    if (request && !request.front_image_url && frontAsset?.image_url) referencePatch.front_image_url = frontAsset.image_url;
+    if (request && !request.back_image_url && backAsset?.image_url) referencePatch.back_image_url = backAsset.image_url;
+    const { error: requestUpdateError } = await service.from("planning_requests").update({
+      ...referencePatch,
+      status: "draft",
+      generation_status: "pending",
+      completion_status: "pending",
+      generation_job_id: null,
+      queued_at: null,
+      generation_started_at: null,
+      generation_finished_at: null,
+      generation_cost_usd: 0,
+      error_message: "",
+      updated_at: now,
+    }).eq("id", requestId).eq("organization_id", workspace.organization.id);
+    if (requestUpdateError) throw new Error(requestUpdateError.message);
+
+    const { error: workItemUpdateError } = await service.from("catalog_work_items").update({
+      planning_request_id: requestId,
+      planning_batch_id: batchId,
+      generation_job_id: null,
+      catalog_session_id: null,
+      generation_status: "ready",
+      generation_started_at: null,
+      generation_completed_at: null,
+      qc_status: "not_started",
+      listing_status: "not_required",
+      listing_started_at: null,
+      listing_completed_at: null,
+      completed_at: null,
+      status: "in_progress",
+    }).eq("id", item.id).eq("organization_id", workspace.organization.id);
+    if (workItemUpdateError) throw new Error(workItemUpdateError.message);
+
+    requestIdsByBatch.set(batchId, [...(requestIdsByBatch.get(batchId) || []), requestId]);
   }
-  
-  return { queued, batchIdToSchedule };
+
+  const settingsByBatch = new Map((existingBatches || []).map((batch) => [String(batch.id), (batch.generation_settings || {}) as JsonRecord]));
+  for (const [batchId, requestIds] of requestIdsByBatch) {
+    const settings = batchId === adHocBatchId ? adHocGenerationSettings : settingsByBatch.get(batchId) || {};
+    const batchPatch: JsonRecord = {
+      generation_settings: { ...settings, catalogProductionRequestIds: requestIds },
+      status: "active",
+      schedule_error: "",
+      updated_at: now,
+    };
+    if (batchId === adHocBatchId) {
+      batchPatch.total_skus = requestIds.length;
+      batchPatch.pending_count = requestIds.length;
+    }
+    const { error: batchUpdateError } = await service.from("planning_batches").update(batchPatch)
+      .eq("id", batchId).eq("organization_id", workspace.organization.id);
+    if (batchUpdateError) throw new Error(batchUpdateError.message);
+  }
+
+  return {
+    queued: workItems?.length || 0,
+    batchIdsToSchedule: [...requestIdsByBatch.keys()],
+  };
 }
