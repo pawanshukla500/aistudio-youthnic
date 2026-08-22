@@ -366,7 +366,7 @@ export async function bulkGenerateCatalogWorkItems(
   if (error) throw new Error(error.message);
 
   let queued = 0;
-  let batchIdToSchedule = null;
+  const batchesToSchedule = new Set<string>();
 
   // Find or create an ad-hoc batch for isolated catalog bulk generation
   const { data: existingBatch } = await service.from("planning_batches")
@@ -394,6 +394,7 @@ export async function bulkGenerateCatalogWorkItems(
 
   for (const item of workItems || []) {
     if (["queued", "generating", "completed"].includes(item.generation_status)) continue;
+    if (item.status === "blocked") continue;
     
     let requestId = item.planning_request_id;
     if (!requestId) {
@@ -407,9 +408,9 @@ export async function bulkGenerateCatalogWorkItems(
         request_code: item.request_code || `SKU-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
         generation_status: "pending",
         front_image_url: item.reference_image_url || null,
-        back_image_url: item.reference_image_url || null, // Best effort fallback
-        validation_status: item.reference_image_url ? "ready" : "pending",
-        analysis_status: item.reference_image_url ? "stale" : "pending",
+        back_image_url: null,
+        validation_status: "pending", // Waiting for full references
+        analysis_status: "pending",
       }).select("id").single();
       if (reqError) throw new Error(reqError.message);
       requestId = newRequest?.id;
@@ -426,8 +427,8 @@ export async function bulkGenerateCatalogWorkItems(
       }).eq("id", item.id);
       queued++;
     }
-    batchIdToSchedule = item.planning_batch_id || batchId;
+    batchesToSchedule.add(String(item.planning_batch_id || batchId));
   }
   
-  return { queued, batchIdToSchedule };
+  return { queued, batchesToSchedule: Array.from(batchesToSchedule) };
 }
