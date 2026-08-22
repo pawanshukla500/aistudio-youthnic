@@ -863,7 +863,7 @@ async function validatePose(args: {
   const policyMedium = resolveGeminiPolicy({ purpose: "qa" });
   let result = await geminiJson(policyMedium, parts);
   let qa = parseQaResponse(result.text);
-  let usageMetadata = result.raw.usageMetadata || {};
+  let usageMetadata = (result.raw.usageMetadata || {}) as Record<string, number>;
 
   // Escalation Step 1: Flash Medium
   // If clear pass or clear severe defect, return immediately.
@@ -879,9 +879,9 @@ async function validatePose(args: {
   qa = parseQaResponse(result.text);
   usageMetadata = {
     ...usageMetadata,
-    promptTokenCount: (usageMetadata.promptTokenCount || 0) + (result.raw.usageMetadata?.promptTokenCount || 0),
-    candidatesTokenCount: (usageMetadata.candidatesTokenCount || 0) + (result.raw.usageMetadata?.candidatesTokenCount || 0),
-    totalTokenCount: (usageMetadata.totalTokenCount || 0) + (result.raw.usageMetadata?.totalTokenCount || 0),
+    promptTokenCount: (usageMetadata.promptTokenCount || 0) + (Number((result.raw.usageMetadata as Record<string, number>)?.promptTokenCount) || 0),
+    candidatesTokenCount: (usageMetadata.candidatesTokenCount || 0) + (Number((result.raw.usageMetadata as Record<string, number>)?.candidatesTokenCount) || 0),
+    totalTokenCount: (usageMetadata.totalTokenCount || 0) + (Number((result.raw.usageMetadata as Record<string, number>)?.totalTokenCount) || 0),
   };
 
   const hasSevereDefectsHigh = qa.reason.includes("Critical attributes far below");
@@ -892,15 +892,15 @@ async function validatePose(args: {
   // Escalation Step 3: Pro High (Escalation)
   // Still uncertain. Only escalate to Pro if the defect is a Product Truth issue that would trigger a paid retry.
   const isProductTruthIssue = qa.failed.some((f) => ["garment_identity", "colors", "print_pattern", "pattern_geometry", "embroidery_geometry", "side_construction", "unknown_region_invention"].includes(f));
-  if (isProductTruthIssue && (args.session.attemptNumber || 1) < MAX_GENERATION_ATTEMPTS) {
+  if (isProductTruthIssue && Number(args.session.attemptNumber || 1) < MAX_GENERATION_ATTEMPTS) {
     const policyPro = resolveGeminiPolicy({ purpose: "qa_escalation" });
     result = await geminiJson(policyPro, parts);
     qa = parseQaResponse(result.text);
     usageMetadata = {
       ...usageMetadata,
-      promptTokenCount: (usageMetadata.promptTokenCount || 0) + (result.raw.usageMetadata?.promptTokenCount || 0),
-      candidatesTokenCount: (usageMetadata.candidatesTokenCount || 0) + (result.raw.usageMetadata?.candidatesTokenCount || 0),
-      totalTokenCount: (usageMetadata.totalTokenCount || 0) + (result.raw.usageMetadata?.totalTokenCount || 0),
+      promptTokenCount: (usageMetadata.promptTokenCount || 0) + (Number((result.raw.usageMetadata as Record<string, number>)?.promptTokenCount) || 0),
+      candidatesTokenCount: (usageMetadata.candidatesTokenCount || 0) + (Number((result.raw.usageMetadata as Record<string, number>)?.candidatesTokenCount) || 0),
+      totalTokenCount: (usageMetadata.totalTokenCount || 0) + (Number((result.raw.usageMetadata as Record<string, number>)?.totalTokenCount) || 0),
     };
   }
 
