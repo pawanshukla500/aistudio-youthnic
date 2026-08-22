@@ -67,6 +67,7 @@ export function isCompleted(item: CatalogWorkItem) {
 }
 
 export function canQueueGeneration(item: CatalogWorkItem) {
+  if (isCompleted(item) || item.generation_status === "completed") return false;
   return !["queued", "generating", "processing"].includes(item.generation_status);
 }
 

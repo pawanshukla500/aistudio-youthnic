@@ -334,15 +334,6 @@ export async function reconcileExistingGenerations(
       if (result.error) throw new Error(result.error.message);
       job = result.data as JsonRecord | null;
     }
-    if (!job) {
-      const result = await service.from("generation_jobs")
-        .select("job_id,session_id,status,started_at,completed_at")
-        .eq("org_id", workspace.organization.id).eq("sku_name", item.sku_name)
-        .order("created_at", { ascending: false }).limit(2);
-      if (result.error) throw new Error(result.error.message);
-      if ((result.data || []).length === 1) job = result.data?.[0] as JsonRecord;
-      else if ((result.data || []).length > 1) ambiguous++;
-    }
     if (!job) continue;
     const generated = generationStatus(job.status);
     const { error: updateError } = await service.from("catalog_work_items").update({
