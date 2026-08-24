@@ -27,12 +27,15 @@ import { getErrorMessage } from "../../lib/errors";
 
 type AdminRole = Record<string, any> & { _id: Id<"roles">; name: string; slug: string; description?: string; permissions: string[] };
 type AdminMember = Record<string, any> & { _id: string; status: string; user: { displayName: string; email: string } | null; roles: AdminRole[] };
+type AdminTeamMembership = Record<string, any> & { _id: string; member_id: string; membership_role: "lead" | "member"; member: AdminMember | null };
+type AdminTeam = Record<string, any> & { _id: string; name: string; slug: string; description: string; team_type: "planning" | "generation" | "review" | "listing" | "general"; active: boolean; is_system: boolean; memberships: AdminTeamMembership[] };
 type AdminPermission = Record<string, any> & { key: string; module: string; description?: string };
 type AdminOverview = {
   capabilities: Record<string, boolean>;
   health: Record<string, any>;
   members: AdminMember[];
   roles: AdminRole[];
+  teams: AdminTeam[];
   permissions: AdminPermission[];
   recentAuditLogs: any[];
   automationSettings?: Record<string, any> | null;
@@ -40,7 +43,7 @@ type AdminOverview = {
   openaiUsage?: { images: number; requests: number; costUsd: number; lastSyncedAt?: string | null };
   recentAiRuns?: any[];
 };
-type Tab = "users" | "roles" | "automation" | "system" | "flow" | "costs";
+type Tab = "users" | "teams" | "roles" | "automation" | "system" | "flow" | "costs";
 
 function HealthCard({
   label,
@@ -242,6 +245,119 @@ function MemberEditor({
   );
 }
 
+function TeamEditor({
+  team,
+  members,
+  saving,
+  onClose,
+  onSave,
+}: {
+  team: AdminTeam | null;
+  members: AdminMember[];
+  saving: boolean;
+  onClose: () => void;
+  onSave: (value: {
+    teamId?: string;
+    name: string;
+    description: string;
+    teamType: AdminTeam["team_type"];
+    active: boolean;
+    memberIds: string[];
+    leadMemberId?: string;
+  }) => Promise<void>;
+}) {
+  const activeMembers = members.filter((member) => member.status === "active" && member.user);
+  const [name, setName] = useState(team?.name || "");
+  const [description, setDescription] = useState(team?.description || "");
+  const [teamType, setTeamType] = useState<AdminTeam["team_type"]>(team?.team_type || "general");
+  const [active, setActive] = useState(team?.active !== false);
+  const [memberIds, setMemberIds] = useState<Set<string>>(
+    new Set((team?.memberships || []).map((membership) => membership.member_id)),
+  );
+  const [leadMemberId, setLeadMemberId] = useState(
+    team?.memberships.find((membership) => membership.membership_role === "lead")?.member_id || "",
+  );
+  const [error, setError] = useState("");
+
+  const toggleMember = (memberId: string) => {
+    if (memberIds.has(memberId) && leadMemberId === memberId) setLeadMemberId("");
+    setMemberIds((current) => {
+      const next = new Set(current);
+      if (next.has(memberId)) {
+        next.delete(memberId);
+      } else next.add(memberId);
+      return next;
+    });
+  };
+
+  return (
+    <div role="dialog" aria-modal="true" aria-labelledby="organization-team-editor-title" className="fixed inset-0 z-50 grid place-items-center bg-[#20161b]/45 p-4 backdrop-blur-sm">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          setError("");
+          if (name.trim().length < 2) {
+            setError("Enter a team name with at least two characters.");
+            return;
+          }
+          void onSave({
+            teamId: team?._id,
+            name: name.trim(),
+            description: description.trim(),
+            teamType,
+            active,
+            memberIds: [...memberIds],
+            leadMemberId: leadMemberId || undefined,
+          }).catch((reason) => setError(getErrorMessage(reason, "Could not save the team.")));
+        }}
+        className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white p-7 shadow-2xl"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">Operational ownership</p>
+            <h3 id="organization-team-editor-title" className="mt-2 font-syne text-2xl font-bold text-on-surface">{team ? "Edit team" : "Create team"}</h3>
+            <p className="mt-1 text-sm text-secondary">Teams own work and receive handoffs. Roles continue to control permissions.</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={saving} aria-label="Close team editor" className="rounded-lg p-2 text-secondary hover:bg-surface-container disabled:opacity-40"><X className="h-5 w-5" /></button>
+        </div>
+
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <label className="text-xs font-bold uppercase tracking-wider text-secondary">Team name<input required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-outline-variant px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary" placeholder="Marketplace Listing" /></label>
+          <label className="text-xs font-bold uppercase tracking-wider text-secondary">Workflow function<select value={teamType} onChange={(event) => setTeamType(event.target.value as AdminTeam["team_type"])} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary"><option value="planning">Planning</option><option value="generation">Generation</option><option value="review">Review</option><option value="listing">Listing</option><option value="general">General</option></select></label>
+          <label className="sm:col-span-2 text-xs font-bold uppercase tracking-wider text-secondary">Description<textarea rows={2} maxLength={500} value={description} onChange={(event) => setDescription(event.target.value)} className="mt-2 w-full rounded-xl border border-outline-variant px-3 py-2 text-sm font-normal normal-case tracking-normal text-on-surface outline-none focus:border-primary" placeholder="What this team owns in the catalog workflow" /></label>
+        </div>
+
+        <label className={`mt-5 flex items-center justify-between rounded-xl border p-4 ${team?.is_system ? "border-outline-variant/40 bg-surface-container/40" : "border-outline-variant/40"}`}>
+          <span><span className="block text-sm font-bold text-on-surface">Active team</span><span className="mt-1 block text-xs text-secondary">Inactive custom teams cannot be selected for future handoffs.</span></span>
+          <input type="checkbox" checked={active} disabled={team?.is_system} onChange={(event) => setActive(event.target.checked)} className="h-4 w-4 accent-primary disabled:opacity-50" />
+        </label>
+
+        <div className="mt-6">
+          <div className="flex items-end justify-between gap-3">
+            <div><p className="text-xs font-bold uppercase tracking-wider text-secondary">Active members</p><p className="mt-1 text-xs text-secondary">Select everyone who operationally belongs to this team.</p></div>
+            <span className="rounded-full bg-soft-blush px-2.5 py-1 text-[10px] font-bold text-primary">{memberIds.size} selected</span>
+          </div>
+          <div className="mt-3 grid max-h-52 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+            {activeMembers.map((member) => {
+              const selected = memberIds.has(member._id);
+              return <button key={member._id} type="button" onClick={() => toggleMember(member._id)} className={`flex items-center gap-3 rounded-xl border p-3 text-left ${selected ? "border-primary/30 bg-soft-blush" : "border-outline-variant/40 hover:bg-surface-container-low"}`}><span className={`grid h-5 w-5 shrink-0 place-items-center rounded-md border ${selected ? "border-primary bg-primary text-white" : "border-outline-variant bg-white"}`}>{selected && <Check className="h-3.5 w-3.5" />}</span><span className="min-w-0"><span className="block truncate text-sm font-bold text-on-surface">{member.user?.displayName}</span><span className="block truncate text-[10px] text-secondary">{member.user?.email}</span></span></button>;
+            })}
+            {!activeMembers.length && <p className="sm:col-span-2 rounded-xl border-2 border-dashed border-outline-variant/40 p-6 text-center text-sm text-secondary">Create an active organization member before assigning a team.</p>}
+          </div>
+        </div>
+
+        <label className="mt-5 block text-xs font-bold uppercase tracking-wider text-secondary">Team lead<select value={leadMemberId} onChange={(event) => setLeadMemberId(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary"><option value="">No designated lead</option>{activeMembers.filter((member) => memberIds.has(member._id)).map((member) => <option key={member._id} value={member._id}>{member.user?.displayName}</option>)}</select></label>
+
+        {error && <div role="alert" className="mt-4 rounded-xl border border-danger/15 bg-danger-surface p-3 text-sm text-danger">{error}</div>}
+        <div className="mt-7 flex justify-end gap-3">
+          <button type="button" onClick={onClose} disabled={saving} className="rounded-xl border border-outline-variant px-4 py-2.5 text-sm font-bold text-secondary disabled:opacity-50">Cancel</button>
+          <button disabled={saving} className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Save team</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 export function Admin() {
   const { organization, user } = useWorkspace();
   const { data: overview, error: _overviewError } = useQuery(api.admin.overview, {
@@ -250,6 +366,7 @@ export function Admin() {
   const createUser = useAction(api.authActions.createUser);
   const updateMemberAccess = useAction(api.authActions.updateMemberAccess);
   const deleteMember = useAction(api.authActions.deleteMember);
+  const upsertTeam = useMutation(api.admin.upsertTeam);
   const updateRolePermissions = useMutation(api.admin.updateRolePermissions);
   const updateAutomationSettings = useMutation(api.admin.updateAutomationSettings);
   const syncOpenAiUsage = useAction(api.admin.syncOpenAiUsage);
@@ -257,6 +374,7 @@ export function Admin() {
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [editingMember, setEditingMember] = useState<AdminMember | null>(null);
+  const [editingTeam, setEditingTeam] = useState<AdminTeam | "new" | null>(null);
   const [selectedRoleId, setSelectedRoleId] = useState<Id<"roles"> | null>(
     null,
   );
@@ -427,6 +545,26 @@ export function Admin() {
     }
   };
 
+  const saveTeam = async (value: {
+    teamId?: string;
+    name: string;
+    description: string;
+    teamType: AdminTeam["team_type"];
+    active: boolean;
+    memberIds: string[];
+    leadMemberId?: string;
+  }) => {
+    setSaving(true);
+    setNotice(null);
+    try {
+      await upsertTeam({ organizationId: organization._id, ...value });
+      setEditingTeam(null);
+      setNotice({ tone: "success", text: value.teamId ? `${value.name} team updated.` : `${value.name} team created.` });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveAutomation = async () => {
     setSaving(true);
     setNotice(null);
@@ -469,7 +607,7 @@ export function Admin() {
               Admin console
             </span>
             <h2 className="font-syne text-3xl font-bold text-on-surface">
-              People, roles, and system access
+              People, teams, roles, and system access
             </h2>
             <p className="mt-1 text-sm text-secondary">
               Control exactly who can plan, generate, approve, and administer{" "}
@@ -501,9 +639,10 @@ export function Admin() {
           </div>
         )}
 
-        <div className="flex gap-1 rounded-xl border border-outline-variant/40 bg-white p-1 shadow-sm">
+        <div className="flex gap-1 overflow-x-auto rounded-xl border border-outline-variant/40 bg-white p-1 shadow-sm">
           {[
             { id: "users", label: "Users & access", icon: Users },
+            { id: "teams", label: "Teams", icon: UserCog },
             { id: "roles", label: "Roles", icon: Shield },
             { id: "automation", label: "Automation", icon: CalendarClock },
             { id: "system", label: "System", icon: Activity },
@@ -512,7 +651,7 @@ export function Admin() {
             <button
               key={id}
               onClick={() => setTab(id as Tab)}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold transition ${tab === id ? "bg-primary text-white shadow-sm" : "text-secondary hover:bg-surface-container"}`}
+              className={`flex shrink-0 items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold transition ${tab === id ? "bg-primary text-white shadow-sm" : "text-secondary hover:bg-surface-container"}`}
             >
               <Icon className="h-4 w-4" />
               {String(label)}
@@ -606,6 +745,35 @@ export function Admin() {
                   </button>
                 </div>
               ))}
+            </div>
+          </section>
+        )}
+
+        {tab === "teams" && (
+          <section className="space-y-4">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">Operational ownership</p>
+                <h3 className="mt-1 font-syne text-xl font-bold text-on-surface">Organization teams</h3>
+                <p className="mt-1 max-w-2xl text-sm text-secondary">Teams group the people who plan, generate, review, and list. Permission-bearing roles remain independently controlled.</p>
+              </div>
+              {overview.capabilities.canManageUsers && <button onClick={() => setEditingTeam("new")} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white"><Plus className="h-4 w-4" />Create team</button>}
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {overview.teams.map((team) => {
+                const lead = team.memberships.find((membership) => membership.membership_role === "lead")?.member;
+                return <article key={team._id} className={`rounded-2xl border bg-white p-5 shadow-sm ${team.active ? "border-outline-variant/40" : "border-outline-variant/30 opacity-70"}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-soft-blush px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-primary">{team.team_type}</span>{team.is_system && <span className="rounded-full bg-surface-container-high px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-secondary">Built in</span>}<span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase ${team.active ? "bg-success-surface text-success" : "bg-danger-surface text-danger"}`}>{team.active ? "Active" : "Archived"}</span></div><h4 className="mt-3 truncate font-syne text-lg font-bold text-on-surface">{team.name}</h4><p className="mt-1 line-clamp-2 min-h-10 text-xs leading-5 text-secondary">{team.description || "No team description."}</p></div>
+                    {overview.capabilities.canManageUsers && <button onClick={() => setEditingTeam(team)} className="shrink-0 rounded-lg border border-outline-variant/50 px-3 py-2 text-xs font-bold text-primary hover:bg-soft-blush">Edit</button>}
+                  </div>
+                  <div className="mt-5 flex items-center justify-between border-t border-outline-variant/25 pt-4">
+                    <div className="flex -space-x-2">{team.memberships.slice(0, 4).map((membership) => <span key={membership._id} title={membership.member?.user?.displayName || "Team member"} className="grid h-8 w-8 place-items-center rounded-full border-2 border-white bg-primary-container text-[10px] font-bold text-on-primary-container">{membership.member?.user?.displayName?.slice(0, 1).toUpperCase() || "?"}</span>)}{team.memberships.length > 4 && <span className="grid h-8 w-8 place-items-center rounded-full border-2 border-white bg-surface-container-high text-[9px] font-bold text-secondary">+{team.memberships.length - 4}</span>}{!team.memberships.length && <span className="text-xs text-secondary">No active members</span>}</div>
+                    <div className="text-right"><p className="text-xs font-bold text-on-surface">{team.memberships.length} member{team.memberships.length === 1 ? "" : "s"}</p><p className="mt-0.5 max-w-40 truncate text-[10px] text-secondary">{lead?.user?.displayName ? `Lead · ${lead.user.displayName}` : "No designated lead"}</p></div>
+                  </div>
+                </article>;
+              })}
+              {!overview.teams.length && <div className="md:col-span-2 xl:col-span-3 rounded-2xl border-2 border-dashed border-outline-variant/40 bg-white p-12 text-center"><Users className="mx-auto h-7 w-7 text-outline" /><h4 className="mt-3 font-syne text-lg font-bold text-on-surface">No operational teams</h4><p className="mt-1 text-sm text-secondary">Create the first team and assign active organization members.</p></div>}
             </div>
           </section>
         )}
@@ -1026,6 +1194,16 @@ export function Admin() {
             </div>
           </form>
         </div>
+      )}
+      {editingTeam && (
+        <TeamEditor
+          key={editingTeam === "new" ? "new" : editingTeam._id}
+          team={editingTeam === "new" ? null : editingTeam}
+          members={overview.members}
+          saving={saving}
+          onClose={() => setEditingTeam(null)}
+          onSave={saveTeam}
+        />
       )}
       {editingMember && (
         <MemberEditor

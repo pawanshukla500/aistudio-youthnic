@@ -49,8 +49,8 @@ jobs:
       - name: Validate live acceptance harness
         run: node --check scripts/verify-catalog-workflow-live.mjs
 
-      - name: Test catalog business calendar
-        run: deno test --frozen supabase/functions/app-api/lib/catalogHandoffCalendar.test.ts
+      - name: Test catalog workflow utilities
+        run: deno test --frozen supabase/functions/app-api/lib/catalogHandoffCalendar.test.ts supabase/functions/app-api/lib/catalogStageTimeline.test.ts supabase/functions/app-api/lib/catalogRecipientSelection.test.ts
 
       - name: Validate catalog migration SQL
         run: npm run validate:catalog-sql

@@ -32,7 +32,7 @@ export const api = {
   eventIntelligence: { roadmap: "eventIntelligence.roadmap", runResearch: "eventIntelligence.runResearch", seedCalendar: "eventIntelligence.seedCalendar" },
   eventDigest: { sendDigestNow: "eventDigest.sendDigestNow" },
   events: { create: "events.create" },
-  admin: { overview: "admin.overview", updateRolePermissions: "admin.updateRolePermissions", updateAutomationSettings: "admin.updateAutomationSettings", syncOpenAiUsage: "admin.syncOpenAiUsage" },
+  admin: { overview: "admin.overview", upsertTeam: "admin.upsertTeam", updateRolePermissions: "admin.updateRolePermissions", updateAutomationSettings: "admin.updateAutomationSettings", syncOpenAiUsage: "admin.syncOpenAiUsage" },
   authActions: { createUser: "authActions.createUser", updateMemberAccess: "authActions.updateMemberAccess", deleteMember: "authActions.deleteMember" },
   profile: { update: "profile.update" },
 } as const;
@@ -564,6 +564,15 @@ async function adminOverview(args: Record<string, any>) {
     ...value,
     health: { ...value.health, supabase: true },
     roles,
+    teams: (value.teams || []).map((team: Record<string, any>) => ({
+      ...team,
+      _id: team.id,
+      memberships: (team.memberships || []).map((membership: Record<string, any>) => ({
+        ...membership,
+        _id: membership.id,
+        member: membership.member ? { ...membership.member, _id: membership.member.id } : null,
+      })),
+    })),
     members: (value.members || []).map((member: Record<string, any>) => ({
       ...member,
       _id: member.id,
@@ -647,6 +656,8 @@ async function mutateBackend(endpoint: BackendEndpoint, args: Record<string, any
       return invokeAppApi("events.digest", args);
     case api.admin.updateRolePermissions:
       return invokeAppApi("admin.updateRolePermissions", args);
+    case api.admin.upsertTeam:
+      return invokeAppApi("admin.upsertTeam", args);
     case api.admin.updateAutomationSettings:
       return invokeAppApi("admin.updateAutomationSettings", args);
     case api.admin.syncOpenAiUsage:

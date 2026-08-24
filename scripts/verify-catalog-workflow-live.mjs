@@ -95,6 +95,26 @@ const foreignRest = await rest(actors.otherOrg, `/rest/v1/catalog_work_items?sel
 assert.equal(foreignRest.response.ok, true, `Cross-tenant Data API probe failed unexpectedly: ${errorText(foreignRest)}`);
 assert.deepEqual(foreignRest.body, [], "Cross-tenant RLS exposed a catalog work item.");
 
+const ownTeams = await rest(actors.viewer, "/rest/v1/organization_teams?select=id,organization_id,name,active&order=name");
+assert.equal(ownTeams.response.ok, true, `Operational-team RLS read failed: ${errorText(ownTeams)}`);
+assert.ok((ownTeams.body || []).some((team) => team.active), "The workspace has no active operational team after migration backfill.");
+for (const team of ownTeams.body || []) assert.equal(String(team.organization_id), primaryOrg, "Operational-team RLS returned another organization's row.");
+const primaryTeamId = String(ownTeams.body?.[0]?.id || "");
+assert.ok(primaryTeamId, "The team backfill did not create a team for the primary organization.");
+const foreignTeam = await rest(actors.otherOrg, `/rest/v1/organization_teams?select=id&id=eq.${encodeURIComponent(primaryTeamId)}`);
+assert.equal(foreignTeam.response.ok, true, `Cross-tenant team probe failed unexpectedly: ${errorText(foreignTeam)}`);
+assert.deepEqual(foreignTeam.body, [], "Cross-tenant RLS exposed an operational team.");
+const ownMemberships = await rest(actors.viewer, "/rest/v1/organization_team_memberships?select=id,organization_id,team_id,member_id,active");
+assert.equal(ownMemberships.response.ok, true, `Team-membership RLS read failed: ${errorText(ownMemberships)}`);
+for (const membership of ownMemberships.body || []) assert.equal(String(membership.organization_id), primaryOrg, "Team-membership RLS returned another organization's row.");
+const ownPreferences = await rest(actors.viewer, "/rest/v1/organization_member_notification_preferences?select=organization_id,member_id,catalog_assignments_in_app,catalog_handoff_email");
+assert.equal(ownPreferences.response.ok, true, `Notification-preference RLS read failed: ${errorText(ownPreferences)}`);
+assert.equal(ownPreferences.body?.length, 1, "The viewer should receive exactly one normalized preference row.");
+assert.equal(String(ownPreferences.body?.[0]?.member_id), String(workspaces.viewer.member.id), "Notification-preference RLS exposed another member's settings.");
+const foreignPreferences = await rest(actors.otherOrg, `/rest/v1/organization_member_notification_preferences?select=member_id&member_id=eq.${encodeURIComponent(String(workspaces.viewer.member.id))}`);
+assert.equal(foreignPreferences.response.ok, true, `Cross-tenant preference probe failed unexpectedly: ${errorText(foreignPreferences)}`);
+assert.deepEqual(foreignPreferences.body, [], "Cross-tenant RLS exposed a notification preference.");
+
 await expectAllowedUntilFixtureLookup(actors.manager, "catalogProduction.assign", { workItemId: invalidId, assignment: "generation", memberId: "" }, "manager assignment");
 await expectAllowedUntilFixtureLookup(actors.manager, "catalogProduction.handoffs.admin", {}, "manager handoff administration");
 await expectAllowedUntilFixtureLookup(actors.generator, "catalogProduction.bulkGenerate", { workItemIds: [invalidId] }, "generator retry");
@@ -107,6 +127,7 @@ for (const [operation, args] of [
   ["catalogProduction.reviewPose", { workItemId: invalidId, assetVersionId: invalidId, decision: "approved", comments: "permission probe" }],
   ["catalogProduction.handoffs.admin", {}],
   ["catalogProduction.startListing", { workItemId: invalidId }],
+  ["admin.upsertTeam", { name: "Denied acceptance team", teamType: "general", active: true, memberIds: [] }],
 ]) await expectDenied(actors.viewer, operation, args, `viewer ${operation}`);
 
 const directMutation = await rest(actors.manager, "/rest/v1/catalog_work_item_comments", {
@@ -116,6 +137,20 @@ const directMutation = await rest(actors.manager, "/rest/v1/catalog_work_item_co
 });
 assert.equal(directMutation.response.ok, false, "Authenticated browser clients can insert server-owned workflow rows directly.");
 assert.ok([401, 403].includes(directMutation.response.status), `Direct mutation failed for an unexpected reason (${directMutation.response.status}).`);
+const directTeamMutation = await rest(actors.manager, "/rest/v1/organization_teams", {
+  method: "POST",
+  headers: { Prefer: "return=minimal" },
+  body: JSON.stringify({ organization_id: primaryOrg, name: "Direct write probe", slug: `direct-write-${Date.now()}`, team_type: "general" }),
+});
+assert.equal(directTeamMutation.response.ok, false, "Authenticated browser clients can insert operational teams directly.");
+assert.ok([401, 403].includes(directTeamMutation.response.status), `Direct team mutation failed for an unexpected reason (${directTeamMutation.response.status}).`);
+const directPreferenceMutation = await rest(actors.viewer, `/rest/v1/organization_member_notification_preferences?member_id=eq.${encodeURIComponent(String(workspaces.viewer.member.id))}`, {
+  method: "PATCH",
+  headers: { Prefer: "return=minimal" },
+  body: JSON.stringify({ catalog_handoff_email: false }),
+});
+assert.equal(directPreferenceMutation.response.ok, false, "Authenticated browser clients can mutate normalized notification preferences directly.");
+assert.ok([401, 403].includes(directPreferenceMutation.response.status), `Direct preference mutation failed for an unexpected reason (${directPreferenceMutation.response.status}).`);
 
 const foreignStorage = await rest(actors.manager, "/storage/v1/object/list/catalog-assets", {
   method: "POST",
@@ -161,4 +196,4 @@ for (const row of notificationRows.body || []) {
   assert.ok(directlyAddressed || roleAddressed || emailAddressed || broadcast, "Notification RLS exposed a row addressed to another member or team.");
 }
 
-console.log("Live Catalog Workflow verification passed: six roles, cross-tenant RLS, action authorization, server-owned writes, notification targeting, and tenant-safe Storage upload/upsert/read/delete.");
+console.log("Live Catalog Workflow verification passed: six roles, cross-tenant workflow/team RLS, action authorization, server-owned writes, notification targeting, and tenant-safe Storage upload/upsert/read/delete.");

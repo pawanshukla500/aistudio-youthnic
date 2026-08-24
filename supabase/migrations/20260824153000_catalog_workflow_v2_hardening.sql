@@ -33,8 +33,415 @@ where role_permission.role_id = role.id
     or (role.slug = 'creative-team' and permission.key = any (array['planning.approve','planning.manage']))
   );
 
+-- Operational teams are deliberately distinct from RBAC roles. Roles answer
+-- "what may this member do?"; teams answer "who owns this work and receives
+-- this handoff?". The browser can read its tenant's teams, while all mutations
+-- continue through permission-checked Edge operations.
+create table if not exists public.organization_teams (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null check (char_length(btrim(name)) between 2 and 100),
+  slug text not null check (slug ~ '^[a-z0-9][a-z0-9-]{0,79}$'),
+  description text not null default '',
+  team_type text not null default 'general' check (team_type in ('planning','generation','review','listing','general')),
+  active boolean not null default true,
+  is_system boolean not null default false,
+  created_by_member_id uuid references public.organization_members(id) on delete set null,
+  updated_by_member_id uuid references public.organization_members(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, slug)
+);
+
+create index if not exists organization_teams_org_active_type_idx
+  on public.organization_teams (organization_id, active, team_type, name);
+create index if not exists organization_teams_created_by_idx
+  on public.organization_teams (created_by_member_id)
+  where created_by_member_id is not null;
+create index if not exists organization_teams_updated_by_idx
+  on public.organization_teams (updated_by_member_id)
+  where updated_by_member_id is not null;
+
+create table if not exists public.organization_team_memberships (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  team_id uuid not null references public.organization_teams(id) on delete cascade,
+  member_id uuid not null references public.organization_members(id) on delete cascade,
+  membership_role text not null default 'member' check (membership_role in ('lead','member')),
+  active boolean not null default true,
+  joined_at timestamptz not null default now(),
+  ended_at timestamptz,
+  created_by_member_id uuid references public.organization_members(id) on delete set null,
+  updated_by_member_id uuid references public.organization_members(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (team_id, member_id),
+  check ((active and ended_at is null) or (not active and ended_at is not null))
+);
+
+create index if not exists organization_team_memberships_org_team_active_idx
+  on public.organization_team_memberships (organization_id, team_id, active, membership_role);
+create index if not exists organization_team_memberships_org_member_active_idx
+  on public.organization_team_memberships (organization_id, member_id, active);
+create index if not exists organization_team_memberships_created_by_idx
+  on public.organization_team_memberships (created_by_member_id)
+  where created_by_member_id is not null;
+create index if not exists organization_team_memberships_updated_by_idx
+  on public.organization_team_memberships (updated_by_member_id)
+  where updated_by_member_id is not null;
+
+create table if not exists public.organization_member_notification_preferences (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  member_id uuid not null references public.organization_members(id) on delete cascade,
+  catalog_assignments_in_app boolean not null default true,
+  catalog_handoff_email boolean not null default true,
+  updated_by_member_id uuid references public.organization_members(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, member_id)
+);
+
+create index if not exists organization_member_notification_preferences_org_member_idx
+  on public.organization_member_notification_preferences (organization_id, member_id);
+create index if not exists organization_member_notification_preferences_updated_by_idx
+  on public.organization_member_notification_preferences (updated_by_member_id)
+  where updated_by_member_id is not null;
+
+do $$
+declare
+  table_name text;
+begin
+  foreach table_name in array array[
+    'organization_teams',
+    'organization_team_memberships',
+    'organization_member_notification_preferences'
+  ]
+  loop
+    execute format('alter table public.%I enable row level security', table_name);
+    execute format('revoke all on table public.%I from anon', table_name);
+    execute format('revoke insert, update, delete on table public.%I from authenticated', table_name);
+    execute format('grant select on table public.%I to authenticated', table_name);
+    execute format('grant all on table public.%I to service_role', table_name);
+    execute format('drop policy if exists %I on public.%I', table_name || '_select_current_org', table_name);
+    execute format(
+      'create policy %I on public.%I for select to authenticated using (organization_id = (select private.current_organization_id()))',
+      table_name || '_select_current_org', table_name
+    );
+  end loop;
+end
+$$;
+
+drop policy if exists organization_member_notification_preferences_select_current_org on public.organization_member_notification_preferences;
+create policy organization_member_notification_preferences_select_current_org
+on public.organization_member_notification_preferences
+for select to authenticated
+using (
+  organization_id = (select private.current_organization_id())
+  and (
+    member_id = (select private.current_member_id())
+    or (select private.has_permission('admin.users.manage'))
+  )
+);
+
+insert into public.organization_member_notification_preferences (
+  organization_id, member_id, catalog_assignments_in_app, catalog_handoff_email
+)
+select member.organization_id, member.id,
+  case when lower(coalesce(member.notification_preferences ->> 'catalog_assignments_in_app', 'true')) = 'false' then false else true end,
+  case when lower(coalesce(member.notification_preferences ->> 'catalog_handoff_email', 'true')) = 'false' then false else true end
+from public.organization_members as member
+on conflict (organization_id, member_id) do nothing;
+
+create or replace function private.initialize_member_notification_preferences()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog, public, private
+as $$
+begin
+  insert into public.organization_member_notification_preferences (
+    organization_id, member_id, catalog_assignments_in_app, catalog_handoff_email
+  ) values (
+    new.organization_id,
+    new.id,
+    case when lower(coalesce(new.notification_preferences ->> 'catalog_assignments_in_app', 'true')) = 'false' then false else true end,
+    case when lower(coalesce(new.notification_preferences ->> 'catalog_handoff_email', 'true')) = 'false' then false else true end
+  )
+  on conflict (organization_id, member_id) do nothing;
+  return new;
+end;
+$$;
+
+revoke all on function private.initialize_member_notification_preferences() from public, anon, authenticated;
+grant execute on function private.initialize_member_notification_preferences() to service_role, postgres;
+
+drop trigger if exists organization_member_initialize_notification_preferences on public.organization_members;
+create trigger organization_member_initialize_notification_preferences
+after insert on public.organization_members
+for each row execute function private.initialize_member_notification_preferences();
+
+insert into public.organization_teams (organization_id, name, slug, description, team_type, is_system)
+select organization.id, seed.name, seed.slug, seed.description, seed.team_type, true
+from public.organizations as organization
+cross join (values
+  ('Catalog Planning', 'catalog-planning', 'Plans requirements, references, ownership, and deadlines.', 'planning'),
+  ('Catalog Generation', 'catalog-generation', 'Creates and re-generates the five-pose image set.', 'generation'),
+  ('Catalog Review', 'catalog-review', 'Reviews pose versions and grants final approval.', 'review'),
+  ('Marketplace Listing', 'marketplace-listing', 'Receives approved packages and completes marketplace listing.', 'listing')
+) as seed(name, slug, description, team_type)
+on conflict (organization_id, slug) do update set
+  name = excluded.name,
+  description = excluded.description,
+  team_type = excluded.team_type,
+  is_system = true,
+  updated_at = now();
+
+-- Preserve current ownership on deployment by seeding operational membership
+-- from the role model. Future team changes are explicit and do not alter RBAC.
+insert into public.organization_team_memberships (
+  organization_id, team_id, member_id, membership_role, active
+)
+select member.organization_id, team.id, member.id,
+  case when role.slug = 'planning-manager' then 'lead' else 'member' end,
+  true
+from public.member_roles as member_role
+join public.roles as role on role.id = member_role.role_id
+join public.organization_members as member on member.id = member_role.member_id
+join public.organization_teams as team
+  on team.organization_id = member.organization_id
+ and team.slug = case role.slug
+   when 'planning-manager' then 'catalog-planning'
+   when 'creative-team' then 'catalog-generation'
+   when 'review-team' then 'catalog-review'
+   when 'listing-team' then 'marketplace-listing'
+ end
+where member.status = 'active'
+  and role.organization_id = member.organization_id
+  and role.slug in ('planning-manager','creative-team','review-team','listing-team')
+on conflict (team_id, member_id) do update set
+  membership_role = excluded.membership_role,
+  active = true,
+  ended_at = null,
+  updated_at = now();
+
 alter table public.catalog_handoff_settings
-  add column if not exists recipient_role_slug text not null default 'listing-team';
+  add column if not exists recipient_role_slug text not null default 'listing-team',
+  add column if not exists recipient_team_id uuid references public.organization_teams(id) on delete set null;
+
+create index if not exists catalog_handoff_settings_recipient_team_idx
+  on public.catalog_handoff_settings (recipient_team_id)
+  where recipient_team_id is not null;
+
+update public.catalog_handoff_settings as setting
+set recipient_team_id = team.id,
+    updated_at = now()
+from public.organization_teams as team
+where setting.organization_id = team.organization_id
+  and team.slug = 'marketplace-listing'
+  and setting.recipient_team_id is null;
+
+-- Atomically replace a team's active membership set. Keeping this RPC
+-- service-role-only prevents browser clients from bypassing admin permission
+-- checks while avoiding partially applied delete/insert sequences.
+create or replace function public.replace_organization_team_members(
+  p_organization_id uuid,
+  p_team_id uuid,
+  p_member_ids uuid[],
+  p_lead_member_id uuid,
+  p_actor_member_id uuid
+)
+returns integer
+language plpgsql
+security definer
+set search_path = pg_catalog, public, private
+as $$
+declare
+  normalized_member_ids uuid[];
+begin
+  select coalesce(array_agg(distinct selected_member_id), '{}'::uuid[])
+  into normalized_member_ids
+  from unnest(coalesce(p_member_ids, '{}'::uuid[])) as selected(selected_member_id);
+
+  if not exists (
+    select 1 from public.organization_teams as team
+    where team.id = p_team_id and team.organization_id = p_organization_id
+  ) then
+    raise exception 'Organization team not found.';
+  end if;
+  if not exists (
+    select 1 from public.organization_members as member
+    where member.id = p_actor_member_id and member.organization_id = p_organization_id and member.status = 'active'
+  ) then
+    raise exception 'The team change actor is not an active organization member.';
+  end if;
+  if exists (
+    select 1
+    from unnest(normalized_member_ids) as selected(member_id)
+    where not exists (
+      select 1 from public.organization_members as member
+      where member.id = selected.member_id
+        and member.organization_id = p_organization_id
+        and member.status = 'active'
+    )
+  ) then
+    raise exception 'Every team member must be active in this organization.';
+  end if;
+  if p_lead_member_id is not null and not (p_lead_member_id = any(normalized_member_ids)) then
+    raise exception 'The team lead must be included in the active team members.';
+  end if;
+
+  update public.organization_team_memberships as membership
+  set active = false,
+      ended_at = now(),
+      updated_by_member_id = p_actor_member_id,
+      updated_at = now()
+  where membership.organization_id = p_organization_id
+    and membership.team_id = p_team_id
+    and membership.active
+    and not (membership.member_id = any(normalized_member_ids));
+
+  insert into public.organization_team_memberships (
+    organization_id, team_id, member_id, membership_role, active,
+    joined_at, ended_at, created_by_member_id, updated_by_member_id
+  )
+  select p_organization_id, p_team_id, selected.member_id,
+    case when selected.member_id = p_lead_member_id then 'lead' else 'member' end,
+    true, now(), null, p_actor_member_id, p_actor_member_id
+  from unnest(normalized_member_ids) as selected(member_id)
+  on conflict (team_id, member_id) do update set
+    membership_role = excluded.membership_role,
+    active = true,
+    joined_at = case
+      when not organization_team_memberships.active then now()
+      else organization_team_memberships.joined_at
+    end,
+    ended_at = null,
+    updated_by_member_id = p_actor_member_id,
+    updated_at = now();
+
+  return cardinality(normalized_member_ids);
+end;
+$$;
+
+revoke all on function public.replace_organization_team_members(uuid, uuid, uuid[], uuid, uuid) from public, anon, authenticated;
+grant execute on function public.replace_organization_team_members(uuid, uuid, uuid[], uuid, uuid) to service_role;
+
+create or replace function public.upsert_organization_team(
+  p_organization_id uuid,
+  p_team_id uuid,
+  p_name text,
+  p_slug text,
+  p_description text,
+  p_team_type text,
+  p_active boolean,
+  p_member_ids uuid[],
+  p_lead_member_id uuid,
+  p_actor_member_id uuid,
+  p_actor_email text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = pg_catalog, public, private
+as $$
+declare
+  resolved_team_id uuid;
+  creating boolean := p_team_id is null;
+begin
+  if p_team_id is null then
+    insert into public.organization_teams (
+      organization_id, name, slug, description, team_type, active,
+      created_by_member_id, updated_by_member_id
+    ) values (
+      p_organization_id, btrim(p_name), p_slug, coalesce(btrim(p_description), ''),
+      p_team_type, p_active, p_actor_member_id, p_actor_member_id
+    ) returning id into resolved_team_id;
+  else
+    if not p_active and exists (
+      select 1 from public.organization_teams as team
+      where team.id = p_team_id and team.organization_id = p_organization_id and team.is_system
+    ) then
+      raise exception 'Built-in workflow teams cannot be archived.';
+    end if;
+    if not p_active and exists (
+      select 1 from public.catalog_handoff_settings as setting
+      where setting.organization_id = p_organization_id
+        and setting.recipient_team_id = p_team_id
+        and setting.enabled
+    ) then
+      raise exception 'Choose a different handoff recipient team before archiving this team.';
+    end if;
+    update public.organization_teams as team
+    set name = btrim(p_name),
+        description = coalesce(btrim(p_description), ''),
+        team_type = p_team_type,
+        active = p_active,
+        updated_by_member_id = p_actor_member_id,
+        updated_at = now()
+    where team.id = p_team_id and team.organization_id = p_organization_id
+    returning team.id into resolved_team_id;
+    if resolved_team_id is null then
+      raise exception 'Organization team not found.';
+    end if;
+  end if;
+
+  perform public.replace_organization_team_members(
+    p_organization_id,
+    resolved_team_id,
+    p_member_ids,
+    p_lead_member_id,
+    p_actor_member_id
+  );
+
+  insert into public.audit_logs (
+    organization_id, actor_member_id, actor_email, action,
+    resource_type, resource_id, metadata
+  ) values (
+    p_organization_id, p_actor_member_id, coalesce(p_actor_email, ''),
+    case when creating then 'admin.team.created' else 'admin.team.updated' end,
+    'organization_team', resolved_team_id::text,
+    jsonb_build_object(
+      'name', btrim(p_name),
+      'slug', p_slug,
+      'teamType', p_team_type,
+      'active', p_active,
+      'memberCount', cardinality(coalesce(p_member_ids, '{}'::uuid[])),
+      'leadMemberId', p_lead_member_id
+    )
+  );
+  return resolved_team_id;
+end;
+$$;
+
+revoke all on function public.upsert_organization_team(uuid, uuid, text, text, text, text, boolean, uuid[], uuid, uuid, text) from public, anon, authenticated;
+grant execute on function public.upsert_organization_team(uuid, uuid, text, text, text, text, boolean, uuid[], uuid, uuid, text) to service_role;
+
+do $$
+declare
+  table_name text;
+begin
+  foreach table_name in array array[
+    'organization_teams',
+    'organization_team_memberships',
+    'organization_member_notification_preferences'
+  ]
+  loop
+    if not exists (
+      select 1 from pg_publication_tables as publication_table
+      where publication_table.pubname = 'supabase_realtime'
+        and publication_table.schemaname = 'public'
+        and publication_table.tablename = table_name
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', table_name);
+    end if;
+  end loop;
+end
+$$;
+
+alter table public.organization_teams replica identity full;
+alter table public.organization_team_memberships replica identity full;
+alter table public.organization_member_notification_preferences replica identity full;
 
 -- Cover every catalog foreign key reported by the production advisor. Several
 -- tenant-leading indexes are excellent for list queries but cannot support FK
@@ -436,6 +843,8 @@ declare
   org_id uuid := (payload ->> 'organization_id')::uuid;
   member_column text;
   member_value text;
+  team_column text;
+  team_value text;
 begin
   foreach member_column in array array[
     'created_by_member_id', 'generation_assigned_member_id', 'listing_assigned_member_id',
@@ -451,6 +860,19 @@ begin
         where member.id::text = member_value and member.organization_id = org_id
       ) then
         raise exception 'Catalog tenant relationship violation: % does not belong to organization %', member_column, org_id;
+      end if;
+    end if;
+  end loop;
+
+  foreach team_column in array array['team_id', 'recipient_team_id']
+  loop
+    if payload ? team_column then
+      team_value := payload ->> team_column;
+      if coalesce(team_value, '') <> '' and not exists (
+        select 1 from public.organization_teams as team
+        where team.id::text = team_value and team.organization_id = org_id
+      ) then
+        raise exception 'Catalog tenant relationship violation: % does not belong to organization %', team_column, org_id;
       end if;
     end if;
   end loop;
@@ -499,6 +921,7 @@ declare
   table_name text;
 begin
   foreach table_name in array array[
+    'organization_teams', 'organization_team_memberships', 'organization_member_notification_preferences',
     'catalog_work_items', 'catalog_work_item_events', 'catalog_creative_directions',
     'catalog_work_item_assignments', 'catalog_work_item_comments', 'catalog_pose_asset_versions',
     'catalog_asset_reviews', 'catalog_listing_handoffs', 'catalog_listing_handoff_assets',
@@ -525,6 +948,14 @@ declare
 begin
   for tenant_check in
     select * from (values
+      ('organization_teams','created_by_member_id','organization_members'),
+      ('organization_teams','updated_by_member_id','organization_members'),
+      ('organization_team_memberships','team_id','organization_teams'),
+      ('organization_team_memberships','member_id','organization_members'),
+      ('organization_team_memberships','created_by_member_id','organization_members'),
+      ('organization_team_memberships','updated_by_member_id','organization_members'),
+      ('organization_member_notification_preferences','member_id','organization_members'),
+      ('organization_member_notification_preferences','updated_by_member_id','organization_members'),
       ('catalog_work_items','created_by_member_id','organization_members'),
       ('catalog_work_items','generation_assigned_member_id','organization_members'),
       ('catalog_work_items','listing_assigned_member_id','organization_members'),
@@ -552,6 +983,7 @@ begin
       ('catalog_listing_handoff_assets','handoff_id','catalog_listing_handoffs'),
       ('catalog_listing_handoff_assets','asset_version_id','catalog_pose_asset_versions'),
       ('catalog_handoff_settings','updated_by_member_id','organization_members'),
+      ('catalog_handoff_settings','recipient_team_id','organization_teams'),
       ('catalog_report_deliveries','created_by_member_id','organization_members'),
       ('catalog_report_delivery_attempts','delivery_id','catalog_report_deliveries'),
       ('catalog_report_delivery_attempts','actor_member_id','organization_members'),
@@ -583,6 +1015,9 @@ declare
   table_name text;
 begin
   foreach table_name in array array[
+    'organization_teams',
+    'organization_team_memberships',
+    'organization_member_notification_preferences',
     'catalog_creative_directions',
     'catalog_work_item_assignments',
     'catalog_work_item_comments',

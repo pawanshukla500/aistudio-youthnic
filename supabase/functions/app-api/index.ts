@@ -30,6 +30,7 @@ import {
   updateCatalogWorkItem,
 } from "./catalogProduction.ts";
 import { isoWeekday, previousBusinessDate } from "./lib/catalogHandoffCalendar.ts";
+import { selectCatalogRecipients } from "./lib/catalogRecipientSelection.ts";
 
 const SUPABASE_URL = requiredEnv("SUPABASE_URL");
 const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -2403,19 +2404,21 @@ async function adminOverview(request: Request) {
   const { workspace } = await workspaceFor(request);
   if (!workspace.isAdmin && !workspace.permissions.some((permission) => permission.startsWith("admin."))) throw new Error("You do not have access to the admin console.");
   const orgId = workspace.organization.id;
-  const [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult] = await Promise.all([
+  const [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, teamsResult, teamMembershipsResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult] = await Promise.all([
     service.from("organization_members").select("*").eq("organization_id", orgId).order("display_name"),
     service.from("roles").select("*").eq("organization_id", orgId).order("name"),
     service.from("permissions").select("*").order("module").order("key"),
     service.from("role_permissions").select("*"),
     service.from("member_roles").select("*"),
+    service.from("organization_teams").select("*").eq("organization_id", orgId).order("active", { ascending: false }).order("name"),
+    service.from("organization_team_memberships").select("*").eq("organization_id", orgId),
     service.from("audit_logs").select("*").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(30),
     service.from("event_automation_settings").select("*").eq("organization_id", orgId).maybeSingle(),
     service.from("event_email_deliveries").select("*").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(10),
     service.from("openai_usage_daily").select("usage_date,image_count,request_count,actual_cost_usd,synced_at").eq("organization_id", orgId).order("usage_date", { ascending: false }).limit(100),
     service.from("ai_runs").select("job_id, session_id, pose_index, run_kind, provider, model, input_tokens, output_tokens, cost_usd, created_at").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(200),
   ]);
-  for (const result of [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult]) if (result.error) throw new Error(result.error.message);
+  for (const result of [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, teamsResult, teamMembershipsResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult]) if (result.error) throw new Error(result.error.message);
   const permissions = permissionsResult.data || [];
   const roles = (rolesResult.data || []).map((role) => ({
     ...role,
@@ -2425,6 +2428,19 @@ async function adminOverview(request: Request) {
     ...member,
     user: { id: member.id, firebaseUid: member.firebase_uid, email: member.email, name: member.display_name, displayName: member.display_name, status: member.status },
     roles: (memberRolesResult.data || []).filter((link) => link.member_id === member.id).map((link) => roles.find((role) => role.id === link.role_id)).filter(Boolean),
+  }));
+  const teams = (teamsResult.data || []).map((team) => ({
+    ...team,
+    memberships: (teamMembershipsResult.data || [])
+      .filter((membership) => membership.team_id === team.id && membership.active)
+      .map((membership) => ({
+        ...membership,
+        member: members.find((member) => member.id === membership.member_id) || null,
+      }))
+      .sort((left, right) => {
+        if (left.membership_role !== right.membership_role) return left.membership_role === "lead" ? -1 : 1;
+        return String(left.member?.display_name || "").localeCompare(String(right.member?.display_name || ""));
+      }),
   }));
   return {
     capabilities: {
@@ -2438,7 +2454,7 @@ async function adminOverview(request: Request) {
       openaiAdminConfigured: Boolean(Deno.env.get("OPENAI_ADMIN_KEY")), emailConfigured: Boolean(Deno.env.get("RESEND_API_KEY") && Deno.env.get("RESEND_FROM")),
       memberCount: members.length, settingsCount: automationResult.data ? 1 : 0,
     },
-    members, roles, permissions, recentAuditLogs: auditsResult.data || [],
+    members, roles, teams, permissions, recentAuditLogs: auditsResult.data || [],
     automationSettings: automationResult.data,
     recentEventDeliveries: deliveriesResult.data || [],
     openaiUsage: {
@@ -2456,6 +2472,62 @@ async function ensureRoles(orgId: string, roleIds: string[]) {
   const { data: roles, error } = await service.from("roles").select("*").eq("organization_id", orgId).in("id", roleIds);
   if (error || !roles || roles.length !== new Set(roleIds).size) throw new Error("One or more selected roles are invalid.");
   return roles;
+}
+
+async function upsertOrganizationTeamOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "admin.users.manage");
+  const orgId = workspace.organization.id;
+  const teamId = String(args.teamId || "").trim();
+  const name = String(args.name || "").trim().replace(/\s+/g, " ");
+  const description = String(args.description || "").trim().slice(0, 500);
+  const teamType = ["planning", "generation", "review", "listing", "general"].includes(String(args.teamType))
+    ? String(args.teamType)
+    : "general";
+  const active = args.active !== false;
+  const memberIds = [...new Set((Array.isArray(args.memberIds) ? args.memberIds : []).map(String).filter(Boolean))];
+  const requestedLeadMemberId = String(args.leadMemberId || "").trim();
+  const leadMemberId = active && requestedLeadMemberId ? requestedLeadMemberId : null;
+  if (name.length < 2 || name.length > 100) throw new Error("Team name must contain between 2 and 100 characters.");
+  if (teamId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(teamId)) throw new Error("Choose a valid organization team.");
+  if (leadMemberId && !memberIds.includes(leadMemberId)) throw new Error("The team lead must also be selected as a team member.");
+
+  let slug = slugify(name).slice(0, 80).replace(/-+$/g, "");
+  if (!slug) throw new Error("Team name must contain at least one letter or number.");
+  if (teamId) {
+    const { data: current, error: currentError } = await service.from("organization_teams")
+      .select("id,slug,is_system").eq("organization_id", orgId).eq("id", teamId).maybeSingle();
+    if (currentError) throw new Error(currentError.message);
+    if (!current) throw new Error("Organization team not found.");
+    if (current.is_system && !active) throw new Error("Built-in workflow teams cannot be archived.");
+    slug = String(current.slug);
+  }
+
+  const effectiveMemberIds = active ? memberIds : [];
+  if (effectiveMemberIds.length) {
+    const { data: members, error: membersError } = await service.from("organization_members")
+      .select("id").eq("organization_id", orgId).eq("status", "active").in("id", effectiveMemberIds);
+    if (membersError) throw new Error(membersError.message);
+    if ((members || []).length !== effectiveMemberIds.length) throw new Error("Every team member must be active in this workspace.");
+  }
+
+  const { data: savedTeamId, error } = await service.rpc("upsert_organization_team", {
+    p_organization_id: orgId,
+    p_team_id: teamId || null,
+    p_name: name,
+    p_slug: slug,
+    p_description: description,
+    p_team_type: teamType,
+    p_active: active,
+    p_member_ids: effectiveMemberIds,
+    p_lead_member_id: leadMemberId,
+    p_actor_member_id: workspace.member.id,
+    p_actor_email: workspace.user.email,
+  });
+  if (error) {
+    if (error.code === "23505") throw new Error("A team with this name already exists in the workspace.");
+    throw new Error(error.message);
+  }
+  return { success: true, teamId: String(savedTeamId), memberCount: effectiveMemberIds.length };
 }
 
 async function countActiveAdmins(orgId: string) {
@@ -2587,14 +2659,23 @@ async function updateOwnProfileOperation(request: Request, args: JsonRecord) {
     catalog_assignments_in_app: args.catalogAssignmentsInApp !== false,
     catalog_handoff_email: args.catalogHandoffEmail !== false,
   };
-  const [, memberUpdate, auditInsert] = await Promise.all([
+  const updatedAt = new Date().toISOString();
+  const [, memberUpdate, preferenceUpdate, auditInsert] = await Promise.all([
     updateFirebaseUser({ uid: workspace.user.firebaseUid, displayName }),
     service.from("organization_members").update({
       display_name: displayName,
       profile: { ...currentProfile, jobTitle, phone },
       notification_preferences: notificationPreferences,
-      updated_at: new Date().toISOString(),
+      updated_at: updatedAt,
     }).eq("id", workspace.member.id).eq("organization_id", workspace.organization.id),
+    service.from("organization_member_notification_preferences").upsert({
+      organization_id: workspace.organization.id,
+      member_id: workspace.member.id,
+      catalog_assignments_in_app: notificationPreferences.catalog_assignments_in_app,
+      catalog_handoff_email: notificationPreferences.catalog_handoff_email,
+      updated_by_member_id: workspace.member.id,
+      updated_at: updatedAt,
+    }, { onConflict: "organization_id,member_id" }),
     service.from("audit_logs").insert({
       organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
       action: "profile.updated", resource_type: "organization_member", resource_id: workspace.member.id,
@@ -2602,6 +2683,7 @@ async function updateOwnProfileOperation(request: Request, args: JsonRecord) {
     }),
   ]);
   if (memberUpdate.error) throw new Error(memberUpdate.error.message);
+  if (preferenceUpdate.error) throw new Error(preferenceUpdate.error.message);
   if (auditInsert.error) throw new Error(auditInsert.error.message);
   return { success: true, displayName, jobTitle, phone, notificationPreferences };
 }
@@ -4408,6 +4490,24 @@ function catalogProductionReportHtml(organizationName: string, reportDate: strin
   </div>`;
 }
 
+async function catalogMemberHandoffEmails(orgId: string, requestedMemberIds: string[]) {
+  const memberIds = [...new Set(requestedMemberIds.filter(Boolean))];
+  if (!memberIds.length) return [];
+  const [membersResult, preferencesResult] = await Promise.all([
+    service.from("organization_members")
+      .select("id,email,notification_preferences").eq("organization_id", orgId).eq("status", "active").in("id", memberIds),
+    service.from("organization_member_notification_preferences")
+      .select("member_id,catalog_handoff_email").eq("organization_id", orgId).in("member_id", memberIds),
+  ]);
+  if (membersResult.error || preferencesResult.error) throw new Error(membersResult.error?.message || preferencesResult.error?.message || "Could not resolve team notification preferences.");
+  const preferenceByMember = new Map((preferencesResult.data || []).map((preference) => [String(preference.member_id), preference.catalog_handoff_email !== false]));
+  return cleanEmails((membersResult.data || [])
+    .filter((member) => preferenceByMember.has(String(member.id))
+      ? preferenceByMember.get(String(member.id))
+      : (member.notification_preferences as JsonRecord | null)?.catalog_handoff_email !== false)
+    .map((member) => member.email));
+}
+
 async function catalogRoleRecipients(orgId: string, roleSlug: string) {
   const { data: roles, error: rolesError } = await service.from("roles").select("id").eq("organization_id", orgId).eq("slug", roleSlug);
   if (rolesError) throw new Error(rolesError.message);
@@ -4416,13 +4516,20 @@ async function catalogRoleRecipients(orgId: string, roleSlug: string) {
   const { data: memberRoles, error: memberRolesError } = await service.from("member_roles").select("member_id").in("role_id", roleIds);
   if (memberRolesError) throw new Error(memberRolesError.message);
   const memberIds = [...new Set((memberRoles || []).map((row) => String(row.member_id)).filter(Boolean))];
-  if (!memberIds.length) return [];
-  const { data: members, error: membersError } = await service.from("organization_members")
-    .select("email,notification_preferences").eq("organization_id", orgId).eq("status", "active").in("id", memberIds);
-  if (membersError) throw new Error(membersError.message);
-  return cleanEmails((members || [])
-    .filter((member) => (member.notification_preferences as JsonRecord | null)?.catalog_handoff_email !== false)
-    .map((member) => member.email));
+  return catalogMemberHandoffEmails(orgId, memberIds);
+}
+
+async function catalogTeamRecipients(orgId: string, teamId: string) {
+  if (!teamId) return [];
+  const { data: team, error: teamError } = await service.from("organization_teams")
+    .select("id").eq("organization_id", orgId).eq("id", teamId).eq("active", true).maybeSingle();
+  if (teamError) throw new Error(teamError.message);
+  if (!team) return [];
+  const { data: memberships, error: membershipsError } = await service.from("organization_team_memberships")
+    .select("member_id").eq("organization_id", orgId).eq("team_id", teamId).eq("active", true);
+  if (membershipsError) throw new Error(membershipsError.message);
+  const memberIds = [...new Set((memberships || []).map((row) => String(row.member_id)).filter(Boolean))];
+  return catalogMemberHandoffEmails(orgId, memberIds);
 }
 
 async function catalogHandoffSettings(orgId: string) {
@@ -4430,10 +4537,14 @@ async function catalogHandoffSettings(orgId: string) {
   if (error) throw new Error(error.message);
   if (existing) return existing as JsonRecord;
   const legacy = await automationSettings(orgId);
+  const { data: listingTeam, error: listingTeamError } = await service.from("organization_teams")
+    .select("id").eq("organization_id", orgId).eq("slug", "marketplace-listing").eq("active", true).maybeSingle();
+  if (listingTeamError) throw new Error(listingTeamError.message);
   const { data, error: createError } = await service.from("catalog_handoff_settings").insert({
     organization_id: orgId,
     timezone: String(legacy.timezone || "Asia/Kolkata"),
     recipient_role_slug: "listing-team",
+    recipient_team_id: listingTeam?.id || null,
     custom_recipients: cleanEmails(legacy.report_recipients),
   }).select("*").single();
   if (createError || !data) throw new Error(createError?.message || "Could not initialize catalog handoff settings.");
@@ -4523,9 +4634,7 @@ async function catalogDigestRows(orgId: string, settings: JsonRecord, handoffIds
 function catalogRecipients(settings: JsonRecord, listingRecipients: string[]) {
   const custom = cleanEmails(settings.custom_recipients);
   const mode = String(settings.recipient_mode || "listing_team");
-  if (mode === "custom") return custom;
-  if (mode === "listing_team_and_custom") return cleanEmails([...listingRecipients, ...custom]);
-  return listingRecipients.length ? listingRecipients : custom;
+  return selectCatalogRecipients(mode, listingRecipients, custom);
 }
 
 async function sendTrackedCatalogReport(args: {
@@ -4700,11 +4809,14 @@ async function catalogDigestContext(orgId: string, organizationName: string, opt
   const holidays = Array.isArray(settings.holiday_dates) ? settings.holiday_dates.map(String) : [];
   const reportDate = previousBusinessDate(today.iso, weekdays, holidays);
   const recipientRoleSlug = String(settings.recipient_role_slug || "listing-team");
-  const groupRecipients = await catalogRoleRecipients(orgId, recipientRoleSlug);
+  const recipientTeamId = String(settings.recipient_team_id || "");
+  const groupRecipients = recipientTeamId
+    ? await catalogTeamRecipients(orgId, recipientTeamId)
+    : await catalogRoleRecipients(orgId, recipientRoleSlug);
   const recipients = catalogRecipients(settings, groupRecipients);
   const rows = await catalogDigestRows(orgId, settings, options.handoffIds);
   const subject = `${organizationName} · ${rows.length} approved catalog package${rows.length === 1 ? "" : "s"} · ${reportDate}`;
-  return { settings, timezone, today, weekdays, holidays, reportDate, recipientRoleSlug, groupRecipients, recipients, rows, subject };
+  return { settings, timezone, today, weekdays, holidays, reportDate, recipientTeamId, recipientRoleSlug, groupRecipients, recipients, rows, subject };
 }
 
 async function runCatalogProductionAutomationOperation(request: Request) {
@@ -4731,7 +4843,7 @@ async function runCatalogProductionAutomationOperation(request: Request) {
         const retryHandoffIds = (failedItems || []).map((item) => String(item.handoff_id));
         if (retryHandoffIds.length) {
           const retryContext = await catalogDigestContext(orgId, String(organization.name || "Youthnic"), { handoffIds: retryHandoffIds });
-          if (!retryContext.recipients.length) throw new Error("No active member in the configured recipient group or custom handoff recipient is available.");
+          if (!retryContext.recipients.length) throw new Error("No active member in the configured recipient team or custom handoff recipient is available.");
           if (!retryContext.rows.length) {
             await service.from("catalog_report_deliveries").update({
               status: "failed",
@@ -4750,7 +4862,7 @@ async function runCatalogProductionAutomationOperation(request: Request) {
             recipients: retryContext.recipients,
             subject: retrySubject,
             html: catalogProductionReportHtml(String(organization.name || "Youthnic"), retryReportDate, retryContext.rows),
-            payload: { itemCount: retryContext.rows.length, workItemIds: retryContext.rows.map((row) => row.workItemId), handoffIds: retryHandoffIds, timezone: retryContext.timezone, recipientRoleSlug: retryContext.recipientRoleSlug, retry: true },
+            payload: { itemCount: retryContext.rows.length, workItemIds: retryContext.rows.map((row) => row.workItemId), handoffIds: retryHandoffIds, timezone: retryContext.timezone, recipientTeamId: retryContext.recipientTeamId, recipientRoleSlug: retryContext.recipientRoleSlug, retry: true },
             rows: retryContext.rows,
             triggerType: "retry",
             forceResend: true,
@@ -4775,7 +4887,7 @@ async function runCatalogProductionAutomationOperation(request: Request) {
         results.push({ orgId, reportDate: context.reportDate, sent: false, reason: "no_final_approvals" });
         continue;
       }
-      if (!context.recipients.length) throw new Error("No active member in the configured recipient group or custom handoff recipient is available.");
+      if (!context.recipients.length) throw new Error("No active member in the configured recipient team or custom handoff recipient is available.");
       const delivery = await sendTrackedCatalogReport({
         orgId,
         reportDate: context.reportDate,
@@ -4787,8 +4899,9 @@ async function runCatalogProductionAutomationOperation(request: Request) {
           workItemIds: context.rows.map((row) => row.workItemId),
           handoffIds: context.rows.map((row) => row.handoffId),
           timezone: context.timezone,
+          recipientTeamId: context.recipientTeamId,
           recipientRoleSlug: context.recipientRoleSlug,
-          roleRecipients: context.groupRecipients.length,
+          teamRecipients: context.groupRecipients.length,
         },
         rows: context.rows,
         triggerType: "scheduled",
@@ -4808,19 +4921,25 @@ async function catalogHandoffAdminOperation(request: Request) {
     .select("*").eq("organization_id", workspace.organization.id).order("created_at", { ascending: false }).limit(50);
   if (error) throw new Error(error.message);
   const deliveryIds = (deliveries || []).map((delivery) => String(delivery.id));
-  const [attemptsResult, itemsResult, rolesResult] = await Promise.all([
+  const [attemptsResult, itemsResult, teamsResult, teamMembershipsResult] = await Promise.all([
     deliveryIds.length
       ? service.from("catalog_report_delivery_attempts").select("*").eq("organization_id", workspace.organization.id).in("delivery_id", deliveryIds).order("attempt_number", { ascending: false })
       : Promise.resolve({ data: [], error: null }),
     deliveryIds.length
       ? service.from("catalog_report_delivery_items").select("*").eq("organization_id", workspace.organization.id).in("delivery_id", deliveryIds)
       : Promise.resolve({ data: [], error: null }),
-    service.from("roles").select("slug,name,description").eq("organization_id", workspace.organization.id).order("name"),
+    service.from("organization_teams").select("id,slug,name,description,team_type,active")
+      .eq("organization_id", workspace.organization.id).eq("active", true).order("name"),
+    service.from("organization_team_memberships").select("team_id")
+      .eq("organization_id", workspace.organization.id).eq("active", true),
   ]);
-  if (attemptsResult.error || itemsResult.error || rolesResult.error) throw new Error(attemptsResult.error?.message || itemsResult.error?.message || rolesResult.error?.message || "Could not load delivery history.");
+  if (attemptsResult.error || itemsResult.error || teamsResult.error || teamMembershipsResult.error) throw new Error(attemptsResult.error?.message || itemsResult.error?.message || teamsResult.error?.message || teamMembershipsResult.error?.message || "Could not load delivery history.");
   return {
     settings: context.settings,
-    recipientGroups: rolesResult.data || [],
+    recipientTeams: (teamsResult.data || []).map((team) => ({
+      ...team,
+      memberCount: (teamMembershipsResult.data || []).filter((membership) => membership.team_id === team.id).length,
+    })),
     preview: { reportDate: context.reportDate, recipients: context.recipients, rows: context.rows, subject: context.subject },
     deliveries: (deliveries || []).map((delivery) => ({
       ...delivery,
@@ -4843,13 +4962,22 @@ async function updateCatalogHandoffSettingsOperation(request: Request, args: Jso
   const customRecipients = cleanEmails(args.customRecipients);
   if (recipientMode === "custom" && !customRecipients.length) throw new Error("Add at least one custom recipient.");
   const recipientRoleSlug = String(args.recipientRoleSlug || "listing-team").trim().toLowerCase();
-  if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(recipientRoleSlug)) throw new Error("Choose a valid recipient group.");
-  if (recipientMode !== "custom") {
-    const { data: recipientRole, error: recipientRoleError } = await service.from("roles").select("id")
-      .eq("organization_id", workspace.organization.id).eq("slug", recipientRoleSlug).maybeSingle();
-    if (recipientRoleError) throw new Error(recipientRoleError.message);
-    if (!recipientRole) throw new Error("The selected recipient group is not available in this workspace.");
+  if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(recipientRoleSlug)) throw new Error("The legacy recipient fallback is invalid.");
+  let recipientTeamId = String(args.recipientTeamId || "").trim();
+  if (!recipientTeamId && recipientMode !== "custom") {
+    const { data: defaultTeam, error: defaultTeamError } = await service.from("organization_teams").select("id")
+      .eq("organization_id", workspace.organization.id).eq("slug", "marketplace-listing").eq("active", true).maybeSingle();
+    if (defaultTeamError) throw new Error(defaultTeamError.message);
+    recipientTeamId = String(defaultTeam?.id || "");
   }
+  if (recipientTeamId) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(recipientTeamId)) throw new Error("Choose a valid recipient team.");
+    const { data: recipientTeam, error: recipientTeamError } = await service.from("organization_teams").select("id")
+      .eq("organization_id", workspace.organization.id).eq("id", recipientTeamId).eq("active", true).maybeSingle();
+    if (recipientTeamError) throw new Error(recipientTeamError.message);
+    if (!recipientTeam) throw new Error("The selected recipient team is not active in this workspace.");
+  }
+  if (recipientMode !== "custom" && !recipientTeamId) throw new Error("Choose an active recipient team.");
   const row = {
     organization_id: workspace.organization.id,
     enabled: args.enabled !== false,
@@ -4857,6 +4985,7 @@ async function updateCatalogHandoffSettingsOperation(request: Request, args: Jso
     send_local_time: sendLocalTime,
     recipient_mode: recipientMode,
     recipient_role_slug: recipientRoleSlug,
+    recipient_team_id: recipientTeamId || null,
     custom_recipients: customRecipients,
     business_weekdays: businessWeekdays,
     holiday_dates: holidayDates,
@@ -4869,7 +4998,7 @@ async function updateCatalogHandoffSettingsOperation(request: Request, args: Jso
   await service.from("audit_logs").insert({
     organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
     action: "catalog.handoff_settings.updated", resource_type: "catalog_handoff_settings", resource_id: data.id,
-    metadata: { timezone, sendLocalTime, recipientMode, recipientRoleSlug, recipientCount: customRecipients.length, businessWeekdays, holidayDates },
+    metadata: { timezone, sendLocalTime, recipientMode, recipientTeamId: recipientTeamId || null, recipientRoleSlug, recipientCount: customRecipients.length, businessWeekdays, holidayDates },
   });
   return data;
 }
@@ -4902,7 +5031,7 @@ async function sendCatalogHandoffDigestOperation(request: Request, args: JsonRec
   }
   const context = await catalogDigestContext(workspace.organization.id, workspace.organization.name, { handoffIds });
   if (!context.rows.length) throw new Error("No approved, undelivered five-pose packages are ready.");
-  if (!context.recipients.length) throw new Error("No active member in the configured recipient group or custom handoff recipient is available.");
+  if (!context.recipients.length) throw new Error("No active member in the configured recipient team or custom handoff recipient is available.");
   const effectiveReportDate = resendReportDate || context.reportDate;
   const effectiveSubject = `${workspace.organization.name} · ${context.rows.length} approved catalog package${context.rows.length === 1 ? "" : "s"} · ${effectiveReportDate}`;
   const result = await sendTrackedCatalogReport({
@@ -4916,6 +5045,7 @@ async function sendCatalogHandoffDigestOperation(request: Request, args: JsonRec
       workItemIds: context.rows.map((row) => row.workItemId),
       handoffIds: context.rows.map((row) => row.handoffId),
       timezone: context.timezone,
+      recipientTeamId: context.recipientTeamId,
       recipientRoleSlug: context.recipientRoleSlug,
       manual: true,
     },
@@ -5184,6 +5314,7 @@ Deno.serve(async (request) => {
       "admin.createUser": () => createUserOperation(request, args),
       "admin.updateMember": () => updateMemberOperation(request, args),
       "admin.deleteMember": () => deleteMemberOperation(request, args),
+      "admin.upsertTeam": () => upsertOrganizationTeamOperation(request, args),
       "admin.updateRolePermissions": () => updateRolePermissionsOperation(request, args),
       "admin.updateAutomationSettings": () => updateAutomationSettingsOperation(request, args),
       "profile.update": () => updateOwnProfileOperation(request, args),

@@ -12,6 +12,8 @@ const productionTable = await readFile("src/features/planning/catalog-production
 const productionBoard = await readFile("src/features/planning/catalog-production/ProductionBoard.tsx", "utf8");
 const catalogProduction = await readFile("src/features/planning/catalog-production/CatalogProduction.tsx", "utf8");
 const handoffAdmin = await readFile("src/features/planning/catalog-production/HandoffAdmin.tsx", "utf8");
+const admin = await readFile("src/features/admin/Admin.tsx", "utf8");
+const backend = await readFile("src/lib/backend.ts", "utf8");
 const planning = await readFile("src/features/planning/Planning.tsx", "utf8");
 const studio = await readFile("src/features/studio/Studio.tsx", "utf8");
 const history = await readFile("src/features/history/History.tsx", "utf8");
@@ -39,6 +41,9 @@ const stageCodes = [
 for (const stage of stageCodes) assert.match(migration, new RegExp(`'${stage}'`), `Missing workflow stage ${stage}`);
 
 const tenantTables = [
+  "organization_teams",
+  "organization_team_memberships",
+  "organization_member_notification_preferences",
   "catalog_creative_directions",
   "catalog_work_item_assignments",
   "catalog_work_item_comments",
@@ -75,6 +80,12 @@ assert.match(migration, /security assertion failed:[\s\S]*has_table_privilege\('
 assert.match(migration, /enforce_catalog_tenant_relationships[\s\S]*tenant assertion failed/, "Cross-tenant catalog relationships are not guarded and validated");
 assert.match(migration, /notifications_select_current_org[\s\S]*recipient_team[\s\S]*member_roles/, "Role-targeted notification isolation is missing");
 assert.match(migration, /recipient_role_slug text not null default 'listing-team'/, "Configurable handoff recipient group is missing");
+assert.match(migration, /recipient_team_id uuid references public\.organization_teams/, "Handoff settings are not linked to an operational team");
+assert.match(migration, /replace_organization_team_members[\s\S]*upsert_organization_team[\s\S]*revoke all on function public\.upsert_organization_team/, "Atomic service-only team membership administration is missing");
+assert.match(edge, /catalogMemberHandoffEmails[\s\S]*organization_member_notification_preferences[\s\S]*catalog_handoff_email/, "Normalized handoff notification preferences are not enforced");
+assert.match(edge, /catalogTeamRecipients[\s\S]*organization_team_memberships[\s\S]*catalogMemberHandoffEmails/, "Handoff recipients are not resolved from active operational-team memberships");
+assert.match(edge, /updateOwnProfileOperation[\s\S]*organization_member_notification_preferences[\s\S]*onConflict: "organization_id,member_id"/, "Profile updates do not dual-write normalized notification preferences");
+assert.match(edge, /upsertOrganizationTeamOperation[\s\S]*"admin\.upsertTeam"/, "Team administration Edge operation is missing");
 for (const indexName of [
   "catalog_asset_reviews_work_item_fk_idx",
   "catalog_creative_directions_created_by_fk_idx",
@@ -126,8 +137,11 @@ assert.match(edge, /Request changes on the approved pose before starting re-gene
 assert.match(catalogApi, /\.eq\("listing_status", "in_progress"\)[\s\S]*\.not\("listing_sent_at", "is", null\)[\s\S]*\.not\("listing_started_at", "is", null\)/, "Listing completion does not enforce the sent-and-started transition");
 assert.doesNotMatch(productionTable, /listing_status === "pending" && !item\.listing_sent_at/, "Table still exposes Listing Done before handoff/start");
 assert.doesNotMatch(productionBoard, /listing_status === "pending" && !item\.listing_sent_at/, "Kanban still exposes Listing Done before handoff/start");
-assert.match(handoffAdmin, /recipientRoleSlug/, "Handoff administrator cannot choose a recipient group");
+assert.match(handoffAdmin, /recipientTeamId[\s\S]*data\.recipientTeams/, "Handoff administrator cannot choose an operational recipient team");
 assert.match(handoffAdmin, /type="submit"[\s\S]*Save handoff settings/, "Handoff settings save control is not wired to form submission");
+assert.match(admin, /api\.admin\.upsertTeam[\s\S]*tab === "teams"[\s\S]*<TeamEditor/, "Admin console does not provide working team and membership management");
+assert.match(admin, /organization-team-editor-title[\s\S]*role="dialog"|role="dialog"[\s\S]*organization-team-editor-title/, "Team editor is not exposed as an accessible modal dialog");
+assert.match(backend, /upsertTeam: "admin\.upsertTeam"[\s\S]*invokeAppApi\("admin\.upsertTeam"/, "Frontend team mutation is not connected to the Edge API");
 assert.match(catalogProduction, /<ActionDialog[\s\S]*confirmImport/, "Spreadsheet dry-run results are not confirmed in the in-app dialog");
 assert.match(catalogProduction, /planning_batch:planning_batches!planning_batch_id[\s\S]*filters\.batch === "all"[\s\S]*All batches/, "Catalog Production is missing its database-backed batch filter");
 assert.match(actionDialog, /role="dialog"[\s\S]*aria-modal="true"/, "Workflow action dialogs are not exposed accessibly");
