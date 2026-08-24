@@ -3,7 +3,6 @@ import {
   assertThrows,
 } from "jsr:@std/assert@1";
 import {
-  ANALYSIS_VERSION,
   assertSareeGenerationReady,
   normalizeAnalysis,
   sareeAnalysisIssues,
@@ -23,7 +22,6 @@ const rawTruth = {
   pallu: {
     hasDistinctPallu: true,
     startingRegion: "after the body",
-    motifInventory: "peacock and floral field",
     artwork: "dense peacock and floral field",
   },
   pleatZone: { patternBehavior: "body repeat continues" },
@@ -46,16 +44,7 @@ const rawDrapePlan = {
 const posePlan = ["full_front", "angled", "back", "creative", "closeup"].map((
   id,
 ) => ({ id }));
-const references = [
-  { role: "saree_front_drape", storagePath: "org/front.jpg" },
-  { role: "saree_back_drape", storagePath: "org/back.jpg" },
-  { role: "saree_body_detail", storagePath: "org/body.jpg" },
-  { role: "saree_pallu_spread", storagePath: "org/pallu.jpg" },
-];
-
-Deno.test("v14 analysis version invalidates pre-fix Studio and catalog caches", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v14-saree-fidelity");
-});
+const references = [{ role: "front", storagePath: "org/front.jpg" }];
 
 Deno.test("root-level sareeTruth and sareeDrapePlan survive canonical normalization", () => {
   const normalized = normalizeAnalysis({
@@ -69,7 +58,6 @@ Deno.test("root-level sareeTruth and sareeDrapePlan survive canonical normalizat
     "peacock",
     "floral",
   ]);
-  assertEquals(normalized.productIdentity.sareeTruth?.pallu.motifInventory, ["peacock and floral field"]);
   assertEquals(
     normalized.productIdentity.sareeDrapePlan?.baseDrapeFamily,
     "nivi",
@@ -122,7 +110,6 @@ Deno.test("partial saree truth is field-normalized without throwing", () => {
       body: { baseColor: "olive" },
       pallu: null,
       blouse: { hasBlouse: "true" },
-      regionEvidence: [{ region: "lower border", state: "confirmed-absent" }],
     },
     sareeDrapePlan: { shoulderSide: "left" },
   }, "saree");
@@ -133,7 +120,6 @@ Deno.test("partial saree truth is field-normalized without throwing", () => {
   assertEquals(normalized.productIdentity.sareeTruth?.borders.upperBorder, "");
   assertEquals(normalized.productIdentity.sareeTruth?.physics.expectedFall, "");
   assertEquals(normalized.productIdentity.sareeTruth?.blouse.hasBlouse, true);
-  assertEquals(normalized.productIdentity.sareeTruth?.regionEvidence[0]?.state, "confirmed_absent");
   assertEquals(normalized.productIdentity.sareeDrapePlan?.palluSpread, "");
 });
 
@@ -169,17 +155,4 @@ Deno.test("saree generation is blocked before paid work when truth is incomplete
 
 Deno.test("non-saree sessions are not blocked by saree-only preflight", () => {
   assertSareeGenerationReady({ productIdentity: { garmentFamily: "dress" } });
-});
-
-Deno.test("a saree category cannot queue with a non-saree garment family", () => {
-  assertThrows(
-    () => assertSareeGenerationReady({
-      category: "saree",
-      productIdentity: { garmentFamily: "dress" },
-      posePlan,
-      references,
-    }),
-    Error,
-    "Stored saree analysis is incomplete or outdated. Reanalyse the product references before generation.",
-  );
 });

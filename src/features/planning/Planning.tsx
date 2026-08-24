@@ -28,7 +28,7 @@ import { normalizePlan, type StylingPlan } from "../../lib/stylingPlan";
 import { supabase } from "../../lib/supabase";
 import { uploadCatalogAsset } from "../../lib/catalogStorage";
 
-const CATEGORIES = ["ethnic/fusion", "saree", "western/casual", "dress", "formal", "streetwear", "activewear"];
+const CATEGORIES = ["ethnic/fusion", "western/casual", "dress", "formal", "streetwear", "activewear"];
 const ASPECTS = ["3:4", "4:5", "2:3", "9:16", "1:1", "16:9"];
 const dateFmt = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" });
 
@@ -323,7 +323,8 @@ export function Planning() {
     setNotice(null);
     try {
       const referenceId = await uploadRef(role, file, sku, selectedId);
-      await setVariantReferences({ skuId: focusSku, referenceId } as any);
+      const key = role === "front" ? "frontReferenceId" : role === "back" ? "backReferenceId" : role === "fabric_pattern" ? "fabricPatternReferenceId" : "additionalProductReferenceId";
+      await setVariantReferences({ skuId: focusSku, [key]: referenceId } as any);
       notify("success", `${role.replace("_", " ")} saved for ${sku}.`);
     } catch (reason) {
       notify("error", getErrorMessage(reason, "Upload failed."));
@@ -810,20 +811,12 @@ export function Planning() {
                       </div>
                       {canEditReferences && (
                         <div className="mt-3 grid grid-cols-2 gap-2">
-                          {(selected.category === "saree" ? [
-                            ["saree_front_drape", "Full saree front *", focusVariant.sareeFrontDrapeUrl],
-                            ["saree_back_drape", "Rear / back drape *", focusVariant.sareeBackDrapeUrl],
-                            ["saree_pallu_spread", "Pallu spread *", focusVariant.sareePalluSpreadUrl],
-                            ["saree_body_detail", "Body fabric / pattern *", focusVariant.sareeBodyDetailUrl],
-                            ["saree_border_tassels", "Border / tassels", focusVariant.sareeBorderTasselsUrl],
-                            ["saree_blouse_front", "Blouse front", focusVariant.sareeBlouseFrontUrl],
-                            ["saree_blouse_back_piece", "Blouse back / piece", focusVariant.sareeBlouseBackPieceUrl],
-                          ] : [
+                          {[
                             ["front", "Front product *", focusVariant.frontUrl],
                             ["back", "Back product *", focusVariant.backUrl],
                             ["fabric_pattern", "Fabric / pattern", focusVariant.fabricPatternUrl],
                             ["additional_product", "Additional product", focusVariant.additionalProductUrl],
-                          ]).map(([role, label, url]) => (
+                          ].map(([role, label, url]) => (
                             <label key={role as string} className="group cursor-pointer">
                               <div className="relative aspect-[4/3] overflow-hidden rounded-lg border border-outline-variant/40 bg-surface-container-lowest transition group-hover:border-primary/40">
                                 {url ? <img src={url as string} alt={label as string} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center gap-1 px-2 text-center text-[10px] font-semibold text-secondary">{busy === `upload-${role}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <><UploadCloud className="h-4 w-4" /><span>{label}</span></>}</div>}

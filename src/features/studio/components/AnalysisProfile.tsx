@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { AlertTriangle, Aperture, CheckCircle2, ChevronDown, ChevronUp, Loader2, Palette, Shirt, Sparkles } from "lucide-react";
 import type { StudioAnalysis } from "../types";
-import { sareeProfilePresentation } from "../sareeProfilePresentation";
 
 const productFields: Array<[keyof StudioAnalysis["productIdentity"], string]> = [
   ["category", "Category"],
@@ -82,10 +81,11 @@ export function AnalysisProfile({
 }) {
   const [isOpen, setIsOpen] = useState(true);
   const [contextOpen, setContextOpen] = useState(false);
-  const sareeProfile = analysis ? sareeProfilePresentation(analysis.productIdentity) : null;
-  const sareeTruth = sareeProfile?.truth;
-  const sareeDrapePlan = sareeProfile?.drape;
-  const sareeProfileIncomplete = sareeProfile?.incomplete === true;
+  const sareeTruth = analysis?.productIdentity.sareeTruth;
+  const sareeDrapePlan = analysis?.productIdentity.sareeDrapePlan;
+  const sareeProfileIncomplete = analysis?.productIdentity.garmentFamily === "saree" && (
+    !sareeTruth?.body || !sareeTruth?.borders || !sareeTruth?.pallu || !sareeTruth?.physics || !sareeDrapePlan
+  );
 
   return (
     <div className="w-full">
@@ -102,7 +102,7 @@ export function AnalysisProfile({
             <h2 className="text-base font-bold text-on-surface">Scene & styling</h2>
             <p className="mt-0.5 text-xs text-secondary">
               {!ready
-                ? "Upload the required product evidence to start Gemini Vision analysis."
+                ? "Upload front and back images to start Gemini Vision analysis."
                 : analyzing
                   ? "Gemini Vision is locking the product, scene, model, and five-pose plan."
                   : current
@@ -213,14 +213,28 @@ export function AnalysisProfile({
                   {analysis.productIdentity.garmentFamily === "saree" && sareeTruth && (
                     <div>
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold"><Shirt className="h-4 w-4 text-primary" /> Saree Truth</h3>
-                      <ProfileGrid items={sareeProfile.truthItems} />
+                      <ProfileGrid items={[
+                        ["Main Fabric", sareeTruth.body?.mainFabric],
+                        ["Pallu Type", sareeTruth.pallu ? (sareeTruth.pallu.hasDistinctPallu ? "Distinct Pallu" : "Continuous Body") : "Not visible"],
+                        ["Pallu Motif", sareeTruth.pallu?.motifInventory],
+                        ["Border", sareeTruth.borders?.upperBorder],
+                        ["Blouse Piece", sareeTruth.blouse ? (sareeTruth.blouse.hasBlouse ? "Included" : "None") : "Not visible"],
+                        ["Physics", sareeTruth.physics?.expectedFall],
+                      ]} />
                     </div>
                   )}
 
                   {analysis.productIdentity.garmentFamily === "saree" && sareeDrapePlan && (
                     <div>
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold"><Palette className="h-4 w-4 text-primary" /> Saree Drape Plan</h3>
-                      <ProfileGrid items={sareeProfile.drapeItems} />
+                      <ProfileGrid items={[
+                        ["Base Drape", sareeDrapePlan.baseDrapeFamily],
+                        ["Shoulder", sareeDrapePlan.shoulderSide],
+                        ["Pallu Placement", sareeDrapePlan.palluShoulderPlacement],
+                        ["Pallu Style", sareeDrapePlan.openOrPleatedPallu],
+                        ["Pleat Treatment", sareeDrapePlan.frontPleatTreatment],
+                        ["Pallu Spread", sareeDrapePlan.palluSpread],
+                      ]} />
                     </div>
                   )}
 

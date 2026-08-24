@@ -46,34 +46,8 @@ async function fetchPoseImageBlob(jobId: string, pose: any): Promise<Blob> {
 
 function fidelityTone(score: number) {
   if (score >= 95) return "text-success";
-  if (score >= 90) return "text-warning";
-  return "text-danger";
-}
-
-function qaStatusLabel(status: string) {
-  const labels: Record<string, string> = {
-    automatically_verified: "Automatically verified",
-    requires_human_review: "Requires human review",
-    unverified: "Unverified because QA was unavailable",
-    rejected_by_qa: "Rejected by QA",
-    human_approved: "Human approved",
-    human_rejected: "Human rejected",
-    passed: "Automatically verified (legacy)",
-    failed: "Rejected by QA (legacy)",
-  };
-  return labels[status] || "Requires human review";
-}
-
-function qaStatusBanner(status: string) {
-  if (["automatically_verified", "human_approved", "passed"].includes(status)) return "bg-success/90 text-white";
-  if (["rejected_by_qa", "human_rejected", "failed"].includes(status)) return "bg-danger/90 text-white";
-  return "bg-warning/90 text-white";
-}
-
-function qaReviewOutcome(review: any) {
-  const outcome = String(review?.outcome || "");
-  if (outcome && outcome !== "legacy") return outcome;
-  return review?.passed === true ? "automatically_verified" : review?.passed === false ? "rejected_by_qa" : "requires_human_review";
+  if (score >= 88) return "text-on-surface";
+  return "text-warning";
 }
 
 function statusClass(status: string) {
@@ -87,10 +61,8 @@ function statusClass(status: string) {
 
 function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const { data: job, error: _jobError } = useQuery(api.jobs.get, { jobId });
-  const workspace = useWorkspace();
-  const { user } = workspace;
+  const { user } = useWorkspace();
   const regeneratePose = useMutation(api.generation.regeneratePose);
-  const rerunQa = useMutation(api.jobs.rerunQa);
   const [regeneratingId, setRegeneratingId] = useState<Id<"generationPoses"> | null>(null);
   const [isZipping, setIsZipping] = useState(false);
   const [selectedPose, setSelectedPose] = useState<any | null>(null);
@@ -104,23 +76,6 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const [selectedReference, setSelectedReference] = useState<any | null>(null);
   const [downloadingPoseId, setDownloadingPoseId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState("");
-  const [rerunningQaId, setRerunningQaId] = useState<string | null>(null);
-  const [qaRerunNotice, setQaRerunNotice] = useState("");
-
-  const runLatestQa = async (pose: any) => {
-    setRerunningQaId(pose._id);
-    setQaRerunNotice("");
-    try {
-      const result = await rerunQa({ poseId: pose._id });
-      setQaRerunNotice(result.success
-        ? `${qaStatusLabel(result.outcome)} · AI QA estimate ${result.score}%`
-        : `QA remained unavailable. The image and previous QA history were preserved.`);
-    } catch (reason) {
-      setQaRerunNotice(reason instanceof Error ? reason.message : "Could not re-run QA.");
-    } finally {
-      setRerunningQaId(null);
-    }
-  };
 
   // Fetched only when the user opts in — never on expand/render — so browsing History
   // doesn't cost extra Firebase Storage requests for images nobody asked to see.
@@ -353,9 +308,9 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
               </span>
               {/* Delivered without an automatic verdict — it must never be mistaken
                   for a consistency-approved frame. */}
-              {["unverified", "requires_human_review", "rejected_by_qa", "human_approved", "human_rejected"].includes(pose.qaStatus) && pose.outputUrl && (
-                <span className={`absolute inset-x-0 bottom-0 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider ${qaStatusBanner(pose.qaStatus)}`}>
-                  {qaStatusLabel(pose.qaStatus)}
+              {pose.qaStatus === "unverified" && pose.outputUrl && (
+                <span className="absolute inset-x-0 bottom-0 bg-warning/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white">
+                  QA unverified · review
                 </span>
               )}
               {/* A pose rejected by QA never produced an image, so it must stay
@@ -394,7 +349,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             <h4 className="mt-3 text-xs font-semibold text-on-surface">{pose.poseNumber}. {pose.title}</h4>
             {pose.outputUrl && pose.productFidelity > 0 && (
               <p className={`mt-1 text-[10px] font-bold ${fidelityTone(pose.productFidelity)}`}>
-                AI QA estimate {pose.productFidelity}% · {qaStatusLabel(pose.qaStatus)}
+                Product fidelity {pose.productFidelity}%
+                {pose.qaStatus === "unverified" ? " · unverified" : ""}
               </p>
             )}
             {pose.outputUrl && (
@@ -424,20 +380,16 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     <p className="mt-1.5 text-[11px] leading-4 text-secondary">Consistency QA rejected this frame, so it was never added to the set. It is kept here because it was already generated and paid for — check it against the product before using it.</p>
                   </div>
                 )}
-                {(selectedPose.qaStatus || selectedPose.productFidelity > 0 || Object.keys(selectedPose.fidelityScores || {}).length > 0) && (
+                {(selectedPose.productFidelity > 0 || Object.keys(selectedPose.fidelityScores || {}).length > 0) && (
                   <div className="rounded-xl bg-surface-container-lowest p-4">
                     <div className="flex items-baseline justify-between">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">AI QA estimate</p>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Product fidelity</p>
                       <p className={`font-syne text-lg font-bold ${fidelityTone(selectedPose.productFidelity)}`}>{selectedPose.productFidelity}%</p>
                     </div>
-                    {selectedPose.qaStatus === "human_approved" ? (
-                      <p className="mt-1 text-[10px] leading-4 text-success">Human approved. The percentage remains the recorded AI estimate; the approval is the verified decision.</p>
-                    ) : selectedPose.qaStatus === "unverified" ? (
+                    {selectedPose.qaStatus === "unverified" ? (
                       <p className="mt-1 text-[10px] leading-4 text-warning">Automatic QA could not run for this frame, so it was delivered unverified. Check it against the product references yourself.</p>
-                    ) : selectedPose.qaStatus === "requires_human_review" || selectedPose.fidelityReviewRecommended ? (
-                      <p className="mt-1 text-[10px] leading-4 text-warning">This estimate is 90–94 or otherwise uncertain. It requires human review and is not verified.</p>
-                    ) : selectedPose.qaStatus === "rejected_by_qa" || selectedPose.qaStatus === "failed" ? (
-                      <p className="mt-1 text-[10px] leading-4 text-danger">Automatic QA rejected this frame. The paid output remains available for review.</p>
+                    ) : selectedPose.fidelityReviewRecommended ? (
+                      <p className="mt-1 text-[10px] leading-4 text-warning">QA cleared this frame but did not rate it an exact match. Worth comparing against the product references before it goes live.</p>
                     ) : null}
                     {Object.keys(selectedPose.fidelityScores || {}).length > 0 && (
                       <dl className="mt-3 space-y-1.5">
@@ -448,7 +400,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                               <dt className="w-32 shrink-0 truncate text-secondary" title={key}>{key.replace(/_/g, " ")}</dt>
                               <dd className="flex flex-1 items-center gap-2">
                                 <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-container-high">
-                                  <span className={`block h-full rounded-full ${score >= 95 ? "bg-success" : score >= 90 ? "bg-warning" : "bg-danger"}`} style={{ width: `${Math.max(0, Math.min(100, score))}%` }} />
+                                  <span className={`block h-full rounded-full ${score >= 95 ? "bg-success" : score >= 88 ? "bg-primary" : "bg-warning"}`} style={{ width: `${Math.max(0, Math.min(100, score))}%` }} />
                                 </span>
                                 <span className="w-9 shrink-0 text-right font-bold text-on-surface">{score}%</span>
                               </dd>
@@ -457,19 +409,6 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                       </dl>
                     )}
                     {selectedPose.qaReason && <p className="mt-3 text-[10px] leading-4 text-secondary">{selectedPose.qaReason}</p>}
-                    {Array.isArray(selectedPose.qaHistory) && selectedPose.qaHistory.length > 0 && (
-                      <div className="mt-3 border-t border-outline-variant/40 pt-3">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">QA audit history</p>
-                        <div className="mt-2 space-y-2">
-                          {selectedPose.qaHistory.map((review: any) => (
-                            <div key={review.id} className="rounded-lg border border-outline-variant/40 bg-white p-2 text-[10px] leading-4">
-                              <p className="font-bold text-on-surface">{qaStatusLabel(qaReviewOutcome(review))}{String(review.reviewer_type || "").startsWith("human_") ? "" : ` · ${Number(review.score || 0)}%`}</p>
-                              <p className="text-secondary">{review.qa_version || "legacy"} · {review.created_at ? new Date(review.created_at).toLocaleString() : "time unavailable"}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
                 <div className="rounded-xl bg-surface-container-lowest p-4">
@@ -491,13 +430,6 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     {downloadingPoseId === selectedPose._id ? "Downloading…" : "Download image"}
                   </button>
                 )}
-                {workspace.isAdmin && selectedPose.outputUrl && (
-                  <button onClick={() => void runLatestQa(selectedPose)} disabled={rerunningQaId === selectedPose._id} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-white px-4 py-3 font-semibold text-primary hover:bg-primary/5 disabled:opacity-50">
-                    {rerunningQaId === selectedPose._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
-                    Re-run latest QA
-                  </button>
-                )}
-                {qaRerunNotice && <p className="rounded-lg bg-surface-container px-3 py-2 text-[10px] leading-4 text-secondary">{qaRerunNotice}</p>}
                 {rejectedOf(selectedPose).length > 0 && (
                   <div className="rounded-xl border border-outline-variant/40 p-4">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">QA-rejected attempts</p>

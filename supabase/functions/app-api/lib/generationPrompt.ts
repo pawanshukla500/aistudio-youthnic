@@ -4,9 +4,22 @@ import {
   type JsonRecord,
   type StudioPose,
 } from "./profiles.ts";
-import { roleLabel } from "./referencePolicy.ts";
 
 export type PromptReference = { role: string };
+
+export function roleLabel(role: string) {
+  const labels: Record<string, string> = {
+    model_identity: "MODEL FACE REFERENCE - the exact, non-negotiable face and identity for the model in every pose; reproduce it as closely as photographically possible, never invent or beautify a different face. Take ONLY the face, skin tone, hair and body proportions from this image: any garment, colour, print, jewellery or styling visible in it belongs to a different product and must have zero influence on the garment being photographed",
+    front: "FRONT PRODUCT - authoritative front product truth",
+    back: "BACK PRODUCT - authoritative back design and construction",
+    fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority texture, print, embroidery, stitching, trim and construction truth",
+    mannequin: "MANNEQUIN / FLAT-LAY SHOT - authoritative garment truth for this exact garment: on a mannequin or dress form it also sets worn shape, fit, proportion and drape; laid flat it sets outline, construction, panel layout and length only, since flat cloth shows no worn drape. Read the garment from it, never reproduce the mannequin, dress form, hanger, pins, clips or the flat surface itself",
+    additional_product: "ADDITIONAL PRODUCT PHOTO - supporting product truth",
+    approved_pose: "APPROVED POSE 1 - shoot-continuity anchor: reproduce its exact set, backdrop, props, floor, light direction, camera height and colour grade, and the same model and styling; also the model identity anchor only when no MODEL FACE REFERENCE was supplied. In a catalog run this frame may show a DIFFERENT colourway or SKU - take the scene and the model from it and nothing else, never its garment, colour, print or trims",
+    style_reference: "STYLE REFERENCE ONLY - background, composition, mood, lighting and creative direction; never product identity",
+  };
+  return labels[role] || role.toUpperCase();
+}
 
 // Analyses cached before the geometry profiles existed still flow through here,
 // so both readers fall back to the flat legacy fields instead of emitting null.
@@ -81,7 +94,7 @@ ${JSON.stringify(sareeTruth)}
 SAREE DRAPE PLAN:
 ${JSON.stringify(sareeDrapePlan)}` : ""}
 User notes: ${args.productDetails}
-Reference authority: original product images always outrank generated anchors and style references. FRONT controls front construction; BACK solely controls rear construction; FABRIC/PATTERN resolves material and small construction; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion and drape, while a FLAT-LAY resolves outline, construction, panel layout and length only; ADDITIONAL supports product truth; STYLE controls art direction only.${isSaree ? " For sarees, FULL SAREE FRONT and REAR/BACK DRAPE control their complete worn regions; SAREE BODY/WEAVE controls body colour, weave and motif geometry; FULLY SPREAD PALLU alone controls the pallu boundary and artwork; BORDER/TASSELS controls edge geometry and tassel construction; BLOUSE FRONT/BACK controls only the matching blouse region. Never classify or treat the pallu spread as generic body fabric." : ""}
+Reference authority: FRONT controls front construction; BACK solely controls rear construction; FABRIC/PATTERN resolves material and small construction; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion and drape, while a FLAT-LAY resolves outline, construction, panel layout and length only; ADDITIONAL supports product truth; STYLE controls art direction only.
 - Product references may be flat-lay, folded, pinned or shot on a mannequin or dress form. Rebuild the garment as it falls on a live human body, and never render a mannequin, dress form, hanger, clip, pin, prop stand, or the flat background surface in the output.
 ${isSaree ? `- SAREE SPECIFIC RULES: Pallu artwork stays on the pallu, never bleed the border into the main body, do not duplicate the pallu into multiple loose cloth panels, border width stays identical, follow the drape plan explicitly.` : ""}
 
@@ -173,3 +186,5 @@ ${args.correction ? `\nEARLIER ATTEMPTS OF THIS EXACT POSE FAILED CONSISTENCY QA
 
 Product accuracy is more important than style matching. Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
 }
+
+

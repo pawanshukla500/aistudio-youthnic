@@ -36,7 +36,6 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
          qaViewModel = {
             pass: p.qa_payload.pass,
             score: p.qa_payload.score,
-            outcome: p.qa_status || p.qa_payload.outcome,
             failed_checks: p.qa_payload.failed || p.qa_payload.checks || [],
             reason: p.qa_payload.reason,
             correction: p.qa_payload.correction,
@@ -45,7 +44,6 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
          qaViewModel = {
             pass: false,
             score: rejectedData.score,
-            outcome: "rejected_by_qa",
             failed_checks: [],
             reason: rejectedData.reason,
             correction: corrections[i - 1],
@@ -54,7 +52,6 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
          qaViewModel = {
             pass: qa.passed ?? qa.pass,
             score: qa.score,
-            outcome: qa.outcome || (qa.passed ? "automatically_verified" : "rejected_by_qa"),
             failed_checks: qa.issues || qa.failed_checks || [],
             reason: qa.notes || qa.reason,
             correction: qa.correction,

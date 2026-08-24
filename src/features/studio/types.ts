@@ -3,19 +3,7 @@ import type { Id } from "../../lib/backend";
 // the analysis contract, both features, and the editor that renders them.
 import type { StylingPlan as StylingPlanProfile } from "../../lib/stylingPlan";
 
-export type ProductReferenceRole =
-  | "front"
-  | "back"
-  | "fabric_pattern"
-  | "mannequin"
-  | "additional_product"
-  | "saree_front_drape"
-  | "saree_back_drape"
-  | "saree_body_detail"
-  | "saree_pallu_spread"
-  | "saree_border_tassels"
-  | "saree_blouse_front"
-  | "saree_blouse_back_piece";
+export type ProductReferenceRole = "front" | "back" | "fabric_pattern" | "mannequin" | "additional_product";
 // "model_identity" (not "model_reference") to match the existing planning_assets_asset_role_check
 // constraint in Supabase - that value was already reserved there; introducing a different string
 // here would fail the DB insert with a check-constraint violation.
@@ -113,7 +101,7 @@ export type SareeTruthProfile = {
     hasDistinctPallu: boolean;
     startingRegion: string;
     baseColor: string;
-    motifInventory: string[];
+    motifInventory: string;
     motifScale: string;
     motifOrientation: string;
     motifRepeat: string;
