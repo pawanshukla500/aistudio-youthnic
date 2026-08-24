@@ -43,8 +43,12 @@ type WorkflowStage = {
   defaultNextAction: string;
   status: "completed" | "current" | "pending";
   startedAt?: string | null;
+  currentStartedAt?: string | null;
   completedAt?: string | null;
+  completedDurationSeconds?: number;
+  currentVisitDurationSeconds?: number;
   durationSeconds?: number;
+  visitCount?: number;
 };
 type AssetVersion = Record<string, any> & {
   id?: string;
@@ -91,7 +95,7 @@ type WorkflowData = Record<string, any> & {
   assignments: Array<Record<string, any>>;
   actions: Array<{ type: string; label: string; enabled: boolean }>;
   progress: { percent: number; completedPoseCount: number; totalPoseCount: number; currentPose: number; currentStep: string };
-  permissions: { canManage: boolean; canApprove: boolean; canList: boolean; canRegenerate: boolean };
+  permissions: { canManage: boolean; canManageHandoffs: boolean; canApprove: boolean; canGenerate: boolean; canList: boolean; canRegenerate: boolean };
 };
 
 type DownloadedAsset = {
@@ -101,6 +105,12 @@ type DownloadedAsset = {
   base64?: string;
   mimeType?: string;
   error?: string;
+};
+
+type PendingAction = {
+  type: "approve" | "reject" | "retry_generation" | "send_handoff" | "regenerate_pose" | "review_pose";
+  pose?: PoseGroup;
+  decision?: "approved" | "rejected";
 };
 
 const panels = [
@@ -130,6 +140,14 @@ function duration(seconds?: number | null) {
   const minutes = Math.floor((seconds % 3600) / 60);
   const remaining = seconds % 60;
   return [hours ? `${hours}h` : "", minutes ? `${minutes}m` : "", !hours ? `${remaining}s` : ""].filter(Boolean).join(" ");
+}
+
+function elapsedSeconds(start: unknown, end: unknown) {
+  const startMs = typeof start === "number" ? start : Date.parse(String(start || ""));
+  const endMs = typeof end === "number" ? end : Date.parse(String(end || ""));
+  return Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
+    ? Math.max(0, Math.round((endMs - startMs) / 1_000))
+    : 0;
 }
 
 function safeFilename(value: string) {
@@ -174,6 +192,8 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
   const [comment, setComment] = useState("");
   const [expandedPose, setExpandedPose] = useState<number | null>(null);
   const [editingBrief, setEditingBrief] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [actionNotes, setActionNotes] = useState("");
   const [briefDraft, setBriefDraft] = useState({
     priority: data.item.priority || "normal",
     deadlineAt: data.item.deadline_at ? String(data.item.deadline_at).slice(0, 16) : "",
@@ -191,11 +211,21 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
     marketplaceRequirements: data.creativeDirection?.marketplace_requirements || "",
   });
   const item = data.item;
+  const workflowStartedAt = item.request_date || item.created_at;
+  const workflowFinishedAt = item.completed_at || item.listing_completed_at || null;
+  const [clock, setClock] = useState(Date.now());
   const currentStage = data.stages.find((stage) => stage.status === "current");
   const activeAction = data.actions.find((action) => action.enabled);
   const completedPoses = data.poses.filter((pose) => pose.current?.generation_status === "completed").length;
-  const startedAt = item.generation_started_at || item.request_date || item.created_at;
-  const elapsedSeconds = startedAt ? Math.max(0, Math.round((Date.now() - Date.parse(startedAt)) / 1000)) : 0;
+  const packageIsDelivered = Boolean(item.listing_sent_at || ["sent_to_listing_team", "listing_in_progress", "listed"].includes(item.workflow_stage));
+  const workflowElapsedSeconds = elapsedSeconds(workflowStartedAt, workflowFinishedAt || clock);
+  const generationElapsedSeconds = elapsedSeconds(item.generation_started_at, item.generation_completed_at || clock);
+
+  useEffect(() => {
+    if (workflowFinishedAt) return;
+    const timer = window.setInterval(() => setClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [workflowFinishedAt]);
 
   const stageGroups = useMemo(() => {
     const groups = new Map<string, WorkflowStage[]>();
@@ -240,38 +270,59 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
   };
 
   const runWorkflowAction = async (type: string) => {
-    if (type === "approve") {
-      const comments = window.prompt("Optional approval comments for the Listing Team:", "") ?? null;
-      if (comments === null) return;
-      return run("approve", () => invokeAppApi("catalogProduction.reviewQc", { workItemId: item.id, decision: "passed", comments }), "Five-pose set approved and the Listing Team package is ready.");
-    }
-    if (type === "reject") {
-      const comments = window.prompt("Describe exactly what must change before re-generation:", "");
-      if (!comments?.trim()) return;
-      return run("reject", () => invokeAppApi("catalogProduction.reviewQc", { workItemId: item.id, decision: "rejected", comments }), "Re-generation guidance recorded.");
-    }
-    if (type === "retry_generation") {
-      if (!window.confirm(`Retry generation for ${item.sku_name}? Existing approved state will reopen.`)) return;
-      return run("retry", () => invokeAppApi("catalogProduction.bulkGenerate", { workItemIds: [item.id] }), "Generation retry queued.");
-    }
-    if (type === "send_handoff") {
-      if (!window.confirm("Send one consolidated approval handoff for every ready SKU now?")) return;
-      return run("handoff", () => invokeAppApi("catalogProduction.handoffs.send", {}), "Approved packages sent to the Listing Team.");
+    if (["approve", "reject", "retry_generation", "send_handoff"].includes(type)) {
+      setActionNotes("");
+      setPendingAction({ type: type as PendingAction["type"] });
+      return;
     }
     if (type === "start_listing") return run("listing-start", () => invokeAppApi("catalogProduction.startListing", { workItemId: item.id }), "Listing work started.");
     if (type === "complete_listing") return run("listing-done", () => invokeAppApi("catalogProduction.markListingDone", { workItemId: item.id }), "Marketplace listing marked complete.");
   };
 
-  const regeneratePose = async (pose: PoseGroup) => {
+  const regeneratePose = (pose: PoseGroup) => {
     const poseId = pose.current?.generation_id || pose.current?.generationId;
     if (!poseId) return setNotice({ tone: "error", text: "This pose has no generation record to retry." });
-    const instructions = window.prompt(`What should change in Pose ${pose.poseIndex}?`, pose.current?.reviewer_comments || "");
-    if (instructions === null) return;
-    await run(`pose:${pose.poseIndex}`, () => invokeAppApi("catalogProduction.regeneratePose", {
-      workItemId: item.id,
-      poseId,
-      extraInstructions: instructions,
-    }), `Pose ${pose.poseIndex} re-generation queued.`);
+    setActionNotes(pose.current?.reviewer_comments || "");
+    setPendingAction({ type: "regenerate_pose", pose });
+  };
+
+  const reviewPose = (pose: PoseGroup, decision: "approved" | "rejected") => {
+    const assetVersionId = pose.current?.id;
+    if (!assetVersionId) return setNotice({ tone: "error", text: "This pose has no immutable asset version to review." });
+    setActionNotes(pose.current?.reviewer_comments || "");
+    setPendingAction({ type: "review_pose", pose, decision });
+  };
+
+  const actionDialogCopy = (() => {
+    if (!pendingAction) return null;
+    if (pendingAction.type === "approve") return { eyebrow: "Final review", title: "Approve this five-pose set?", description: "The current five pose versions will be frozen into a stable Listing Team package.", confirm: "Approve set", notes: "Optional approval note", required: false, danger: false };
+    if (pendingAction.type === "reject") return { eyebrow: "Quality decision", title: "Request re-generation?", description: "The pending handoff will be invalidated and the generation owner will receive your guidance.", confirm: "Request changes", notes: "Required re-generation guidance", required: true, danger: true };
+    if (pendingAction.type === "retry_generation") return { eyebrow: "Generation retry", title: `Retry ${item.sku_name}?`, description: "The generation will be queued again and downstream approval state will reopen.", confirm: "Queue retry", notes: "", required: false, danger: true };
+    if (pendingAction.type === "send_handoff") return { eyebrow: "Listing Team delivery", title: "Send the consolidated handoff now?", description: "Every currently ready, undelivered five-pose package will be revalidated and included in one tracked email.", confirm: "Send handoff", notes: "", required: false, danger: false };
+    if (pendingAction.type === "regenerate_pose") return { eyebrow: `Pose ${pendingAction.pose?.poseIndex} re-generation`, title: "Describe the required change", description: "A new immutable version will be created; earlier versions remain in history.", confirm: "Queue re-generation", notes: "Re-generation instructions", required: true, danger: true };
+    const rejected = pendingAction.decision === "rejected";
+    return { eyebrow: `Pose ${pendingAction.pose?.poseIndex} review`, title: rejected ? "Request changes to this pose?" : "Approve this pose version?", description: rejected ? "The SKU returns to re-generation and the current pending handoff is invalidated." : "This decision is recorded against the current immutable version.", confirm: rejected ? "Request changes" : "Approve pose", notes: rejected ? "Required reviewer guidance" : "Optional reviewer note", required: rejected, danger: rejected };
+  })();
+
+  const submitPendingAction = async () => {
+    if (!pendingAction || !actionDialogCopy || (actionDialogCopy.required && !actionNotes.trim())) return;
+    let saved = false;
+    if (pendingAction.type === "approve") saved = Boolean(await run("approve", () => invokeAppApi("catalogProduction.reviewQc", { workItemId: item.id, decision: "passed", comments: actionNotes.trim() }), "Five-pose set approved and the Listing Team package is ready."));
+    else if (pendingAction.type === "reject") saved = Boolean(await run("reject", () => invokeAppApi("catalogProduction.reviewQc", { workItemId: item.id, decision: "rejected", comments: actionNotes.trim() }), "Re-generation guidance recorded."));
+    else if (pendingAction.type === "retry_generation") saved = Boolean(await run("retry", () => invokeAppApi("catalogProduction.bulkGenerate", { workItemIds: [item.id] }), "Generation retry queued."));
+    else if (pendingAction.type === "send_handoff") saved = Boolean(await run("handoff", () => invokeAppApi("catalogProduction.handoffs.send", {}), "Approved packages sent to the Listing Team."));
+    else if (pendingAction.type === "regenerate_pose" && pendingAction.pose) {
+      const pose = pendingAction.pose;
+      const poseId = pose.current?.generation_id || pose.current?.generationId;
+      saved = Boolean(await run(`pose:${pose.poseIndex}`, () => invokeAppApi("catalogProduction.regeneratePose", { workItemId: item.id, poseId, extraInstructions: actionNotes.trim() }), `Pose ${pose.poseIndex} re-generation queued.`));
+    } else if (pendingAction.type === "review_pose" && pendingAction.pose && pendingAction.decision) {
+      const pose = pendingAction.pose;
+      saved = Boolean(await run(`review:${pose.poseIndex}`, () => invokeAppApi("catalogProduction.reviewPose", { workItemId: item.id, assetVersionId: pose.current?.id, decision: pendingAction.decision, comments: actionNotes.trim() }), pendingAction.decision === "approved" ? `Pose ${pose.poseIndex} approved.` : `Pose ${pose.poseIndex} rejected with re-generation guidance.`));
+    }
+    if (saved) {
+      setPendingAction(null);
+      setActionNotes("");
+    }
   };
 
   const addComment = async () => {
@@ -365,7 +416,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
               <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-white/65">
                 <span className="inline-flex items-center gap-1.5"><PackageCheck className="h-3.5 w-3.5" /> {currentStage?.title || words(item.workflow_stage)}</span>
                 <span className="inline-flex items-center gap-1.5"><UserRound className="h-3.5 w-3.5" /> {memberName(item.generation_assigned_member)}</span>
-                <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" /> Active {duration(elapsedSeconds)}</span>
+                <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" /> {workflowFinishedAt ? "Total" : "Active"} {duration(workflowElapsedSeconds)}</span>
                 {item.deadline_at && <span className="inline-flex items-center gap-1.5 text-amber-200"><CalendarClock className="h-3.5 w-3.5" /> Due {dateTime(item.deadline_at)}</span>}
               </div>
             </div>
@@ -393,15 +444,20 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
                 <div key={group} className="grid gap-3 lg:grid-cols-[110px_minmax(0,1fr)]">
                   <div className="pt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-secondary">{words(group)}</div>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    {stages.map((stage) => (
+                    {stages.map((stage) => {
+                      const stageDuration = stage.status === "current"
+                        ? Number(stage.completedDurationSeconds || 0) + elapsedSeconds(stage.currentStartedAt || stage.startedAt, clock)
+                        : stage.durationSeconds;
+                      return (
                       <article key={stage.code} className={`relative min-h-36 rounded-2xl border p-4 shadow-lg transition ${stageTone(stage)}`}>
                         {stage.status === "current" && <span className="absolute right-4 top-4 h-2.5 w-2.5 animate-pulse rounded-full bg-primary ring-4 ring-primary/10" />}
                         <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-black/5">{stage.status === "completed" ? <Check className="h-4 w-4 text-emerald-600" /> : stage.status === "current" ? <Zap className="h-4 w-4 text-primary" /> : <Circle className="h-4 w-4 text-outline" />}</div>
                         <p className="mt-3 text-sm font-bold">{stage.title}</p>
                         <p className="mt-1 line-clamp-2 text-[11px] leading-4 opacity-70">{stage.description}</p>
-                        <div className="mt-3 flex items-center justify-between text-[10px] font-semibold opacity-65"><span>{stage.status === "current" ? `Started ${dateTime(stage.startedAt)}` : stage.status === "completed" ? "Completed" : "Waiting"}</span><span>{duration(stage.durationSeconds)}</span></div>
+                        <div className="mt-3 flex items-end justify-between gap-2 text-[10px] font-semibold opacity-65"><span>{stage.status === "current" ? `Started ${dateTime(stage.currentStartedAt || stage.startedAt)}` : stage.status === "completed" ? stage.completedAt ? `Completed ${dateTime(stage.completedAt)}` : "Completed · time not recorded" : "Waiting"}{Number(stage.visitCount || 0) > 1 ? ` · ${stage.visitCount} visits` : ""}</span><span className="shrink-0">{duration(stageDuration)}</span></div>
                       </article>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ))}
@@ -411,14 +467,17 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
           <section className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,.7fr)]">
             <div className="rounded-2xl border border-outline-variant/35 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">Live processing</p><h3 className="mt-1 text-base font-bold text-on-surface">Current execution state</h3></div><Sparkles className="h-5 w-5 text-primary" /></div>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {[
                   ["Current step", data.progress.currentStep || item.next_action || "Waiting", Zap],
                   ["Pose progress", `${data.progress.completedPoseCount}/${data.progress.totalPoseCount}`, ImageIcon],
                   ["Generation owner", memberName(item.generation_assigned_member), UserRound],
                   ["Listing owner", memberName(item.listing_assigned_member), PackageCheck],
+                  ["Generation time", item.generation_started_at ? duration(generationElapsedSeconds) : "Not started", Clock3],
+                  ["Workflow total", workflowStartedAt ? duration(workflowElapsedSeconds) : "Not started", CalendarClock],
                 ].map(([label, value, Icon]) => <div key={String(label)} className="rounded-xl bg-surface-container/55 p-3"><Icon className="h-4 w-4 text-primary" /><p className="mt-3 text-[10px] font-bold uppercase tracking-wide text-secondary">{String(label)}</p><p className="mt-1 truncate text-sm font-bold text-on-surface">{String(value)}</p></div>)}
               </div>
+              <div className="mt-3 grid gap-2 rounded-xl border border-outline-variant/25 bg-surface-container/20 p-3 text-[11px] text-secondary sm:grid-cols-2"><p><span className="font-bold text-on-surface">Workflow started:</span> {dateTime(workflowStartedAt)}</p><p><span className="font-bold text-on-surface">Workflow completed:</span> {workflowFinishedAt ? dateTime(workflowFinishedAt) : "In progress"}</p><p><span className="font-bold text-on-surface">Generation started:</span> {dateTime(item.generation_started_at)}</p><p><span className="font-bold text-on-surface">Generation completed:</span> {item.generation_completed_at ? dateTime(item.generation_completed_at) : item.generation_started_at ? "In progress" : "Not started"}</p></div>
               {item.blocked_reason && <div className="mt-4 flex gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-red-800"><XCircle className="mt-0.5 h-5 w-5 shrink-0" /><div><p className="text-sm font-bold">Workflow blocked</p><p className="mt-1 text-xs leading-5">{item.blocked_reason}</p></div></div>}
               <div className="mt-5 flex flex-wrap gap-2">
                 {data.actions.map((action) => <button key={action.type} disabled={!action.enabled || Boolean(busy)} onClick={() => void runWorkflowAction(action.type)} className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 ${action.type === "reject" || action.type === "retry_generation" ? "border border-red-200 bg-red-50 text-red-700 hover:bg-red-100" : "bg-primary text-white hover:bg-primary/90"}`}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : action.type.includes("retry") || action.type === "reject" ? <RotateCcw className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}{action.label}</button>)}
@@ -441,14 +500,14 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
               const asset = pose.current;
               const open = expandedPose === pose.poseIndex;
               const hasDownloadSource = Boolean(asset && (asset.final_asset_url || asset.original_url || asset.preview_url || asset.storage_path || (asset.generation_id && item.catalog_session_id)));
-              const canRegeneratePose = Boolean(asset?.generation_id && item.catalog_session_id);
+              const canRegeneratePose = Boolean(asset?.generation_id && item.catalog_session_id && item.qc_status !== "passed" && !packageIsDelivered);
               return <article key={pose.poseIndex} className="overflow-hidden rounded-2xl border border-outline-variant/35 bg-white shadow-sm">
                 <div className="grid min-h-64 sm:grid-cols-[190px_minmax(0,1fr)]">
                   <div className="relative bg-[#e9eaf3]">{asset?.preview_url ? <img src={asset.preview_url} alt={`${item.sku_name} pose ${pose.poseIndex}`} className="h-full min-h-64 w-full object-cover" /> : <div className="grid h-full min-h-64 place-items-center text-center text-xs text-secondary"><ImageIcon className="h-7 w-7" /><span>No preview</span></div>}<span className="absolute left-3 top-3 rounded-full bg-[#182033]/85 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur">Pose {pose.poseIndex}</span></div>
                   <div className="flex min-w-0 flex-col p-4">
                     <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold text-on-surface">{pose.title}</p><p className="mt-1 text-[11px] text-secondary">{asset ? `Version ${asset.version_number} · ${dateTime(asset.generated_at)}` : "Awaiting generation"}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-bold capitalize ${asset?.approval_status === "approved" ? "bg-emerald-50 text-emerald-700" : asset?.approval_status === "rejected" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>{words(asset?.approval_status || asset?.generation_status || "not_started")}</span></div>
                     <div className="mt-4 space-y-2 text-[11px]"><p className="flex justify-between gap-3"><span className="text-secondary">Model</span><span className="truncate font-semibold text-on-surface">{asset?.model || data.generationJob?.model || "Not recorded"}</span></p><p className="flex justify-between gap-3"><span className="text-secondary">Versions</span><span className="font-semibold text-on-surface">{pose.versions.length || (asset ? 1 : 0)}</span></p><p className="flex justify-between gap-3"><span className="text-secondary">Review</span><span className="truncate font-semibold text-on-surface">{asset?.reviewer_comments || (asset ? "No reviewer comment" : "Not ready for review")}</span></p></div>
-                    <div className="mt-auto flex flex-wrap gap-2 pt-4">{asset?.preview_url && <a href={asset.final_asset_url || asset.original_url || asset.preview_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-outline-variant px-2.5 py-1.5 text-[11px] font-bold text-secondary"><ExternalLink className="h-3 w-3" /> Open</a>}<button disabled={!hasDownloadSource || Boolean(busy)} onClick={() => void downloadPose(pose)} className="inline-flex items-center gap-1 rounded-lg border border-primary px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-40">{busy === `download:${pose.poseIndex}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} Original</button>{data.permissions.canRegenerate && <button disabled={!canRegeneratePose || Boolean(busy)} onClick={() => void regeneratePose(pose)} className="inline-flex items-center gap-1 rounded-lg bg-surface-container px-2.5 py-1.5 text-[11px] font-bold text-secondary disabled:opacity-40"><RefreshCw className="h-3 w-3" /> Re-generate</button>}</div>
+                    <div className="mt-auto flex flex-wrap gap-2 pt-4">{asset?.preview_url && <a href={asset.final_asset_url || asset.original_url || asset.preview_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-outline-variant px-2.5 py-1.5 text-[11px] font-bold text-secondary"><ExternalLink className="h-3 w-3" /> Open</a>}<button disabled={!hasDownloadSource || Boolean(busy)} onClick={() => void downloadPose(pose)} className="inline-flex items-center gap-1 rounded-lg border border-primary px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-40">{busy === `download:${pose.poseIndex}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} Original</button>{data.permissions.canApprove && !packageIsDelivered && asset?.generation_status === "completed" && <><button disabled={asset.approval_status === "approved" || Boolean(busy)} onClick={() => void reviewPose(pose, "approved")} className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] font-bold text-emerald-700 disabled:opacity-40"><Check className="h-3 w-3" /> Approve pose</button><button disabled={asset.approval_status === "rejected" || Boolean(busy)} onClick={() => void reviewPose(pose, "rejected")} className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700 disabled:opacity-40"><X className="h-3 w-3" /> Request changes</button></>}{data.permissions.canRegenerate && <button title={item.qc_status === "passed" ? "Request changes before re-generating an approved pose" : packageIsDelivered ? "Delivered packages are immutable" : undefined} disabled={!canRegeneratePose || Boolean(busy)} onClick={() => void regeneratePose(pose)} className="inline-flex items-center gap-1 rounded-lg bg-surface-container px-2.5 py-1.5 text-[11px] font-bold text-secondary disabled:opacity-40"><RefreshCw className="h-3 w-3" /> Re-generate</button>}</div>
                   </div>
                 </div>
                 <button onClick={() => setExpandedPose(open ? null : pose.poseIndex)} className="flex w-full items-center justify-between border-t border-outline-variant/25 px-4 py-3 text-xs font-bold text-secondary"><span>Prompt, metadata and version history</span><ChevronDown className={`h-4 w-4 transition ${open ? "rotate-180" : ""}`} /></button>
@@ -485,6 +544,25 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
           </section>
           <section className="rounded-2xl border border-outline-variant/35 bg-white p-5 shadow-sm"><div className="flex items-center gap-2"><Link2 className="h-4 w-4 text-primary" /><h3 className="text-sm font-bold text-on-surface">References and production facts</h3></div><div className="mt-4 space-y-2">{(data.references || []).map((reference: any) => <a key={reference.id} href={reference.image_url || undefined} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-xl border border-outline-variant/25 p-3 transition hover:border-primary/40"><ImageIcon className="h-4 w-4 text-primary" /><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold capitalize text-on-surface">{words(reference.asset_role)}</p><p className="mt-0.5 truncate text-[10px] text-secondary">{reference.storage_path || reference.image_url}</p></div>{reference.image_url && <ExternalLink className="h-3.5 w-3.5 text-secondary" />}</a>)}{!data.references?.length && <p className="rounded-xl border-2 border-dashed border-outline-variant/40 py-8 text-center text-xs text-secondary">No reference metadata is attached.</p>}</div><div className="mt-5 grid grid-cols-2 gap-3 text-xs"><div className="rounded-xl bg-surface-container/45 p-3"><p className="text-secondary">Campaign</p><p className="mt-1 font-bold text-on-surface">{item.campaign_season || data.batch?.campaign_season || "Not set"}</p></div><div className="rounded-xl bg-surface-container/45 p-3"><p className="text-secondary">Marketplaces</p><p className="mt-1 font-bold text-on-surface">{item.marketplaces?.join(", ") || item.portal || "Not set"}</p></div><div className="rounded-xl bg-surface-container/45 p-3"><p className="text-secondary">Model</p><p className="mt-1 font-bold text-on-surface">{data.generationJob?.model || "Not started"}</p></div><div className="rounded-xl bg-surface-container/45 p-3"><p className="text-secondary">Cost</p><p className="mt-1 font-bold text-on-surface">${Number(data.generationJob?.actual_cost_usd || 0).toFixed(3)}</p></div></div></section>
         </main>
+      )}
+
+      {pendingAction && actionDialogCopy && (
+        <div className="fixed inset-0 z-[80] grid place-items-end bg-[#111827]/55 p-0 backdrop-blur-sm sm:place-items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingAction(null); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="catalog-action-title" className="w-full max-w-lg overflow-hidden rounded-t-[28px] border border-white/20 bg-white shadow-[0_30px_100px_rgba(15,23,42,.35)] sm:rounded-[28px]">
+            <div className={`h-1.5 ${actionDialogCopy.danger ? "bg-gradient-to-r from-red-500 via-rose-500 to-orange-400" : "bg-gradient-to-r from-primary via-fuchsia-500 to-amber-400"}`} />
+            <div className="p-5 sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div><p className={`text-[10px] font-bold uppercase tracking-[0.18em] ${actionDialogCopy.danger ? "text-red-600" : "text-primary"}`}>{actionDialogCopy.eyebrow}</p><h2 id="catalog-action-title" className="mt-2 font-syne text-xl font-bold text-on-surface">{actionDialogCopy.title}</h2><p className="mt-2 text-sm leading-6 text-secondary">{actionDialogCopy.description}</p></div>
+                <button type="button" disabled={Boolean(busy)} onClick={() => setPendingAction(null)} aria-label="Close action" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-surface-container text-secondary transition hover:text-on-surface disabled:opacity-40"><X className="h-4 w-4" /></button>
+              </div>
+              {actionDialogCopy.notes && <label className="mt-5 block text-xs font-bold text-secondary">{actionDialogCopy.notes}<textarea autoFocus rows={4} maxLength={4000} value={actionNotes} onChange={(event) => setActionNotes(event.target.value)} placeholder={actionDialogCopy.required ? "Be specific so the next attempt is actionable…" : "Add context for the audit trail…"} className="mt-2 w-full resize-y rounded-2xl border border-outline-variant bg-surface-container/20 px-4 py-3 text-sm font-normal leading-6 text-on-surface outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10" />{actionDialogCopy.required && <span className="mt-1.5 block text-[10px] font-normal text-secondary">Required · {actionNotes.trim().length}/4,000 characters</span>}</label>}
+              <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button type="button" disabled={Boolean(busy)} onClick={() => setPendingAction(null)} className="rounded-xl border border-outline-variant px-4 py-2.5 text-sm font-bold text-secondary transition hover:bg-surface-container disabled:opacity-40">Cancel</button>
+                <button type="button" disabled={Boolean(busy) || (actionDialogCopy.required && !actionNotes.trim())} onClick={() => void submitPendingAction()} className={`inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white shadow-lg transition disabled:cursor-not-allowed disabled:opacity-40 ${actionDialogCopy.danger ? "bg-red-600 shadow-red-200 hover:bg-red-700" : "bg-primary shadow-primary/20 hover:bg-primary/90"}`}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : actionDialogCopy.danger ? <RotateCcw className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}{actionDialogCopy.confirm}</button>
+              </div>
+            </div>
+          </section>
+        </div>
       )}
     </div>
   );

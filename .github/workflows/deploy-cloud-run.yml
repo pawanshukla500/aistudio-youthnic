@@ -26,9 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -46,8 +46,11 @@ jobs:
       - name: Verify catalog workflow contract
         run: node scripts/verify-catalog-workflow-v2.mjs
 
-      - name: Test catalog business calendar
-        run: deno test --frozen supabase/functions/app-api/lib/catalogHandoffCalendar.test.ts
+      - name: Validate live acceptance harness
+        run: node --check scripts/verify-catalog-workflow-live.mjs
+
+      - name: Test catalog workflow utilities
+        run: deno test --frozen supabase/functions/app-api/lib/catalogHandoffCalendar.test.ts supabase/functions/app-api/lib/catalogStageTimeline.test.ts supabase/functions/app-api/lib/catalogRecipientSelection.test.ts
 
       - name: Validate catalog migration SQL
         run: npm run validate:catalog-sql
@@ -80,7 +83,7 @@ jobs:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: supabase/setup-cli@v1
         with:
@@ -108,7 +111,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - id: auth
         uses: google-github-actions/auth@v3
@@ -125,11 +128,11 @@ jobs:
       - name: Create Artifact Registry repository if missing
         run: gcloud artifacts repositories create "$REPOSITORY" --repository-format=docker --location="$REGION" --description="Docker repository" || true
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - id: image
         name: Build and push immutable image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true

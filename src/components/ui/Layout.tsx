@@ -25,10 +25,17 @@ export function Layout() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const updateProfile = useMutation(api.profile.update);
   const memberProfile = membership.profile && typeof membership.profile === "object" ? membership.profile : {};
+  const memberNotificationPreferences = membership.notification_preferences && typeof membership.notification_preferences === "object" ? membership.notification_preferences : {};
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState("");
-  const [profileDraft, setProfileDraft] = useState({ displayName: user.displayName, jobTitle: String(memberProfile.jobTitle || ""), phone: String(memberProfile.phone || "") });
+  const [profileDraft, setProfileDraft] = useState({
+    displayName: user.displayName,
+    jobTitle: String(memberProfile.jobTitle || ""),
+    phone: String(memberProfile.phone || ""),
+    catalogAssignmentsInApp: memberNotificationPreferences.catalog_assignments_in_app !== false,
+    catalogHandoffEmail: memberNotificationPreferences.catalog_handoff_email !== false,
+  });
   const saveProfile = async (event: React.FormEvent) => {
     event.preventDefault();
     setProfileSaving(true);
@@ -124,7 +131,7 @@ export function Layout() {
             </div>
             {(!collapsed || mobileNavOpen) && (
               <>
-                <button onClick={() => { setProfileDraft({ displayName: user.displayName, jobTitle: String(memberProfile.jobTitle || ""), phone: String(memberProfile.phone || "") }); setProfileOpen(true); }} className="min-w-0 flex-1 rounded-lg text-left hover:text-primary" title="Edit your profile">
+                <button onClick={() => { setProfileDraft({ displayName: user.displayName, jobTitle: String(memberProfile.jobTitle || ""), phone: String(memberProfile.phone || ""), catalogAssignmentsInApp: memberNotificationPreferences.catalog_assignments_in_app !== false, catalogHandoffEmail: memberNotificationPreferences.catalog_handoff_email !== false }); setProfileOpen(true); }} className="min-w-0 flex-1 rounded-lg text-left hover:text-primary" title="Edit your profile">
                   <p className="truncate text-xs font-bold text-on-surface">{user.displayName}</p>
                   <p className="truncate text-[10px] text-secondary">{String(memberProfile.jobTitle || roles.map((role) => role.name).join(", ") || "Member")}</p>
                 </button>
@@ -168,6 +175,7 @@ export function Layout() {
               <label className="block text-xs font-bold uppercase tracking-wider text-secondary">Full name<input required minLength={2} maxLength={80} value={profileDraft.displayName} onChange={(event) => setProfileDraft({ ...profileDraft, displayName: event.target.value })} className="mt-2 h-11 w-full rounded-xl border border-outline-variant px-3 text-sm normal-case tracking-normal text-on-surface outline-none focus:border-primary" /></label>
               <label className="block text-xs font-bold uppercase tracking-wider text-secondary">Job title<input maxLength={100} value={profileDraft.jobTitle} onChange={(event) => setProfileDraft({ ...profileDraft, jobTitle: event.target.value })} placeholder="Catalog manager" className="mt-2 h-11 w-full rounded-xl border border-outline-variant px-3 text-sm normal-case tracking-normal text-on-surface outline-none focus:border-primary" /></label>
               <label className="block text-xs font-bold uppercase tracking-wider text-secondary">Phone<input maxLength={30} value={profileDraft.phone} onChange={(event) => setProfileDraft({ ...profileDraft, phone: event.target.value })} placeholder="Optional" className="mt-2 h-11 w-full rounded-xl border border-outline-variant px-3 text-sm normal-case tracking-normal text-on-surface outline-none focus:border-primary" /></label>
+              <fieldset className="rounded-2xl border border-outline-variant/60 p-4"><legend className="px-1 text-xs font-bold uppercase tracking-wider text-secondary">Catalog notifications</legend><label className="mt-1 flex items-start justify-between gap-4 text-sm text-on-surface"><span><span className="block font-semibold">Assignment alerts</span><span className="mt-0.5 block text-xs text-secondary">Show an in-app alert when a generation or listing task is assigned to you.</span></span><input type="checkbox" checked={profileDraft.catalogAssignmentsInApp} onChange={(event) => setProfileDraft({ ...profileDraft, catalogAssignmentsInApp: event.target.checked })} className="mt-1 h-4 w-4 shrink-0 accent-primary" /></label><label className="mt-4 flex items-start justify-between gap-4 border-t border-outline-variant/40 pt-4 text-sm text-on-surface"><span><span className="block font-semibold">Listing handoff email</span><span className="mt-0.5 block text-xs text-secondary">Receive consolidated handoff emails when you belong to the selected operational team.</span></span><input type="checkbox" checked={profileDraft.catalogHandoffEmail} onChange={(event) => setProfileDraft({ ...profileDraft, catalogHandoffEmail: event.target.checked })} className="mt-1 h-4 w-4 shrink-0 accent-primary" /></label></fieldset>
             </div>
             {profileError && <p className="mt-4 rounded-xl bg-danger-surface p-3 text-sm text-danger">{profileError}</p>}
             <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setProfileOpen(false)} className="rounded-xl border border-outline-variant px-4 py-2.5 text-sm font-bold text-secondary">Cancel</button><button disabled={profileSaving} className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{profileSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />}Save profile</button></div>

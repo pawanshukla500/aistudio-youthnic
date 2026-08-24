@@ -15,6 +15,7 @@ export type StudioReference = {
   file: File;
   previewUrl: string;
   uploadedId?: Id<"productReferences">;
+  storageBackend?: "firebase" | "supabase" | "external";
   storagePath?: string;
   downloadUrl?: string;
   hash?: string;

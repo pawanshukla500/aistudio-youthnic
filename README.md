@@ -11,7 +11,8 @@ Convex is no longer a runtime dependency of this application.
 | Responsibility | Service |
 | --- | --- |
 | User sign-in, sessions, account status | Firebase Authentication |
-| Front/back/fabric/style uploads and generated images | Firebase Storage |
+| New front/back/fabric/style uploads and generated images | Private tenant-prefixed Supabase Storage |
+| Historical image compatibility | Firebase Storage dual-read during the checksum migration window |
 | Organizations, RBAC, planning, history, events, notifications, learning | Supabase PostgreSQL |
 | Browser data access and organization isolation | Supabase Data API + PostgreSQL RLS |
 | Secure AI calls, administration, generation workers | Supabase Edge Function `app-api` |
@@ -32,7 +33,7 @@ The frontend sends the current Firebase ID token to Supabase. RLS maps the Fireb
 6. Supabase claims one generation task at a time. Pose 1 becomes the approved visual anchor for poses 2–5, but original product references always remain the highest-priority source of truth.
 7. Each pose is generated with `gpt-image-2`, checked against the product profile and set identity, and retried automatically when QA fails.
 
-Every completed image is uploaded to Firebase Storage before the pose is marked complete. Supabase stores the durable image URL/path, generation status, prompt/QA metadata, provider request ID, reported token usage, and calculated cost. Deleting a job from History removes both its Supabase records and its generated Firebase objects; stopping a job preserves images that already completed.
+Every new completed image is uploaded to the private `catalog-assets` Supabase Storage bucket before the pose is marked complete. Supabase stores the durable object path, generation status, prompt/QA metadata, provider request ID, reported token usage, and calculated cost. Readers mint short-lived signed URLs; historical Firebase paths remain readable and cleanup is backend-aware during migration. Deleting a job from History removes its database records and generated objects from the recorded backend; stopping a job preserves images that already completed.
 
 ## Catalog automation
 

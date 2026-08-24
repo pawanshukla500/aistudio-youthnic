@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Ban, CheckCircle2, Images, Loader2, Sparkles } from "lucide-react";
-import { getDownloadURL, ref as firebaseStorageRef, uploadBytes } from "firebase/storage";
 import { api, useAction, useMutation, useQuery, type Id } from "../../lib/backend";
 import { Button } from "../../components/ui/Button";
+import { ActionDialog } from "../../components/ui/ActionDialog";
 import { useWorkspace } from "../../lib/WorkspaceContext";
-import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
-import { firebaseStorage } from "../../lib/firebase";
+import { uploadCatalogAsset } from "../../lib/catalogStorage";
 import { AnalysisProfile } from "./components/AnalysisProfile";
 import { OutputSettings } from "./components/OutputSettings";
 import { PosePlan } from "./components/PosePlan";
@@ -62,7 +61,6 @@ function validateFile(file: File) {
 
 export function Studio() {
   const { organization, user } = useWorkspace();
-  const { user: firebaseUser } = useFirebaseAuth();
   const analyzeReferences = useAction(api.analysis.analyzeReferences);
   const updateStylingPlan = useMutation(api.styling.updateSessionPlan);
   const queueSku = useMutation(api.generation.queueSku);
@@ -86,6 +84,7 @@ export function Studio() {
   const [analyzing, setAnalyzing] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [stopDialogOpen, setStopDialogOpen] = useState(false);
   const [submittedJobId, setSubmittedJobId] = useState<Id<"generationJobs"> | null>(null);
   const [skuId, setSkuId] = useState("");
   const [skuName, setSkuName] = useState("");
@@ -122,6 +121,20 @@ export function Studio() {
   ].filter(Boolean).join(", ") : "", [analysis]);
   const sceneDirectionValue = sceneDirectionNote || derivedSceneDirection;
   const garmentSummaryValue = garmentSummaryNote || derivedGarmentSummary;
+
+  const stopSubmittedJob = async () => {
+    if (!submittedJobId) return;
+    setStopping(true);
+    try {
+      await cancelJob({ jobId: submittedJobId });
+      setNotice({ tone: "success", text: "Photoshoot cancellation requested. Completed images remain saved.", jobId: submittedJobId });
+      setStopDialogOpen(false);
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not stop this photoshoot." });
+    } finally {
+      setStopping(false);
+    }
+  };
   const analysisInputKey = useMemo(
     () => JSON.stringify({
       references: allReferences.map((reference) => ({
@@ -246,29 +259,21 @@ export function Studio() {
     const inFlight = uploadPromisesRef.current.get(reference.id);
     if (inFlight) return inFlight;
     const promise = (async () => {
-      if (!firebaseUser) throw new Error("Your Firebase session expired. Please sign in again.");
-      const safeFilename = reference.file.name.replace(/[^a-zA-Z0-9._-]+/g, "-");
-      const storagePath = [
-        "users",
-        firebaseUser.uid,
-        "organizations",
-        String(organization._id),
-        "references",
-        effectiveSkuId.replace(/[^a-zA-Z0-9._-]+/g, "-"),
-        reference.role,
-        `${reference.id}-${safeFilename}`,
-      ].join("/");
-      const objectRef = firebaseStorageRef(firebaseStorage, storagePath);
-      const uploaded = await uploadBytes(objectRef, reference.file, {
-        contentType: reference.file.type,
-        customMetadata: {
-          organizationId: String(organization._id),
-          role: reference.role,
-          skuId: effectiveSkuId,
-        },
+      const uploaded = await uploadCatalogAsset({
+        organizationId: String(organization._id),
+        scope: "references",
+        ownerKey: effectiveSkuId,
+        role: reference.role,
+        file: reference.file,
       });
-      const downloadUrl = await getDownloadURL(uploaded.ref);
-      return { ...reference, uploadedId: reference.id, storagePath, downloadUrl, hash: await fileHash(reference.file) };
+      return {
+        ...reference,
+        uploadedId: reference.id,
+        storageBackend: uploaded.storageBackend,
+        storagePath: uploaded.storagePath,
+        downloadUrl: uploaded.downloadUrl,
+        hash: await fileHash(reference.file),
+      };
     })();
     uploadPromisesRef.current.set(reference.id, promise);
     try {
@@ -312,6 +317,7 @@ export function Studio() {
           role: reference.role,
           downloadUrl: reference.downloadUrl,
           storagePath: reference.storagePath,
+          storageBackend: reference.storageBackend,
           hash: reference.hash,
           filename: reference.file.name,
           mimeType: reference.file.type,
@@ -496,7 +502,7 @@ export function Studio() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            {submittedJob && ["queued", "processing"].includes(submittedJob.status) && <button disabled={stopping} onClick={() => { if (!window.confirm("Stop this photoshoot? Completed images will remain saved.")) return; setStopping(true); void cancelJob({ jobId: submittedJobId }).finally(() => setStopping(false)); }} className="flex items-center gap-1.5 rounded-lg border border-warning/30 bg-white px-3 py-2 text-xs font-semibold text-warning disabled:opacity-50">{stopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Stop</button>}
+            {submittedJob && ["queued", "processing"].includes(submittedJob.status) && <button disabled={stopping} onClick={() => setStopDialogOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-warning/30 bg-white px-3 py-2 text-xs font-semibold text-warning disabled:opacity-50">{stopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Stop</button>}
             <Link to="/history" className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-primary underline">View in History</Link>
           </div>
           </div>
@@ -609,6 +615,17 @@ export function Studio() {
       <section className="mt-6 rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all overflow-hidden">
          <PosePlan poses={poses} onChange={setPoses} enabledCount={enabledPoseCount} ready={analysisIsCurrent} stale={analysisIsStale} />
       </section>
+
+      <ActionDialog
+        open={stopDialogOpen}
+        title={`Stop ${submittedJob?.skuName || submittedJob?.skuId || "this photoshoot"}?`}
+        description="The queued or active generation job will be cancelled. Every image already completed remains saved in History."
+        confirmLabel="Stop photoshoot"
+        tone="danger"
+        busy={stopping}
+        onCancel={() => setStopDialogOpen(false)}
+        onConfirm={() => void stopSubmittedJob()}
+      />
     </div>
   );
 }

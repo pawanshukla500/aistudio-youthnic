@@ -3,6 +3,7 @@ import { Download, ExternalLink, FileText, Images, Link2, Loader2, X } from "luc
 import { saveAs } from "file-saver";
 import { invokeAppApi } from "../../../lib/backend";
 import { supabase } from "../../../lib/supabase";
+import { resolveCatalogAssetUrl } from "../../../lib/catalogStorage";
 import { formatDuration, type CatalogWorkItem } from "./types";
 
 type PoseAsset = {
@@ -15,6 +16,7 @@ type PoseAsset = {
   status: string;
   output_url: string;
   storage_path: string;
+  storage_backend?: string;
   qa_status: string;
   updated_at: string;
 };
@@ -24,6 +26,8 @@ type ReferenceAsset = {
   filename?: string;
   downloadUrl?: string;
   storagePath?: string;
+  storageBackend?: string;
+  storageProvider?: string;
 };
 
 type DownloadedAsset = {
@@ -66,7 +70,7 @@ export function AssetViewerModal({ item, onClose }: { item: CatalogWorkItem; onC
       setError("");
       const [posesResult, sessionResult] = await Promise.all([
         supabase.from("session_generations")
-          .select("generation_id,pose_index,title,pose_type,instructions,full_prompt,status,output_url,storage_path,qa_status,updated_at")
+          .select("generation_id,pose_index,title,pose_type,instructions,full_prompt,status,output_url,storage_path,storage_backend,qa_status,updated_at")
           .eq("session_id", item.catalog_session_id || "")
           .order("pose_index"),
         supabase.from("catalog_sessions").select("session_data").eq("session_id", item.catalog_session_id || "").maybeSingle(),
@@ -75,10 +79,24 @@ export function AssetViewerModal({ item, onClose }: { item: CatalogWorkItem; onC
       const requestError = posesResult.error || sessionResult.error;
       if (requestError) setError(requestError.message);
       else {
-        setPoses((posesResult.data || []) as PoseAsset[]);
+        const resolvedPoses = await Promise.all((posesResult.data || []).map(async (pose) => ({
+          ...pose,
+          output_url: await resolveCatalogAssetUrl({ storageBackend: pose.storage_backend, storagePath: pose.storage_path, fallbackUrl: pose.output_url }),
+        })));
         const sessionData = (sessionResult.data?.session_data || {}) as Record<string, unknown>;
-        setReferences(Array.isArray(sessionData.references) ? sessionData.references as ReferenceAsset[] : []);
+        const resolvedReferences = await Promise.all((Array.isArray(sessionData.references) ? sessionData.references as ReferenceAsset[] : []).map(async (reference) => ({
+          ...reference,
+          downloadUrl: await resolveCatalogAssetUrl({
+            storageBackend: reference.storageBackend || reference.storageProvider,
+            storagePath: reference.storagePath,
+            fallbackUrl: reference.downloadUrl,
+          }),
+        })));
+        if (!active) return;
+        setPoses(resolvedPoses as PoseAsset[]);
+        setReferences(resolvedReferences);
       }
+      if (!active) return;
       setLoading(false);
     };
     void load();

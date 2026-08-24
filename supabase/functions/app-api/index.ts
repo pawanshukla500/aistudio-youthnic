@@ -26,9 +26,11 @@ import {
   markListingStarted,
   reconcileExistingGenerations,
   reviewCatalogQc,
+  reviewCatalogPose,
   updateCatalogWorkItem,
 } from "./catalogProduction.ts";
 import { isoWeekday, previousBusinessDate } from "./lib/catalogHandoffCalendar.ts";
+import { selectCatalogRecipients } from "./lib/catalogRecipientSelection.ts";
 
 const SUPABASE_URL = requiredEnv("SUPABASE_URL");
 const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -50,6 +52,113 @@ const service = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+const CATALOG_ASSET_BUCKET = "catalog-assets";
+const CATALOG_ASSET_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
+type CatalogStorageBackend = "firebase" | "supabase" | "external";
+
+function configuredCatalogStorageBackend(): CatalogStorageBackend {
+  const configured = String(Deno.env.get("CATALOG_ASSET_STORAGE_BACKEND") || "supabase").trim().toLowerCase();
+  if (configured === "firebase" || configured === "external") return configured;
+  return "supabase";
+}
+
+function supabaseCatalogPath(orgId: string, requestedPath: string) {
+  const normalized = requestedPath.replace(/^\/+/, "");
+  const legacyPrefix = `organizations/${orgId}/`;
+  const path = normalized.startsWith(legacyPrefix) ? `${orgId}/${normalized.slice(legacyPrefix.length)}` : normalized;
+  if (!path.startsWith(`${orgId}/`) || path.includes("../")) throw new Error("Catalog Storage path is outside the organization prefix.");
+  return path;
+}
+
+async function signCatalogObject(orgId: string, storagePath: string, storageBackend: unknown, fallbackUrl = "") {
+  if (String(storageBackend || "firebase") !== "supabase" || !storagePath) return fallbackUrl;
+  const tenantPath = supabaseCatalogPath(orgId, storagePath);
+  const { data, error } = await service.storage.from(CATALOG_ASSET_BUCKET).createSignedUrl(tenantPath, CATALOG_ASSET_URL_TTL_SECONDS);
+  if (error || !data?.signedUrl) throw new Error(`Could not sign catalog asset: ${error?.message || "no signed URL returned"}`);
+  return data.signedUrl;
+}
+
+async function uploadCatalogObject(args: { orgId: string; storagePath: string; blob: Blob; mimeType: string }) {
+  const backend = configuredCatalogStorageBackend();
+  if (backend === "firebase") {
+    const stored = await uploadFirebaseObject({ storagePath: args.storagePath, blob: args.blob, mimeType: args.mimeType });
+    return { ...stored, storageBackend: "firebase" as const };
+  }
+  if (backend === "external") throw new Error("External catalog asset storage is read-only.");
+  const storagePath = supabaseCatalogPath(args.orgId, args.storagePath);
+  const bucket = service.storage.from(CATALOG_ASSET_BUCKET);
+  const { error } = await bucket.upload(storagePath, args.blob, {
+    contentType: args.mimeType || "image/png",
+    cacheControl: "31536000",
+    upsert: false,
+  });
+  if (error) throw new Error(`Supabase Storage upload failed: ${error.message}`);
+  try {
+    const downloadUrl = await signCatalogObject(args.orgId, storagePath, "supabase");
+    return { downloadUrl, storagePath, storageBackend: "supabase" as const };
+  } catch (error) {
+    await bucket.remove([storagePath]);
+    throw error;
+  }
+}
+
+async function downloadCatalogObject(orgId: string, storagePath: string, storageBackend: unknown, fallbackUrl = "") {
+  const backend = String(storageBackend || "firebase") as CatalogStorageBackend;
+  if (backend === "supabase") {
+    const tenantPath = supabaseCatalogPath(orgId, storagePath);
+    const { data, error } = await service.storage.from(CATALOG_ASSET_BUCKET).download(tenantPath);
+    if (error || !data) throw new Error(`Supabase Storage download failed: ${error?.message || "object unavailable"}`);
+    return data;
+  }
+  if (/^https:\/\//i.test(storagePath)) {
+    const response = await fetch(storagePath);
+    if (!response.ok) throw new Error(`Asset download failed (${response.status}).`);
+    return response.blob();
+  }
+  if (/^http:\/\//i.test(storagePath)) throw new Error("Catalog asset URLs must use HTTPS.");
+  if (backend === "external") {
+    if (!fallbackUrl) throw new Error("External asset URL is unavailable.");
+    const response = await fetch(fallbackUrl);
+    if (!response.ok) throw new Error(`External asset download failed (${response.status}).`);
+    return response.blob();
+  }
+  assertCatalogReferenceOwnership(orgId, { role: "stored_asset", storagePath, storageBackend: "firebase", hash: "", filename: "stored-asset", mimeType: "", size: 0 });
+  return downloadFirebaseObject(storagePath);
+}
+
+async function deleteCatalogObject(orgId: string, storagePath: string, storageBackend: unknown) {
+  if (!storagePath) return;
+  if (String(storageBackend || "firebase") === "supabase") {
+    const tenantPath = supabaseCatalogPath(orgId, storagePath);
+    const { error } = await service.storage.from(CATALOG_ASSET_BUCKET).remove([tenantPath]);
+    if (error) throw new Error(`Supabase Storage deletion failed: ${error.message}`);
+    return;
+  }
+  if (String(storageBackend || "firebase") === "external" || /^https:\/\//i.test(storagePath)) return;
+  if (/^http:\/\//i.test(storagePath)) throw new Error("Catalog asset URLs must use HTTPS.");
+  assertCatalogReferenceOwnership(orgId, { role: "stored_asset", storagePath, storageBackend: "firebase", hash: "", filename: "stored-asset", mimeType: "", size: 0 });
+  await deleteFirebaseObject(storagePath);
+}
+
+function assertCatalogReferenceOwnership(orgId: string, reference: ReferenceInput) {
+  const backend = String(reference.storageBackend || "firebase");
+  const storagePath = String(reference.storagePath || "");
+  const downloadUrl = String(reference.downloadUrl || "");
+  if (backend === "supabase") {
+    if (!storagePath) throw new Error("A Supabase catalog reference must include its private storage path.");
+    supabaseCatalogPath(orgId, storagePath);
+    return;
+  }
+  if (backend === "firebase" && storagePath) {
+    const normalized = storagePath.replace(/^\/+/, "");
+    if (!normalized.includes(`organizations/${orgId}/`) && !normalized.startsWith(`${orgId}/`)) {
+      throw new Error("The Firebase reference path is outside the current organization.");
+    }
+    return;
+  }
+  if (!/^https:\/\//i.test(downloadUrl)) throw new Error("Reference links must use HTTPS.");
+}
+
 async function recordAiRun(args: JsonRecord) {
   const { error } = await service.from("ai_runs").insert(args);
   if (error) console.error(`Failed to record ai_run telemetry: ${error.message}`);
@@ -60,6 +169,7 @@ type ReferenceInput = {
   role: string;
   downloadUrl?: string;
   storagePath?: string;
+  storageBackend?: CatalogStorageBackend;
   hash: string;
   filename: string;
   mimeType: string;
@@ -348,24 +458,25 @@ async function geminiGroundedJson(prompt: string) {
   return { model, raw: data, json: parseJsonResponse(text), citations };
 }
 
-async function loadReference(reference: ReferenceInput): Promise<LoadedReference> {
+async function loadReference(reference: ReferenceInput, orgId: string): Promise<LoadedReference> {
   let blob: Blob | null = null;
-  if (reference.downloadUrl) {
+  assertCatalogReferenceOwnership(orgId, reference);
+  if (reference.storagePath) blob = await downloadCatalogObject(orgId, reference.storagePath, reference.storageBackend, reference.downloadUrl);
+  if (!blob && reference.downloadUrl) {
     const response = await fetch(reference.downloadUrl);
     if (response.ok) blob = await response.blob();
   }
-  if (!blob && reference.storagePath) blob = await downloadFirebaseObject(reference.storagePath);
-  if (!blob) throw new Error(`Could not load ${reference.filename} from Firebase Storage.`);
+  if (!blob) throw new Error(`Could not load ${reference.filename} from catalog asset storage.`);
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const mimeType = reference.mimeType || blob.type || "image/jpeg";
   return { ...reference, mimeType, blob: new Blob([bytes], { type: mimeType }), base64: bytesToBase64(bytes) };
 }
 
-async function loadAvailableReferences(references: ReferenceInput[]): Promise<LoadedReference[]> {
+async function loadAvailableReferences(references: ReferenceInput[], orgId: string): Promise<LoadedReference[]> {
   const loaded: LoadedReference[] = [];
   for (const reference of references) {
     try {
-      loaded.push(await loadReference(reference));
+      loaded.push(await loadReference(reference, orgId));
     } catch (error) {
       if (reference.role === "front" || reference.role === "back") {
         throw new Error(
@@ -486,12 +597,13 @@ async function geminiJson(policy: GeminiPolicy, parts: JsonRecord[], attempt = 1
 async function analyze(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "studio.generate");
   const references = canonicalReferences((Array.isArray(args.references) ? args.references : []) as ReferenceInput[]);
+  const orgId = workspace.organization.id;
+  references.forEach((reference) => assertCatalogReferenceOwnership(orgId, reference));
   if (!references.some((reference) => reference.role === "front")) throw new Error("A front product image is required before analysis.");
   if (!references.some((reference) => reference.role === "back")) throw new Error("A back product image is required before analysis.");
   const pHash = productHash(args);
   const rHash = referenceHash(references);
   const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}`);
-  const orgId = workspace.organization.id;
   // House preference is an analysis input, so it belongs in the cache identity:
   // otherwise a cached plan keeps proposing the styling a stylist corrected, for
   // up to the cache's thirty days. It stays out of the fingerprint on purpose -
@@ -513,7 +625,7 @@ async function analyze(request: Request, args: JsonRecord) {
   }
   const started = Date.now();
   if (!normalized) {
-    const loaded = await loadAvailableReferences(references);
+    const loaded = await loadAvailableReferences(references, orgId);
     const manifest: Array<{ number: number; role: string }> = [];
     const parts: JsonRecord[] = [];
     loaded.forEach((reference, index) => {
@@ -563,16 +675,16 @@ async function analyze(request: Request, args: JsonRecord) {
   const assetRows = references.map((reference) => ({
     organization_id: orgId, planning_request_id: planningRequest.id, sku_name: String(args.skuName || "Untitled studio product"),
     prompt: "", image_url: reference.downloadUrl || "", storage_path: reference.storagePath || "", sku_matched: true,
-    asset_role: reference.role, storage_backend: "firebase", metadata: { hash: reference.hash, filename: reference.filename, mimeType: reference.mimeType, size: reference.size },
+    asset_role: reference.role, storage_backend: reference.storageBackend || "firebase", metadata: { hash: reference.hash, filename: reference.filename, mimeType: reference.mimeType, size: reference.size, storageBackend: reference.storageBackend || "firebase" },
   }));
-  const { data: assets, error: assetError } = await service.from("planning_assets").insert(assetRows).select("id,asset_role,image_url,storage_path,metadata");
+  const { data: assets, error: assetError } = await service.from("planning_assets").insert(assetRows).select("id,asset_role,image_url,storage_path,storage_backend,metadata");
   if (assetError) console.error(assetError.message);
   const sessionId = `session_${crypto.randomUUID()}`;
   const sessionData = {
     skuId: String(args.skuId || requestCode), skuName: String(args.skuName || "Untitled studio product"),
     productDetails: String(args.productDetails || ""), category: String(args.category || "ethnic/fusion"),
     referenceIds: (assets || []).map((asset) => asset.id), references: (assets || []).map((asset) => ({
-      id: asset.id, role: asset.asset_role, downloadUrl: asset.image_url, storagePath: asset.storage_path,
+      id: asset.id, role: asset.asset_role, downloadUrl: asset.image_url, storagePath: asset.storage_path, storageBackend: asset.storage_backend as CatalogStorageBackend,
       hash: String((asset.metadata as JsonRecord)?.hash || ""), filename: String((asset.metadata as JsonRecord)?.filename || `${asset.asset_role}.jpg`),
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     })), productIdentity: normalized.productIdentity, creativeDirection: normalized.creativeDirection,
@@ -1083,7 +1195,7 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
       // approving a plan at this moment must not lose the anchor, and vice versa.
       const { error: anchorError } = await service.rpc("merge_catalog_memory", {
         p_batch_id: batchId,
-        p_patch: { anchorOutputUrl: anchor.output_url, anchorStoragePath: anchor.storage_path, anchorJobId: job.job_id },
+        p_patch: { anchorOutputUrl: anchor.output_url, anchorStoragePath: anchor.storage_path, anchorStorageBackend: anchor.storage_backend || "firebase", anchorJobId: job.job_id },
         p_require_absent: null,
       });
       // Stamping the memory as current after a failed merge would claim an anchor
@@ -1148,9 +1260,10 @@ async function archiveRejectedAttempt(args: {
 }): Promise<JsonRecord | null> {
   try {
     const storagePath = `organizations/${args.job.org_id}/generated/${args.job.job_id}/rejected/${args.pose.pose_index}-attempt-${args.attempt}-${crypto.randomUUID()}.${extensionForMimeType(args.generated.mimeType)}`;
-    const stored = await uploadFirebaseObject({ storagePath, blob: args.generated.blob, mimeType: args.generated.mimeType });
+    const stored = await uploadCatalogObject({ orgId: String(args.job.org_id), storagePath, blob: args.generated.blob, mimeType: args.generated.mimeType });
     return {
       attempt: args.attempt, url: stored.downloadUrl, storagePath: stored.storagePath,
+      storageBackend: stored.storageBackend,
       mimeType: args.generated.mimeType, reason: args.qa.reason, failed: args.qa.failed,
       score: args.qa.score, createdAt: Date.now(),
     };
@@ -1242,7 +1355,10 @@ async function finalizeCancelledJob(job: JsonRecord, message = "Generation cance
 async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
   const inputs = node.inputs as JsonRecord;
   const references = inputs.references as ReferenceInput[];
-  const loaded = await loadAvailableReferences(references);
+  const { data: batch, error: batchError } = await service.from("planning_batches").select("*").eq("id", inputs.batchId).maybeSingle();
+  if (batchError) throw new Error(batchError.message);
+  if (!batch) throw new Error("Catalog batch not found for visual analysis.");
+  const loaded = await loadAvailableReferences(references, String(batch.organization_id));
   
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
@@ -1251,10 +1367,9 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
   });
 
-  const { data: batch, error: batchError } = await service.from("planning_batches").select("*").eq("id", inputs.batchId).maybeSingle();
-  if (batchError) throw new Error(batchError.message);
-  const { data: variant, error: variantError } = await service.from("planning_requests").select("*").eq("id", inputs.variantId).maybeSingle();
+  const { data: variant, error: variantError } = await service.from("planning_requests").select("*").eq("id", inputs.variantId).eq("batch_id", inputs.batchId).maybeSingle();
   if (variantError) throw new Error(variantError.message);
+  if (!variant) throw new Error("Catalog SKU not found for visual analysis.");
   const settings = (batch?.generation_settings || {}) as JsonRecord;
   const category = String(settings.category || variant?.category || "ethnic/fusion");
   const orgId = String(batch?.organization_id || "");
@@ -1513,23 +1628,23 @@ async function processNode(request: Request, args: JsonRecord) {
 
 async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, pose: JsonRecord) {
   const sourceInputs = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
-  const loadedReferences = await loadAvailableReferences(sourceInputs);
+  const loadedReferences = await loadAvailableReferences(sourceInputs, String(job.org_id));
   let { data: anchorPose } = Number(pose.pose_index) > 1
-    ? await service.from("session_generations").select("output_url,storage_path,title").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
+    ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
     : { data: null };
   if (!anchorPose?.output_url && !anchorPose?.storage_path && job.batch_id) {
     const { data: batchRow } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
     const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
     if (memory.anchorOutputUrl || memory.anchorStoragePath) {
-      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), title: "catalog anchor" };
+      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor" };
     }
   }
   const approved: LoadedReference[] = [];
   if (anchorPose?.output_url || anchorPose?.storage_path) {
     const loaded = await loadReference({
-      role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path,
+      role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path, storageBackend: anchorPose.storage_backend as CatalogStorageBackend,
       hash: smallHash(String(anchorPose.output_url || anchorPose.storage_path)), filename: "approved-pose-1", mimeType: "", size: 0,
-    });
+    }, String(job.org_id));
     loaded.filename = `approved-pose-1.${extensionForMimeType(loaded.mimeType)}`;
     approved.push(loaded);
   }
@@ -1607,9 +1722,9 @@ async function processWorker(request: Request, args: JsonRecord) {
   ]);
   const sessionData = session.session_data as JsonRecord;
   const sourceInputs = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
-  const loadedReferences = await loadAvailableReferences(sourceInputs);
+  const loadedReferences = await loadAvailableReferences(sourceInputs, String(job.org_id));
   let { data: anchorPose } = Number(pose.pose_index) > 1
-    ? await service.from("session_generations").select("output_url,storage_path,title").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
+    ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
     : { data: null };
   // A bulk catalog has to look like one shoot day across every colourway, but each
   // SKU is its own session, so pose 1 of SKU 2 had no anchor at all - only text
@@ -1620,7 +1735,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     if (batchRowError) throw new Error(batchRowError.message);
     const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
     if (memory.anchorOutputUrl || memory.anchorStoragePath) {
-      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), title: "catalog anchor" };
+      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor" };
     }
   }
   const approved: LoadedReference[] = [];
@@ -1630,9 +1745,9 @@ async function processWorker(request: Request, args: JsonRecord) {
     // loadReference() falls back to the fetched blob's actual Content-Type.
     // Pose 1 is now stored as JPEG, but could be PNG or WebP for legacy data.
     const loaded = await loadReference({
-      role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path,
+      role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path, storageBackend: anchorPose.storage_backend as CatalogStorageBackend,
       hash: smallHash(String(anchorPose.output_url || anchorPose.storage_path)), filename: "approved-pose-1", mimeType: "", size: 0,
-    });
+    }, String(job.org_id));
     // Update filename to include the correct extension based on resolved MIME type
     loaded.filename = `approved-pose-1.${extensionForMimeType(loaded.mimeType)}`;
     approved.push(loaded);
@@ -1783,12 +1898,12 @@ async function processWorker(request: Request, args: JsonRecord) {
     if (["cancelling", "cancelled"].includes(String(latestJob?.status || ""))) return finalizeCancelledJob(job);
     const safeSku = String((job.job_data as JsonRecord)?.skuId || job.sku_name || "product").replace(/[^a-zA-Z0-9._-]+/g, "-");
     const storagePath = `organizations/${job.org_id}/generated/${job.job_id}/${pose.pose_index}-${safeSku}-${crypto.randomUUID()}.${extensionForMimeType(generated.mimeType)}`;
-    const stored = await uploadFirebaseObject({ storagePath, blob: generated.blob, mimeType: generated.mimeType });
+    const stored = await uploadCatalogObject({ orgId: String(job.org_id), storagePath, blob: generated.blob, mimeType: generated.mimeType });
     const completedAt = new Date().toISOString();
     const usagePatch = accumulatedUsage(pose as JsonRecord, generated.usage, generated.requestId, attemptCost);
     await Promise.all([
       service.from("session_generations").update({
-        status: "completed", output_url: stored.downloadUrl, storage_path: stored.storagePath,
+        status: "completed", output_url: stored.downloadUrl, storage_path: stored.storagePath, storage_backend: stored.storageBackend,
         qa_status: qaUnavailable ? "unverified" : "passed", qa_payload: { ...qa, qaUnavailable },
         error: qaUnavailable ? `Delivered without automatic consistency QA: ${qaUnavailable}`.slice(0, 1000) : "", updated_at: completedAt,
         generation_data: { ...storedPoseData, correction: "", corrections: [], completedAt: Date.now(), mimeType: generated.mimeType },
@@ -1797,7 +1912,7 @@ async function processWorker(request: Request, args: JsonRecord) {
       service.from("planning_assets").insert({
         organization_id: job.org_id, planning_request_id: job.planning_request_id, sku_name: job.sku_name,
         prompt, image_url: stored.downloadUrl, storage_path: stored.storagePath, generation_job_id: job.job_id,
-        sku_matched: true, asset_role: "generated", storage_backend: "firebase",
+        sku_matched: true, asset_role: "generated", storage_backend: stored.storageBackend,
         metadata: {
           poseIndex: pose.pose_index, poseType: pose.pose_type, qa, qaStatus: qaUnavailable ? "unverified" : "passed",
           model: job.model, quality: job.quality,
@@ -1898,7 +2013,12 @@ async function cancelJob(request: Request, args: JsonRecord) {
 }
 
 async function regeneratePose(request: Request, args: JsonRecord, options: { allowManagedCatalog?: boolean } = {}) {
-  const { workspace } = await workspaceFor(request, options.allowManagedCatalog ? "planning.approve" : "studio.generate");
+  const { workspace } = await workspaceFor(request, options.allowManagedCatalog ? undefined : "studio.generate");
+  if (options.allowManagedCatalog && !workspace.isAdmin
+    && !workspace.permissions.includes("planning.approve")
+    && !workspace.permissions.includes("planning.generate_images")) {
+    throw new Error("Permission required: planning.approve or planning.generate_images");
+  }
   const generationId = String(args.poseId || args.generationId || "");
   const { data: pose, error: poseError } = await service.from("session_generations").select("*").eq("generation_id", generationId).single();
   if (poseError) throw new Error(poseError.message);
@@ -1911,7 +2031,7 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
   const extraInstructions = String(args.extraInstructions || "").trim();
   if (extraInstructions.length > 1000) throw new Error("Regeneration instructions must be 1,000 characters or fewer.");
   const history = Array.isArray(pose.regeneration_history) ? pose.regeneration_history as JsonRecord[] : [];
-  await Promise.all([
+  const regenerationResults = await Promise.all([
     service.from("session_generations").update({
       status: "queued", attempt_count: 0, qa_status: "pending", error: "",
       output_url: "", storage_path: "",
@@ -1934,6 +2054,7 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
       metadata: { jobId: job.job_id, poseIndex: pose.pose_index, extraInstructions },
     }),
   ]);
+  assertSupabaseResults(regenerationResults, "Could not queue the pose re-generation");
   scheduleBackground(kickWorker());
   return { success: true };
 }
@@ -1979,23 +2100,28 @@ async function regenerateSession(request: Request, args: JsonRecord) {
 // A pose owns more than its final image: attempts rejected by consistency QA are
 // archived so nothing the organization paid for is destroyed. Ownership checks and
 // deletion therefore have to cover that archive as well as the delivered image.
-function rejectedAttemptPaths(rows: JsonRecord[]) {
+function rejectedAttemptAssets(rows: JsonRecord[]) {
   return rows.flatMap((row) => {
     const data = (row.generation_data || {}) as JsonRecord;
-    return (Array.isArray(data.rejectedAttempts) ? data.rejectedAttempts as JsonRecord[] : []).map((entry) => String(entry.storagePath || ""));
+    return (Array.isArray(data.rejectedAttempts) ? data.rejectedAttempts as JsonRecord[] : []).map((entry) => ({
+      storagePath: String(entry.storagePath || ""),
+      storageBackend: String(entry.storageBackend || row.storage_backend || "firebase"),
+      fallbackUrl: String(entry.url || ""),
+    }));
   });
 }
 
-async function jobImagePaths(job: JsonRecord) {
+async function jobImageAssets(job: JsonRecord) {
   const [{ data: poses }, { data: generatedAssets }] = await Promise.all([
-    service.from("session_generations").select("storage_path,generation_data").eq("session_id", job.session_id),
-    service.from("planning_assets").select("storage_path").eq("generation_job_id", job.job_id).eq("asset_role", "generated"),
+    service.from("session_generations").select("storage_path,storage_backend,generation_data,output_url").eq("session_id", job.session_id),
+    service.from("planning_assets").select("storage_path,storage_backend,image_url").eq("generation_job_id", job.job_id).eq("asset_role", "generated"),
   ]);
-  return new Set([
-    ...(poses || []).map((row) => String(row.storage_path || "")),
-    ...rejectedAttemptPaths((poses || []) as JsonRecord[]),
-    ...(generatedAssets || []).map((row) => String(row.storage_path || "")),
-  ].filter(Boolean));
+  const assets = [
+    ...(poses || []).map((row) => ({ storagePath: String(row.storage_path || ""), storageBackend: String(row.storage_backend || "firebase"), fallbackUrl: String(row.output_url || "") })),
+    ...rejectedAttemptAssets((poses || []) as JsonRecord[]),
+    ...(generatedAssets || []).map((row) => ({ storagePath: String(row.storage_path || ""), storageBackend: String(row.storage_backend || "firebase"), fallbackUrl: String(row.image_url || "") })),
+  ].filter((asset) => asset.storagePath);
+  return [...new Map(assets.map((asset) => [asset.storagePath, asset])).values()];
 }
 
 async function removeJob(request: Request, args: JsonRecord) {
@@ -2006,13 +2132,13 @@ async function removeJob(request: Request, args: JsonRecord) {
   if (!job) throw new Error("Generation job not found.");
   if (["queued", "processing", "cancelling"].includes(job.status)) throw new Error("Cancel the active generation before deleting it.");
   if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid) throw new Error("You can delete only your own generation jobs.");
-  const generatedPaths = [...await jobImagePaths(job)];
+  const generatedAssets = await jobImageAssets(job);
   await service.from("planning_assets").delete().eq("generation_job_id", jobId).eq("asset_role", "generated");
   await service.from("catalog_sessions").delete().eq("session_id", job.session_id);
   await service.from("generation_jobs").delete().eq("job_id", jobId);
-  const deletionResults = await Promise.allSettled(generatedPaths.map(deleteFirebaseObject));
+  const deletionResults = await Promise.allSettled(generatedAssets.map((asset) => deleteCatalogObject(workspace.organization.id, asset.storagePath, asset.storageBackend)));
   const storageDeleteFailures = deletionResults.filter((result) => result.status === "rejected").length;
-  return { success: true, deletedImages: generatedPaths.length - storageDeleteFailures, storageDeleteFailures };
+  return { success: true, deletedImages: generatedAssets.length - storageDeleteFailures, storageDeleteFailures };
 }
 
 // Browsers can render Firebase Storage download URLs directly in <img> tags without any
@@ -2029,9 +2155,10 @@ async function downloadGeneratedAsset(request: Request, args: JsonRecord) {
   const { data: job, error: jobError } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
   if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
-  const allowed = await jobImagePaths(job);
-  if (!allowed.has(storagePath)) throw new Error("This image does not belong to the requested generation job.");
-  const blob = await downloadFirebaseObject(storagePath);
+  const allowed = await jobImageAssets(job);
+  const asset = allowed.find((candidate) => candidate.storagePath === storagePath);
+  if (!asset) throw new Error("This image does not belong to the requested generation job.");
+  const blob = await downloadCatalogObject(workspace.organization.id, storagePath, asset.storageBackend, asset.fallbackUrl);
   return { base64: await blobToBase64(blob), mimeType: blob.type || "image/png" };
 }
 
@@ -2048,11 +2175,12 @@ async function downloadGeneratedAssets(request: Request, args: JsonRecord) {
   const { data: job, error: jobError } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
   if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
-  const allowed = await jobImagePaths(job);
+  const allowed = await jobImageAssets(job);
   const assetResults = await Promise.all(storagePaths.map(async (storagePath) => {
-    if (!allowed.has(storagePath)) return { storagePath, error: "This image does not belong to the requested generation job." };
+    const asset = allowed.find((candidate) => candidate.storagePath === storagePath);
+    if (!asset) return { storagePath, error: "This image does not belong to the requested generation job." };
     try {
-      const blob = await downloadFirebaseObject(storagePath);
+      const blob = await downloadCatalogObject(workspace.organization.id, storagePath, asset.storageBackend, asset.fallbackUrl);
       return { storagePath, base64: await blobToBase64(blob), mimeType: blob.type || "image/png" };
     } catch (error) {
       return { storagePath, error: errorMessage(error) };
@@ -2083,7 +2211,7 @@ async function downloadCatalogProductionAssets(request: Request, args: JsonRecor
   if (workItemError) throw new Error(workItemError.message);
   if (!workItem?.catalog_session_id) throw new Error("This work item has no generated session assets.");
   const { data: poses, error: posesError } = await service.from("session_generations")
-    .select("generation_id,pose_index,title,storage_path,output_url,status")
+    .select("generation_id,pose_index,title,storage_path,storage_backend,output_url,status")
     .eq("session_id", workItem.catalog_session_id)
     .eq("status", "completed")
     .order("pose_index");
@@ -2099,14 +2227,9 @@ async function downloadCatalogProductionAssets(request: Request, args: JsonRecor
     const storagePath = String(pose.storage_path || "");
     const outputUrl = String(pose.output_url || "");
     try {
-      let blob: Blob;
-      if (storagePath && !/^https?:\/\//i.test(storagePath)) {
-        blob = await downloadFirebaseObject(storagePath);
-      } else {
-        const response = await fetch(outputUrl || storagePath);
-        if (!response.ok) throw new Error(`Asset download failed (${response.status}).`);
-        blob = await response.blob();
-      }
+      const blob = storagePath
+        ? await downloadCatalogObject(workspace.organization.id, storagePath, pose.storage_backend, outputUrl)
+        : await downloadCatalogObject(workspace.organization.id, outputUrl, "external", outputUrl);
       return {
         storagePath,
         poseIndex: Number(pose.pose_index || 0),
@@ -2281,19 +2404,21 @@ async function adminOverview(request: Request) {
   const { workspace } = await workspaceFor(request);
   if (!workspace.isAdmin && !workspace.permissions.some((permission) => permission.startsWith("admin."))) throw new Error("You do not have access to the admin console.");
   const orgId = workspace.organization.id;
-  const [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult] = await Promise.all([
+  const [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, teamsResult, teamMembershipsResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult] = await Promise.all([
     service.from("organization_members").select("*").eq("organization_id", orgId).order("display_name"),
     service.from("roles").select("*").eq("organization_id", orgId).order("name"),
     service.from("permissions").select("*").order("module").order("key"),
     service.from("role_permissions").select("*"),
     service.from("member_roles").select("*"),
+    service.from("organization_teams").select("*").eq("organization_id", orgId).order("active", { ascending: false }).order("name"),
+    service.from("organization_team_memberships").select("*").eq("organization_id", orgId),
     service.from("audit_logs").select("*").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(30),
     service.from("event_automation_settings").select("*").eq("organization_id", orgId).maybeSingle(),
     service.from("event_email_deliveries").select("*").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(10),
     service.from("openai_usage_daily").select("usage_date,image_count,request_count,actual_cost_usd,synced_at").eq("organization_id", orgId).order("usage_date", { ascending: false }).limit(100),
     service.from("ai_runs").select("job_id, session_id, pose_index, run_kind, provider, model, input_tokens, output_tokens, cost_usd, created_at").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(200),
   ]);
-  for (const result of [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult]) if (result.error) throw new Error(result.error.message);
+  for (const result of [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, teamsResult, teamMembershipsResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult]) if (result.error) throw new Error(result.error.message);
   const permissions = permissionsResult.data || [];
   const roles = (rolesResult.data || []).map((role) => ({
     ...role,
@@ -2303,6 +2428,19 @@ async function adminOverview(request: Request) {
     ...member,
     user: { id: member.id, firebaseUid: member.firebase_uid, email: member.email, name: member.display_name, displayName: member.display_name, status: member.status },
     roles: (memberRolesResult.data || []).filter((link) => link.member_id === member.id).map((link) => roles.find((role) => role.id === link.role_id)).filter(Boolean),
+  }));
+  const teams = (teamsResult.data || []).map((team) => ({
+    ...team,
+    memberships: (teamMembershipsResult.data || [])
+      .filter((membership) => membership.team_id === team.id && membership.active)
+      .map((membership) => ({
+        ...membership,
+        member: members.find((member) => member.id === membership.member_id) || null,
+      }))
+      .sort((left, right) => {
+        if (left.membership_role !== right.membership_role) return left.membership_role === "lead" ? -1 : 1;
+        return String(left.member?.display_name || "").localeCompare(String(right.member?.display_name || ""));
+      }),
   }));
   return {
     capabilities: {
@@ -2316,7 +2454,7 @@ async function adminOverview(request: Request) {
       openaiAdminConfigured: Boolean(Deno.env.get("OPENAI_ADMIN_KEY")), emailConfigured: Boolean(Deno.env.get("RESEND_API_KEY") && Deno.env.get("RESEND_FROM")),
       memberCount: members.length, settingsCount: automationResult.data ? 1 : 0,
     },
-    members, roles, permissions, recentAuditLogs: auditsResult.data || [],
+    members, roles, teams, permissions, recentAuditLogs: auditsResult.data || [],
     automationSettings: automationResult.data,
     recentEventDeliveries: deliveriesResult.data || [],
     openaiUsage: {
@@ -2334,6 +2472,62 @@ async function ensureRoles(orgId: string, roleIds: string[]) {
   const { data: roles, error } = await service.from("roles").select("*").eq("organization_id", orgId).in("id", roleIds);
   if (error || !roles || roles.length !== new Set(roleIds).size) throw new Error("One or more selected roles are invalid.");
   return roles;
+}
+
+async function upsertOrganizationTeamOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "admin.users.manage");
+  const orgId = workspace.organization.id;
+  const teamId = String(args.teamId || "").trim();
+  const name = String(args.name || "").trim().replace(/\s+/g, " ");
+  const description = String(args.description || "").trim().slice(0, 500);
+  const teamType = ["planning", "generation", "review", "listing", "general"].includes(String(args.teamType))
+    ? String(args.teamType)
+    : "general";
+  const active = args.active !== false;
+  const memberIds = [...new Set((Array.isArray(args.memberIds) ? args.memberIds : []).map(String).filter(Boolean))];
+  const requestedLeadMemberId = String(args.leadMemberId || "").trim();
+  const leadMemberId = active && requestedLeadMemberId ? requestedLeadMemberId : null;
+  if (name.length < 2 || name.length > 100) throw new Error("Team name must contain between 2 and 100 characters.");
+  if (teamId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(teamId)) throw new Error("Choose a valid organization team.");
+  if (leadMemberId && !memberIds.includes(leadMemberId)) throw new Error("The team lead must also be selected as a team member.");
+
+  let slug = slugify(name).slice(0, 80).replace(/-+$/g, "");
+  if (!slug) throw new Error("Team name must contain at least one letter or number.");
+  if (teamId) {
+    const { data: current, error: currentError } = await service.from("organization_teams")
+      .select("id,slug,is_system").eq("organization_id", orgId).eq("id", teamId).maybeSingle();
+    if (currentError) throw new Error(currentError.message);
+    if (!current) throw new Error("Organization team not found.");
+    if (current.is_system && !active) throw new Error("Built-in workflow teams cannot be archived.");
+    slug = String(current.slug);
+  }
+
+  const effectiveMemberIds = active ? memberIds : [];
+  if (effectiveMemberIds.length) {
+    const { data: members, error: membersError } = await service.from("organization_members")
+      .select("id").eq("organization_id", orgId).eq("status", "active").in("id", effectiveMemberIds);
+    if (membersError) throw new Error(membersError.message);
+    if ((members || []).length !== effectiveMemberIds.length) throw new Error("Every team member must be active in this workspace.");
+  }
+
+  const { data: savedTeamId, error } = await service.rpc("upsert_organization_team", {
+    p_organization_id: orgId,
+    p_team_id: teamId || null,
+    p_name: name,
+    p_slug: slug,
+    p_description: description,
+    p_team_type: teamType,
+    p_active: active,
+    p_member_ids: effectiveMemberIds,
+    p_lead_member_id: leadMemberId,
+    p_actor_member_id: workspace.member.id,
+    p_actor_email: workspace.user.email,
+  });
+  if (error) {
+    if (error.code === "23505") throw new Error("A team with this name already exists in the workspace.");
+    throw new Error(error.message);
+  }
+  return { success: true, teamId: String(savedTeamId), memberCount: effectiveMemberIds.length };
 }
 
 async function countActiveAdmins(orgId: string) {
@@ -2456,23 +2650,42 @@ async function updateOwnProfileOperation(request: Request, args: JsonRecord) {
   const jobTitle = String(args.jobTitle || "").trim().slice(0, 100);
   const phone = String(args.phone || "").trim().slice(0, 30);
   if (displayName.length < 2 || displayName.length > 80) throw new Error("Your name must contain between 2 and 80 characters.");
-  const { data: member, error } = await service.from("organization_members").select("profile").eq("id", workspace.member.id).eq("organization_id", workspace.organization.id).single();
+  const { data: member, error } = await service.from("organization_members").select("profile,notification_preferences").eq("id", workspace.member.id).eq("organization_id", workspace.organization.id).single();
   if (error || !member) throw new Error("Your organization profile could not be loaded.");
   const currentProfile = member.profile && typeof member.profile === "object" ? member.profile as JsonRecord : {};
-  const [, memberUpdate, auditInsert] = await Promise.all([
+  const currentNotifications = member.notification_preferences && typeof member.notification_preferences === "object" ? member.notification_preferences as JsonRecord : {};
+  const notificationPreferences = {
+    ...currentNotifications,
+    catalog_assignments_in_app: args.catalogAssignmentsInApp !== false,
+    catalog_handoff_email: args.catalogHandoffEmail !== false,
+  };
+  const updatedAt = new Date().toISOString();
+  const [, memberUpdate, preferenceUpdate, auditInsert] = await Promise.all([
     updateFirebaseUser({ uid: workspace.user.firebaseUid, displayName }),
     service.from("organization_members").update({
-      display_name: displayName, profile: { ...currentProfile, jobTitle, phone }, updated_at: new Date().toISOString(),
+      display_name: displayName,
+      profile: { ...currentProfile, jobTitle, phone },
+      notification_preferences: notificationPreferences,
+      updated_at: updatedAt,
     }).eq("id", workspace.member.id).eq("organization_id", workspace.organization.id),
+    service.from("organization_member_notification_preferences").upsert({
+      organization_id: workspace.organization.id,
+      member_id: workspace.member.id,
+      catalog_assignments_in_app: notificationPreferences.catalog_assignments_in_app,
+      catalog_handoff_email: notificationPreferences.catalog_handoff_email,
+      updated_by_member_id: workspace.member.id,
+      updated_at: updatedAt,
+    }, { onConflict: "organization_id,member_id" }),
     service.from("audit_logs").insert({
       organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
       action: "profile.updated", resource_type: "organization_member", resource_id: workspace.member.id,
-      metadata: { changed: ["displayName", "jobTitle", "phone"] },
+      metadata: { changed: ["displayName", "jobTitle", "phone", "catalogAssignmentsInApp", "catalogHandoffEmail"] },
     }),
   ]);
   if (memberUpdate.error) throw new Error(memberUpdate.error.message);
+  if (preferenceUpdate.error) throw new Error(preferenceUpdate.error.message);
   if (auditInsert.error) throw new Error(auditInsert.error.message);
-  return { success: true, displayName, jobTitle, phone };
+  return { success: true, displayName, jobTitle, phone, notificationPreferences };
 }
 
 async function deleteMemberOperation(request: Request, args: JsonRecord) {
@@ -2527,19 +2740,50 @@ async function catalogBatch(workspace: Awaited<ReturnType<typeof workspaceFor>>[
   return data as JsonRecord;
 }
 
+async function assertActiveCatalogMembers(orgId: string, memberIds: unknown[]) {
+  const uniqueIds = [...new Set(memberIds.map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!uniqueIds.length) return;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (uniqueIds.some((id) => !uuid.test(id))) throw new Error("One or more selected catalog owners are invalid.");
+  const { data, error } = await service.from("organization_members").select("id")
+    .eq("organization_id", orgId).eq("status", "active").in("id", uniqueIds);
+  if (error) throw new Error(error.message);
+  if ((data || []).length !== uniqueIds.length) throw new Error("Every catalog owner must be an active member of this workspace.");
+}
+
+async function assertCatalogEvent(orgId: string, eventId: unknown) {
+  const id = String(eventId || "").trim();
+  if (!id) return;
+  const { data, error } = await service.from("marketing_events").select("id")
+    .eq("id", id).eq("organization_id", orgId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("The selected campaign event does not belong to this workspace.");
+}
+
+function optionalCatalogTimestamp(value: unknown, label: string) {
+  if (value === null || value === undefined || value === "") return null;
+  const raw = typeof value === "number" || /^\d+$/.test(String(value)) ? Number(value) : String(value);
+  const date = new Date(raw);
+  if (!Number.isFinite(date.getTime())) throw new Error(`${label} must be a valid date and time.`);
+  return date.toISOString();
+}
+
 // Best-effort cleanup for the batch-level reference entries mutate_planning_batch_reference_images
 // just replaced or removed from planning_batches.reference_images. A failure here never rolls
 // back or blocks the reference-image update that already committed - it only leaves an orphaned
-// Firebase Storage object, the same tolerance removeJob() already applies to generated images.
-// deleteFirebaseObject() itself tolerates a 404 (already-gone object), so this is safe to call
-// even if the same path was already cleaned up by a concurrent request.
-async function cleanupOrphanedBatchReferences(removed: unknown) {
+// object. Existing Firebase references and new Supabase references share this cleanup path.
+async function cleanupOrphanedBatchReferences(orgId: string, removed: unknown) {
   const entries = Array.isArray(removed) ? removed as JsonRecord[] : [];
-  const paths = [...new Set(entries.map((entry) => String(entry.storagePath || entry.storage_path || "")).filter(Boolean))];
-  if (!paths.length) return;
-  const results = await Promise.allSettled(paths.map(deleteFirebaseObject));
+  const assetsByPath = new Map<string, { storagePath: string; storageBackend: string }>();
+  for (const entry of entries) {
+    const storagePath = String(entry.storagePath || entry.storage_path || "");
+    if (storagePath) assetsByPath.set(storagePath, { storagePath, storageBackend: String(entry.storageProvider || entry.storageBackend || entry.storage_backend || "firebase") });
+  }
+  const assets = [...assetsByPath.values()];
+  if (!assets.length) return;
+  const results = await Promise.allSettled(assets.map((asset) => deleteCatalogObject(orgId, asset.storagePath, asset.storageBackend)));
   const failures = results.filter((result) => result.status === "rejected").length;
-  if (failures) console.warn(`Could not delete ${failures} orphaned catalog reference object(s) from Firebase Storage.`);
+  if (failures) console.warn(`Could not delete ${failures} orphaned catalog reference object(s) from catalog storage.`);
 }
 
 async function saveReferenceOperation(request: Request, args: JsonRecord) {
@@ -2547,11 +2791,15 @@ async function saveReferenceOperation(request: Request, args: JsonRecord) {
   if (!hasAnyPermission(workspace, ["studio.generate", "planning.manage"])) throw new Error("You do not have permission to upload product references.");
   const batchId = String(args.catalogId || "");
   const role = String(args.role || "reference");
+  const storageProvider = ["firebase", "supabase", "external"].includes(String(args.storageProvider))
+    ? String(args.storageProvider) as CatalogStorageBackend
+    : "firebase";
   const reference = {
     id: crypto.randomUUID(), role, downloadUrl: String(args.downloadUrl || ""), storagePath: String(args.storagePath || ""),
     hash: String(args.hash || ""), filename: String(args.filename || "reference.jpg"), mimeType: String(args.mimeType || "image/jpeg"),
-    size: Number(args.size || 0), storageProvider: String(args.storageProvider || "firebase"),
+    size: Number(args.size || 0), storageProvider,
   };
+  assertCatalogReferenceOwnership(workspace.organization.id, { ...reference, storageBackend: storageProvider });
   if (!batchId) return reference.id;
   await catalogBatch(workspace, batchId); // Org-scoped access check; throws if not found/accessible.
   // Batch-level shared references (visible to every variant in the catalog, not tied to one
@@ -2566,7 +2814,7 @@ async function saveReferenceOperation(request: Request, args: JsonRecord) {
       p_batch_id: batchId, p_add: reference, p_replace_role: role === "model_identity" ? "model_identity" : null, p_remove_id: null,
     });
     if (error) throw new Error(error.message);
-    scheduleBackground(cleanupOrphanedBatchReferences(removed));
+    scheduleBackground(cleanupOrphanedBatchReferences(workspace.organization.id, removed));
     // The batch memory holds the scene, model and anchor frame derived from the
     // previous references, and applyCatalogMemory replays it over every later
     // analysis. Leaving it in place is why uploading a new reference appeared to
@@ -2584,7 +2832,7 @@ async function saveReferenceOperation(request: Request, args: JsonRecord) {
   const { data: asset, error } = await service.from("planning_assets").insert({
     organization_id: workspace.organization.id, planning_request_id: planningRequest.id, sku_name: String(args.skuId || ""), prompt: "",
     image_url: reference.downloadUrl, storage_path: reference.storagePath, sku_matched: true, asset_role: role,
-    storage_backend: "firebase", metadata: reference,
+    storage_backend: reference.storageProvider, metadata: reference,
   }).select("id").single();
   if (error || !asset) throw new Error(error?.message || "Could not save the product reference.");
   return asset.id;
@@ -2594,7 +2842,13 @@ async function createCatalogOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const name = String(args.name || "").trim();
   if (!name) throw new Error("A catalog name is required.");
+  await Promise.all([
+    assertActiveCatalogMembers(workspace.organization.id, [args.generationAssignedMemberId, args.listingAssignedMemberId]),
+    assertCatalogEvent(workspace.organization.id, args.eventId),
+  ]);
   const now = new Date().toISOString();
+  const deadlineAt = optionalCatalogTimestamp(args.deadlineAt, "Listing deadline");
+  const preferredGenerationAt = optionalCatalogTimestamp(args.preferredGenerationAt, "Preferred generation time");
   const generationSettings = {
     modelDirection: String(args.modelDirection || ""), sceneDirection: String(args.sceneDirection || ""),
     category: String(args.category || "ethnic/fusion"), aspectRatio: String(args.aspectRatio || "3:4"),
@@ -2604,14 +2858,14 @@ async function createCatalogOperation(request: Request, args: JsonRecord) {
     poseDirection: String(args.poseDirection || ""),
     marketplaceRequirements: String(args.marketplaceRequirements || ""),
     marketplaces: Array.isArray(args.marketplaces) ? args.marketplaces.map(String).filter(Boolean).slice(0, 20) : [],
-    specialInstructions: String(args.specialInstructions || ""), deadlineAt: args.deadlineAt ? new Date(String(args.deadlineAt)).toISOString() : null,
+    specialInstructions: String(args.specialInstructions || ""), deadlineAt,
     listingAssignedMemberId: args.listingAssignedMemberId || null,
   };
   const { data, error } = await service.from("planning_batches").insert({
     organization_id: workspace.organization.id, batch_code: `CAT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, name,
     total_skus: 0, generated_count: 0, pending_count: 0, failed_count: 0, status: "active", created_by_member_id: workspace.member.id,
     catalog_key: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), queue_status: "idle",
-    campaign_season: String(args.campaign || ""), scheduled_at: args.preferredGenerationAt ? new Date(Number(args.preferredGenerationAt)).toISOString() : null,
+    campaign_season: String(args.campaign || ""), scheduled_at: preferredGenerationAt,
     schedule_status: "none", source_event_id: args.eventId || null, event_id: args.eventId || null, generation_settings: generationSettings,
     priority: ["low", "normal", "high", "urgent"].includes(String(args.priority)) ? String(args.priority) : "normal",
     assigned_member_id: args.generationAssignedMemberId || null,
@@ -2627,17 +2881,29 @@ async function bulkAddVariantsOperation(request: Request, args: JsonRecord) {
   const batch = await catalogBatch(workspace, batchId);
   const variants = Array.isArray(args.variants) ? args.variants as JsonRecord[] : [];
   if (!variants.length) return { created: 0 };
+  if (variants.length > 1_000) throw new Error("A catalog can add at most 1,000 SKUs in one request.");
   const { data: existing, error: existingError } = await service.from("planning_requests").select("sku_name").eq("batch_id", batchId);
-  if (existingError) console.error(existingError.message);
+  if (existingError) throw new Error(existingError.message);
   const existingSkus = new Set((existing || []).map((row) => String(row.sku_name).toLowerCase()));
-  const clean = variants.filter((variant) => String(variant.sku || "").trim() && !existingSkus.has(String(variant.sku).trim().toLowerCase()));
+  const clean: JsonRecord[] = [];
+  for (const variant of variants) {
+    const sku = String(variant.sku || "").trim();
+    const normalizedSku = sku.toLowerCase();
+    if (!sku || existingSkus.has(normalizedSku)) continue;
+    existingSkus.add(normalizedSku);
+    clean.push(variant);
+  }
   if (!clean.length) return { created: 0 };
   const basePosition = existing?.length || 0;
   const settings = (batch.generation_settings || {}) as JsonRecord;
   const defaultPriority = ["low", "normal", "high", "urgent"].includes(String(args.priority || batch.priority)) ? String(args.priority || batch.priority) : "normal";
   const defaultAssignee = args.generationAssignedMemberId || batch.assigned_member_id || null;
+  await assertActiveCatalogMembers(workspace.organization.id, [
+    defaultAssignee,
+    ...clean.map((variant) => variant.generationAssignedMemberId),
+  ]);
   const defaultNotes = String(args.specialInstructions || settings.specialInstructions || "");
-  const deadlineAt = args.deadlineAt || settings.deadlineAt;
+  const deadlineAt = optionalCatalogTimestamp(args.deadlineAt || settings.deadlineAt, "Listing deadline");
   const { error } = await service.from("planning_requests").insert(clean.map((variant, index) => ({
     organization_id: workspace.organization.id, created_by_member_id: workspace.member.id, batch_id: batchId,
     sku_name: String(variant.sku).trim(), color_label: String(variant.colorLabel || ""), product_description: "",
@@ -2646,7 +2912,7 @@ async function bulkAddVariantsOperation(request: Request, args: JsonRecord) {
     priority: ["low", "normal", "high", "urgent"].includes(String(variant.priority)) ? String(variant.priority) : defaultPriority,
     assigned_member_id: variant.generationAssignedMemberId || defaultAssignee,
     notes: String(variant.specialInstructions || defaultNotes),
-    expected_shoot_date: deadlineAt ? new Date(String(deadlineAt)).toISOString().slice(0, 10) : null,
+    expected_shoot_date: deadlineAt ? deadlineAt.slice(0, 10) : null,
   })));
   if (error) throw new Error(error.message);
   const total = basePosition + clean.length;
@@ -2731,7 +2997,7 @@ async function removeCatalogStyleReferenceOperation(request: Request, args: Json
     p_batch_id: catalogId, p_add: null, p_replace_role: null, p_remove_id: referenceId,
   });
   if (error) throw new Error(error.message);
-  scheduleBackground(cleanupOrphanedBatchReferences(removed));
+  scheduleBackground(cleanupOrphanedBatchReferences(workspace.organization.id, removed));
   await service.from("planning_requests").update({ analysis_status: "stale", analysis_fingerprint: "", updated_at: new Date().toISOString() }).eq("batch_id", catalogId).not("front_image_url", "is", null).not("back_image_url", "is", null);
   scheduleBackground(kickCatalogPreflight(catalogId));
   return { success: true };
@@ -2839,7 +3105,7 @@ async function retryVariantOperation(request: Request, args: JsonRecord) {
 }
 
 async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, references: ReferenceInput[]) {
-  const loaded = await loadAvailableReferences(references);
+  const loaded = await loadAvailableReferences(references, String(batch.organization_id));
   const settings = (batch.generation_settings || {}) as JsonRecord;
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
@@ -2864,7 +3130,7 @@ async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
   const productRefs: ReferenceInput[] = (assets || [])
     .filter((asset) => ["front", "back", "fabric_pattern", "mannequin", "additional_product"].includes(asset.asset_role))
     .map((asset) => ({
-      id: asset.id, role: asset.asset_role, downloadUrl: asset.image_url, storagePath: asset.storage_path,
+      id: asset.id, role: asset.asset_role, downloadUrl: asset.image_url, storagePath: asset.storage_path, storageBackend: asset.storage_backend as CatalogStorageBackend,
       hash: String((asset.metadata as JsonRecord)?.hash || asset.id), filename: String((asset.metadata as JsonRecord)?.filename || `${asset.asset_role}.jpg`),
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     }));
@@ -2881,6 +3147,7 @@ async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
       role,
       downloadUrl,
       storagePath,
+      storageBackend: "firebase",
       hash: smallHash(`${downloadUrl}|${storagePath}`),
       filename: `${role}.jpg`,
       mimeType: "image/jpeg",
@@ -2892,7 +3159,7 @@ async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
   // everything to "style_reference", or a model-identity upload would silently be treated as
   // creative direction only and never reach the FACE & IDENTITY LOCK in the generation prompt.
   const sharedRefs: ReferenceInput[] = (Array.isArray(batch.reference_images) ? batch.reference_images as JsonRecord[] : []).map((entry) => ({
-    id: String(entry.id || ""), role: String(entry.role || "style_reference"), downloadUrl: String(entry.downloadUrl || entry.image_url || ""), storagePath: String(entry.storagePath || entry.storage_path || ""),
+    id: String(entry.id || ""), role: String(entry.role || "style_reference"), downloadUrl: String(entry.downloadUrl || entry.image_url || ""), storagePath: String(entry.storagePath || entry.storage_path || ""), storageBackend: String(entry.storageProvider || entry.storageBackend || entry.storage_backend || "firebase") as CatalogStorageBackend,
     hash: String(entry.hash || entry.id || ""), filename: String(entry.filename || "style-reference.jpg"), mimeType: String(entry.mimeType || "image/jpeg"), size: Number(entry.size || 0),
   }));
   return { productRefs, references: canonicalReferences([...productRefs, ...sharedRefs]) };
@@ -4223,19 +4490,46 @@ function catalogProductionReportHtml(organizationName: string, reportDate: strin
   </div>`;
 }
 
-async function listingTeamRecipients(orgId: string) {
-  const { data: roles, error: rolesError } = await service.from("roles").select("id").eq("organization_id", orgId).eq("slug", "listing-team");
+async function catalogMemberHandoffEmails(orgId: string, requestedMemberIds: string[]) {
+  const memberIds = [...new Set(requestedMemberIds.filter(Boolean))];
+  if (!memberIds.length) return [];
+  const [membersResult, preferencesResult] = await Promise.all([
+    service.from("organization_members")
+      .select("id,email,notification_preferences").eq("organization_id", orgId).eq("status", "active").in("id", memberIds),
+    service.from("organization_member_notification_preferences")
+      .select("member_id,catalog_handoff_email").eq("organization_id", orgId).in("member_id", memberIds),
+  ]);
+  if (membersResult.error || preferencesResult.error) throw new Error(membersResult.error?.message || preferencesResult.error?.message || "Could not resolve team notification preferences.");
+  const preferenceByMember = new Map((preferencesResult.data || []).map((preference) => [String(preference.member_id), preference.catalog_handoff_email !== false]));
+  return cleanEmails((membersResult.data || [])
+    .filter((member) => preferenceByMember.has(String(member.id))
+      ? preferenceByMember.get(String(member.id))
+      : (member.notification_preferences as JsonRecord | null)?.catalog_handoff_email !== false)
+    .map((member) => member.email));
+}
+
+async function catalogRoleRecipients(orgId: string, roleSlug: string) {
+  const { data: roles, error: rolesError } = await service.from("roles").select("id").eq("organization_id", orgId).eq("slug", roleSlug);
   if (rolesError) throw new Error(rolesError.message);
   const roleIds = (roles || []).map((role) => role.id);
   if (!roleIds.length) return [];
   const { data: memberRoles, error: memberRolesError } = await service.from("member_roles").select("member_id").in("role_id", roleIds);
   if (memberRolesError) throw new Error(memberRolesError.message);
   const memberIds = [...new Set((memberRoles || []).map((row) => String(row.member_id)).filter(Boolean))];
-  if (!memberIds.length) return [];
-  const { data: members, error: membersError } = await service.from("organization_members")
-    .select("email").eq("organization_id", orgId).eq("status", "active").in("id", memberIds);
-  if (membersError) throw new Error(membersError.message);
-  return cleanEmails((members || []).map((member) => member.email));
+  return catalogMemberHandoffEmails(orgId, memberIds);
+}
+
+async function catalogTeamRecipients(orgId: string, teamId: string) {
+  if (!teamId) return [];
+  const { data: team, error: teamError } = await service.from("organization_teams")
+    .select("id").eq("organization_id", orgId).eq("id", teamId).eq("active", true).maybeSingle();
+  if (teamError) throw new Error(teamError.message);
+  if (!team) return [];
+  const { data: memberships, error: membershipsError } = await service.from("organization_team_memberships")
+    .select("member_id").eq("organization_id", orgId).eq("team_id", teamId).eq("active", true);
+  if (membershipsError) throw new Error(membershipsError.message);
+  const memberIds = [...new Set((memberships || []).map((row) => String(row.member_id)).filter(Boolean))];
+  return catalogMemberHandoffEmails(orgId, memberIds);
 }
 
 async function catalogHandoffSettings(orgId: string) {
@@ -4243,9 +4537,14 @@ async function catalogHandoffSettings(orgId: string) {
   if (error) throw new Error(error.message);
   if (existing) return existing as JsonRecord;
   const legacy = await automationSettings(orgId);
+  const { data: listingTeam, error: listingTeamError } = await service.from("organization_teams")
+    .select("id").eq("organization_id", orgId).eq("slug", "marketplace-listing").eq("active", true).maybeSingle();
+  if (listingTeamError) throw new Error(listingTeamError.message);
   const { data, error: createError } = await service.from("catalog_handoff_settings").insert({
     organization_id: orgId,
     timezone: String(legacy.timezone || "Asia/Kolkata"),
+    recipient_role_slug: "listing-team",
+    recipient_team_id: listingTeam?.id || null,
     custom_recipients: cleanEmails(legacy.report_recipients),
   }).select("*").single();
   if (createError || !data) throw new Error(createError?.message || "Could not initialize catalog handoff settings.");
@@ -4280,6 +4579,15 @@ async function catalogDigestRows(orgId: string, settings: JsonRecord, handoffIds
     ? await service.from("catalog_pose_asset_versions").select("*").eq("organization_id", orgId).in("id", assetVersionIds)
     : { data: [], error: null };
   if (versionsError) throw new Error(versionsError.message);
+  const resolvedVersions = await Promise.all((versions || []).map(async (version) => {
+    const signedUrl = await signCatalogObject(orgId, String(version.storage_path || ""), version.storage_backend, String(version.original_url || version.preview_url || ""));
+    return {
+      ...version,
+      preview_url: signedUrl || version.preview_url,
+      original_url: signedUrl || version.original_url,
+      final_asset_url: version.final_asset_url ? signedUrl || version.final_asset_url : version.final_asset_url,
+    };
+  }));
   const batchIds = [...new Set((workItemsResult.data || []).map((item) => String(item.planning_batch_id || "")).filter(Boolean))];
   const { data: batches, error: batchesError } = batchIds.length
     ? await service.from("planning_batches").select("id,name,campaign_season").eq("organization_id", orgId).in("id", batchIds)
@@ -4293,7 +4601,7 @@ async function catalogDigestRows(orgId: string, settings: JsonRecord, handoffIds
     const links = (handoffAssetsResult.data || [])
       .filter((asset) => asset.handoff_id === handoff.id)
       .map((asset) => {
-        const version = (versions || []).find((candidate) => candidate.id === asset.asset_version_id) || {};
+        const version = resolvedVersions.find((candidate) => candidate.id === asset.asset_version_id) || {};
         return {
           poseIndex: asset.pose_index,
           versionNumber: version.version_number,
@@ -4326,9 +4634,7 @@ async function catalogDigestRows(orgId: string, settings: JsonRecord, handoffIds
 function catalogRecipients(settings: JsonRecord, listingRecipients: string[]) {
   const custom = cleanEmails(settings.custom_recipients);
   const mode = String(settings.recipient_mode || "listing_team");
-  if (mode === "custom") return custom;
-  if (mode === "listing_team_and_custom") return cleanEmails([...listingRecipients, ...custom]);
-  return listingRecipients.length ? listingRecipients : custom;
+  return selectCatalogRecipients(mode, listingRecipients, custom);
 }
 
 async function sendTrackedCatalogReport(args: {
@@ -4386,10 +4692,49 @@ async function sendTrackedCatalogReport(args: {
     work_item_id: digestRow.workItemId,
   }));
   if (deliveryItems.length && !args.forceResend) {
-    const { error: itemsError } = await service.from("catalog_report_delivery_items").insert(deliveryItems);
+    const { error: itemsError } = await service.from("catalog_report_delivery_items")
+      .upsert(deliveryItems, { onConflict: "handoff_id", ignoreDuplicates: true });
     if (itemsError) {
       await service.from("catalog_report_deliveries").update({ status: "failed", error_message: itemsError.message, updated_at: new Date().toISOString() }).eq("id", delivery.id);
       throw new Error(`Could not reserve idempotent handoff items: ${itemsError.message}`);
+    }
+  }
+  if (!args.forceResend || args.triggerType === "retry") {
+    const handoffIds = args.rows.map((digestRow) => String(digestRow.handoffId));
+    const workItemIds = args.rows.map((digestRow) => String(digestRow.workItemId));
+    const [reservedItemsResult, handoffsResult, workItemsResult] = await Promise.all([
+      service.from("catalog_report_delivery_items").select("handoff_id")
+        .eq("organization_id", args.orgId).eq("delivery_id", delivery.id).in("handoff_id", handoffIds),
+      service.from("catalog_listing_handoffs").select("id,status")
+        .eq("organization_id", args.orgId).in("id", handoffIds),
+      service.from("catalog_work_items").select("id,qc_status,final_approved_at,listing_sent_at")
+        .eq("organization_id", args.orgId).in("id", workItemIds),
+    ]);
+    assertSupabaseResults([reservedItemsResult, handoffsResult, workItemsResult], "Could not validate the catalog handoff reservation");
+    const reservedIds = new Set((reservedItemsResult.data || []).map((item) => String(item.handoff_id)));
+    const readyIds = new Set((handoffsResult.data || []).filter((handoff) => handoff.status === "ready").map((handoff) => String(handoff.id)));
+    const approvedIds = new Set((workItemsResult.data || [])
+      .filter((item) => item.qc_status === "passed" && item.final_approved_at && !item.listing_sent_at)
+      .map((item) => String(item.id)));
+    const reservationIsCurrent = args.rows.every((digestRow) => reservedIds.has(String(digestRow.handoffId))
+      && readyIds.has(String(digestRow.handoffId)) && approvedIds.has(String(digestRow.workItemId)));
+    if (!reservationIsCurrent) {
+      const skippedAt = new Date().toISOString();
+      const skippedResults = await Promise.all([
+        service.from("catalog_report_delivery_items").delete().eq("organization_id", args.orgId).eq("delivery_id", delivery.id),
+        service.from("catalog_report_deliveries").update({
+          status: "skipped", error_message: "Approval state changed before delivery; no email was sent.", updated_at: skippedAt,
+        }).eq("organization_id", args.orgId).eq("id", delivery.id),
+        service.from("catalog_report_delivery_attempts").insert({
+          organization_id: args.orgId, delivery_id: delivery.id, attempt_number: attemptNumber,
+          trigger_type: args.triggerType, status: "skipped", recipients: args.recipients,
+          actor_member_id: args.actorMemberId || null, completed_at: skippedAt,
+          error_message: "Approval state changed before delivery; no email was sent.",
+          metadata: { itemCount: args.rows.length, reason: "approval_state_changed" },
+        }),
+      ]);
+      assertSupabaseResults(skippedResults, "Could not record the skipped catalog handoff");
+      return { sent: false, skipped: true, deliveryId: delivery.id, reason: "approval_state_changed" };
     }
   }
   const { data: attempt, error: attemptError } = await service.from("catalog_report_delivery_attempts").insert({
@@ -4463,11 +4808,15 @@ async function catalogDigestContext(orgId: string, organizationName: string, opt
   const weekdays = Array.isArray(settings.business_weekdays) ? settings.business_weekdays.map(Number) : [1, 2, 3, 4, 5];
   const holidays = Array.isArray(settings.holiday_dates) ? settings.holiday_dates.map(String) : [];
   const reportDate = previousBusinessDate(today.iso, weekdays, holidays);
-  const listingRecipients = await listingTeamRecipients(orgId);
-  const recipients = catalogRecipients(settings, listingRecipients);
+  const recipientRoleSlug = String(settings.recipient_role_slug || "listing-team");
+  const recipientTeamId = String(settings.recipient_team_id || "");
+  const groupRecipients = recipientTeamId
+    ? await catalogTeamRecipients(orgId, recipientTeamId)
+    : await catalogRoleRecipients(orgId, recipientRoleSlug);
+  const recipients = catalogRecipients(settings, groupRecipients);
   const rows = await catalogDigestRows(orgId, settings, options.handoffIds);
   const subject = `${organizationName} · ${rows.length} approved catalog package${rows.length === 1 ? "" : "s"} · ${reportDate}`;
-  return { settings, timezone, today, weekdays, holidays, reportDate, listingRecipients, recipients, rows, subject };
+  return { settings, timezone, today, weekdays, holidays, reportDate, recipientTeamId, recipientRoleSlug, groupRecipients, recipients, rows, subject };
 }
 
 async function runCatalogProductionAutomationOperation(request: Request) {
@@ -4494,7 +4843,7 @@ async function runCatalogProductionAutomationOperation(request: Request) {
         const retryHandoffIds = (failedItems || []).map((item) => String(item.handoff_id));
         if (retryHandoffIds.length) {
           const retryContext = await catalogDigestContext(orgId, String(organization.name || "Youthnic"), { handoffIds: retryHandoffIds });
-          if (!retryContext.recipients.length) throw new Error("No active Listing Team member or custom handoff recipient is configured.");
+          if (!retryContext.recipients.length) throw new Error("No active member in the configured recipient team or custom handoff recipient is available.");
           if (!retryContext.rows.length) {
             await service.from("catalog_report_deliveries").update({
               status: "failed",
@@ -4513,7 +4862,7 @@ async function runCatalogProductionAutomationOperation(request: Request) {
             recipients: retryContext.recipients,
             subject: retrySubject,
             html: catalogProductionReportHtml(String(organization.name || "Youthnic"), retryReportDate, retryContext.rows),
-            payload: { itemCount: retryContext.rows.length, workItemIds: retryContext.rows.map((row) => row.workItemId), handoffIds: retryHandoffIds, timezone: retryContext.timezone, retry: true },
+            payload: { itemCount: retryContext.rows.length, workItemIds: retryContext.rows.map((row) => row.workItemId), handoffIds: retryHandoffIds, timezone: retryContext.timezone, recipientTeamId: retryContext.recipientTeamId, recipientRoleSlug: retryContext.recipientRoleSlug, retry: true },
             rows: retryContext.rows,
             triggerType: "retry",
             forceResend: true,
@@ -4538,7 +4887,7 @@ async function runCatalogProductionAutomationOperation(request: Request) {
         results.push({ orgId, reportDate: context.reportDate, sent: false, reason: "no_final_approvals" });
         continue;
       }
-      if (!context.recipients.length) throw new Error("No active Listing Team member or custom handoff recipient is configured.");
+      if (!context.recipients.length) throw new Error("No active member in the configured recipient team or custom handoff recipient is available.");
       const delivery = await sendTrackedCatalogReport({
         orgId,
         reportDate: context.reportDate,
@@ -4550,7 +4899,9 @@ async function runCatalogProductionAutomationOperation(request: Request) {
           workItemIds: context.rows.map((row) => row.workItemId),
           handoffIds: context.rows.map((row) => row.handoffId),
           timezone: context.timezone,
-          listingTeamRecipients: context.listingRecipients.length,
+          recipientTeamId: context.recipientTeamId,
+          recipientRoleSlug: context.recipientRoleSlug,
+          teamRecipients: context.groupRecipients.length,
         },
         rows: context.rows,
         triggerType: "scheduled",
@@ -4564,19 +4915,31 @@ async function runCatalogProductionAutomationOperation(request: Request) {
 }
 
 async function catalogHandoffAdminOperation(request: Request) {
-  const { workspace } = await workspaceFor(request, "planning.manage");
+  const { workspace } = await workspaceFor(request, "catalog.handoff.manage");
   const context = await catalogDigestContext(workspace.organization.id, workspace.organization.name);
   const { data: deliveries, error } = await service.from("catalog_report_deliveries")
     .select("*").eq("organization_id", workspace.organization.id).order("created_at", { ascending: false }).limit(50);
   if (error) throw new Error(error.message);
   const deliveryIds = (deliveries || []).map((delivery) => String(delivery.id));
-  const [attemptsResult, itemsResult] = deliveryIds.length ? await Promise.all([
-    service.from("catalog_report_delivery_attempts").select("*").eq("organization_id", workspace.organization.id).in("delivery_id", deliveryIds).order("attempt_number", { ascending: false }),
-    service.from("catalog_report_delivery_items").select("*").eq("organization_id", workspace.organization.id).in("delivery_id", deliveryIds),
-  ]) : [{ data: [], error: null }, { data: [], error: null }];
-  if (attemptsResult.error || itemsResult.error) throw new Error(attemptsResult.error?.message || itemsResult.error?.message || "Could not load delivery history.");
+  const [attemptsResult, itemsResult, teamsResult, teamMembershipsResult] = await Promise.all([
+    deliveryIds.length
+      ? service.from("catalog_report_delivery_attempts").select("*").eq("organization_id", workspace.organization.id).in("delivery_id", deliveryIds).order("attempt_number", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+    deliveryIds.length
+      ? service.from("catalog_report_delivery_items").select("*").eq("organization_id", workspace.organization.id).in("delivery_id", deliveryIds)
+      : Promise.resolve({ data: [], error: null }),
+    service.from("organization_teams").select("id,slug,name,description,team_type,active")
+      .eq("organization_id", workspace.organization.id).eq("active", true).order("name"),
+    service.from("organization_team_memberships").select("team_id")
+      .eq("organization_id", workspace.organization.id).eq("active", true),
+  ]);
+  if (attemptsResult.error || itemsResult.error || teamsResult.error || teamMembershipsResult.error) throw new Error(attemptsResult.error?.message || itemsResult.error?.message || teamsResult.error?.message || teamMembershipsResult.error?.message || "Could not load delivery history.");
   return {
     settings: context.settings,
+    recipientTeams: (teamsResult.data || []).map((team) => ({
+      ...team,
+      memberCount: (teamMembershipsResult.data || []).filter((membership) => membership.team_id === team.id).length,
+    })),
     preview: { reportDate: context.reportDate, recipients: context.recipients, rows: context.rows, subject: context.subject },
     deliveries: (deliveries || []).map((delivery) => ({
       ...delivery,
@@ -4587,7 +4950,7 @@ async function catalogHandoffAdminOperation(request: Request) {
 }
 
 async function updateCatalogHandoffSettingsOperation(request: Request, args: JsonRecord) {
-  const { workspace } = await workspaceFor(request, "planning.manage");
+  const { workspace } = await workspaceFor(request, "catalog.handoff.manage");
   const timezone = String(args.timezone || "Asia/Kolkata").trim();
   try { new Intl.DateTimeFormat("en", { timeZone: timezone }).format(); } catch { throw new Error("Choose a valid IANA timezone."); }
   const sendLocalTime = String(args.sendLocalTime || "10:00").trim();
@@ -4598,12 +4961,31 @@ async function updateCatalogHandoffSettingsOperation(request: Request, args: Jso
   const recipientMode = ["listing_team", "custom", "listing_team_and_custom"].includes(String(args.recipientMode)) ? String(args.recipientMode) : "listing_team";
   const customRecipients = cleanEmails(args.customRecipients);
   if (recipientMode === "custom" && !customRecipients.length) throw new Error("Add at least one custom recipient.");
+  const recipientRoleSlug = String(args.recipientRoleSlug || "listing-team").trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(recipientRoleSlug)) throw new Error("The legacy recipient fallback is invalid.");
+  let recipientTeamId = String(args.recipientTeamId || "").trim();
+  if (!recipientTeamId && recipientMode !== "custom") {
+    const { data: defaultTeam, error: defaultTeamError } = await service.from("organization_teams").select("id")
+      .eq("organization_id", workspace.organization.id).eq("slug", "marketplace-listing").eq("active", true).maybeSingle();
+    if (defaultTeamError) throw new Error(defaultTeamError.message);
+    recipientTeamId = String(defaultTeam?.id || "");
+  }
+  if (recipientTeamId) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(recipientTeamId)) throw new Error("Choose a valid recipient team.");
+    const { data: recipientTeam, error: recipientTeamError } = await service.from("organization_teams").select("id")
+      .eq("organization_id", workspace.organization.id).eq("id", recipientTeamId).eq("active", true).maybeSingle();
+    if (recipientTeamError) throw new Error(recipientTeamError.message);
+    if (!recipientTeam) throw new Error("The selected recipient team is not active in this workspace.");
+  }
+  if (recipientMode !== "custom" && !recipientTeamId) throw new Error("Choose an active recipient team.");
   const row = {
     organization_id: workspace.organization.id,
     enabled: args.enabled !== false,
     timezone,
     send_local_time: sendLocalTime,
     recipient_mode: recipientMode,
+    recipient_role_slug: recipientRoleSlug,
+    recipient_team_id: recipientTeamId || null,
     custom_recipients: customRecipients,
     business_weekdays: businessWeekdays,
     holiday_dates: holidayDates,
@@ -4616,13 +4998,13 @@ async function updateCatalogHandoffSettingsOperation(request: Request, args: Jso
   await service.from("audit_logs").insert({
     organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
     action: "catalog.handoff_settings.updated", resource_type: "catalog_handoff_settings", resource_id: data.id,
-    metadata: { timezone, sendLocalTime, recipientMode, recipientCount: customRecipients.length, businessWeekdays, holidayDates },
+    metadata: { timezone, sendLocalTime, recipientMode, recipientTeamId: recipientTeamId || null, recipientRoleSlug, recipientCount: customRecipients.length, businessWeekdays, holidayDates },
   });
   return data;
 }
 
 async function sendCatalogHandoffDigestOperation(request: Request, args: JsonRecord) {
-  const { workspace } = await workspaceFor(request, "planning.manage");
+  const { workspace } = await workspaceFor(request, "catalog.handoff.manage");
   const resendDeliveryId = String(args.deliveryId || "").trim();
   let handoffIds: string[] | undefined;
   let forceResend = false;
@@ -4649,7 +5031,7 @@ async function sendCatalogHandoffDigestOperation(request: Request, args: JsonRec
   }
   const context = await catalogDigestContext(workspace.organization.id, workspace.organization.name, { handoffIds });
   if (!context.rows.length) throw new Error("No approved, undelivered five-pose packages are ready.");
-  if (!context.recipients.length) throw new Error("No active Listing Team member or custom handoff recipient is configured.");
+  if (!context.recipients.length) throw new Error("No active member in the configured recipient team or custom handoff recipient is available.");
   const effectiveReportDate = resendReportDate || context.reportDate;
   const effectiveSubject = `${workspace.organization.name} · ${context.rows.length} approved catalog package${context.rows.length === 1 ? "" : "s"} · ${effectiveReportDate}`;
   const result = await sendTrackedCatalogReport({
@@ -4663,6 +5045,8 @@ async function sendCatalogHandoffDigestOperation(request: Request, args: JsonRec
       workItemIds: context.rows.map((row) => row.workItemId),
       handoffIds: context.rows.map((row) => row.handoffId),
       timezone: context.timezone,
+      recipientTeamId: context.recipientTeamId,
+      recipientRoleSlug: context.recipientRoleSlug,
       manual: true,
     },
     rows: context.rows,
@@ -4930,6 +5314,7 @@ Deno.serve(async (request) => {
       "admin.createUser": () => createUserOperation(request, args),
       "admin.updateMember": () => updateMemberOperation(request, args),
       "admin.deleteMember": () => deleteMemberOperation(request, args),
+      "admin.upsertTeam": () => upsertOrganizationTeamOperation(request, args),
       "admin.updateRolePermissions": () => updateRolePermissionsOperation(request, args),
       "admin.updateAutomationSettings": () => updateAutomationSettingsOperation(request, args),
       "profile.update": () => updateOwnProfileOperation(request, args),
@@ -4984,22 +5369,36 @@ Deno.serve(async (request) => {
         return addCatalogWorkItemComment(service, workspace, args);
       },
       "catalogProduction.assign": async () => {
-        const { workspace } = await workspaceFor(request, "planning.manage");
+        const { workspace } = await workspaceFor(request, "catalog.assign");
         return assignCatalogWorkItem(service, workspace, args);
       },
       "catalogProduction.reviewQc": async () => {
         const { workspace } = await workspaceFor(request, "planning.approve");
         return reviewCatalogQc(service, workspace, args);
       },
-      "catalogProduction.regeneratePose": async () => {
+      "catalogProduction.reviewPose": async () => {
         const { workspace } = await workspaceFor(request, "planning.approve");
+        return reviewCatalogPose(service, workspace, args);
+      },
+      "catalogProduction.regeneratePose": async () => {
+        const { workspace } = await workspaceFor(request);
+        if (!workspace.isAdmin && !workspace.permissions.includes("planning.approve") && !workspace.permissions.includes("planning.generate_images")) {
+          throw new Error("Permission required: planning.approve or planning.generate_images");
+        }
         const workItemId = String(args.workItemId || "");
         const poseId = String(args.poseId || args.generationId || "");
         if (!workItemId || !poseId) throw new Error("A catalog item and pose are required.");
-        const { data: item, error: itemError } = await service.from("catalog_work_items").select("id,catalog_session_id")
+        const { data: item, error: itemError } = await service.from("catalog_work_items")
+          .select("id,catalog_session_id,qc_status,listing_status,listing_sent_at")
           .eq("organization_id", workspace.organization.id).eq("id", workItemId).maybeSingle();
         if (itemError) throw new Error(itemError.message);
         if (!item) throw new Error("Catalog work item not found.");
+        if (item.listing_sent_at || ["in_progress", "completed"].includes(String(item.listing_status || ""))) {
+          throw new Error("This asset package has already been handed to the Listing Team and cannot be regenerated in place. Create a new catalog revision instead.");
+        }
+        if (item.qc_status === "passed") {
+          throw new Error("Request changes on the approved pose before starting re-generation.");
+        }
         const { data: pose, error: poseError } = await service.from("session_generations").select("generation_id,pose_index")
           .eq("session_id", item.catalog_session_id).eq("generation_id", poseId).maybeSingle();
         if (poseError) throw new Error(poseError.message);
@@ -5033,7 +5432,7 @@ Deno.serve(async (request) => {
       "catalogProduction.startListing": async () => {
         const { workspace } = await workspaceFor(request, "planning.view");
         const canCompleteListing = workspace.isAdmin
-          || workspace.permissions.includes("planning.manage")
+          || workspace.permissions.includes("catalog.listing.complete")
           || workspace.roles.some((role) => role.slug === "listing-team");
         if (!canCompleteListing) throw new Error("Only the Listing Team or a planning manager can start listing work.");
         return markListingStarted(service, workspace, args);
@@ -5041,7 +5440,7 @@ Deno.serve(async (request) => {
       "catalogProduction.markListingDone": async () => {
         const { workspace } = await workspaceFor(request, "planning.view");
         const canCompleteListing = workspace.isAdmin
-          || workspace.permissions.includes("planning.manage")
+          || workspace.permissions.includes("catalog.listing.complete")
           || workspace.roles.some((role) => role.slug === "listing-team");
         if (!canCompleteListing) throw new Error("Only the Listing Team or a planning manager can complete listing work.");
         return markListingDone(service, workspace, args);
@@ -5055,7 +5454,7 @@ Deno.serve(async (request) => {
       "catalogProduction.handoffs.updateSettings": () => updateCatalogHandoffSettingsOperation(request, args),
       "catalogProduction.handoffs.send": () => sendCatalogHandoffDigestOperation(request, args),
       "catalogProduction.bulkGenerate": async () => {
-        const { workspace } = await workspaceFor(request, "planning.manage");
+        const { workspace } = await workspaceFor(request, "planning.generate_images");
         const result = await bulkGenerateCatalogWorkItems(service, workspace, args);
         const scheduleOutcomes: Array<{ batchId: string; success: boolean; error?: string }> = [];
         for (const batchId of result.batchIdsToSchedule) {

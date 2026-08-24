@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./supabase";
+import { resolveCatalogAssetUrl } from "./catalogStorage";
 
 export type Id<_Table extends string> = string;
 export type BackendEndpoint = string;
@@ -31,7 +32,7 @@ export const api = {
   eventIntelligence: { roadmap: "eventIntelligence.roadmap", runResearch: "eventIntelligence.runResearch", seedCalendar: "eventIntelligence.seedCalendar" },
   eventDigest: { sendDigestNow: "eventDigest.sendDigestNow" },
   events: { create: "events.create" },
-  admin: { overview: "admin.overview", updateRolePermissions: "admin.updateRolePermissions", updateAutomationSettings: "admin.updateAutomationSettings", syncOpenAiUsage: "admin.syncOpenAiUsage" },
+  admin: { overview: "admin.overview", upsertTeam: "admin.upsertTeam", updateRolePermissions: "admin.updateRolePermissions", updateAutomationSettings: "admin.updateAutomationSettings", syncOpenAiUsage: "admin.syncOpenAiUsage" },
   authActions: { createUser: "authActions.createUser", updateMemberAccess: "authActions.updateMemberAccess", deleteMember: "authActions.deleteMember" },
   profile: { update: "profile.update" },
 } as const;
@@ -69,6 +70,34 @@ function milliseconds(value: unknown) {
 
 function record(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
+async function resolveAssetRow<T extends Record<string, any>>(row: T, urlField: "image_url" | "output_url" = "image_url") {
+  const resolvedUrl = await resolveCatalogAssetUrl({
+    storageBackend: row.storage_backend,
+    storagePath: row.storage_path,
+    fallbackUrl: row[urlField],
+  });
+  return { ...row, [urlField]: resolvedUrl } as T;
+}
+
+async function resolveReferenceEntry(entry: Record<string, any>) {
+  const storageBackend = entry.storageBackend || entry.storageProvider || entry.storage_backend;
+  const storagePath = entry.storagePath || entry.storage_path;
+  const fallbackUrl = entry.downloadUrl || entry.image_url;
+  return {
+    ...entry,
+    storageBackend,
+    downloadUrl: await resolveCatalogAssetUrl({ storageBackend, storagePath, fallbackUrl }),
+  };
+}
+
+async function resolveJobAssetReferences<T extends Record<string, any>>(row: T) {
+  const jobData = record(row.job_data);
+  const references = Array.isArray(jobData.references)
+    ? await Promise.all(jobData.references.map((entry: Record<string, any>) => resolveReferenceEntry(entry)))
+    : [];
+  return { ...row, job_data: { ...jobData, references } } as T;
 }
 
 function jobSummary(row: Record<string, any>, members: Record<string, any>[] = [], generatedThumbnailUrl = "") {
@@ -119,18 +148,18 @@ async function listJobs(args: Record<string, any>) {
     supabase.from("organization_members").select("firebase_uid,display_name,email").eq("organization_id", String(args.organizationId)),
   ]);
   if (jobsResult.error) throw jobsResult.error;
-  const rows = jobsResult.data || [];
+  const rows = await Promise.all((jobsResult.data || []).map((row) => resolveJobAssetReferences(row)));
   const jobIds = rows.map((row) => row.job_id);
   const thumbnailsResult = jobIds.length
     ? await supabase
       .from("planning_assets")
-      .select("generation_job_id,image_url,metadata,created_at")
+      .select("generation_job_id,image_url,storage_path,storage_backend,metadata,created_at")
       .in("generation_job_id", jobIds)
       .eq("asset_role", "generated")
       .order("created_at")
     : { data: [], error: null };
   if (thumbnailsResult.error) throw thumbnailsResult.error;
-  const thumbnails = thumbnailsResult.data || [];
+  const thumbnails = await Promise.all((thumbnailsResult.data || []).map((entry) => resolveAssetRow(entry)));
   const total = jobsResult.count || 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   return {
@@ -157,9 +186,21 @@ async function getJob(jobId: string) {
   ]);
   if (posesResult.error) throw posesResult.error;
   if (assetsResult.error) throw assetsResult.error;
-  const summary = jobSummary(job);
-  const generatedAssets = assetsResult.data || [];
-  const poseRows = posesResult.data || [];
+  const resolvedJob = await resolveJobAssetReferences(job);
+  const summary = jobSummary(resolvedJob);
+  const generatedAssets = await Promise.all((assetsResult.data || []).map((entry) => resolveAssetRow(entry)));
+  const poseRows = await Promise.all((posesResult.data || []).map(async (entry) => {
+    const resolved = await resolveAssetRow(entry, "output_url");
+    const generationData = record(resolved.generation_data);
+    const rejectedAttempts = Array.isArray(generationData.rejectedAttempts)
+      ? await Promise.all(generationData.rejectedAttempts.map((attempt: Record<string, any>) => resolveReferenceEntry({
+        ...attempt,
+        downloadUrl: attempt.url,
+        storageBackend: attempt.storageBackend || resolved.storage_backend,
+      })))
+      : [];
+    return { ...resolved, generation_data: { ...generationData, rejectedAttempts: rejectedAttempts.map((attempt) => ({ ...attempt, url: attempt.downloadUrl })) } };
+  }));
   const defaultTitles = [
     "Full Front Product View",
     "Professional Side / 3/4 View",
@@ -270,7 +311,8 @@ export async function getJobReferenceImages(jobId: string) {
   const { data, error } = await supabase.from("generation_jobs").select("job_data").eq("job_id", jobId).maybeSingle();
   if (error) throw error;
   const references = record(data?.job_data).references;
-  return (Array.isArray(references) ? references : [])
+  const resolved = await Promise.all((Array.isArray(references) ? references : []).map((entry: Record<string, any>) => resolveReferenceEntry(entry)));
+  return resolved
     .map((entry: Record<string, any>, index: number) => ({
       _id: String(entry.id || `${jobId}-ref-${index}`),
       role: String(entry.role || ""),
@@ -372,11 +414,14 @@ async function getCatalog(catalogId: string) {
     : { data: [], error: null };
   if (posesResult.error) throw posesResult.error;
   const settings = record(batch.generation_settings);
+  const resolvedAssets = await Promise.all((assetsResult.data || []).map((asset) => resolveAssetRow(asset)));
+  const resolvedPoses = await Promise.all((posesResult.data || []).map((pose) => resolveAssetRow(pose, "output_url")));
+  const resolvedBatchReferences = await Promise.all((Array.isArray(batch.reference_images) ? batch.reference_images : []).map((entry: Record<string, any>) => resolveReferenceEntry(entry)));
   const hydrated = (variants || []).map((variant) => {
-    const variantAssets = (assetsResult.data || []).filter((asset) => asset.planning_request_id === variant.id);
+    const variantAssets = resolvedAssets.filter((asset) => asset.planning_request_id === variant.id);
     const latest = (role: string) => [...variantAssets].reverse().find((asset) => asset.asset_role === role);
     const job = [...(jobsResult.data || [])].reverse().find((entry) => entry.planning_request_id === variant.id);
-    const outputs = (posesResult.data || []).filter((pose) => pose.session_id === job?.session_id).map((pose) => ({
+    const outputs = resolvedPoses.filter((pose) => pose.session_id === job?.session_id).map((pose) => ({
       poseNumber: Number(pose.pose_index), title: pose.title, status: pose.status, url: pose.output_url || null, error: pose.error || null,
     }));
     const readinessReasons = [
@@ -404,8 +449,8 @@ async function getCatalog(catalogId: string) {
       analysisUpdatedAt: variant.analysis_updated_at ? milliseconds(variant.analysis_updated_at) : null,
       readinessStatus,
       readinessReasons,
-      frontUrl: variant.front_image_url || latest("front")?.image_url || null,
-      backUrl: variant.back_image_url || latest("back")?.image_url || null,
+      frontUrl: latest("front")?.image_url || variant.front_image_url || null,
+      backUrl: latest("back")?.image_url || variant.back_image_url || null,
       fabricPatternUrl: latest("fabric_pattern")?.image_url || null,
       additionalProductUrl: latest("additional_product")?.image_url || null,
       jobId: job?.job_id || null,
@@ -421,7 +466,7 @@ async function getCatalog(catalogId: string) {
   // reference_images holds every batch-level shared reference (style_reference and, now,
   // model_identity) tagged by its own role - split them back out here instead of treating
   // everything as a style reference, which would misfile a model face upload.
-  const referenceEntries = Array.isArray(batch.reference_images) ? batch.reference_images : [];
+  const referenceEntries = resolvedBatchReferences;
   const styleEntries = referenceEntries.filter((entry: Record<string, any>) => (entry.role || "style_reference") === "style_reference");
   const modelEntry = referenceEntries.find((entry: Record<string, any>) => entry.role === "model_identity");
   return {
@@ -519,6 +564,15 @@ async function adminOverview(args: Record<string, any>) {
     ...value,
     health: { ...value.health, supabase: true },
     roles,
+    teams: (value.teams || []).map((team: Record<string, any>) => ({
+      ...team,
+      _id: team.id,
+      memberships: (team.memberships || []).map((membership: Record<string, any>) => ({
+        ...membership,
+        _id: membership.id,
+        member: membership.member ? { ...membership.member, _id: membership.member.id } : null,
+      })),
+    })),
     members: (value.members || []).map((member: Record<string, any>) => ({
       ...member,
       _id: member.id,
@@ -602,6 +656,8 @@ async function mutateBackend(endpoint: BackendEndpoint, args: Record<string, any
       return invokeAppApi("events.digest", args);
     case api.admin.updateRolePermissions:
       return invokeAppApi("admin.updateRolePermissions", args);
+    case api.admin.upsertTeam:
+      return invokeAppApi("admin.upsertTeam", args);
     case api.admin.updateAutomationSettings:
       return invokeAppApi("admin.updateAutomationSettings", args);
     case api.admin.syncOpenAiUsage:

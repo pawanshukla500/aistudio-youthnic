@@ -45,6 +45,8 @@ export type CatalogWorkItem = {
   listing_completed_at?: string | null;
   completed_at?: string | null;
   planning_request_id?: string | null;
+  planning_batch_id?: string | null;
+  planning_batch?: { id: string; name?: string | null } | null;
   generation_job_id?: string | null;
   catalog_session_id?: string | null;
   reference_image_url?: string | null;
@@ -66,7 +68,8 @@ export type PlanningSku = {
 export type ProductionActionProps = {
   items: CatalogWorkItem[];
   members: CatalogMember[];
-  canManage: boolean;
+  canAssign: boolean;
+  canGenerate: boolean;
   canReviewQc: boolean;
   canCompleteListing: boolean;
   busyKey: string;
