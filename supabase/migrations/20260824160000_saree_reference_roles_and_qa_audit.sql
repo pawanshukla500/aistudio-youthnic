@@ -1,3 +1,5 @@
+-- Forward timestamp follows catalog_workflow_v2_hardening, which was already
+-- applied remotely before this migration was merged.
 -- Sarees need region-specific product evidence. Keep every legacy role valid so
 -- existing Studio and catalog sessions continue to load without data rewrites.
 alter table public.planning_assets
