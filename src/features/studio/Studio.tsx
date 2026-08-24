@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Ban, CheckCircle2, Images, Loader2, Sparkles } from "lucide-react";
 import { api, useAction, useMutation, useQuery, type Id } from "../../lib/backend";
 import { Button } from "../../components/ui/Button";
+import { ActionDialog } from "../../components/ui/ActionDialog";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import { uploadCatalogAsset } from "../../lib/catalogStorage";
 import { AnalysisProfile } from "./components/AnalysisProfile";
@@ -83,6 +84,7 @@ export function Studio() {
   const [analyzing, setAnalyzing] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [stopDialogOpen, setStopDialogOpen] = useState(false);
   const [submittedJobId, setSubmittedJobId] = useState<Id<"generationJobs"> | null>(null);
   const [skuId, setSkuId] = useState("");
   const [skuName, setSkuName] = useState("");
@@ -119,6 +121,20 @@ export function Studio() {
   ].filter(Boolean).join(", ") : "", [analysis]);
   const sceneDirectionValue = sceneDirectionNote || derivedSceneDirection;
   const garmentSummaryValue = garmentSummaryNote || derivedGarmentSummary;
+
+  const stopSubmittedJob = async () => {
+    if (!submittedJobId) return;
+    setStopping(true);
+    try {
+      await cancelJob({ jobId: submittedJobId });
+      setNotice({ tone: "success", text: "Photoshoot cancellation requested. Completed images remain saved.", jobId: submittedJobId });
+      setStopDialogOpen(false);
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not stop this photoshoot." });
+    } finally {
+      setStopping(false);
+    }
+  };
   const analysisInputKey = useMemo(
     () => JSON.stringify({
       references: allReferences.map((reference) => ({
@@ -486,7 +502,7 @@ export function Studio() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            {submittedJob && ["queued", "processing"].includes(submittedJob.status) && <button disabled={stopping} onClick={() => { if (!window.confirm("Stop this photoshoot? Completed images will remain saved.")) return; setStopping(true); void cancelJob({ jobId: submittedJobId }).finally(() => setStopping(false)); }} className="flex items-center gap-1.5 rounded-lg border border-warning/30 bg-white px-3 py-2 text-xs font-semibold text-warning disabled:opacity-50">{stopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Stop</button>}
+            {submittedJob && ["queued", "processing"].includes(submittedJob.status) && <button disabled={stopping} onClick={() => setStopDialogOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-warning/30 bg-white px-3 py-2 text-xs font-semibold text-warning disabled:opacity-50">{stopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Stop</button>}
             <Link to="/history" className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-primary underline">View in History</Link>
           </div>
           </div>
@@ -599,6 +615,17 @@ export function Studio() {
       <section className="mt-6 rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all overflow-hidden">
          <PosePlan poses={poses} onChange={setPoses} enabledCount={enabledPoseCount} ready={analysisIsCurrent} stale={analysisIsStale} />
       </section>
+
+      <ActionDialog
+        open={stopDialogOpen}
+        title={`Stop ${submittedJob?.skuName || submittedJob?.skuId || "this photoshoot"}?`}
+        description="The queued or active generation job will be cancelled. Every image already completed remains saved in History."
+        confirmLabel="Stop photoshoot"
+        tone="danger"
+        busy={stopping}
+        onCancel={() => setStopDialogOpen(false)}
+        onConfirm={() => void stopSubmittedJob()}
+      />
     </div>
   );
 }

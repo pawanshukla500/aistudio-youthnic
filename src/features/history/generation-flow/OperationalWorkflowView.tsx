@@ -43,8 +43,12 @@ type WorkflowStage = {
   defaultNextAction: string;
   status: "completed" | "current" | "pending";
   startedAt?: string | null;
+  currentStartedAt?: string | null;
   completedAt?: string | null;
+  completedDurationSeconds?: number;
+  currentVisitDurationSeconds?: number;
   durationSeconds?: number;
+  visitCount?: number;
 };
 type AssetVersion = Record<string, any> & {
   id?: string;
@@ -138,6 +142,14 @@ function duration(seconds?: number | null) {
   return [hours ? `${hours}h` : "", minutes ? `${minutes}m` : "", !hours ? `${remaining}s` : ""].filter(Boolean).join(" ");
 }
 
+function elapsedSeconds(start: unknown, end: unknown) {
+  const startMs = typeof start === "number" ? start : Date.parse(String(start || ""));
+  const endMs = typeof end === "number" ? end : Date.parse(String(end || ""));
+  return Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
+    ? Math.max(0, Math.round((endMs - startMs) / 1_000))
+    : 0;
+}
+
 function safeFilename(value: string) {
   return value.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "catalog";
 }
@@ -199,12 +211,21 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
     marketplaceRequirements: data.creativeDirection?.marketplace_requirements || "",
   });
   const item = data.item;
+  const workflowStartedAt = item.request_date || item.created_at;
+  const workflowFinishedAt = item.completed_at || item.listing_completed_at || null;
+  const [clock, setClock] = useState(Date.now());
   const currentStage = data.stages.find((stage) => stage.status === "current");
   const activeAction = data.actions.find((action) => action.enabled);
   const completedPoses = data.poses.filter((pose) => pose.current?.generation_status === "completed").length;
   const packageIsDelivered = Boolean(item.listing_sent_at || ["sent_to_listing_team", "listing_in_progress", "listed"].includes(item.workflow_stage));
-  const startedAt = item.generation_started_at || item.request_date || item.created_at;
-  const elapsedSeconds = startedAt ? Math.max(0, Math.round((Date.now() - Date.parse(startedAt)) / 1000)) : 0;
+  const workflowElapsedSeconds = elapsedSeconds(workflowStartedAt, workflowFinishedAt || clock);
+  const generationElapsedSeconds = elapsedSeconds(item.generation_started_at, item.generation_completed_at || clock);
+
+  useEffect(() => {
+    if (workflowFinishedAt) return;
+    const timer = window.setInterval(() => setClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [workflowFinishedAt]);
 
   const stageGroups = useMemo(() => {
     const groups = new Map<string, WorkflowStage[]>();
@@ -395,7 +416,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
               <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-white/65">
                 <span className="inline-flex items-center gap-1.5"><PackageCheck className="h-3.5 w-3.5" /> {currentStage?.title || words(item.workflow_stage)}</span>
                 <span className="inline-flex items-center gap-1.5"><UserRound className="h-3.5 w-3.5" /> {memberName(item.generation_assigned_member)}</span>
-                <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" /> Active {duration(elapsedSeconds)}</span>
+                <span className="inline-flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" /> {workflowFinishedAt ? "Total" : "Active"} {duration(workflowElapsedSeconds)}</span>
                 {item.deadline_at && <span className="inline-flex items-center gap-1.5 text-amber-200"><CalendarClock className="h-3.5 w-3.5" /> Due {dateTime(item.deadline_at)}</span>}
               </div>
             </div>
@@ -423,15 +444,20 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
                 <div key={group} className="grid gap-3 lg:grid-cols-[110px_minmax(0,1fr)]">
                   <div className="pt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-secondary">{words(group)}</div>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    {stages.map((stage) => (
+                    {stages.map((stage) => {
+                      const stageDuration = stage.status === "current"
+                        ? Number(stage.completedDurationSeconds || 0) + elapsedSeconds(stage.currentStartedAt || stage.startedAt, clock)
+                        : stage.durationSeconds;
+                      return (
                       <article key={stage.code} className={`relative min-h-36 rounded-2xl border p-4 shadow-lg transition ${stageTone(stage)}`}>
                         {stage.status === "current" && <span className="absolute right-4 top-4 h-2.5 w-2.5 animate-pulse rounded-full bg-primary ring-4 ring-primary/10" />}
                         <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-black/5">{stage.status === "completed" ? <Check className="h-4 w-4 text-emerald-600" /> : stage.status === "current" ? <Zap className="h-4 w-4 text-primary" /> : <Circle className="h-4 w-4 text-outline" />}</div>
                         <p className="mt-3 text-sm font-bold">{stage.title}</p>
                         <p className="mt-1 line-clamp-2 text-[11px] leading-4 opacity-70">{stage.description}</p>
-                        <div className="mt-3 flex items-center justify-between text-[10px] font-semibold opacity-65"><span>{stage.status === "current" ? `Started ${dateTime(stage.startedAt)}` : stage.status === "completed" ? "Completed" : "Waiting"}</span><span>{duration(stage.durationSeconds)}</span></div>
+                        <div className="mt-3 flex items-end justify-between gap-2 text-[10px] font-semibold opacity-65"><span>{stage.status === "current" ? `Started ${dateTime(stage.currentStartedAt || stage.startedAt)}` : stage.status === "completed" ? stage.completedAt ? `Completed ${dateTime(stage.completedAt)}` : "Completed · time not recorded" : "Waiting"}{Number(stage.visitCount || 0) > 1 ? ` · ${stage.visitCount} visits` : ""}</span><span className="shrink-0">{duration(stageDuration)}</span></div>
                       </article>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ))}
@@ -441,14 +467,17 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
           <section className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,.7fr)]">
             <div className="rounded-2xl border border-outline-variant/35 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">Live processing</p><h3 className="mt-1 text-base font-bold text-on-surface">Current execution state</h3></div><Sparkles className="h-5 w-5 text-primary" /></div>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {[
                   ["Current step", data.progress.currentStep || item.next_action || "Waiting", Zap],
                   ["Pose progress", `${data.progress.completedPoseCount}/${data.progress.totalPoseCount}`, ImageIcon],
                   ["Generation owner", memberName(item.generation_assigned_member), UserRound],
                   ["Listing owner", memberName(item.listing_assigned_member), PackageCheck],
+                  ["Generation time", item.generation_started_at ? duration(generationElapsedSeconds) : "Not started", Clock3],
+                  ["Workflow total", workflowStartedAt ? duration(workflowElapsedSeconds) : "Not started", CalendarClock],
                 ].map(([label, value, Icon]) => <div key={String(label)} className="rounded-xl bg-surface-container/55 p-3"><Icon className="h-4 w-4 text-primary" /><p className="mt-3 text-[10px] font-bold uppercase tracking-wide text-secondary">{String(label)}</p><p className="mt-1 truncate text-sm font-bold text-on-surface">{String(value)}</p></div>)}
               </div>
+              <div className="mt-3 grid gap-2 rounded-xl border border-outline-variant/25 bg-surface-container/20 p-3 text-[11px] text-secondary sm:grid-cols-2"><p><span className="font-bold text-on-surface">Workflow started:</span> {dateTime(workflowStartedAt)}</p><p><span className="font-bold text-on-surface">Workflow completed:</span> {workflowFinishedAt ? dateTime(workflowFinishedAt) : "In progress"}</p><p><span className="font-bold text-on-surface">Generation started:</span> {dateTime(item.generation_started_at)}</p><p><span className="font-bold text-on-surface">Generation completed:</span> {item.generation_completed_at ? dateTime(item.generation_completed_at) : item.generation_started_at ? "In progress" : "Not started"}</p></div>
               {item.blocked_reason && <div className="mt-4 flex gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-red-800"><XCircle className="mt-0.5 h-5 w-5 shrink-0" /><div><p className="text-sm font-bold">Workflow blocked</p><p className="mt-1 text-xs leading-5">{item.blocked_reason}</p></div></div>}
               <div className="mt-5 flex flex-wrap gap-2">
                 {data.actions.map((action) => <button key={action.type} disabled={!action.enabled || Boolean(busy)} onClick={() => void runWorkflowAction(action.type)} className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 ${action.type === "reject" || action.type === "retry_generation" ? "border border-red-200 bg-red-50 text-red-700 hover:bg-red-100" : "bg-primary text-white hover:bg-primary/90"}`}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : action.type.includes("retry") || action.type === "reject" ? <RotateCcw className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}{action.label}</button>)}

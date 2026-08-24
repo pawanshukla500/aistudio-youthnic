@@ -2658,6 +2658,34 @@ async function catalogBatch(workspace: Awaited<ReturnType<typeof workspaceFor>>[
   return data as JsonRecord;
 }
 
+async function assertActiveCatalogMembers(orgId: string, memberIds: unknown[]) {
+  const uniqueIds = [...new Set(memberIds.map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!uniqueIds.length) return;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (uniqueIds.some((id) => !uuid.test(id))) throw new Error("One or more selected catalog owners are invalid.");
+  const { data, error } = await service.from("organization_members").select("id")
+    .eq("organization_id", orgId).eq("status", "active").in("id", uniqueIds);
+  if (error) throw new Error(error.message);
+  if ((data || []).length !== uniqueIds.length) throw new Error("Every catalog owner must be an active member of this workspace.");
+}
+
+async function assertCatalogEvent(orgId: string, eventId: unknown) {
+  const id = String(eventId || "").trim();
+  if (!id) return;
+  const { data, error } = await service.from("marketing_events").select("id")
+    .eq("id", id).eq("organization_id", orgId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("The selected campaign event does not belong to this workspace.");
+}
+
+function optionalCatalogTimestamp(value: unknown, label: string) {
+  if (value === null || value === undefined || value === "") return null;
+  const raw = typeof value === "number" || /^\d+$/.test(String(value)) ? Number(value) : String(value);
+  const date = new Date(raw);
+  if (!Number.isFinite(date.getTime())) throw new Error(`${label} must be a valid date and time.`);
+  return date.toISOString();
+}
+
 // Best-effort cleanup for the batch-level reference entries mutate_planning_batch_reference_images
 // just replaced or removed from planning_batches.reference_images. A failure here never rolls
 // back or blocks the reference-image update that already committed - it only leaves an orphaned
@@ -2732,7 +2760,13 @@ async function createCatalogOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const name = String(args.name || "").trim();
   if (!name) throw new Error("A catalog name is required.");
+  await Promise.all([
+    assertActiveCatalogMembers(workspace.organization.id, [args.generationAssignedMemberId, args.listingAssignedMemberId]),
+    assertCatalogEvent(workspace.organization.id, args.eventId),
+  ]);
   const now = new Date().toISOString();
+  const deadlineAt = optionalCatalogTimestamp(args.deadlineAt, "Listing deadline");
+  const preferredGenerationAt = optionalCatalogTimestamp(args.preferredGenerationAt, "Preferred generation time");
   const generationSettings = {
     modelDirection: String(args.modelDirection || ""), sceneDirection: String(args.sceneDirection || ""),
     category: String(args.category || "ethnic/fusion"), aspectRatio: String(args.aspectRatio || "3:4"),
@@ -2742,14 +2776,14 @@ async function createCatalogOperation(request: Request, args: JsonRecord) {
     poseDirection: String(args.poseDirection || ""),
     marketplaceRequirements: String(args.marketplaceRequirements || ""),
     marketplaces: Array.isArray(args.marketplaces) ? args.marketplaces.map(String).filter(Boolean).slice(0, 20) : [],
-    specialInstructions: String(args.specialInstructions || ""), deadlineAt: args.deadlineAt ? new Date(String(args.deadlineAt)).toISOString() : null,
+    specialInstructions: String(args.specialInstructions || ""), deadlineAt,
     listingAssignedMemberId: args.listingAssignedMemberId || null,
   };
   const { data, error } = await service.from("planning_batches").insert({
     organization_id: workspace.organization.id, batch_code: `CAT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, name,
     total_skus: 0, generated_count: 0, pending_count: 0, failed_count: 0, status: "active", created_by_member_id: workspace.member.id,
     catalog_key: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), queue_status: "idle",
-    campaign_season: String(args.campaign || ""), scheduled_at: args.preferredGenerationAt ? new Date(Number(args.preferredGenerationAt)).toISOString() : null,
+    campaign_season: String(args.campaign || ""), scheduled_at: preferredGenerationAt,
     schedule_status: "none", source_event_id: args.eventId || null, event_id: args.eventId || null, generation_settings: generationSettings,
     priority: ["low", "normal", "high", "urgent"].includes(String(args.priority)) ? String(args.priority) : "normal",
     assigned_member_id: args.generationAssignedMemberId || null,
@@ -2765,17 +2799,29 @@ async function bulkAddVariantsOperation(request: Request, args: JsonRecord) {
   const batch = await catalogBatch(workspace, batchId);
   const variants = Array.isArray(args.variants) ? args.variants as JsonRecord[] : [];
   if (!variants.length) return { created: 0 };
+  if (variants.length > 1_000) throw new Error("A catalog can add at most 1,000 SKUs in one request.");
   const { data: existing, error: existingError } = await service.from("planning_requests").select("sku_name").eq("batch_id", batchId);
-  if (existingError) console.error(existingError.message);
+  if (existingError) throw new Error(existingError.message);
   const existingSkus = new Set((existing || []).map((row) => String(row.sku_name).toLowerCase()));
-  const clean = variants.filter((variant) => String(variant.sku || "").trim() && !existingSkus.has(String(variant.sku).trim().toLowerCase()));
+  const clean: JsonRecord[] = [];
+  for (const variant of variants) {
+    const sku = String(variant.sku || "").trim();
+    const normalizedSku = sku.toLowerCase();
+    if (!sku || existingSkus.has(normalizedSku)) continue;
+    existingSkus.add(normalizedSku);
+    clean.push(variant);
+  }
   if (!clean.length) return { created: 0 };
   const basePosition = existing?.length || 0;
   const settings = (batch.generation_settings || {}) as JsonRecord;
   const defaultPriority = ["low", "normal", "high", "urgent"].includes(String(args.priority || batch.priority)) ? String(args.priority || batch.priority) : "normal";
   const defaultAssignee = args.generationAssignedMemberId || batch.assigned_member_id || null;
+  await assertActiveCatalogMembers(workspace.organization.id, [
+    defaultAssignee,
+    ...clean.map((variant) => variant.generationAssignedMemberId),
+  ]);
   const defaultNotes = String(args.specialInstructions || settings.specialInstructions || "");
-  const deadlineAt = args.deadlineAt || settings.deadlineAt;
+  const deadlineAt = optionalCatalogTimestamp(args.deadlineAt || settings.deadlineAt, "Listing deadline");
   const { error } = await service.from("planning_requests").insert(clean.map((variant, index) => ({
     organization_id: workspace.organization.id, created_by_member_id: workspace.member.id, batch_id: batchId,
     sku_name: String(variant.sku).trim(), color_label: String(variant.colorLabel || ""), product_description: "",
@@ -2784,7 +2830,7 @@ async function bulkAddVariantsOperation(request: Request, args: JsonRecord) {
     priority: ["low", "normal", "high", "urgent"].includes(String(variant.priority)) ? String(variant.priority) : defaultPriority,
     assigned_member_id: variant.generationAssignedMemberId || defaultAssignee,
     notes: String(variant.specialInstructions || defaultNotes),
-    expected_shoot_date: deadlineAt ? new Date(String(deadlineAt)).toISOString().slice(0, 10) : null,
+    expected_shoot_date: deadlineAt ? deadlineAt.slice(0, 10) : null,
   })));
   if (error) throw new Error(error.message);
   const total = basePosition + clean.length;

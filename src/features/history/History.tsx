@@ -5,6 +5,13 @@ import { api, getJobReferenceImages, invokeAppApi, useMutation, useQuery, type I
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
+import { ActionDialog } from "../../components/ui/ActionDialog";
+
+type PendingHistoryAction = {
+  type: "stop" | "delete" | "regenerate";
+  jobId: Id<"generationJobs">;
+  sku: string;
+};
 
 function base64ToBlob(base64: string, mimeType: string): Blob {
   const binary = atob(base64);
@@ -509,6 +516,7 @@ export function History() {
   const [expanded, setExpanded] = useState<Id<"generationJobs"> | null>(null);
   const [error, setError] = useState("");
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingHistoryAction | null>(null);
   const { data: jobsPage, error: _jobsPageError } = useQuery(api.jobs.list, {
     organizationId: organization._id,
     page,
@@ -533,21 +541,35 @@ export function History() {
   }, [jobsPage, page]);
 
   const stopGeneration = async (jobId: string) => {
-    if (!window.confirm("Stop this generation? Completed images will remain saved and all remaining poses will be cancelled.")) return;
     setBusyJobId(jobId);
     try { await cancelJob({ jobId }); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not stop generation."); } finally { setBusyJobId(null); }
   };
 
   const deleteGeneration = async (jobId: string) => {
-    if (!window.confirm("Delete this generation and its generated Firebase images? This cannot be undone.")) return;
     setBusyJobId(jobId);
     try { await removeJob({ jobId }); if (expanded === jobId) setExpanded(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete generation."); } finally { setBusyJobId(null); }
   };
 
   const regenerateFailedSession = async (jobId: string) => {
-    if (!window.confirm("Regenerate this session? Every pose that didn't complete will be re-attempted; poses that already completed are kept as-is.")) return;
     setBusyJobId(jobId);
     try { await regenerateSession({ jobId }); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not regenerate this session."); } finally { setBusyJobId(null); }
+  };
+
+  const actionDialog = pendingAction?.type === "stop"
+    ? { title: `Stop ${pendingAction.sku}?`, description: "All remaining poses will be cancelled. Images that already completed remain saved in this generation history.", confirmLabel: "Stop generation", tone: "danger" as const }
+    : pendingAction?.type === "delete"
+      ? { title: `Delete ${pendingAction.sku}?`, description: "This permanently removes the generation record and its stored generated images. This action cannot be undone.", confirmLabel: "Delete generation", tone: "danger" as const }
+      : pendingAction?.type === "regenerate"
+        ? { title: `Retry failed poses for ${pendingAction.sku}?`, description: "Every pose that did not complete will be attempted again. Poses already completed remain unchanged.", confirmLabel: "Retry failed poses", tone: "primary" as const }
+        : null;
+
+  const confirmPendingAction = async () => {
+    const action = pendingAction;
+    if (!action) return;
+    if (action.type === "stop") await stopGeneration(action.jobId);
+    else if (action.type === "delete") await deleteGeneration(action.jobId);
+    else await regenerateFailedSession(action.jobId);
+    setPendingAction(null);
   };
 
   return (
@@ -654,17 +676,17 @@ export function History() {
                  {/* COL 4: Actions */}
                  <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 lg:pl-4">
                    {['queued', 'processing'].includes(job.status) && (
-                      <button disabled={busyJobId === job._id} title="Stop generation" onClick={(e) => { e.stopPropagation(); void stopGeneration(job._id); }} className="rounded-md p-1.5 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
+                      <button disabled={busyJobId === job._id} title="Stop generation" onClick={(e) => { e.stopPropagation(); setPendingAction({ type: "stop", jobId: job._id, sku: job.skuName || job.skuId }); }} className="rounded-md p-1.5 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
                          {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
                       </button>
                    )}
                    {job.status === "failed" && (
-                      <button disabled={busyJobId === job._id} title="Regenerate failed poses" onClick={(e) => { e.stopPropagation(); void regenerateFailedSession(job._id); }} className="rounded-md p-1.5 text-secondary hover:bg-primary/10 hover:text-primary disabled:opacity-50">
+                      <button disabled={busyJobId === job._id} title="Regenerate failed poses" onClick={(e) => { e.stopPropagation(); setPendingAction({ type: "regenerate", jobId: job._id, sku: job.skuName || job.skuId }); }} className="rounded-md p-1.5 text-secondary hover:bg-primary/10 hover:text-primary disabled:opacity-50">
                          {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
                       </button>
                    )}
                    {!['queued', 'processing'].includes(job.status) && (
-                      <button disabled={busyJobId === job._id} title="Delete generation" onClick={(e) => { e.stopPropagation(); void deleteGeneration(job._id); }} className="rounded-md p-1.5 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
+                      <button disabled={busyJobId === job._id} title="Delete generation" onClick={(e) => { e.stopPropagation(); setPendingAction({ type: "delete", jobId: job._id, sku: job.skuName || job.skuId }); }} className="rounded-md p-1.5 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
                          {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                       </button>
                    )}
@@ -737,6 +759,17 @@ export function History() {
         </div>
       )}
       
+      <ActionDialog
+        open={Boolean(pendingAction && actionDialog)}
+        title={actionDialog?.title || "Confirm generation action"}
+        description={actionDialog?.description || "Confirm this generation action."}
+        confirmLabel={actionDialog?.confirmLabel || "Confirm"}
+        tone={actionDialog?.tone || "danger"}
+        busy={Boolean(busyJobId)}
+        onCancel={() => setPendingAction(null)}
+        onConfirm={() => void confirmPendingAction()}
+      />
+
       {error && (
          <div className="fixed bottom-6 right-6 rounded-xl border border-danger/20 bg-white px-5 py-4 text-sm text-danger shadow-xl flex items-center gap-3 z-50 animate-in slide-in-from-bottom-5">
             <AlertCircle className="h-5 w-5" />

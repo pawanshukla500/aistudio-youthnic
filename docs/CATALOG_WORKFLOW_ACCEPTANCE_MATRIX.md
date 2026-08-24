@@ -13,7 +13,7 @@ Status meanings:
 | Requirement | Implemented behavior | Status and evidence |
 | --- | --- | --- |
 | Create a requirement/batch and add many SKUs | Catalog Planning persists one batch plus one request/work item per SKU; the spreadsheet importer supports multi-row intake and dry-run validation. | **Implemented** — Planning UI, `catalogProduction.importGoogleSheetDryRun`, and `catalogProduction.importGoogleSheet`. |
-| Assign generation and listing ownership | Current owners live on the work item; immutable assignment history records actor, assignee, assignment type, note, and timestamp. | **Implemented; live gate** — role transition harness covers manager/generator/listing boundaries. |
+| Assign generation and listing ownership | Current owners live on the work item; initial Planning owners and later reassignments create immutable history with actor, assignee, assignment type, note, and timestamp. Owner IDs must resolve to active members in the same organization. | **Implemented; live gate** — role transition harness covers manager/generator/listing boundaries. |
 | Priority, deadlines, campaign/event, marketplaces, and instructions | In-app intake and spreadsheet contracts store all fields and expose filters/sorting. | **Implemented** — batch, priority, campaign, marketplace, assignee, stage, date, query, and sort controls use database rows. |
 | Front/back and other reference assets | Browser uploads use the private `catalog-assets` bucket; URL imports and historical Firebase objects remain supported. Reference records store role, path, backend, URL, metadata, and tenant. | **Implemented; live gate** — the live harness performs same-tenant upload/upsert/read/delete plus viewer and cross-tenant denial probes. |
 | Structured creative direction | Mood/look, model, styling, poses, backdrop, lighting, composition, and marketplace requirements are stored in `catalog_creative_directions` and editable from workflow detail. | **Implemented** — normalized record plus audit event. |
@@ -27,13 +27,13 @@ Status meanings:
 | Requirement | Implemented behavior | Status and evidence |
 | --- | --- | --- |
 | Live data-driven Flow | Workflow detail joins work item, stage definitions, stage events/timings, owners, dependencies, poses, reviews, comments, handoffs, generation job, and session data. No sample stages are fabricated in the client. | **Implemented; live gate** — Realtime subscriptions refresh work item, event, and pose-version changes; production subscription delivery needs post-deploy proof. |
-| Status, owner, progress, step, start/end, and time per stage | Responsive stage rail and summary expose the persisted current state and calculated/recorded timing. | **Implemented** — workflow API and operational Flow view. |
+| Status, owner, progress, step, start/end, and time per stage | Responsive stage rail and summary expose the persisted current state, entry/completion times, visit count, and total time across repeated review/re-generation visits. Transition duration is attributed to the stage being exited. | **Implemented** — deterministic Deno tests cover re-entry and legacy events without recorded duration. |
 | Blockers, failures, dependencies, and next action | Detail response returns structured dependencies, blocker/error details, permission-aware actions, and recovery state. | **Implemented** — API contract and exceptional-state UI. |
 | Expandable SKU detail and five-pose inspection | From list/Kanban a SKU opens a full-screen live workflow; pose cards expose history, prompt/model metadata, reviews, comments, and downloads. | **Implemented** — desktop/mobile browser QA and local build. |
 | Search, sort, and requested filters | Search covers SKU/request/batch/campaign/theme/remarks/marketplace; filters cover batch, assignee, status, campaign, marketplace, priority, and date. | **Implemented** — Catalog Production controls operate on fetched rows. |
 | List, Kanban, and Flow views | Catalog Production provides list and Kanban; each SKU opens the live operational Flow. The technical generation graph remains available for diagnosis. | **Implemented** — existing diagnostics preserved. |
 | Responsive navigation and states | The application retains the collapsible sidebar. Catalog Production and workflow detail have desktop/mobile layouts plus loading, empty, success, and actionable error states. | **Implemented** — browser QA and production build. |
-| Working controls only | QC, re-generation guidance, bulk start, spreadsheet review, send, and resend use accessible action dialogs with real handlers and server validation. | **Implemented** — static verifier fails on browser `prompt`/`confirm` and checks dialog wiring. |
+| Working controls only | QC, re-generation guidance, bulk start, spreadsheet review, Planning delete/stop, Studio stop, History stop/retry/delete, send, and resend use accessible action dialogs with real handlers and server validation. | **Implemented** — static verifier fails on browser `prompt`/`confirm`, checks dialog wiring, and rendered QA found no native JavaScript dialog. |
 
 ## Five-pose asset package
 
@@ -60,12 +60,12 @@ Status meanings:
 
 | Requirement | Implemented behavior | Status and evidence |
 | --- | --- | --- |
-| PostgreSQL/Auth/RBAC/RLS | Existing Firebase identities map to organization memberships; granular catalog permissions gate server actions; every organization-owned V2 table has tenant RLS and organization-leading indexes. | **Implemented; live gate** — migration includes deployment-time assertions; six-role harness proves same/cross-tenant outcomes after deploy. |
+| PostgreSQL/Auth/RBAC/RLS | Existing Firebase identities map to organization memberships; granular catalog permissions gate server actions; every organization-owned V2 table has tenant RLS and organization-leading indexes. A database trigger rejects cross-organization member, work-item, batch, event, asset, handoff, and delivery links even from service-role paths. | **Implemented; live gate** — migration validates historical relationships at deploy time; six-role harness proves same/cross-tenant outcomes after deploy. |
 | Realtime | Work items, events, pose versions, handoffs, comments, and deliveries are added to the publication and clients retain a low-frequency recovery refresh. | **Implemented; live gate** — verify subscription events in deployed Supabase. |
 | Storage isolation | Private bucket paths start with organization UUID. Browser policies require current organization plus planning/studio permissions; Edge service-role operations reject paths outside the active tenant. | **Implemented; live gate** — real Storage policy cycle is in the authenticated harness. |
 | Scheduled jobs and Edge email | Cron invokes the permission-protected Edge operation; internal calls require the catalog worker secret. | **Implemented; live gate** — observe one eligible and one empty schedule window after deploy. |
 | Audit and notifications | Sensitive actions write audit/events and targeted notifications; user notification preferences participate in recipient selection. | **Implemented; live gate** — recipient visibility and addressing are checked by the role harness. |
-| Safe migration | The already-applied base migration is immutable. Hardening is additive, validates RLS/policy coverage, backfills state/version/handoff data, and deploys before API/UI. | **Implemented** — verifier parses both migrations and Git comparison protects the base file. |
+| Safe migration | The already-applied base migration is immutable. Hardening is additive, validates RLS/policy and tenant-relationship coverage, backfills state/version/handoff/assignment data, and deploys before API/UI. | **Implemented** — verifier parses both migrations, the live preflight passed all 33 catalog relationship checks, and Git comparison protects the base file. |
 
 ## Remaining production sign-off gates
 

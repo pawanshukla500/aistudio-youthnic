@@ -23,6 +23,7 @@ import { api, useMutation, useQuery, type Id } from "../../lib/backend";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import { getErrorMessage } from "../../lib/errors";
 import { StylingPlanEditor } from "../../components/ui/StylingPlanEditor";
+import { ActionDialog } from "../../components/ui/ActionDialog";
 import { normalizePlan, type StylingPlan } from "../../lib/stylingPlan";
 import { supabase } from "../../lib/supabase";
 import { uploadCatalogAsset } from "../../lib/catalogStorage";
@@ -36,6 +37,10 @@ type PlanningRoadmap = { events: RoadmapEvent[] };
 type CatalogSummary = any;
 type CatalogVariant = Record<string, any> & { outputs: Array<Record<string, any> & { status: string; poseNumber: number; title: string; url?: string }> };
 type CatalogDetail = Record<string, any> & { variants: CatalogVariant[]; styleReferences: any[]; modelReference: { _id: string; url: string; filename: string } | null };
+type PendingCatalogAction =
+  | { type: "delete_catalog" }
+  | { type: "stop_catalog" }
+  | { type: "stop_generation"; jobId: Id<"generationJobs">; sku: string };
 
 const emptyCreate = {
   name: "",
@@ -155,6 +160,7 @@ export function Planning() {
   const [scheduleAt, setScheduleAt] = useState("");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingCatalogAction | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -440,7 +446,6 @@ export function Planning() {
 
   const handleDeleteCatalog = async () => {
     if (!selectedId) return;
-    if (!window.confirm("Are you sure you want to delete this catalog and all its variants? This cannot be undone.")) return;
     setBusy("delete-catalog");
     setNotice(null);
     try {
@@ -457,7 +462,6 @@ export function Planning() {
 
   const handleStopCatalogGeneration = async () => {
     if (!selectedId) return;
-    if (!window.confirm("Are you sure you want to force-stop the generation of this catalog? Active generating images will be cancelled.")) return;
     setBusy("stop-catalog-generation");
     setNotice(null);
     try {
@@ -470,12 +474,11 @@ export function Planning() {
     }
   };
 
-  const stopActiveGeneration = async () => {
-    if (!activeVariant?.jobId || !window.confirm(`Stop generation for ${activeVariant.sku}? Completed images will remain saved.`)) return;
+  const stopActiveGeneration = async (jobId: Id<"generationJobs">, sku: string) => {
     setBusy("stop-generation");
     try {
-      await cancelJob({ jobId: activeVariant.jobId });
-      notify("success", `Generation stopped for ${activeVariant.sku}.`);
+      await cancelJob({ jobId });
+      notify("success", `Generation stopped for ${sku}.`);
     } catch (reason) {
       notify("error", getErrorMessage(reason, "Could not stop generation."));
     } finally {
@@ -493,6 +496,37 @@ export function Planning() {
   const isDraftable = selected && ["draft", "completed", "failed"].includes(selected.status);
   const canEditReferences = Boolean(selected && ["draft", "completed", "failed"].includes(selected.status));
   const incompleteCount = Math.max(0, (selected?.variants.length || 0) - readyCount);
+  const actionDialog = pendingAction?.type === "delete_catalog"
+    ? {
+      title: `Delete ${selected?.name || "this catalog"}?`,
+      description: "This permanently removes the catalog and every colourway linked to it. Generated assets that are already stored are not recoverable from this screen.",
+      confirmLabel: "Delete catalog",
+      tone: "danger" as const,
+    }
+    : pendingAction?.type === "stop_catalog"
+      ? {
+        title: `Stop generation for ${selected?.name || "this catalog"}?`,
+        description: "Queued and active colourways will be cancelled. Images already completed remain saved in their SKU history.",
+        confirmLabel: "Stop generation",
+        tone: "danger" as const,
+      }
+      : pendingAction?.type === "stop_generation"
+        ? {
+          title: `Stop ${pendingAction.sku}?`,
+          description: "The active generation job will be cancelled. Images already completed remain saved and can still be reviewed.",
+          confirmLabel: "Stop SKU generation",
+          tone: "danger" as const,
+        }
+        : null;
+
+  const confirmPendingAction = async () => {
+    const action = pendingAction;
+    if (!action) return;
+    if (action.type === "delete_catalog") await handleDeleteCatalog();
+    else if (action.type === "stop_catalog") await handleStopCatalogGeneration();
+    else await stopActiveGeneration(action.jobId, action.sku);
+    setPendingAction(null);
+  };
 
   return (
     <div className="mx-auto max-w-[1280px] space-y-6 flex flex-col h-[calc(100vh-2rem)]">
@@ -598,11 +632,11 @@ export function Planning() {
                       <h2 className="font-syne text-2xl font-bold text-on-surface">{selected.name}</h2>
                       <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${statusChip(selected.status)}`}>{statusLabel(selected.status)}</span>
                       {["scheduled", "queued", "processing", "generating"].includes(selected.status) && (
-                        <button disabled={busy === "stop-catalog-generation"} onClick={() => void handleStopCatalogGeneration()} className="flex items-center gap-1.5 rounded-lg border border-warning/20 px-2 py-1 text-[11px] font-semibold text-warning hover:bg-warning-surface disabled:opacity-50">
+                        <button disabled={busy === "stop-catalog-generation"} onClick={() => setPendingAction({ type: "stop_catalog" })} className="flex items-center gap-1.5 rounded-lg border border-warning/20 px-2 py-1 text-[11px] font-semibold text-warning hover:bg-warning-surface disabled:opacity-50">
                           {busy === "stop-catalog-generation" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Ban className="h-3 w-3" />} Stop generation
                         </button>
                       )}
-                      <button disabled={busy === "delete-catalog"} onClick={() => void handleDeleteCatalog()} className="flex items-center gap-1.5 rounded-lg border border-danger/20 px-2 py-1 text-[11px] font-semibold text-danger hover:bg-danger-surface disabled:opacity-50">
+                      <button disabled={busy === "delete-catalog"} onClick={() => setPendingAction({ type: "delete_catalog" })} className="flex items-center gap-1.5 rounded-lg border border-danger/20 px-2 py-1 text-[11px] font-semibold text-danger hover:bg-danger-surface disabled:opacity-50">
                         {busy === "delete-catalog" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />} Delete
                       </button>
                     </div>
@@ -868,7 +902,7 @@ export function Planning() {
                             {activeVariant.jobStatus === "queued" && activeVariant.jobError && <p className="mt-1 text-info">Automatic retry{activeVariant.retryAvailableAt && activeVariant.retryAvailableAt > Date.now() ? ` at ${new Date(activeVariant.retryAvailableAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}: {activeVariant.jobError}</p>}
                           </div>
                         ) : null}
-                        {activeVariant?.jobId && <button disabled={busy === "stop-generation"} onClick={() => void stopActiveGeneration()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-warning/30 bg-white px-4 py-2.5 text-sm font-semibold text-warning disabled:opacity-50">{busy === "stop-generation" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Stop active generation</button>}
+                        {activeVariant?.jobId && <button disabled={busy === "stop-generation"} onClick={() => setPendingAction({ type: "stop_generation", jobId: activeVariant.jobId, sku: activeVariant.sku })} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-warning/30 bg-white px-4 py-2.5 text-sm font-semibold text-warning disabled:opacity-50">{busy === "stop-generation" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Stop active generation</button>}
                         <p className="mt-2 text-xs leading-5 text-secondary">The durable queue continues in the background. You can safely leave this page and follow stored results in History.</p>
                       </div>
                     ) : isDraftable ? (
@@ -946,6 +980,17 @@ export function Planning() {
           )}
         </>
       )}
+
+      <ActionDialog
+        open={Boolean(pendingAction && actionDialog)}
+        title={actionDialog?.title || "Confirm action"}
+        description={actionDialog?.description || "Confirm this catalog action."}
+        confirmLabel={actionDialog?.confirmLabel || "Confirm"}
+        tone={actionDialog?.tone || "danger"}
+        busy={Boolean(busy)}
+        onCancel={() => setPendingAction(null)}
+        onConfirm={() => void confirmPendingAction()}
+      />
 
       {showCreate && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-navy-soft/45 p-4">

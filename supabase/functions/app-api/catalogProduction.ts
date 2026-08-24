@@ -1,5 +1,6 @@
 import { type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.112.2";
 import { type JsonRecord } from "./profiles.ts";
+import { buildCatalogStageTimeline } from "./lib/catalogStageTimeline.ts";
 
 export type CatalogWorkspace = {
   organization: { id: string; name: string };
@@ -900,11 +901,6 @@ function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 }
 
-function isoMillis(value: unknown) {
-  const parsed = Date.parse(text(value));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function tenantCatalogAssetPath(orgId: string, requestedPath: string) {
   const normalized = requestedPath.replace(/^\/+/, "");
   const legacyPrefix = `organizations/${orgId}/`;
@@ -993,38 +989,7 @@ export async function getCatalogWorkflowDetail(
   const decorateMember = (id: unknown) => memberById.get(text(id)) || null;
 
   const events = (eventsResult.data || []).map((event) => ({ ...event, actor: decorateMember(event.actor_member_id) }));
-  const workflowEvents = events.filter((event) => event.event_type === "workflow_stage_changed");
-  const currentProgress = Number(item.workflow_progress || 0);
-  const exceptionalCurrent = ["blocked_failed", "regeneration_required"].includes(String(item.workflow_stage));
-  const stageRows = (stagesResult.data || []).map((stage) => {
-    const entries = workflowEvents.filter((event) => event.to_status === stage.code || event.stage_code === stage.code);
-    const firstEntry = entries[0];
-    const firstEntryIndex = firstEntry ? workflowEvents.findIndex((event) => event.id === firstEntry.id) : -1;
-    const nextEntry = firstEntryIndex >= 0 ? workflowEvents[firstEntryIndex + 1] : null;
-    const isCurrent = stage.code === item.workflow_stage;
-    const inferredCompleted = !exceptionalCurrent
-      && stage.group_key !== "exception"
-      && Number(stage.progress_percent) < currentProgress;
-    const status = isCurrent ? "current" : (firstEntry && !isCurrent) || inferredCompleted ? "completed" : "pending";
-    const startedAt = isCurrent ? item.stage_started_at : firstEntry?.created_at || null;
-    const completedAt = isCurrent ? null : nextEntry?.created_at || null;
-    const recordedDuration = entries.map((entry) => Number(entry.duration_seconds || 0)).find((duration) => duration > 0) || 0;
-    const calculatedDuration = startedAt && completedAt ? Math.max(0, Math.round((isoMillis(completedAt) - isoMillis(startedAt)) / 1000)) : 0;
-    return {
-      code: stage.code,
-      groupKey: stage.group_key,
-      title: stage.title,
-      description: stage.description,
-      order: Number(stage.stage_order),
-      progressPercent: Number(stage.progress_percent),
-      defaultNextAction: stage.default_next_action,
-      terminal: Boolean(stage.terminal),
-      status,
-      startedAt,
-      completedAt,
-      durationSeconds: recordedDuration || calculatedDuration,
-    };
-  });
+  const stageRows = buildCatalogStageTimeline(stagesResult.data || [], eventsResult.data || [], item);
 
   const poseVersions = await Promise.all((versionsResult.data || []).map(async (version) => {
     const signedUrl = await signedCatalogAssetUrl(service, workspace.organization.id, version as JsonRecord, "original_url");
@@ -1322,8 +1287,8 @@ export async function bulkGenerateCatalogWorkItems(
       const referenceUrl = text(item.reference_image_url);
       const backReferenceUrl = text(item.back_reference_image_url);
       insertAssets.push(
-        { organization_id: workspace.organization.id, planning_request_id: requestId, sku_name: item.sku_name, prompt: "", image_url: referenceUrl, storage_path: "", sku_matched: true, asset_role: "front", storage_backend: "firebase", metadata: { source: "catalog_production_import", role: "front" } },
-        { organization_id: workspace.organization.id, planning_request_id: requestId, sku_name: item.sku_name, prompt: "", image_url: backReferenceUrl, storage_path: "", sku_matched: true, asset_role: "back", storage_backend: "firebase", metadata: { source: "catalog_production_import", role: "back" } }
+        { organization_id: workspace.organization.id, planning_request_id: requestId, sku_name: item.sku_name, prompt: "", image_url: referenceUrl, storage_path: "", sku_matched: true, asset_role: "front", storage_backend: "external", metadata: { source: "catalog_production_import", role: "front" } },
+        { organization_id: workspace.organization.id, planning_request_id: requestId, sku_name: item.sku_name, prompt: "", image_url: backReferenceUrl, storage_path: "", sku_matched: true, asset_role: "back", storage_backend: "external", metadata: { source: "catalog_production_import", role: "back" } }
       );
     } else {
       if (!request?.batch_id) {

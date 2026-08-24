@@ -12,10 +12,14 @@ const productionTable = await readFile("src/features/planning/catalog-production
 const productionBoard = await readFile("src/features/planning/catalog-production/ProductionBoard.tsx", "utf8");
 const catalogProduction = await readFile("src/features/planning/catalog-production/CatalogProduction.tsx", "utf8");
 const handoffAdmin = await readFile("src/features/planning/catalog-production/HandoffAdmin.tsx", "utf8");
+const planning = await readFile("src/features/planning/Planning.tsx", "utf8");
+const studio = await readFile("src/features/studio/Studio.tsx", "utf8");
+const history = await readFile("src/features/history/History.tsx", "utf8");
 const actionDialog = await readFile("src/components/ui/ActionDialog.tsx", "utf8");
 const layout = await readFile("src/components/ui/Layout.tsx", "utf8");
 const catalogStorage = await readFile("src/lib/catalogStorage.ts", "utf8");
 const liveVerifier = await readFile("scripts/verify-catalog-workflow-live.mjs", "utf8");
+const stageTimeline = await readFile("supabase/functions/app-api/lib/catalogStageTimeline.ts", "utf8");
 
 const stageCodes = [
   "requirement_created",
@@ -68,6 +72,7 @@ assert.match(migration, /sync_catalog_pose_asset_version/, "Pose-version synchro
 assert.match(migration, /freeze_catalog_handoff_on_approval/, "Approval handoff freeze trigger is missing");
 assert.match(migration, /'catalog_work_items'[\s\S]*alter publication supabase_realtime add table public\.%I/, "Catalog work items are not published to Realtime");
 assert.match(migration, /security assertion failed:[\s\S]*has_table_privilege\('authenticated'/, "Executable deployment-time RLS/grant assertions are missing");
+assert.match(migration, /enforce_catalog_tenant_relationships[\s\S]*tenant assertion failed/, "Cross-tenant catalog relationships are not guarded and validated");
 assert.match(migration, /notifications_select_current_org[\s\S]*recipient_team[\s\S]*member_roles/, "Role-targeted notification isolation is missing");
 assert.match(migration, /recipient_role_slug text not null default 'listing-team'/, "Configurable handoff recipient group is missing");
 for (const indexName of [
@@ -105,6 +110,9 @@ assert.match(edge, /reservationIsCurrent[\s\S]*approval_state_changed/, "Handoff
 assert.match(edge, /catalog_handoff_email !== false/, "Member handoff-email preferences are not enforced");
 assert.match(edge, /workspaceFor\(request, "catalog\.handoff\.manage"\)/, "Handoff administration is not protected by its granular permission");
 assert.match(edge, /workspaceFor\(request, "catalog\.assign"\)/, "Assignment is not protected by its granular permission");
+assert.match(edge, /assertActiveCatalogMembers[\s\S]*Every catalog owner must be an active member of this workspace/, "Catalog creation does not validate owners against the active organization");
+assert.match(edge, /assertCatalogEvent[\s\S]*campaign event does not belong to this workspace/, "Catalog creation does not validate campaign ownership");
+assert.match(edge, /existingSkus\.add\(normalizedSku\)[\s\S]*clean\.push\(variant\)/, "Bulk catalog creation does not reject duplicate SKUs within the same request");
 assert.match(migration, /'catalog\.assign'[\s\S]*'catalog\.handoff\.manage'[\s\S]*'catalog\.listing\.complete'/, "Granular catalog permissions are not provisioned");
 assert.match(migration, /role\.slug = 'listing-team'[\s\S]*'planning\.approve'[\s\S]*'planning\.manage'/, "Legacy Listing Team over-privilege is not removed");
 assert.match(catalogApi, /decision === "rejected" && !comments/, "QC rejection comments are not required");
@@ -125,7 +133,13 @@ assert.match(catalogProduction, /planning_batch:planning_batches!planning_batch_
 assert.match(actionDialog, /role="dialog"[\s\S]*aria-modal="true"/, "Workflow action dialogs are not exposed accessibly");
 assert.match(layout, /catalogAssignmentsInApp[\s\S]*catalogHandoffEmail/, "Member notification preferences are not configurable");
 assert.match(flow, /data\.stages/, "Flow View is not data-driven");
+assert.match(stageTimeline, /duration belongs to `from_status`[\s\S]*completedDuration \+ liveDuration/, "Stage timing does not attribute and total repeated stage visits correctly");
+assert.match(flow, /Completed \$\{dateTime\(stage\.completedAt\)\}/, "Completed workflow stages do not show their completion timestamp");
+assert.match(flow, /Workflow started:[\s\S]*Generation completed:/, "Flow View does not expose workflow and generation timing boundaries");
 assert.doesNotMatch(flow, /const\s+stages\s*=\s*\[/, "Flow View contains static stage fixtures");
-assert.doesNotMatch([flow, catalogProduction, handoffAdmin].join("\n"), /window\.(?:prompt|confirm)/, "Catalog workflow still relies on unpolished browser prompt controls");
+assert.doesNotMatch([flow, catalogProduction, handoffAdmin, planning, studio, history].join("\n"), /window\.(?:prompt|confirm)/, "Catalog workflow still relies on unpolished browser prompt controls");
+assert.match(planning, /<ActionDialog[\s\S]*confirmPendingAction/, "Catalog Planning destructive actions do not use the accessible action dialog");
+assert.match(studio, /<ActionDialog[\s\S]*stopSubmittedJob/, "Studio cancellation does not use the accessible action dialog");
+assert.match(history, /<ActionDialog[\s\S]*confirmPendingAction/, "History stop, retry, and delete actions do not use the accessible action dialog");
 
 console.log(`Catalog Workflow V2 contract verified: ${stageCodes.length} stages, ${tenantTables.length} tenant tables, live actions, five-pose approval, and idempotent handoff checks.`);

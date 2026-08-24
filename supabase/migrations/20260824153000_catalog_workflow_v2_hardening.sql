@@ -325,6 +325,256 @@ $$;
 revoke all on function private.sync_catalog_pose_asset_version() from public, anon, authenticated;
 grant execute on function private.sync_catalog_pose_asset_version() to service_role, postgres;
 
+drop trigger if exists session_generation_sync_catalog_pose_version on public.session_generations;
+create trigger session_generation_sync_catalog_pose_version
+after insert or update of status, output_url, storage_path, storage_backend, generation_epoch, updated_at
+on public.session_generations
+for each row execute function private.sync_catalog_pose_asset_version();
+
+-- The planning trigger owns initial/default assignments, while manual
+-- reassignments are recorded by the API. Run this trigger after the existing
+-- workflow-details trigger (Postgres orders same-kind triggers by name) so the
+-- operational work item already contains its final generation/listing owners.
+create or replace function private.sync_catalog_assignment_history_from_planning()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog, public, private
+as $$
+declare
+  target public.catalog_work_items%rowtype;
+  assignment record;
+  previous_member_id uuid;
+begin
+  select item.* into target
+  from public.catalog_work_items as item
+  where item.organization_id = new.organization_id
+    and item.planning_request_id = new.id;
+  if target.id is null then return new; end if;
+
+  for assignment in
+    select * from (values
+      ('generation'::text, target.generation_assigned_member_id),
+      ('listing'::text, target.listing_assigned_member_id)
+    ) as desired(assignment_type, member_id)
+  loop
+    previous_member_id := null;
+    select history.member_id into previous_member_id
+    from public.catalog_work_item_assignments as history
+    where history.work_item_id = target.id
+      and history.assignment_type = assignment.assignment_type
+      and history.active
+    order by history.assigned_at desc
+    limit 1;
+
+    if previous_member_id is not distinct from assignment.member_id then continue; end if;
+    update public.catalog_work_item_assignments as history
+    set active = false, ended_at = now()
+    where history.work_item_id = target.id
+      and history.assignment_type = assignment.assignment_type
+      and history.active;
+
+    if assignment.member_id is not null then
+      insert into public.catalog_work_item_assignments (
+        organization_id, work_item_id, assignment_type, member_id,
+        assigned_by_member_id, note
+      ) values (
+        target.organization_id, target.id, assignment.assignment_type,
+        assignment.member_id, coalesce(private.current_member_id(), new.created_by_member_id),
+        'Synchronized from Catalog Planning'
+      );
+    end if;
+
+    insert into public.catalog_work_item_events (
+      organization_id, work_item_id, event_type, actor_member_id, source,
+      message, metadata
+    ) values (
+      target.organization_id, target.id, assignment.assignment_type || '_assignment_changed',
+      coalesce(private.current_member_id(), new.created_by_member_id), 'planning',
+      initcap(assignment.assignment_type) || ' owner synchronized from Catalog Planning',
+      jsonb_build_object('memberId', assignment.member_id, 'previousMemberId', previous_member_id)
+    );
+  end loop;
+  return new;
+end;
+$$;
+
+revoke all on function private.sync_catalog_assignment_history_from_planning() from public, anon, authenticated;
+grant execute on function private.sync_catalog_assignment_history_from_planning() to service_role, postgres;
+
+drop trigger if exists planning_request_sync_catalog_workflow_owner_history on public.planning_requests;
+create trigger planning_request_sync_catalog_workflow_owner_history
+after insert or update of priority, assigned_member_id, expected_shoot_date, notes, batch_id, pose_plan, selected_styling, front_image_url, back_image_url
+on public.planning_requests
+for each row execute function private.sync_catalog_assignment_history_from_planning();
+
+insert into public.catalog_work_item_assignments (
+  organization_id, work_item_id, assignment_type, member_id,
+  assigned_by_member_id, assigned_at, active, note
+)
+select item.organization_id, item.id, assignment.assignment_type, assignment.member_id,
+  item.created_by_member_id, item.updated_at, true, 'Hardening backfill from the active owner'
+from public.catalog_work_items as item
+cross join lateral (values
+  ('generation'::text, item.generation_assigned_member_id),
+  ('listing'::text, item.listing_assigned_member_id)
+) as assignment(assignment_type, member_id)
+where assignment.member_id is not null
+on conflict (work_item_id, assignment_type) where active do nothing;
+
+-- RLS isolates rows by organization; this trigger additionally protects every
+-- catalog foreign-key relationship from cross-tenant links made through a
+-- service-role code path.
+create or replace function private.enforce_catalog_tenant_relationships()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog, public, private
+as $$
+declare
+  payload jsonb := to_jsonb(new);
+  org_id uuid := (payload ->> 'organization_id')::uuid;
+  member_column text;
+  member_value text;
+begin
+  foreach member_column in array array[
+    'created_by_member_id', 'generation_assigned_member_id', 'listing_assigned_member_id',
+    'final_approved_by_member_id', 'actor_member_id', 'author_member_id',
+    'approved_by_member_id', 'reviewer_member_id', 'updated_by_member_id',
+    'member_id', 'assigned_by_member_id'
+  ]
+  loop
+    if payload ? member_column then
+      member_value := payload ->> member_column;
+      if coalesce(member_value, '') <> '' and not exists (
+        select 1 from public.organization_members as member
+        where member.id::text = member_value and member.organization_id = org_id
+      ) then
+        raise exception 'Catalog tenant relationship violation: % does not belong to organization %', member_column, org_id;
+      end if;
+    end if;
+  end loop;
+
+  if coalesce(payload ->> 'work_item_id', '') <> '' and not exists (
+    select 1 from public.catalog_work_items as item
+    where item.id::text = payload ->> 'work_item_id' and item.organization_id = org_id
+  ) then raise exception 'Catalog tenant relationship violation: work item'; end if;
+  if coalesce(payload ->> 'planning_request_id', '') <> '' and not exists (
+    select 1 from public.planning_requests as request
+    where request.id::text = payload ->> 'planning_request_id' and request.organization_id = org_id
+  ) then raise exception 'Catalog tenant relationship violation: planning request'; end if;
+  if coalesce(payload ->> 'planning_batch_id', '') <> '' and not exists (
+    select 1 from public.planning_batches as batch
+    where batch.id::text = payload ->> 'planning_batch_id' and batch.organization_id = org_id
+  ) then raise exception 'Catalog tenant relationship violation: planning batch'; end if;
+  if coalesce(payload ->> 'event_id', '') <> '' and not exists (
+    select 1 from public.marketing_events as event
+    where event.id::text = payload ->> 'event_id' and event.organization_id = org_id
+  ) then raise exception 'Catalog tenant relationship violation: campaign event'; end if;
+  if coalesce(payload ->> 'asset_version_id', '') <> '' and not exists (
+    select 1 from public.catalog_pose_asset_versions as asset
+    where asset.id::text = payload ->> 'asset_version_id' and asset.organization_id = org_id
+  ) then raise exception 'Catalog tenant relationship violation: asset version'; end if;
+  if coalesce(payload ->> 'related_asset_version_id', '') <> '' and not exists (
+    select 1 from public.catalog_pose_asset_versions as asset
+    where asset.id::text = payload ->> 'related_asset_version_id' and asset.organization_id = org_id
+  ) then raise exception 'Catalog tenant relationship violation: related asset version'; end if;
+  if coalesce(payload ->> 'handoff_id', '') <> '' and not exists (
+    select 1 from public.catalog_listing_handoffs as handoff
+    where handoff.id::text = payload ->> 'handoff_id' and handoff.organization_id = org_id
+  ) then raise exception 'Catalog tenant relationship violation: handoff'; end if;
+  if coalesce(payload ->> 'delivery_id', '') <> '' and not exists (
+    select 1 from public.catalog_report_deliveries as delivery
+    where delivery.id::text = payload ->> 'delivery_id' and delivery.organization_id = org_id
+  ) then raise exception 'Catalog tenant relationship violation: delivery'; end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.enforce_catalog_tenant_relationships() from public, anon, authenticated;
+grant execute on function private.enforce_catalog_tenant_relationships() to service_role, postgres;
+
+do $$
+declare
+  table_name text;
+begin
+  foreach table_name in array array[
+    'catalog_work_items', 'catalog_work_item_events', 'catalog_creative_directions',
+    'catalog_work_item_assignments', 'catalog_work_item_comments', 'catalog_pose_asset_versions',
+    'catalog_asset_reviews', 'catalog_listing_handoffs', 'catalog_listing_handoff_assets',
+    'catalog_handoff_settings', 'catalog_report_deliveries',
+    'catalog_report_delivery_attempts', 'catalog_report_delivery_items'
+  ]
+  loop
+    execute format('drop trigger if exists catalog_tenant_relationship_check on public.%I', table_name);
+    execute format(
+      'create trigger catalog_tenant_relationship_check before insert or update on public.%I for each row execute function private.enforce_catalog_tenant_relationships()',
+      table_name
+    );
+  end loop;
+end
+$$;
+
+-- Validate historical rows before declaring the hardening migration complete.
+-- The trigger above protects future writes; this assertion makes an existing
+-- cross-tenant link a deployment failure instead of silently grandfathering it.
+do $$
+declare
+  tenant_check record;
+  invalid_count bigint;
+begin
+  for tenant_check in
+    select * from (values
+      ('catalog_work_items','created_by_member_id','organization_members'),
+      ('catalog_work_items','generation_assigned_member_id','organization_members'),
+      ('catalog_work_items','listing_assigned_member_id','organization_members'),
+      ('catalog_work_items','final_approved_by_member_id','organization_members'),
+      ('catalog_work_items','planning_request_id','planning_requests'),
+      ('catalog_work_items','planning_batch_id','planning_batches'),
+      ('catalog_work_items','event_id','marketing_events'),
+      ('catalog_work_item_events','work_item_id','catalog_work_items'),
+      ('catalog_work_item_events','actor_member_id','organization_members'),
+      ('catalog_work_item_events','related_asset_version_id','catalog_pose_asset_versions'),
+      ('catalog_creative_directions','work_item_id','catalog_work_items'),
+      ('catalog_creative_directions','created_by_member_id','organization_members'),
+      ('catalog_work_item_assignments','work_item_id','catalog_work_items'),
+      ('catalog_work_item_assignments','member_id','organization_members'),
+      ('catalog_work_item_assignments','assigned_by_member_id','organization_members'),
+      ('catalog_work_item_comments','work_item_id','catalog_work_items'),
+      ('catalog_work_item_comments','author_member_id','organization_members'),
+      ('catalog_pose_asset_versions','work_item_id','catalog_work_items'),
+      ('catalog_pose_asset_versions','approved_by_member_id','organization_members'),
+      ('catalog_asset_reviews','work_item_id','catalog_work_items'),
+      ('catalog_asset_reviews','asset_version_id','catalog_pose_asset_versions'),
+      ('catalog_asset_reviews','reviewer_member_id','organization_members'),
+      ('catalog_listing_handoffs','work_item_id','catalog_work_items'),
+      ('catalog_listing_handoffs','approved_by_member_id','organization_members'),
+      ('catalog_listing_handoff_assets','handoff_id','catalog_listing_handoffs'),
+      ('catalog_listing_handoff_assets','asset_version_id','catalog_pose_asset_versions'),
+      ('catalog_handoff_settings','updated_by_member_id','organization_members'),
+      ('catalog_report_deliveries','created_by_member_id','organization_members'),
+      ('catalog_report_delivery_attempts','delivery_id','catalog_report_deliveries'),
+      ('catalog_report_delivery_attempts','actor_member_id','organization_members'),
+      ('catalog_report_delivery_items','delivery_id','catalog_report_deliveries'),
+      ('catalog_report_delivery_items','handoff_id','catalog_listing_handoffs'),
+      ('catalog_report_delivery_items','work_item_id','catalog_work_items')
+    ) as checks(child_table, child_column, parent_table)
+  loop
+    execute format(
+      'select count(*) from public.%I as child left join public.%I as parent on parent.id = child.%I and parent.organization_id = child.organization_id where child.%I is not null and parent.id is null',
+      tenant_check.child_table,
+      tenant_check.parent_table,
+      tenant_check.child_column,
+      tenant_check.child_column
+    ) into invalid_count;
+    if invalid_count > 0 then
+      raise exception 'Catalog Workflow V2 tenant assertion failed: %.% contains % cross-organization link(s)',
+        tenant_check.child_table, tenant_check.child_column, invalid_count;
+    end if;
+  end loop;
+end
+$$;
+
 -- Abort deployment if any V2 tenant table is exposed without RLS/current-org
 -- reads, if browser mutation grants slipped in, or if the private bucket lost
 -- one of its tenant-prefix policies.

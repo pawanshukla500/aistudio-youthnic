@@ -126,17 +126,19 @@ The implementation was verified locally on 24 August 2026 with:
 
 - `oxlint` across the React source.
 - A workflow contract test covering all thirteen stage records, tenant-scoped tables, RLS/storage declarations, Realtime publication, latest-version/five-pose approval gates, immutable delivered revisions, implemented UI actions, idempotent retry reservations, pre-send approval revalidation, and the no-empty-email rule.
-- Five Deno tests for weekday, weekend, configured holiday, year-boundary, and invalid-business-calendar behavior.
+- Seven Deno tests: five business-calendar cases plus visit-aware stage timing, re-generation re-entry, and legacy duration reconstruction.
 - Deno type checking for the complete `app-api` Edge Function.
-- SQL parsing for all 109 statements in the immutable base migration plus all 26 statements in the additive hardening migration, including the production-advisor FK indexes and using bounded top-level chunks so the verifier remains reliable as PL/pgSQL grows.
+- SQL parsing for all 109 statements in the immutable base migration plus all 39 statements in the additive hardening migration, including production-advisor FK indexes, assignment-history synchronization, Storage trigger refresh, tenant-relationship guards, and deployment assertions.
 - TypeScript compilation and a production Vite build.
-- Desktop and mobile browser QA of the live-data Flow interface, including Flow, assets, activity, brief editing, responsive stage navigation, loading, and pending-asset behavior.
+- Desktop and 390px mobile browser QA of the data-driven Flow interface, including responsive navigation, stage completion timestamps, repeated-visit timing, workflow/generation windows, dialog rendering, and horizontal-overflow checks. Authenticated production actions remain part of the post-deploy live gate.
 
 The Excel import/template now carries the same operational data as in-app intake: SKU/product, front and back references, priority, owners, deadline, marketplaces/campaign, special instructions, and all creative-direction fields. Dry-run validation reports unknown assignees, invalid dates/priorities, missing references, and queue-ready rows before import.
 
 Catalog Production now filters live records by batch, SKU/search text, assignee, stage/status, campaign, marketplace, priority, and date, and supports active-first/deadline/newest/SKU sorting across its list and Kanban views.
 
-Catalog Production no longer uses browser prompt/confirm controls. QC, re-generation guidance, spreadsheet dry-run review, bulk generation, handoff send, and resend use accessible responsive action dialogs with explicit validation and retry-preserving error behavior.
+Catalog Production, Catalog Planning, Studio, and History no longer use browser prompt/confirm controls. QC, re-generation guidance, spreadsheet dry-run review, destructive Planning/History actions, generation cancellation, bulk generation, handoff send, and resend use accessible responsive action dialogs with explicit validation and retry-preserving error behavior.
+
+The final hardening audit also closed three correctness gaps: catalog owners and campaign events are validated against the active organization before service-role inserts, duplicate SKUs in the same bulk request are discarded case-insensitively, and stage duration is now attributed to `from_status` and summed across every visit instead of being displayed against the stage entered. The database independently rejects cross-tenant catalog relationships and fails deployment if historical violations are present.
 
 The base V2 migration, Edge Function, and client were deployed from the merged implementation PR on 24 August 2026. The follow-up hardening migration and corresponding API/UI changes remain gated by their own PR and must deploy in the same order: additive migration, server/Edge API, then client. Cross-tenant RLS, role-specific transitions, Realtime delivery, Storage access, scheduled invocation, email-provider behavior, and existing-data backfill still require the authenticated manager/generator/reviewer/Listing Team/read-only acceptance run below; a green deployment job alone does not prove those user-level behaviors.
 
