@@ -47,6 +47,21 @@ function priority(value: unknown) {
   return ["low", "normal", "high", "urgent"].includes(candidate) ? candidate : "normal";
 }
 
+function optionalDate(value: unknown) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(text(value));
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+function delimitedList(value: unknown, limit = 20) {
+  return [...new Set(text(value).split(/[,;\n]/).map((entry) => entry.trim()).filter(Boolean))].slice(0, limit);
+}
+
+function assertQueryResults(results: unknown[], context: string) {
+  const failure = results.map((result) => (result as { error?: { message?: string } | null })?.error).find(Boolean);
+  if (failure) throw new Error(`${context}: ${failure.message || "database operation failed"}`);
+}
+
 async function existingExternalRequests(service: SupabaseClient, orgId: string, requestIds: string[]) {
   if (!requestIds.length) return new Set<string>();
   const { data, error } = await service
@@ -70,6 +85,10 @@ export async function importGoogleSheetDryRun(
   const valid = rows.filter((row) => text(row["SKU Name"]) && text(row["Request ID"]));
   const requestIds = valid.map((row) => text(row["Request ID"]));
   const existing = await existingExternalRequests(service, workspace.organization.id, requestIds);
+  const { data: members, error: membersError } = await service.from("organization_members")
+    .select("email").eq("organization_id", workspace.organization.id).eq("status", "active");
+  if (membersError) throw new Error(membersError.message);
+  const memberEmails = new Set((members || []).map((member) => text(member.email).toLowerCase()).filter(Boolean));
   const seen = new Set<string>();
   let duplicates = 0;
   for (const requestId of requestIds) {
@@ -83,6 +102,9 @@ export async function importGoogleSheetDryRun(
       ? [`Priority: ${rawPriority}`]
       : [];
   }))];
+  const unknownAssigneeEmails = [...new Set(rows.flatMap((row) => [row["Generation Owner Email"], row["Listing Owner Email"]]
+    .map((value) => text(value).toLowerCase()).filter((email) => email && !memberEmails.has(email))))];
+  const invalidDeadlines = rows.filter((row) => text(row["Deadline"]) && !optionalDate(row["Deadline"])).length;
 
   return {
     scanned: rows.length,
@@ -91,6 +113,8 @@ export async function importGoogleSheetDryRun(
     duplicates,
     invalidSkus: rows.length - valid.length,
     unknownStatuses,
+    unknownAssigneeEmails,
+    invalidDeadlines,
     conflicts: [],
   };
 }
@@ -116,6 +140,14 @@ export async function importGoogleSheet(
   let inserted = 0;
   let skipped = rows.length - candidates.length;
   const errors: Array<{ row: number; message: string }> = [];
+  const insertedWorkItemIds: string[] = [];
+  const queueableWorkItemIds: string[] = [];
+  const { data: members, error: membersError } = await service.from("organization_members")
+    .select("id,email")
+    .eq("organization_id", workspace.organization.id)
+    .eq("status", "active");
+  if (membersError) throw new Error(membersError.message);
+  const memberByEmail = new Map((members || []).map((member) => [text(member.email).toLowerCase(), String(member.id)]));
 
   for (const candidate of candidates) {
     if (existing.has(candidate.requestId) || seen.has(candidate.requestId)) {
@@ -124,9 +156,28 @@ export async function importGoogleSheet(
     }
     seen.add(candidate.requestId);
     const row = candidate.row;
+    const rawPriority = text(row["Priority"]).toLowerCase();
+    if (rawPriority && !["low", "normal", "high", "urgent"].includes(rawPriority)) {
+      errors.push({ row: candidate.rowNumber, message: "Priority must be low, normal, high, or urgent." });
+      continue;
+    }
     const generated = generationStatus(row["Generation Status"]);
     const listing = listingStatus(row["Listing Status"], generated);
     const qc = qcStatus(row["QC Status"], generated, listing);
+    const generationOwnerEmail = text(row["Generation Owner Email"]).toLowerCase();
+    const listingOwnerEmail = text(row["Listing Owner Email"]).toLowerCase();
+    const generationOwnerId = memberByEmail.get(generationOwnerEmail) || null;
+    const listingOwnerId = memberByEmail.get(listingOwnerEmail) || null;
+    if ((generationOwnerEmail && !generationOwnerId) || (listingOwnerEmail && !listingOwnerId)) {
+      errors.push({ row: candidate.rowNumber, message: "Generation or Listing owner email does not match an active workspace member." });
+      continue;
+    }
+    const deadlineAt = optionalDate(row["Deadline"]);
+    if (text(row["Deadline"]) && !deadlineAt) {
+      errors.push({ row: candidate.rowNumber, message: "Deadline is not a valid date." });
+      continue;
+    }
+    const marketplaces = delimitedList(row["Marketplaces"] || row["Marketplace"]);
     const now = new Date().toISOString();
     const { data: workItem, error: workItemError } = await service.from("catalog_work_items").insert({
       organization_id: workspace.organization.id,
@@ -143,8 +194,16 @@ export async function importGoogleSheet(
       listing_action: text(row["Listing Action"]) || null,
       in_house_brand: text(row["In House Brand"]) || null,
       marketplace_brand: text(row["Myntra Brand"]) || null,
+      marketplaces,
+      campaign_season: text(row["Campaign / Event"]) || null,
+      campaign_event_details: { source: "spreadsheet_import", value: text(row["Campaign / Event"]) },
+      deadline_at: deadlineAt,
+      special_instructions: text(row["Special Instructions"]),
+      generation_assigned_member_id: generationOwnerId,
+      listing_assigned_member_id: listingOwnerId,
       legacy_external_link: text(row["Links"]) || null,
-      reference_image_url: text(row["Reference Image"]) || null,
+      reference_image_url: text(row["Front Reference Image"] || row["Reference Image"]) || null,
+      back_reference_image_url: text(row["Back Reference Image"]) || null,
       created_by_member_id: workspace.member.id,
       generation_completed_at: generated === "completed" ? now : null,
       listing_completed_at: listing === "completed" ? now : null,
@@ -168,6 +227,38 @@ export async function importGoogleSheet(
       continue;
     }
 
+    const { error: directionError } = await service.from("catalog_creative_directions").insert({
+      organization_id: workspace.organization.id,
+      work_item_id: workItem.id,
+      look_and_mood: text(row["Desired Look and Mood"]),
+      model_direction: text(row["Model Direction"]),
+      styling_requirements: text(row["Styling Requirements"]),
+      pose_direction: delimitedList(row["Pose Direction"], 5),
+      background_backdrop: text(row["Background / Backdrop"]),
+      lighting: text(row["Lighting"]),
+      composition: text(row["Composition"]),
+      marketplace_requirements: text(row["Marketplace Requirements"]),
+      created_by_member_id: workspace.member.id,
+    });
+    if (directionError) {
+      await service.from("catalog_work_items").delete().eq("id", workItem.id);
+      errors.push({ row: candidate.rowNumber, message: directionError.message });
+      continue;
+    }
+
+    const assignmentRows = [
+      generationOwnerId ? { organization_id: workspace.organization.id, work_item_id: workItem.id, assignment_type: "generation", member_id: generationOwnerId, assigned_by_member_id: workspace.member.id, note: "Imported from spreadsheet" } : null,
+      listingOwnerId ? { organization_id: workspace.organization.id, work_item_id: workItem.id, assignment_type: "listing", member_id: listingOwnerId, assigned_by_member_id: workspace.member.id, note: "Imported from spreadsheet" } : null,
+    ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+    if (assignmentRows.length) {
+      const { error: assignmentError } = await service.from("catalog_work_item_assignments").insert(assignmentRows);
+      if (assignmentError) {
+        await service.from("catalog_work_items").delete().eq("id", workItem.id);
+        errors.push({ row: candidate.rowNumber, message: assignmentError.message });
+        continue;
+      }
+    }
+
     const { error: eventError } = await service.from("catalog_work_item_events").insert({
       organization_id: workspace.organization.id,
       work_item_id: workItem.id,
@@ -177,10 +268,14 @@ export async function importGoogleSheet(
       metadata: { externalRequestId: candidate.requestId, rowNumber: candidate.rowNumber },
     });
     if (eventError) console.error(`Could not record catalog import event: ${eventError.message}`);
+    insertedWorkItemIds.push(String(workItem.id));
+    if (!["completed", "queued", "generating"].includes(generated)
+      && text(row["Front Reference Image"] || row["Reference Image"])
+      && text(row["Back Reference Image"])) queueableWorkItemIds.push(String(workItem.id));
     inserted++;
   }
 
-  return { inserted, skipped, errors };
+  return { inserted, skipped, errors, workItemIds: insertedWorkItemIds, queueableWorkItemIds };
 }
 
 export async function createFromPlanningRequests(
@@ -191,7 +286,7 @@ export async function createFromPlanningRequests(
   const requestIds = [...new Set((Array.isArray(args.requestIds) ? args.requestIds : []).map((id) => text(id)).filter(Boolean))].slice(0, 100);
   if (!requestIds.length) throw new Error("Select at least one SKU.");
   const { data: requests, error } = await service.from("planning_requests")
-    .select("id,organization_id,request_code,created_at,sku_name,color_label,photoshoot_type,generation_status,batch_id,generation_job_id,created_by_member_id,generation_started_at,generation_finished_at,queued_at")
+    .select("id,organization_id,request_code,created_at,sku_name,color_label,photoshoot_type,generation_status,batch_id,generation_job_id,created_by_member_id,generation_started_at,generation_finished_at,queued_at,priority,assigned_member_id,expected_shoot_date,notes")
     .eq("organization_id", workspace.organization.id)
     .in("id", requestIds);
   if (error) throw new Error(error.message);
@@ -220,7 +315,7 @@ export async function createFromPlanningRequests(
       color_label: request.color_label,
       work_type: request.photoshoot_type,
       work_mode: "ai",
-      priority: "normal",
+      priority: priority(request.priority),
       status: failed ? "blocked" : "in_progress",
       generation_status: generated,
       qc_status: completed ? "needs_review" : "not_started",
@@ -230,6 +325,9 @@ export async function createFromPlanningRequests(
       generation_job_id: job?.job_id || request.generation_job_id,
       catalog_session_id: job?.session_id || session?.session_id,
       created_by_member_id: workspace.member.id,
+      generation_assigned_member_id: request.assigned_member_id || null,
+      deadline_at: request.expected_shoot_date ? new Date(`${request.expected_shoot_date}T18:29:59.999Z`).toISOString() : null,
+      special_instructions: request.notes || "",
       generation_started_at: job?.started_at || request.generation_started_at || (generated === "generating" ? session?.created_at : null),
       generation_completed_at: job?.completed_at || request.generation_finished_at || (completed ? session?.updated_at : null),
     });
@@ -256,18 +354,52 @@ export async function assignCatalogWorkItem(
     if (!member) throw new Error("The selected member is not active in this workspace.");
   }
   const field = assignment === "generation" ? "generation_assigned_member_id" : "listing_assigned_member_id";
+  const { data: current, error: currentError } = await service.from("catalog_work_items")
+    .select(`id,${field}`).eq("id", workItemId).eq("organization_id", workspace.organization.id).maybeSingle();
+  if (currentError) throw new Error(currentError.message);
+  if (!current) throw new Error("Catalog work item not found.");
+  const previousMemberId = text((current as JsonRecord)[field]) || null;
+  if (previousMemberId === memberId) return { success: true };
+
   const { data, error } = await service.from("catalog_work_items").update({ [field]: memberId })
     .eq("id", workItemId).eq("organization_id", workspace.organization.id).select("id").maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Catalog work item not found.");
-  await service.from("catalog_work_item_events").insert({
-    organization_id: workspace.organization.id,
-    work_item_id: workItemId,
-    event_type: `${assignment}_assignment_changed`,
-    actor_member_id: workspace.member.id,
-    source: "user",
-    metadata: { memberId },
-  });
+  const now = new Date().toISOString();
+  const operations: PromiseLike<unknown>[] = [
+    service.from("catalog_work_item_assignments").update({ active: false, ended_at: now })
+      .eq("work_item_id", workItemId).eq("assignment_type", assignment).eq("active", true),
+    service.from("catalog_work_item_events").insert({
+      organization_id: workspace.organization.id,
+      work_item_id: workItemId,
+      event_type: `${assignment}_assignment_changed`,
+      actor_member_id: workspace.member.id,
+      source: "user",
+      message: `${assignment === "generation" ? "Generation" : "Listing"} owner changed`,
+      metadata: { memberId, previousMemberId },
+    }),
+    service.from("audit_logs").insert({
+      organization_id: workspace.organization.id,
+      actor_member_id: workspace.member.id,
+      actor_email: workspace.user.email,
+      action: "catalog.assignment.changed",
+      resource_type: "catalog_work_item",
+      resource_id: workItemId,
+      metadata: { assignment, memberId, previousMemberId },
+    }),
+  ];
+  if (memberId) {
+    operations.push(service.from("catalog_work_item_assignments").insert({
+      organization_id: workspace.organization.id,
+      work_item_id: workItemId,
+      assignment_type: assignment,
+      member_id: memberId,
+      assigned_by_member_id: workspace.member.id,
+      assigned_at: now,
+      active: true,
+    }));
+  }
+  assertQueryResults(await Promise.all(operations), "Could not finish the assignment change");
   return { success: true };
 }
 
@@ -278,15 +410,111 @@ export async function reviewCatalogQc(
 ) {
   const workItemId = text(args.workItemId);
   const decision = text(args.decision).toLowerCase();
+  const comments = text(args.comments);
   if (!workItemId || !["passed", "rejected"].includes(decision)) throw new Error("Choose a valid QC decision.");
+  if (comments.length > 4_000) throw new Error("Reviewer comments must be 4,000 characters or fewer.");
+  if (decision === "rejected" && !comments) throw new Error("Add reviewer guidance before requesting re-generation.");
+
+  const { data: item, error: itemError } = await service.from("catalog_work_items")
+    .select("id,generation_status,catalog_session_id")
+    .eq("id", workItemId).eq("organization_id", workspace.organization.id).maybeSingle();
+  if (itemError) throw new Error(itemError.message);
+  if (!item || item.generation_status !== "completed") throw new Error("Generation must be complete before QC review.");
+  if (decision === "passed") {
+    const { data: versions, error: versionsError } = await service.from("catalog_pose_asset_versions")
+      .select("pose_index,version_number")
+      .eq("organization_id", workspace.organization.id)
+      .eq("work_item_id", workItemId)
+      .eq("generation_status", "completed");
+    if (versionsError) throw new Error(versionsError.message);
+    const completedPoseIndexes = new Set((versions || []).map((version) => Number(version.pose_index)));
+    if ([1, 2, 3, 4, 5].some((poseIndex) => !completedPoseIndexes.has(poseIndex))) {
+      throw new Error("All five pose outputs must be complete before final approval.");
+    }
+  }
   const patch = decision === "passed"
-    ? { qc_status: "passed", listing_status: "pending", listing_started_at: new Date().toISOString(), status: "in_progress" }
-    : { qc_status: "rejected", status: "blocked" };
+    ? {
+      qc_status: "passed", listing_status: "pending", listing_started_at: null, status: "in_progress",
+      final_approved_at: new Date().toISOString(), final_approved_by_member_id: workspace.member.id,
+      blocked_reason: "", failure_code: "",
+    }
+    : { qc_status: "rejected", status: "blocked", blocked_reason: comments, next_action: "Regenerate the rejected pose set" };
   const { data, error } = await service.from("catalog_work_items").update(patch)
     .eq("id", workItemId).eq("organization_id", workspace.organization.id).eq("generation_status", "completed")
     .select("id").maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Generation must be complete before QC review.");
+  assertQueryResults(await Promise.all([
+    service.from("catalog_asset_reviews").insert({
+      organization_id: workspace.organization.id,
+      work_item_id: workItemId,
+      review_scope: "sku_set",
+      decision: decision === "passed" ? "approved" : "changes_requested",
+      reviewer_member_id: workspace.member.id,
+      comments,
+      metadata: { source: "catalog_production" },
+    }),
+    service.from("catalog_work_item_events").insert({
+      organization_id: workspace.organization.id,
+      work_item_id: workItemId,
+      event_type: decision === "passed" ? "final_approval_recorded" : "regeneration_requested",
+      actor_member_id: workspace.member.id,
+      source: "user",
+      stage_code: decision === "passed" ? "approved" : "regeneration_required",
+      message: comments || (decision === "passed" ? "Five-pose set approved" : "Re-generation requested"),
+      metadata: { decision },
+    }),
+    service.from("audit_logs").insert({
+      organization_id: workspace.organization.id,
+      actor_member_id: workspace.member.id,
+      actor_email: workspace.user.email,
+      action: decision === "passed" ? "catalog.final_approval.recorded" : "catalog.regeneration.requested",
+      resource_type: "catalog_work_item",
+      resource_id: workItemId,
+      metadata: { comments },
+    }),
+  ]), "Could not finish the QC audit trail");
+  if (decision === "passed" && comments) {
+    const { error: versionCommentError } = await service.from("catalog_pose_asset_versions").update({ reviewer_comments: comments })
+      .eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).eq("approval_status", "approved");
+    if (versionCommentError) throw new Error(versionCommentError.message);
+  }
+  return { success: true };
+}
+
+export async function markListingStarted(
+  service: SupabaseClient,
+  workspace: CatalogWorkspace,
+  args: JsonRecord,
+) {
+  const workItemId = text(args.workItemId);
+  if (!workItemId) throw new Error("Catalog work item is required.");
+  const now = new Date().toISOString();
+  const { data, error } = await service.from("catalog_work_items").update({
+    listing_status: "in_progress",
+    listing_started_at: now,
+  }).eq("id", workItemId)
+    .eq("organization_id", workspace.organization.id)
+    .eq("generation_status", "completed")
+    .eq("qc_status", "passed")
+    .not("listing_sent_at", "is", null)
+    .select("id").maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("The approved asset package must be sent before listing can start.");
+  assertQueryResults(await Promise.all([
+    service.from("catalog_listing_handoffs").update({ status: "listing_in_progress", listing_started_at: now, updated_at: now })
+      .eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).eq("status", "sent"),
+    service.from("catalog_work_item_events").insert({
+      organization_id: workspace.organization.id, work_item_id: workItemId,
+      event_type: "listing_started", actor_member_id: workspace.member.id, source: "user",
+      stage_code: "listing_in_progress", message: "Listing Team started marketplace listing",
+    }),
+    service.from("audit_logs").insert({
+      organization_id: workspace.organization.id, actor_member_id: workspace.member.id,
+      actor_email: workspace.user.email, action: "catalog.listing.started",
+      resource_type: "catalog_work_item", resource_id: workItemId,
+    }),
+  ]), "Could not finish the listing-start audit trail");
   return { success: true };
 }
 
@@ -297,9 +525,10 @@ export async function markListingDone(
 ) {
   const workItemId = text(args.workItemId);
   if (!workItemId) throw new Error("Catalog work item is required.");
+  const now = new Date().toISOString();
   const { data, error } = await service.from("catalog_work_items").update({
     listing_status: "completed",
-    listing_completed_at: new Date().toISOString(),
+    listing_completed_at: now,
   })
     .eq("id", workItemId)
     .eq("organization_id", workspace.organization.id)
@@ -308,7 +537,339 @@ export async function markListingDone(
     .select("id").maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Listing can be completed only after generation is complete and QC has passed.");
+  assertQueryResults(await Promise.all([
+    service.from("catalog_listing_handoffs").update({ status: "listed", listed_at: now, updated_at: now })
+      .eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).in("status", ["sent", "listing_in_progress"]),
+    service.from("catalog_work_item_events").insert({
+      organization_id: workspace.organization.id, work_item_id: workItemId,
+      event_type: "listing_completed", actor_member_id: workspace.member.id, source: "user",
+      stage_code: "listed", message: "Marketplace listing marked complete",
+    }),
+    service.from("audit_logs").insert({
+      organization_id: workspace.organization.id, actor_member_id: workspace.member.id,
+      actor_email: workspace.user.email, action: "catalog.listing.completed",
+      resource_type: "catalog_work_item", resource_id: workItemId,
+    }),
+  ]), "Could not finish the listing-completion audit trail");
   return { success: true };
+}
+
+function stringList(value: unknown, limit = 20) {
+  return [...new Set((Array.isArray(value) ? value : []).map((entry) => text(entry)).filter(Boolean))].slice(0, limit);
+}
+
+export async function updateCatalogWorkItem(
+  service: SupabaseClient,
+  workspace: CatalogWorkspace,
+  args: JsonRecord,
+) {
+  const workItemId = text(args.workItemId);
+  if (!workItemId) throw new Error("Catalog work item is required.");
+  const allowedPriorities = ["low", "normal", "high", "urgent"];
+  const requestedPriority = text(args.priority).toLowerCase();
+  const deadlineAt = text(args.deadlineAt);
+  if (deadlineAt && !Number.isFinite(Date.parse(deadlineAt))) throw new Error("Enter a valid deadline.");
+  const specialInstructions = text(args.specialInstructions);
+  const marketplaces = stringList(args.marketplaces);
+  if (specialInstructions.length > 4_000) throw new Error("Special instructions must be 4,000 characters or fewer.");
+  const patch: JsonRecord = {
+    priority: allowedPriorities.includes(requestedPriority) ? requestedPriority : "normal",
+    deadline_at: deadlineAt ? new Date(deadlineAt).toISOString() : null,
+    marketplaces,
+    campaign_season: text(args.campaignSeason) || null,
+    special_instructions: specialInstructions,
+    remarks: text(args.remarks) || null,
+    blocked_reason: text(args.blockedReason),
+    campaign_event_details: args.campaignEventDetails && typeof args.campaignEventDetails === "object" ? args.campaignEventDetails : {},
+  };
+  const { data: currentItem, error: currentItemError } = await service.from("catalog_work_items")
+    .select("id,status,generation_status,qc_status")
+    .eq("id", workItemId).eq("organization_id", workspace.organization.id).maybeSingle();
+  if (currentItemError) throw new Error(currentItemError.message);
+  if (!currentItem) throw new Error("Catalog work item not found.");
+  if (patch.blocked_reason) patch.status = "blocked";
+  else if (currentItem.status === "blocked" && currentItem.generation_status !== "failed" && currentItem.qc_status !== "rejected") {
+    patch.status = "in_progress";
+    patch.failure_code = "";
+  }
+  const { data, error } = await service.from("catalog_work_items").update(patch)
+    .eq("id", workItemId).eq("organization_id", workspace.organization.id).select("id").maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Catalog work item not found.");
+
+  const direction = args.creativeDirection && typeof args.creativeDirection === "object"
+    ? args.creativeDirection as JsonRecord
+    : {};
+  const directionRow = {
+    organization_id: workspace.organization.id,
+    work_item_id: workItemId,
+    look_and_mood: text(direction.lookAndMood),
+    model_direction: text(direction.modelDirection),
+    styling_requirements: text(direction.stylingRequirements),
+    pose_direction: Array.isArray(direction.poses) ? direction.poses.slice(0, 5) : [],
+    background_backdrop: text(direction.backgroundBackdrop),
+    lighting: text(direction.lighting),
+    composition: text(direction.composition),
+    marketplace_requirements: text(direction.marketplaceRequirements),
+    created_by_member_id: workspace.member.id,
+    updated_at: new Date().toISOString(),
+  };
+  const { error: directionError } = await service.from("catalog_creative_directions")
+    .upsert(directionRow, { onConflict: "organization_id,work_item_id" });
+  if (directionError) throw new Error(directionError.message);
+
+  assertQueryResults(await Promise.all([
+    service.from("catalog_work_item_events").insert({
+      organization_id: workspace.organization.id, work_item_id: workItemId,
+      event_type: "production_details_updated", actor_member_id: workspace.member.id,
+      source: "user", message: "Production details and creative direction updated",
+    }),
+    service.from("audit_logs").insert({
+      organization_id: workspace.organization.id, actor_member_id: workspace.member.id,
+      actor_email: workspace.user.email, action: "catalog.production_details.updated",
+      resource_type: "catalog_work_item", resource_id: workItemId,
+      metadata: { priority: patch.priority, deadlineAt: patch.deadline_at, marketplaceCount: marketplaces.length },
+    }),
+  ]), "Could not finish the production-details audit trail");
+  return { success: true };
+}
+
+export async function addCatalogWorkItemComment(
+  service: SupabaseClient,
+  workspace: CatalogWorkspace,
+  args: JsonRecord,
+) {
+  const workItemId = text(args.workItemId);
+  const body = text(args.body);
+  const visibility = text(args.visibility) === "listing_team" ? "listing_team" : "workspace";
+  if (!workItemId || !body) throw new Error("Add a comment before saving.");
+  if (body.length > 4_000) throw new Error("Comments must be 4,000 characters or fewer.");
+  const { data: item, error: itemError } = await service.from("catalog_work_items").select("id")
+    .eq("id", workItemId).eq("organization_id", workspace.organization.id).maybeSingle();
+  if (itemError) throw new Error(itemError.message);
+  if (!item) throw new Error("Catalog work item not found.");
+  const { data, error } = await service.from("catalog_work_item_comments").insert({
+    organization_id: workspace.organization.id,
+    work_item_id: workItemId,
+    author_member_id: workspace.member.id,
+    body,
+    visibility,
+  }).select("id,created_at").single();
+  if (error || !data) throw new Error(error?.message || "Could not save the comment.");
+  await service.from("catalog_work_item_events").insert({
+    organization_id: workspace.organization.id, work_item_id: workItemId,
+    event_type: "comment_added", actor_member_id: workspace.member.id,
+    source: "user", message: body, metadata: { commentId: data.id, visibility },
+  });
+  return data;
+}
+
+function asRecord(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
+function isoMillis(value: unknown) {
+  const parsed = Date.parse(text(value));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export async function getCatalogWorkflowDetail(
+  service: SupabaseClient,
+  workspace: CatalogWorkspace,
+  args: JsonRecord,
+) {
+  const workItemId = text(args.workItemId);
+  const jobId = text(args.jobId);
+  if (jobId && !/^[a-zA-Z0-9_-]{1,160}$/.test(jobId)) throw new Error("Invalid generation job identifier.");
+  let itemQuery = service.from("catalog_work_items").select("*")
+    .eq("organization_id", workspace.organization.id);
+  if (workItemId) itemQuery = itemQuery.eq("id", workItemId);
+  else if (jobId) itemQuery = itemQuery.or(`generation_job_id.eq.${jobId},catalog_session_id.eq.${jobId}`);
+  else throw new Error("A catalog work item or generation job is required.");
+  const { data: item, error: itemError } = await itemQuery.order("updated_at", { ascending: false }).limit(1).maybeSingle();
+  if (itemError) throw new Error(itemError.message);
+  if (!item) return null;
+
+  const sessionId = text(item.catalog_session_id);
+  const generationJobId = text(item.generation_job_id);
+  const [
+    stagesResult,
+    eventsResult,
+    commentsResult,
+    directionsResult,
+    assignmentsResult,
+    versionsResult,
+    reviewsResult,
+    handoffsResult,
+    batchResult,
+    requestResult,
+    assetsResult,
+    jobResult,
+    sessionResult,
+    posesResult,
+  ] = await Promise.all([
+    service.from("catalog_workflow_stage_definitions").select("*").order("stage_order"),
+    service.from("catalog_work_item_events").select("*").eq("organization_id", workspace.organization.id).eq("work_item_id", item.id).order("created_at"),
+    service.from("catalog_work_item_comments").select("*").eq("organization_id", workspace.organization.id).eq("work_item_id", item.id).is("deleted_at", null).order("created_at"),
+    service.from("catalog_creative_directions").select("*").eq("organization_id", workspace.organization.id).eq("work_item_id", item.id).maybeSingle(),
+    service.from("catalog_work_item_assignments").select("*").eq("organization_id", workspace.organization.id).eq("work_item_id", item.id).order("assigned_at", { ascending: false }),
+    service.from("catalog_pose_asset_versions").select("*").eq("organization_id", workspace.organization.id).eq("work_item_id", item.id).order("pose_index").order("version_number", { ascending: false }),
+    service.from("catalog_asset_reviews").select("*").eq("organization_id", workspace.organization.id).eq("work_item_id", item.id).order("created_at", { ascending: false }),
+    service.from("catalog_listing_handoffs").select("*").eq("organization_id", workspace.organization.id).eq("work_item_id", item.id).order("approval_revision", { ascending: false }),
+    item.planning_batch_id ? service.from("planning_batches").select("*").eq("organization_id", workspace.organization.id).eq("id", item.planning_batch_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    item.planning_request_id ? service.from("planning_requests").select("*").eq("organization_id", workspace.organization.id).eq("id", item.planning_request_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    item.planning_request_id ? service.from("planning_assets").select("*").eq("organization_id", workspace.organization.id).eq("planning_request_id", item.planning_request_id).order("created_at") : Promise.resolve({ data: [], error: null }),
+    generationJobId ? service.from("generation_jobs").select("*").eq("org_id", workspace.organization.id).eq("job_id", generationJobId).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    sessionId ? service.from("catalog_sessions").select("*").eq("organization_id", workspace.organization.id).eq("session_id", sessionId).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    sessionId ? service.from("session_generations").select("*").eq("session_id", sessionId).order("pose_index") : Promise.resolve({ data: [], error: null }),
+  ]);
+  for (const result of [stagesResult, eventsResult, commentsResult, directionsResult, assignmentsResult, versionsResult, reviewsResult, handoffsResult, batchResult, requestResult, assetsResult, jobResult, sessionResult, posesResult]) {
+    if (result.error) throw new Error(result.error.message);
+  }
+
+  const memberIds = [...new Set([
+    item.created_by_member_id,
+    item.generation_assigned_member_id,
+    item.listing_assigned_member_id,
+    item.final_approved_by_member_id,
+    ...(eventsResult.data || []).map((event) => event.actor_member_id),
+    ...(commentsResult.data || []).map((comment) => comment.author_member_id),
+    ...(assignmentsResult.data || []).flatMap((assignment) => [assignment.member_id, assignment.assigned_by_member_id]),
+    ...(reviewsResult.data || []).map((review) => review.reviewer_member_id),
+  ].map((id) => text(id)).filter(Boolean))];
+  const { data: members, error: membersError } = memberIds.length
+    ? await service.from("organization_members").select("id,display_name,email,status").eq("organization_id", workspace.organization.id).in("id", memberIds)
+    : { data: [], error: null };
+  if (membersError) throw new Error(membersError.message);
+  const memberById = new Map((members || []).map((member) => [String(member.id), member]));
+  const decorateMember = (id: unknown) => memberById.get(text(id)) || null;
+
+  const events = (eventsResult.data || []).map((event) => ({ ...event, actor: decorateMember(event.actor_member_id) }));
+  const workflowEvents = events.filter((event) => event.event_type === "workflow_stage_changed");
+  const currentProgress = Number(item.workflow_progress || 0);
+  const exceptionalCurrent = ["blocked_failed", "regeneration_required"].includes(String(item.workflow_stage));
+  const stageRows = (stagesResult.data || []).map((stage) => {
+    const entries = workflowEvents.filter((event) => event.to_status === stage.code || event.stage_code === stage.code);
+    const firstEntry = entries[0];
+    const firstEntryIndex = firstEntry ? workflowEvents.findIndex((event) => event.id === firstEntry.id) : -1;
+    const nextEntry = firstEntryIndex >= 0 ? workflowEvents[firstEntryIndex + 1] : null;
+    const isCurrent = stage.code === item.workflow_stage;
+    const inferredCompleted = !exceptionalCurrent
+      && stage.group_key !== "exception"
+      && Number(stage.progress_percent) < currentProgress;
+    const status = isCurrent ? "current" : (firstEntry && !isCurrent) || inferredCompleted ? "completed" : "pending";
+    const startedAt = isCurrent ? item.stage_started_at : firstEntry?.created_at || null;
+    const completedAt = isCurrent ? null : nextEntry?.created_at || null;
+    const recordedDuration = entries.map((entry) => Number(entry.duration_seconds || 0)).find((duration) => duration > 0) || 0;
+    const calculatedDuration = startedAt && completedAt ? Math.max(0, Math.round((isoMillis(completedAt) - isoMillis(startedAt)) / 1000)) : 0;
+    return {
+      code: stage.code,
+      groupKey: stage.group_key,
+      title: stage.title,
+      description: stage.description,
+      order: Number(stage.stage_order),
+      progressPercent: Number(stage.progress_percent),
+      defaultNextAction: stage.default_next_action,
+      terminal: Boolean(stage.terminal),
+      status,
+      startedAt,
+      completedAt,
+      durationSeconds: recordedDuration || calculatedDuration,
+    };
+  });
+
+  const poseVersions = versionsResult.data || [];
+  const poseRows = posesResult.data || [];
+  const latestByPose = [1, 2, 3, 4, 5].map((poseIndex) => {
+    const versions = poseVersions.filter((version) => Number(version.pose_index) === poseIndex);
+    const currentPose = poseRows.find((pose) => Number(pose.pose_index) === poseIndex);
+    return {
+      poseIndex,
+      title: text(versions[0]?.title || currentPose?.title || `Pose ${poseIndex}`),
+      current: versions[0] || (currentPose ? {
+        generation_id: currentPose.generation_id,
+        pose_index: currentPose.pose_index,
+        version_number: Number(currentPose.generation_epoch || 1),
+        preview_url: currentPose.output_url,
+        original_url: currentPose.output_url,
+        storage_path: currentPose.storage_path,
+        generation_status: currentPose.status,
+        approval_status: "pending",
+        generated_at: currentPose.updated_at,
+        prompt: currentPose.full_prompt,
+        model: jobResult.data?.model || "",
+        prompt_metadata: currentPose.usage_payload,
+        regeneration_metadata: { history: currentPose.regeneration_history },
+      } : null),
+      versions,
+      reviews: (reviewsResult.data || []).filter((review) => versions.some((version) => version.id === review.asset_version_id)),
+    };
+  });
+  const completedPoseCount = latestByPose.filter((pose) => pose.current && ["completed", "approved"].includes(text(pose.current.generation_status || pose.current.approval_status))).length;
+
+  const references = assetsResult.data || [];
+  const request = requestResult.data;
+  const hasFront = Boolean(request?.front_image_url) || references.some((asset) => asset.asset_role === "front" && (asset.image_url || asset.storage_path));
+  const hasBack = Boolean(request?.back_image_url) || references.some((asset) => asset.asset_role === "back" && (asset.image_url || asset.storage_path));
+  const latestHandoff = handoffsResult.data?.[0] || null;
+  const dependencies = [
+    { key: "front_reference", label: "Front product reference", status: hasFront ? "complete" : "missing" },
+    { key: "back_reference", label: "Back product reference", status: hasBack ? "complete" : "missing" },
+    { key: "pose_plan", label: "Five-pose plan", status: Array.isArray(request?.pose_plan) && request.pose_plan.length === 5 ? "complete" : "pending" },
+    { key: "pose_outputs", label: "Five generated outputs", status: completedPoseCount === 5 ? "complete" : completedPoseCount ? "in_progress" : "pending", detail: `${completedPoseCount}/5 complete` },
+    { key: "human_approval", label: "Final human approval", status: item.final_approved_at ? "complete" : item.qc_status === "rejected" ? "failed" : "pending" },
+    { key: "listing_handoff", label: "Listing Team handoff", status: latestHandoff?.sent_at ? "complete" : latestHandoff ? "ready" : "pending" },
+  ];
+  const canManage = workspace.isAdmin || workspace.permissions.includes("planning.manage");
+  const canApprove = workspace.isAdmin || workspace.permissions.includes("planning.approve");
+  const canList = workspace.isAdmin || canManage || workspace.roles.some((role) => role.slug === "listing-team");
+  const canRegenerate = canApprove;
+  const actions: JsonRecord[] = [];
+  if (["blocked_failed", "regeneration_required"].includes(item.workflow_stage)) actions.push({ type: "retry_generation", label: "Retry generation", enabled: canManage });
+  if (item.workflow_stage === "quality_review") {
+    actions.push({ type: "approve", label: "Approve five-pose set", enabled: canApprove && completedPoseCount === 5 });
+    actions.push({ type: "reject", label: "Request re-generation", enabled: canApprove });
+  }
+  if (item.workflow_stage === "ready_for_listing") actions.push({ type: "send_handoff", label: "Send to Listing Team", enabled: canManage });
+  if (item.workflow_stage === "sent_to_listing_team") actions.push({ type: "start_listing", label: "Start listing", enabled: canList });
+  if (item.workflow_stage === "listing_in_progress") actions.push({ type: "complete_listing", label: "Mark listed", enabled: canList });
+
+  return {
+    is_workflow_v2: true,
+    item: {
+      ...item,
+      generation_assigned_member: decorateMember(item.generation_assigned_member_id),
+      listing_assigned_member: decorateMember(item.listing_assigned_member_id),
+      final_approved_by_member: decorateMember(item.final_approved_by_member_id),
+    },
+    batch: batchResult.data,
+    planningRequest: request,
+    creativeDirection: directionsResult.data,
+    generationJob: jobResult.data,
+    session: sessionResult.data,
+    stages: stageRows,
+    poses: latestByPose,
+    dependencies,
+    activity: events.slice().reverse(),
+    comments: (commentsResult.data || []).map((comment) => ({ ...comment, author: decorateMember(comment.author_member_id) })),
+    assignments: (assignmentsResult.data || []).map((assignment) => ({
+      ...assignment,
+      member: decorateMember(assignment.member_id),
+      assignedBy: decorateMember(assignment.assigned_by_member_id),
+    })),
+    reviews: reviewsResult.data || [],
+    handoffs: handoffsResult.data || [],
+    references,
+    actions,
+    permissions: { canManage, canApprove, canList, canRegenerate },
+    progress: {
+      percent: Number(item.workflow_progress || 0),
+      completedPoseCount,
+      totalPoseCount: 5,
+      currentPose: Number(jobResult.data?.current_pose || 0),
+      currentStep: item.current_step || item.next_action,
+    },
+  };
 }
 
 export async function reconcileExistingGenerations(
@@ -396,7 +957,7 @@ export async function bulkGenerateCatalogWorkItems(
   for (const item of workItems || []) {
     const requestId = text(item.planning_request_id);
     if (!requestId) {
-      if (!text(item.reference_image_url)) throw new Error(`${item.sku_name} needs a reference image before generation can start.`);
+      if (!text(item.reference_image_url) || !text(item.back_reference_image_url)) throw new Error(`${item.sku_name} needs both front and back reference images before generation can start.`);
       continue;
     }
     const request = requestById.get(requestId);
@@ -467,7 +1028,7 @@ export async function bulkGenerateCatalogWorkItems(
   const upsertWorkItems: JsonRecord[] = [];
 
   for (const item of workItems || []) {
-    if (activeItems.some(i => i.id === item.id) || item.status === "blocked") continue;
+    if (activeItems.some(i => i.id === item.id)) continue;
     queued++;
     let requestId = text(item.planning_request_id);
     let request = requestId ? requestById.get(requestId) : undefined;
@@ -488,16 +1049,17 @@ export async function bulkGenerateCatalogWorkItems(
         generation_status: "pending",
         completion_status: "pending",
         front_image_url: item.reference_image_url,
-        back_image_url: item.reference_image_url,
+        back_image_url: item.back_reference_image_url,
         validation_status: "ready",
         validation_report: { ready: true, reasons: [] },
         analysis_status: "stale",
         updated_at: now,
       });
       const referenceUrl = text(item.reference_image_url);
+      const backReferenceUrl = text(item.back_reference_image_url);
       insertAssets.push(
         { organization_id: workspace.organization.id, planning_request_id: requestId, sku_name: item.sku_name, prompt: "", image_url: referenceUrl, storage_path: "", sku_matched: true, asset_role: "front", storage_backend: "firebase", metadata: { source: "catalog_production_import", role: "front" } },
-        { organization_id: workspace.organization.id, planning_request_id: requestId, sku_name: item.sku_name, prompt: "", image_url: referenceUrl, storage_path: "", sku_matched: true, asset_role: "back", storage_backend: "firebase", metadata: { source: "catalog_production_import", role: "back" } }
+        { organization_id: workspace.organization.id, planning_request_id: requestId, sku_name: item.sku_name, prompt: "", image_url: backReferenceUrl, storage_path: "", sku_matched: true, asset_role: "back", storage_backend: "firebase", metadata: { source: "catalog_production_import", role: "back" } }
       );
     } else {
       if (!request?.batch_id) {
@@ -542,6 +1104,8 @@ export async function bulkGenerateCatalogWorkItems(
       listing_completed_at: null,
       completed_at: null,
       status: "in_progress",
+      blocked_reason: "",
+      failure_code: "",
     });
 
     requestIdsByBatch.set(batchId, [...(requestIdsByBatch.get(batchId) || []), requestId]);

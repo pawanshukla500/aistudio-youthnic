@@ -12,11 +12,12 @@ import { Login } from "./features/auth/Login";
 import { useWorkspace } from "./lib/WorkspaceContext";
 import { useFirebaseAuth } from "./lib/FirebaseAuthContext";
 
-function Guard({ permission, admin, children }: { permission?: string; admin?: boolean; children: React.ReactNode }) {
+function Guard({ permission, admin, children }: { permission?: string | string[]; admin?: boolean; children: React.ReactNode }) {
   const workspace = useWorkspace();
+  const required = Array.isArray(permission) ? permission : permission ? [permission] : [];
   const allowed = admin
     ? workspace.isAdmin || workspace.permissions.some((key) => key.startsWith("admin."))
-    : !permission || workspace.isAdmin || workspace.permissions.includes(permission);
+    : !required.length || workspace.isAdmin || required.some((key) => workspace.permissions.includes(key));
   return allowed ? children : <Navigate to="/" replace />;
 }
 
@@ -40,7 +41,7 @@ function AppRoutes() {
         <Route path="events" element={<Guard permission="planning.view"><Events /></Guard>} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="history" element={<Guard permission="studio.view"><History /></Guard>} />
-        <Route path="history/flow/:jobId" element={<Guard permission="studio.view"><GenerationFlowPage /></Guard>} />
+        <Route path="history/flow/:jobId" element={<Guard permission={["studio.view", "planning.view"]}><GenerationFlowPage /></Guard>} />
         <Route path="admin" element={<Guard admin><Admin /></Guard>} />
         <Route path="*" element={<Navigate to={landing} replace />} />
       </Route>

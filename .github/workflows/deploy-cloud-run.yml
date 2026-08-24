@@ -43,6 +43,12 @@ jobs:
         with:
           deno-version: 2.9.5
 
+      - name: Verify catalog workflow contract
+        run: node scripts/verify-catalog-workflow-v2.mjs
+
+      - name: Test catalog business calendar
+        run: deno test --frozen supabase/functions/app-api/lib/catalogHandoffCalendar.test.ts
+
       - name: Validate catalog migration SQL
         run: npm run validate:catalog-sql
 

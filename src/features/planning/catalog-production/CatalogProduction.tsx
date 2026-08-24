@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, Download, Plus, RefreshCw, Upload, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, Download, Filter, MailCheck, Plus, RefreshCw, Search, Upload, X } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { invokeAppApi } from "../../../lib/backend";
 import { supabase } from "../../../lib/supabase";
 import { useWorkspace } from "../../../lib/WorkspaceContext";
@@ -7,6 +8,8 @@ import { ProductionOverview } from "./ProductionOverview";
 import { ProductionBoard } from "./ProductionBoard";
 import { ProductionTable } from "./ProductionTable";
 import { AssetViewerModal } from "./AssetViewerModal";
+import { WorkItemWorkflowModal } from "./WorkItemWorkflowModal";
+import { HandoffAdmin } from "./HandoffAdmin";
 import {
   canQueueGeneration,
   isCompleted,
@@ -16,7 +19,7 @@ import {
   type PlanningSku,
 } from "./types";
 
-type Tab = "overview" | "workflow" | "table";
+type Tab = "overview" | "kanban" | "list" | "handoffs";
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error || "Unknown error");
@@ -24,7 +27,8 @@ function errorMessage(error: unknown) {
 
 export function CatalogProduction() {
   const workspace = useWorkspace();
-  const [activeTab, setActiveTab] = useState<Tab>("table");
+  const [params, setParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<Tab>(params.get("view") === "handoffs" ? "handoffs" : "list");
   const [workItems, setWorkItems] = useState<CatalogWorkItem[]>([]);
   const [members, setMembers] = useState<CatalogMember[]>([]);
   const [planningSkus, setPlanningSkus] = useState<PlanningSku[]>([]);
@@ -33,9 +37,22 @@ export function CatalogProduction() {
   const [busyKey, setBusyKey] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [viewingItem, setViewingItem] = useState<CatalogWorkItem | null>(null);
+  const [workflowItem, setWorkflowItem] = useState<CatalogWorkItem | null>(null);
   const [showSkuPicker, setShowSkuPicker] = useState(false);
   const [selectedSkuIds, setSelectedSkuIds] = useState<Set<string>>(new Set());
   const [selectedTableIds, setSelectedTableIds] = useState<Set<string>>(new Set());
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState({
+    query: "",
+    stage: "all",
+    assignee: "all",
+    campaign: "all",
+    marketplace: "all",
+    priority: "all",
+    dateFrom: "",
+    dateTo: "",
+    sort: "active",
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canManage = workspace.isAdmin || workspace.permissions.includes("planning.manage");
@@ -72,14 +89,26 @@ export function CatalogProduction() {
 
   useEffect(() => {
     void fetchWorkItems();
-    const interval = window.setInterval(() => void fetchWorkItems(true), 15_000);
+    let timer = 0;
+    const refreshSoon = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void fetchWorkItems(true), 250);
+    };
+    const channel = supabase.channel(`catalog-production:${workspace.organization.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "catalog_work_items", filter: `organization_id=eq.${workspace.organization.id}` }, refreshSoon)
+      .on("postgres_changes", { event: "*", schema: "public", table: "catalog_work_item_events", filter: `organization_id=eq.${workspace.organization.id}` }, refreshSoon)
+      .on("postgres_changes", { event: "*", schema: "public", table: "catalog_listing_handoffs", filter: `organization_id=eq.${workspace.organization.id}` }, refreshSoon)
+      .subscribe();
+    const interval = window.setInterval(() => void fetchWorkItems(true), 60_000);
     const refresh = () => void fetchWorkItems(true);
     window.addEventListener("focus", refresh);
     return () => {
+      window.clearTimeout(timer);
       window.clearInterval(interval);
       window.removeEventListener("focus", refresh);
+      void supabase.removeChannel(channel);
     };
-  }, [fetchWorkItems]);
+  }, [fetchWorkItems, workspace.organization.id]);
 
   const trackedPlanningIds = useMemo(
     () => new Set(workItems.map((item) => item.planning_request_id).filter(Boolean)),
@@ -89,11 +118,60 @@ export function CatalogProduction() {
     () => planningSkus.filter((sku) => !trackedPlanningIds.has(sku.id)),
     [planningSkus, trackedPlanningIds],
   );
+  useEffect(() => {
+    const requestedWorkItemId = params.get("workItem");
+    if (!requestedWorkItemId || workflowItem) return;
+    const requested = workItems.find((item) => item.id === requestedWorkItemId);
+    if (requested) setWorkflowItem(requested);
+  }, [params, workItems, workflowItem]);
+
+  const filterOptions = useMemo(() => ({
+    stages: [...new Set(workItems.map((item) => item.workflow_stage || "requirement_created"))].sort(),
+    campaigns: [...new Set(workItems.map((item) => item.campaign_season || "").filter(Boolean))].sort(),
+    marketplaces: [...new Set(workItems.flatMap((item) => [
+      ...(item.marketplaces || []),
+      item.portal || "",
+      item.marketplace_brand || "",
+    ]).filter(Boolean))].sort(),
+  }), [workItems]);
+
+  const filteredWorkItems = useMemo(() => {
+    const query = filters.query.trim().toLowerCase();
+    const from = filters.dateFrom ? Date.parse(`${filters.dateFrom}T00:00:00`) : 0;
+    const to = filters.dateTo ? Date.parse(`${filters.dateTo}T23:59:59`) : Number.POSITIVE_INFINITY;
+    const filtered = workItems.filter((item) => {
+      const searchable = [item.sku_name, item.request_code, item.color_label, item.campaign_season, item.theme, item.remarks, ...(item.marketplaces || [])].join(" ").toLowerCase();
+      const itemDate = Date.parse(item.request_date || item.created_at);
+      const assignees = [item.generation_assigned_member_id, item.listing_assigned_member_id].filter(Boolean);
+      const marketplaces = [...(item.marketplaces || []), item.portal || "", item.marketplace_brand || ""];
+      return (!query || searchable.includes(query))
+        && (filters.stage === "all" || (item.workflow_stage || "requirement_created") === filters.stage)
+        && (filters.assignee === "all" || (filters.assignee === "unassigned" ? !assignees.length : assignees.includes(filters.assignee)))
+        && (filters.campaign === "all" || item.campaign_season === filters.campaign)
+        && (filters.marketplace === "all" || marketplaces.includes(filters.marketplace))
+        && (filters.priority === "all" || item.priority === filters.priority)
+        && itemDate >= from && itemDate <= to;
+    });
+    if (filters.sort === "deadline") return [...filtered].sort((left, right) => Date.parse(left.deadline_at || "9999-12-31") - Date.parse(right.deadline_at || "9999-12-31"));
+    if (filters.sort === "newest") return [...filtered].sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+    if (filters.sort === "sku") return [...filtered].sort((left, right) => left.sku_name.localeCompare(right.sku_name));
+    return sortProductionItems(filtered);
+  }, [filters, workItems]);
+
+  const activeFilterCount = Object.entries(filters).filter(([key, value]) => key !== "sort" && value && value !== "all").length;
   const activeCount = workItems.filter((item) => !isCompleted(item)).length;
   const completedCount = workItems.length - activeCount;
   const queueableIds = useMemo(
     () => new Set(workItems.filter(canQueueGeneration).map((item) => item.id)),
     [workItems],
+  );
+  const autoStartIds = useMemo(
+    () => new Set(workItems.filter((item) => canQueueGeneration(item) && item.qc_status !== "rejected" && item.workflow_stage !== "regeneration_required").map((item) => item.id)),
+    [workItems],
+  );
+  const visibleQueueableIds = useMemo(
+    () => new Set(filteredWorkItems.filter(canQueueGeneration).map((item) => item.id)),
+    [filteredWorkItems],
   );
 
   useEffect(() => {
@@ -126,12 +204,39 @@ export function CatalogProduction() {
     ).catch(() => undefined);
   };
 
+  const handleListingStarted = async (id: string) => {
+    await runAction(
+      `listing-start:${id}`,
+      () => invokeAppApi("catalogProduction.startListing", { workItemId: id }),
+      "Listing work started. The SKU remains in the active queue until the Listing Team marks it done.",
+    ).catch(() => undefined);
+  };
+
   const handleQc = async (id: string, decision: "passed" | "rejected") => {
+    const comments = decision === "rejected"
+      ? window.prompt("Describe what must change before re-generation:", "")
+      : window.prompt("Optional approval comments for the Listing Team:", "");
+    if (comments === null || (decision === "rejected" && !comments.trim())) return;
     await runAction(
       `qc:${id}`,
-      () => invokeAppApi("catalogProduction.reviewQc", { workItemId: id, decision }),
+      () => invokeAppApi("catalogProduction.reviewQc", { workItemId: id, decision, comments }),
       decision === "passed" ? "QC passed. The SKU is ready for the Listing Team." : "QC rejected. The SKU moved to Blocked.",
     ).catch(() => undefined);
+  };
+
+  const openWorkflow = (item: CatalogWorkItem) => {
+    setWorkflowItem(item);
+    const next = new URLSearchParams(params);
+    next.set("tab", "production");
+    next.set("workItem", item.id);
+    setParams(next, { replace: true });
+  };
+
+  const closeWorkflow = () => {
+    setWorkflowItem(null);
+    const next = new URLSearchParams(params);
+    next.delete("workItem");
+    setParams(next, { replace: true });
   };
 
   const handleAssign = async (id: string, assignment: "generation" | "listing", memberId: string) => {
@@ -184,7 +289,22 @@ export function CatalogProduction() {
         { header: "In House Brand", key: "inHouseBrand", width: 20 },
         { header: "Myntra Brand", key: "myntraBrand", width: 20 },
         { header: "Links", key: "links", width: 30 },
-        { header: "Reference Image", key: "refImage", width: 30 },
+        { header: "Front Reference Image", key: "frontRefImage", width: 34 },
+        { header: "Back Reference Image", key: "backRefImage", width: 34 },
+        { header: "Campaign / Event", key: "campaign", width: 24 },
+        { header: "Marketplaces", key: "marketplaces", width: 24 },
+        { header: "Deadline", key: "deadline", width: 20 },
+        { header: "Special Instructions", key: "instructions", width: 36 },
+        { header: "Generation Owner Email", key: "generationOwner", width: 30 },
+        { header: "Listing Owner Email", key: "listingOwner", width: 30 },
+        { header: "Desired Look and Mood", key: "lookMood", width: 32 },
+        { header: "Model Direction", key: "modelDirection", width: 32 },
+        { header: "Styling Requirements", key: "styling", width: 32 },
+        { header: "Pose Direction", key: "poses", width: 36 },
+        { header: "Background / Backdrop", key: "background", width: 30 },
+        { header: "Lighting", key: "lighting", width: 28 },
+        { header: "Composition", key: "composition", width: 28 },
+        { header: "Marketplace Requirements", key: "marketplaceRequirements", width: 36 },
       ];
       for (let row = 2; row <= 1000; row++) {
         worksheet.getCell(`C${row}`).dataValidation = { type: "list", allowBlank: true, formulae: ['"low,normal,high,urgent"'] };
@@ -194,6 +314,8 @@ export function CatalogProduction() {
       }
       worksheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
       worksheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF4F2457" } };
+      worksheet.views = [{ state: "frozen", ySplit: 1 }];
+      worksheet.autoFilter = { from: "A1", to: `AD1000` };
       const buffer = await workbook.xlsx.writeBuffer();
       saveAs(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "Youthnic_Catalog_Template.xlsx");
     } catch (error) {
@@ -227,25 +349,23 @@ export function CatalogProduction() {
         if (Object.keys(value).length) rows.push(value);
       });
       if (!rows.length) throw new Error("No data found in the uploaded file.");
-      const preview = await invokeAppApi<{ scanned: number; newRows: number; matchedRows: number; duplicates: number; invalidSkus: number }>(
+      const preview = await invokeAppApi<{ scanned: number; newRows: number; matchedRows: number; duplicates: number; invalidSkus: number; unknownStatuses: string[]; unknownAssigneeEmails: string[]; invalidDeadlines: number }>(
         "catalogProduction.importGoogleSheetDryRun",
         { rows },
       );
       const confirmed = window.confirm(
-        `Import ${preview.newRows} new SKU${preview.newRows === 1 ? "" : "s"}?\n\n${preview.matchedRows} already tracked · ${preview.duplicates} duplicate rows · ${preview.invalidSkus} invalid rows`,
+        `Import ${preview.newRows} new SKU${preview.newRows === 1 ? "" : "s"}?\n\n${preview.matchedRows} already tracked · ${preview.duplicates} duplicate rows · ${preview.invalidSkus} invalid SKU rows · ${preview.invalidDeadlines} invalid deadlines · ${preview.unknownAssigneeEmails.length} unknown assignee emails · ${preview.unknownStatuses.length} invalid priority values`,
       );
       if (!confirmed) return;
-      const result = await invokeAppApi<{ inserted: number; skipped: number; errors: unknown[] }>("catalogProduction.importGoogleSheet", { rows });
+      const result = await invokeAppApi<{ inserted: number; skipped: number; errors: unknown[]; workItemIds: string[]; queueableWorkItemIds: string[] }>("catalogProduction.importGoogleSheet", { rows });
       
       let queuedMessage = "";
-      if (result.inserted > 0) {
-         // Auto-start prompt
-         const autoStartConfirmed = window.confirm(`Import finished: ${result.inserted} inserted. Would you like to automatically start generation for the ready SKUs?`);
-         if (autoStartConfirmed) {
-            await fetchWorkItems(true);
-            // We need the freshly fetched items to get their IDs. We can just tell the user to click the new Auto-Start button.
-            queuedMessage = " Please click 'Auto-Start Pending' to begin generation.";
-         }
+       if (result.queueableWorkItemIds.length > 0) {
+          const autoStartConfirmed = window.confirm(`Import finished: ${result.inserted} inserted. Start generation now for ${result.queueableWorkItemIds.length} SKU${result.queueableWorkItemIds.length === 1 ? "" : "s"} with complete front and back references?`);
+          if (autoStartConfirmed) {
+             const queued = await invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", { workItemIds: result.queueableWorkItemIds });
+             queuedMessage = ` Started generation for ${queued.queued} SKU${queued.queued === 1 ? "" : "s"}.`;
+          }
       }
 
       setNotice({
@@ -262,7 +382,7 @@ export function CatalogProduction() {
   };
 
   const tableProps = {
-    items: workItems,
+    items: filteredWorkItems,
     members,
     canManage,
     canReviewQc,
@@ -271,7 +391,9 @@ export function CatalogProduction() {
     onAssign: handleAssign,
     onQc: handleQc,
     onListingDone: handleListingDone,
+    onListingStarted: handleListingStarted,
     onViewAssets: setViewingItem,
+    onViewWorkflow: openWorkflow,
     selectedIds: selectedTableIds,
     onToggleSelect: (id: string) => setSelectedTableIds(prev => {
       if (!canManage || !queueableIds.has(id)) return prev;
@@ -281,7 +403,9 @@ export function CatalogProduction() {
       return next;
     }),
     onToggleSelectAll: () => setSelectedTableIds((current) => (
-      current.size === queueableIds.size ? new Set() : new Set(queueableIds)
+      visibleQueueableIds.size > 0 && [...visibleQueueableIds].every((id) => current.has(id))
+        ? new Set([...current].filter((id) => !visibleQueueableIds.has(id)))
+        : new Set([...current, ...visibleQueueableIds])
     )),
   };
   const handleBulkGenerate = async () => {
@@ -301,14 +425,14 @@ export function CatalogProduction() {
   };
 
   const handleAutoStartPending = async () => {
-    if (!queueableIds.size) return;
-    const confirmed = window.confirm(`Auto-start generation for all ${queueableIds.size} pending catalog item(s)?`);
+    if (!autoStartIds.size) return;
+    const confirmed = window.confirm(`Auto-start generation for all ${autoStartIds.size} ready catalog item(s)? Rejected items remain available for an intentional re-generation action.`);
     if (!confirmed) return;
     
     try {
       await runAction("autoStart", () => invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", {
-        workItemIds: Array.from(queueableIds),
-      }), `Started generation for ${queueableIds.size} pending item(s).`);
+        workItemIds: Array.from(autoStartIds),
+      }), `Started generation for ${autoStartIds.size} ready item(s).`);
       setSelectedTableIds(new Set());
     } catch {}
   };
@@ -326,13 +450,18 @@ export function CatalogProduction() {
             <p className="mt-1 text-xs text-secondary">Generation syncs automatically. QC unlocks listing, and completed work stays below the active queue.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {(["overview", "workflow", "table"] as Tab[]).map((tab) => (
+            {([
+              { id: "overview", label: "Overview" },
+              { id: "kanban", label: "Kanban" },
+              { id: "list", label: "List" },
+              ...(canManage ? [{ id: "handoffs", label: "Handoffs" }] : []),
+            ] as Array<{ id: Tab; label: string }>).map((tab) => (
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`rounded-lg px-3 py-2 text-sm font-semibold capitalize transition-colors ${activeTab === tab ? "bg-primary text-white" : "text-secondary hover:bg-surface-container"}`}
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${activeTab === tab.id ? "bg-primary text-white" : "text-secondary hover:bg-surface-container"}`}
               >
-                {tab}
+                {tab.id === "handoffs" && <MailCheck className="h-3.5 w-3.5" />}{tab.label}
               </button>
             ))}
             {canManage && <span className="mx-1 hidden h-7 w-px bg-outline-variant/50 md:block" />}
@@ -346,9 +475,9 @@ export function CatalogProduction() {
                 <RefreshCw className={`h-4 w-4 ${busyKey === "bulkGenerate" ? "animate-spin" : ""}`} /> Generate Selected ({selectedTableIds.size})
               </button>
             )}
-            {canManage && queueableIds.size > 0 && selectedTableIds.size === 0 && (
+            {canManage && autoStartIds.size > 0 && selectedTableIds.size === 0 && (
               <button onClick={handleAutoStartPending} disabled={busyKey === "autoStart"} className="inline-flex items-center gap-2 rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-50 shadow-sm shadow-primary/20 transition-all hover:shadow-md">
-                <RefreshCw className={`h-4 w-4 ${busyKey === "autoStart" ? "animate-spin" : ""}`} /> Auto-Start Pending ({queueableIds.size})
+                <RefreshCw className={`h-4 w-4 ${busyKey === "autoStart" ? "animate-spin" : ""}`} /> Auto-Start Ready ({autoStartIds.size})
               </button>
             )}
             {canManage && (
@@ -381,6 +510,19 @@ export function CatalogProduction() {
             <button onClick={() => setNotice(null)} aria-label="Dismiss message"><X className="h-4 w-4" /></button>
           </div>
         )}
+        {activeTab !== "handoffs" && (
+          <div className="mt-4 rounded-xl border border-outline-variant/35 bg-white p-3 shadow-sm">
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+              <label className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-secondary" /><input value={filters.query} onChange={(event) => setFilters({ ...filters, query: event.target.value })} placeholder="Search SKU, request, campaign, theme, remark or marketplace…" className="h-9 w-full rounded-lg border border-outline-variant bg-surface-container/20 pl-9 pr-3 text-sm text-on-surface outline-none focus:border-primary" /></label>
+              <select value={filters.stage} onChange={(event) => setFilters({ ...filters, stage: event.target.value })} className="h-9 rounded-lg border border-outline-variant bg-white px-3 text-xs font-semibold text-secondary"><option value="all">All stages</option>{filterOptions.stages.map((stage) => <option key={stage} value={stage}>{stage.replaceAll("_", " ")}</option>)}</select>
+              <select value={filters.assignee} onChange={(event) => setFilters({ ...filters, assignee: event.target.value })} className="h-9 rounded-lg border border-outline-variant bg-white px-3 text-xs font-semibold text-secondary"><option value="all">All assignees</option><option value="unassigned">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.display_name || member.email}</option>)}</select>
+              <select value={filters.sort} onChange={(event) => setFilters({ ...filters, sort: event.target.value })} className="h-9 rounded-lg border border-outline-variant bg-white px-3 text-xs font-semibold text-secondary"><option value="active">Active first</option><option value="deadline">Deadline first</option><option value="newest">Newest first</option><option value="sku">SKU A–Z</option></select>
+              <button onClick={() => setShowFilters((value) => !value)} className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-xs font-bold ${showFilters || activeFilterCount ? "border-primary bg-primary/5 text-primary" : "border-outline-variant text-secondary"}`}><Filter className="h-3.5 w-3.5" /> More filters{activeFilterCount ? ` · ${activeFilterCount}` : ""}</button>
+              <span className="shrink-0 text-xs font-semibold text-secondary">{filteredWorkItems.length} of {workItems.length}</span>
+            </div>
+            {showFilters && <div className="mt-3 grid gap-3 border-t border-outline-variant/25 pt-3 sm:grid-cols-2 lg:grid-cols-6"><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">Priority<select value={filters.priority} onChange={(event) => setFilters({ ...filters, priority: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant bg-white px-2 text-xs font-semibold normal-case tracking-normal"><option value="all">All priorities</option>{["urgent", "high", "normal", "low"].map((value) => <option key={value}>{value}</option>)}</select></label><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">Campaign<select value={filters.campaign} onChange={(event) => setFilters({ ...filters, campaign: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant bg-white px-2 text-xs font-semibold normal-case tracking-normal"><option value="all">All campaigns</option>{filterOptions.campaigns.map((value) => <option key={value}>{value}</option>)}</select></label><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">Marketplace<select value={filters.marketplace} onChange={(event) => setFilters({ ...filters, marketplace: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant bg-white px-2 text-xs font-semibold normal-case tracking-normal"><option value="all">All marketplaces</option>{filterOptions.marketplaces.map((value) => <option key={value}>{value}</option>)}</select></label><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">From<input type="date" value={filters.dateFrom} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant px-2 text-xs font-semibold normal-case tracking-normal" /></label><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">To<input type="date" value={filters.dateTo} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant px-2 text-xs font-semibold normal-case tracking-normal" /></label><button onClick={() => setFilters({ query: "", stage: "all", assignee: "all", campaign: "all", marketplace: "all", priority: "all", dateFrom: "", dateTo: "", sort: "active" })} className="mt-4 h-9 rounded-lg border border-outline-variant px-3 text-xs font-bold text-secondary hover:bg-surface-container">Clear filters</button></div>}
+          </div>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-4">
@@ -390,14 +532,16 @@ export function CatalogProduction() {
           </div>
         ) : (
           <>
-            {activeTab === "overview" && <ProductionOverview items={workItems} />}
-            {activeTab === "workflow" && <ProductionBoard {...tableProps} />}
-            {activeTab === "table" && <ProductionTable {...tableProps} />}
+            {activeTab === "overview" && <ProductionOverview items={filteredWorkItems} />}
+            {activeTab === "kanban" && <ProductionBoard {...tableProps} />}
+            {activeTab === "list" && <ProductionTable {...tableProps} />}
+            {activeTab === "handoffs" && canManage && <HandoffAdmin />}
           </>
         )}
       </div>
 
       {viewingItem && <AssetViewerModal item={viewingItem} onClose={() => setViewingItem(null)} />}
+      {workflowItem && <WorkItemWorkflowModal item={workflowItem} onClose={closeWorkflow} />}
 
       {showSkuPicker && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" onMouseDown={() => setShowSkuPicker(false)}>

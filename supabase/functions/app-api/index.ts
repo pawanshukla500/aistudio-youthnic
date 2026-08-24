@@ -16,14 +16,19 @@ import {
 import { buildPoseQaPrompt, parseQaResponse } from "./qa.ts";
 import {
   assignCatalogWorkItem,
+  addCatalogWorkItemComment,
   bulkGenerateCatalogWorkItems,
   createFromPlanningRequests,
+  getCatalogWorkflowDetail,
   importGoogleSheet,
   importGoogleSheetDryRun,
   markListingDone,
+  markListingStarted,
   reconcileExistingGenerations,
   reviewCatalogQc,
+  updateCatalogWorkItem,
 } from "./catalogProduction.ts";
+import { isoWeekday, previousBusinessDate } from "./lib/catalogHandoffCalendar.ts";
 
 const SUPABASE_URL = requiredEnv("SUPABASE_URL");
 const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -139,6 +144,14 @@ function json(data: unknown, status = 200) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error || "Unknown error");
+}
+
+function assertSupabaseResults(
+  results: Array<{ error?: { message?: string } | null }>,
+  context: string,
+) {
+  const failed = results.find((result) => result.error);
+  if (failed?.error) throw new Error(`${context}: ${failed.error.message || "database operation failed"}`);
 }
 
 function parseRetryAfterMs(value: string | null) {
@@ -283,14 +296,31 @@ function localDateParts(timezone: string, date = new Date()) {
   return { iso: `${value.year}-${value.month}-${value.day}`, year: Number(value.year), month: Number(value.month), day: Number(value.day) };
 }
 
-async function sendEmail(args: { recipients: string[]; subject: string; html: string; attachments?: Array<{ filename: string; content: string }> }) {
+function localDateTimeParts(timezone: string, date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone || "Asia/Kolkata",
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    iso: `${value.year}-${value.month}-${value.day}`,
+    time: `${value.hour}:${value.minute}`,
+    year: Number(value.year), month: Number(value.month), day: Number(value.day),
+    hour: Number(value.hour), minute: Number(value.minute),
+  };
+}
+
+async function sendEmail(args: { recipients: string[]; subject: string; html: string; attachments?: Array<{ filename: string; content: string }>; idempotencyKey?: string }) {
   const apiKey = Deno.env.get("RESEND_API_KEY")?.trim();
   const from = Deno.env.get("RESEND_FROM")?.trim();
   if (!apiKey || !from) throw new Error("Email delivery is not configured. Add RESEND_API_KEY and RESEND_FROM to Supabase Edge Function secrets.");
   if (!args.recipients.length) throw new Error("Add at least one valid report recipient in Administration.");
+  const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
+  if (args.idempotencyKey) headers["Idempotency-Key"] = args.idempotencyKey;
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ from, to: args.recipients, subject: args.subject, html: args.html, attachments: args.attachments }),
   });
   const data = await response.json().catch(() => ({})) as JsonRecord;
@@ -1867,8 +1897,8 @@ async function cancelJob(request: Request, args: JsonRecord) {
   return { success: true };
 }
 
-async function regeneratePose(request: Request, args: JsonRecord) {
-  const { workspace } = await workspaceFor(request, "studio.generate");
+async function regeneratePose(request: Request, args: JsonRecord, options: { allowManagedCatalog?: boolean } = {}) {
+  const { workspace } = await workspaceFor(request, options.allowManagedCatalog ? "planning.approve" : "studio.generate");
   const generationId = String(args.poseId || args.generationId || "");
   const { data: pose, error: poseError } = await service.from("session_generations").select("*").eq("generation_id", generationId).single();
   if (poseError) throw new Error(poseError.message);
@@ -1877,7 +1907,7 @@ async function regeneratePose(request: Request, args: JsonRecord) {
   if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
   if (["queued", "processing", "cancelling"].includes(job.status)) throw new Error("Wait for the current photoshoot to finish before regenerating a pose.");
-  if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid) throw new Error("You can regenerate only your own generation jobs.");
+  if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid && !options.allowManagedCatalog) throw new Error("You can regenerate only your own generation jobs.");
   const extraInstructions = String(args.extraInstructions || "").trim();
   if (extraInstructions.length > 1000) throw new Error("Regeneration instructions must be 1,000 characters or fewer.");
   const history = Array.isArray(pose.regeneration_history) ? pose.regeneration_history as JsonRecord[] : [];
@@ -1885,6 +1915,7 @@ async function regeneratePose(request: Request, args: JsonRecord) {
     service.from("session_generations").update({
       status: "queued", attempt_count: 0, qa_status: "pending", error: "",
       output_url: "", storage_path: "",
+      generation_epoch: Math.max(1, Number(pose.generation_epoch || 1)) + 1,
       regeneration_instructions: extraInstructions,
       regeneration_history: [...history, { instructions: extraInstructions, previousOutputUrl: pose.output_url || "", previousStoragePath: pose.storage_path || "", requestedAt: new Date().toISOString(), requestedByMemberId: workspace.member.id }].slice(-20),
       updated_at: new Date().toISOString(),
@@ -2141,6 +2172,9 @@ async function historyGenerationFlowGet(request: Request, args: JsonRecord) {
   
   const jobId = String(args.jobId || "");
   if (!jobId) throw new Error("jobId is required.");
+
+  const operationalWorkflow = await getCatalogWorkflowDetail(service, workspace, { jobId });
+  if (operationalWorkflow) return operationalWorkflow;
 
   if (jobId.startsWith("session_")) {
     const [session, nodes, edges] = await Promise.all([
@@ -2565,6 +2599,13 @@ async function createCatalogOperation(request: Request, args: JsonRecord) {
     modelDirection: String(args.modelDirection || ""), sceneDirection: String(args.sceneDirection || ""),
     category: String(args.category || "ethnic/fusion"), aspectRatio: String(args.aspectRatio || "3:4"),
     imageSize: String(args.imageSize || "2K"), quality: "medium", poseQa: args.poseQa !== false,
+    lookAndMood: String(args.lookAndMood || ""), stylingRequirements: String(args.stylingRequirements || ""),
+    lighting: String(args.lighting || ""), composition: String(args.composition || ""),
+    poseDirection: String(args.poseDirection || ""),
+    marketplaceRequirements: String(args.marketplaceRequirements || ""),
+    marketplaces: Array.isArray(args.marketplaces) ? args.marketplaces.map(String).filter(Boolean).slice(0, 20) : [],
+    specialInstructions: String(args.specialInstructions || ""), deadlineAt: args.deadlineAt ? new Date(String(args.deadlineAt)).toISOString() : null,
+    listingAssignedMemberId: args.listingAssignedMemberId || null,
   };
   const { data, error } = await service.from("planning_batches").insert({
     organization_id: workspace.organization.id, batch_code: `CAT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, name,
@@ -2572,6 +2613,8 @@ async function createCatalogOperation(request: Request, args: JsonRecord) {
     catalog_key: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), queue_status: "idle",
     campaign_season: String(args.campaign || ""), scheduled_at: args.preferredGenerationAt ? new Date(Number(args.preferredGenerationAt)).toISOString() : null,
     schedule_status: "none", source_event_id: args.eventId || null, event_id: args.eventId || null, generation_settings: generationSettings,
+    priority: ["low", "normal", "high", "urgent"].includes(String(args.priority)) ? String(args.priority) : "normal",
+    assigned_member_id: args.generationAssignedMemberId || null,
     created_at: now, updated_at: now,
   }).select("id").single();
   if (error || !data) throw new Error(error?.message || "Could not create the catalog.");
@@ -2581,7 +2624,7 @@ async function createCatalogOperation(request: Request, args: JsonRecord) {
 async function bulkAddVariantsOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const batchId = String(args.catalogId || "");
-  await catalogBatch(workspace, batchId);
+  const batch = await catalogBatch(workspace, batchId);
   const variants = Array.isArray(args.variants) ? args.variants as JsonRecord[] : [];
   if (!variants.length) return { created: 0 };
   const { data: existing, error: existingError } = await service.from("planning_requests").select("sku_name").eq("batch_id", batchId);
@@ -2590,11 +2633,20 @@ async function bulkAddVariantsOperation(request: Request, args: JsonRecord) {
   const clean = variants.filter((variant) => String(variant.sku || "").trim() && !existingSkus.has(String(variant.sku).trim().toLowerCase()));
   if (!clean.length) return { created: 0 };
   const basePosition = existing?.length || 0;
+  const settings = (batch.generation_settings || {}) as JsonRecord;
+  const defaultPriority = ["low", "normal", "high", "urgent"].includes(String(args.priority || batch.priority)) ? String(args.priority || batch.priority) : "normal";
+  const defaultAssignee = args.generationAssignedMemberId || batch.assigned_member_id || null;
+  const defaultNotes = String(args.specialInstructions || settings.specialInstructions || "");
+  const deadlineAt = args.deadlineAt || settings.deadlineAt;
   const { error } = await service.from("planning_requests").insert(clean.map((variant, index) => ({
     organization_id: workspace.organization.id, created_by_member_id: workspace.member.id, batch_id: batchId,
     sku_name: String(variant.sku).trim(), color_label: String(variant.colorLabel || ""), product_description: "",
     photoshoot_type: "catalog_colourway_5_pose", category: "", status: "draft", request_code: `SKU-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
     generation_status: "pending", completion_status: "pending", validation_status: "pending", queue_position: basePosition + index + 1,
+    priority: ["low", "normal", "high", "urgent"].includes(String(variant.priority)) ? String(variant.priority) : defaultPriority,
+    assigned_member_id: variant.generationAssignedMemberId || defaultAssignee,
+    notes: String(variant.specialInstructions || defaultNotes),
+    expected_shoot_date: deadlineAt ? new Date(String(deadlineAt)).toISOString().slice(0, 10) : null,
   })));
   if (error) throw new Error(error.message);
   const total = basePosition + clean.length;
@@ -3208,6 +3260,45 @@ async function queueCatalogVariantGeneration(
     ? applyCatalogMemory(batch, normalizeAnalysis(variant.ai_analysis as JsonRecord, category))
     : await analyzeCatalogVariant(batch, variant, references);
 
+  const { data: workflowItem, error: workflowItemError } = await service.from("catalog_work_items")
+    .select("id,special_instructions,campaign_season,marketplaces")
+    .eq("organization_id", batch.organization_id)
+    .eq("planning_request_id", variant.id)
+    .maybeSingle();
+  if (workflowItemError) throw new Error(workflowItemError.message);
+  const { data: workflowDirection, error: workflowDirectionError } = workflowItem
+    ? await service.from("catalog_creative_directions").select("*")
+      .eq("organization_id", batch.organization_id).eq("work_item_id", workflowItem.id).maybeSingle()
+    : { data: null, error: null };
+  if (workflowDirectionError) throw new Error(workflowDirectionError.message);
+  if (workflowDirection) {
+    const direction = workflowDirection as JsonRecord;
+    const poseDirections = Array.isArray(direction.pose_direction) ? direction.pose_direction.map((entry) => String(entry || "").trim()) : [];
+    const instructionSummary = [
+      workflowItem?.special_instructions ? `Special instructions: ${workflowItem.special_instructions}` : "",
+      workflowItem?.campaign_season ? `Campaign or event: ${workflowItem.campaign_season}` : "",
+      Array.isArray(workflowItem?.marketplaces) && workflowItem.marketplaces.length ? `Marketplaces: ${workflowItem.marketplaces.join(", ")}` : "",
+      direction.marketplace_requirements ? `Marketplace requirements: ${direction.marketplace_requirements}` : "",
+    ].filter(Boolean).join("\n");
+    normalized.creativeDirection = {
+      ...normalized.creativeDirection,
+      ...(direction.background_backdrop ? { backgroundStyle: String(direction.background_backdrop), studioEnvironment: String(direction.background_backdrop) } : {}),
+      ...(direction.lighting ? { lighting: String(direction.lighting) } : {}),
+      ...(direction.composition ? { composition: String(direction.composition) } : {}),
+      ...(direction.look_and_mood ? { mood: String(direction.look_and_mood), editorialCommercialFeel: String(direction.look_and_mood) } : {}),
+      ...(direction.styling_requirements ? { modelStyling: String(direction.styling_requirements) } : {}),
+    };
+    normalized.stylingPlan = {
+      ...normalized.stylingPlan,
+      ...(direction.styling_requirements ? { stylingNotes: String(direction.styling_requirements) } : {}),
+      ...(direction.model_direction ? { themeInterpretation: String(direction.model_direction) } : {}),
+    };
+    normalized.posePlan = normalized.posePlan.map((pose, index) => ({
+      ...pose,
+      prompt: [pose.prompt, poseDirections[index] ? `SKU pose direction: ${poseDirections[index]}` : "", instructionSummary].filter(Boolean).join("\n"),
+    }));
+  }
+
   if (!hasCurrentAnalysis) {
     const analyzedAt = new Date().toISOString();
     const { error: analysisUpdateError } = await service.from("planning_requests").update({
@@ -3290,6 +3381,7 @@ async function queueCatalogVariantGeneration(
     stylingPlan: normalized.stylingPlan,
     posePlan: poses,
     consistencyRules: CONSISTENCY_RULES,
+    workflowDirection: workflowDirection || null,
     analysisModel: resolveGeminiPolicy({ purpose: "product_truth" }).model,
     analysisVersion: ANALYSIS_VERSION,
     generatedAssets: [],
@@ -3314,8 +3406,8 @@ async function queueCatalogVariantGeneration(
     skuName: String(variant.sku_name),
     productDetails: String(variant.product_description || ""),
     category,
-    backgroundStyle: String(generationSettings.sceneDirection || ""),
-    modelIdentityDirection: String(generationSettings.modelDirection || ""),
+    backgroundStyle: String((workflowDirection as JsonRecord | null)?.background_backdrop || generationSettings.sceneDirection || ""),
+    modelIdentityDirection: String((workflowDirection as JsonRecord | null)?.model_direction || generationSettings.modelDirection || ""),
     references,
     analysisFingerprint: analysisHashes.fingerprint,
   };
@@ -4085,50 +4177,48 @@ async function sendTrackedEventEmail(args: { orgId: string; eventId?: string; ki
   }
 }
 
-function catalogDuration(startedAt: unknown, completedAt: unknown) {
-  const started = Date.parse(String(startedAt || ""));
-  const completed = Date.parse(String(completedAt || ""));
-  if (!Number.isFinite(started) || !Number.isFinite(completed) || completed < started) return "Not recorded";
-  const totalSeconds = Math.max(0, Math.round((completed - started) / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return [hours ? `${hours}h` : "", minutes ? `${minutes}m` : "", `${seconds}s`].filter(Boolean).join(" ");
-}
-
 function catalogProductionReportHtml(organizationName: string, reportDate: string, rows: JsonRecord[]) {
   const itemRows = rows.map((row) => {
     const poses = Array.isArray(row.poses) ? row.poses as JsonRecord[] : [];
     const poseLinks = poses.map((pose) => {
-      const url = String(pose.outputUrl || "");
+      const url = String(pose.finalAssetUrl || pose.originalUrl || pose.previewUrl || "");
       const label = `Pose ${Number(pose.poseIndex || 0) || ""}`.trim();
       return /^https?:\/\//i.test(url)
-        ? `<a href="${escapeHtml(url)}" style="color:#7c3aed;text-decoration:none;font-weight:700">${escapeHtml(label)}</a>`
+        ? `<a href="${escapeHtml(url)}" style="color:#970046;text-decoration:none;font-weight:700">${escapeHtml(label)}</a>`
         : escapeHtml(label);
     }).join(" · ") || "No pose links recorded";
+    const folderLink = /^https?:\/\//i.test(String(row.folderLink || ""))
+      ? `<a href="${escapeHtml(row.folderLink)}" style="display:inline-block;margin-top:7px;color:#970046;text-decoration:none;font-weight:700">Open approved package →</a>`
+      : "";
+    const campaign = [row.campaign, row.marketplaces].filter(Boolean).join(" · ") || "Not specified";
+    const priorityDeadline = `${String(row.priority || "normal").toUpperCase()}${row.deadlineAt ? ` · due ${new Date(String(row.deadlineAt)).toLocaleString("en-IN")}` : ""}`;
     return `<tr>
-      <td style="padding:12px;border-bottom:1px solid #e7e2ee;font:700 13px/1.4 Arial,sans-serif;color:#211a24">${escapeHtml(row.skuName)}</td>
-      <td style="padding:12px;border-bottom:1px solid #e7e2ee;font:400 12px/1.5 Arial,sans-serif;color:#655d6b">${escapeHtml(row.generationOwner || "Unassigned")}</td>
-      <td style="padding:12px;border-bottom:1px solid #e7e2ee;font:600 12px/1.5 Arial,sans-serif;color:#655d6b">${escapeHtml(row.duration)}</td>
-      <td style="padding:12px;border-bottom:1px solid #e7e2ee;font:400 12px/1.7 Arial,sans-serif;color:#655d6b">${poseLinks}</td>
+      <td style="padding:14px;border-bottom:1px solid #e7e2ee;vertical-align:top">
+        <div style="font:700 13px/1.4 Arial,sans-serif;color:#211a24">${escapeHtml(row.skuCode || "SKU")} · ${escapeHtml(row.skuName)}</div>
+        <div style="padding-top:4px;font:400 11px/1.5 Arial,sans-serif;color:#655d6b">${escapeHtml(row.batchName || "Standalone requirement")}</div>
+        ${folderLink}
+      </td>
+      <td style="padding:14px;border-bottom:1px solid #e7e2ee;vertical-align:top;font:400 12px/1.6 Arial,sans-serif;color:#655d6b">${escapeHtml(campaign)}<br><strong>${escapeHtml(priorityDeadline)}</strong></td>
+      <td style="padding:14px;border-bottom:1px solid #e7e2ee;vertical-align:top;font:400 12px/1.7 Arial,sans-serif;color:#655d6b">${poseLinks}</td>
+      <td style="padding:14px;border-bottom:1px solid #e7e2ee;vertical-align:top;font:400 12px/1.6 Arial,sans-serif;color:#655d6b">${escapeHtml(row.approvedAt)}<br>${escapeHtml(row.remarks || "No important remarks")}</td>
     </tr>`;
   }).join("");
-  return `<div style="margin:0;padding:24px 12px;background:#f7f3f8;font-family:Arial,Helvetica,sans-serif">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:900px;margin:0 auto;border-collapse:collapse">
-      <tr><td style="border-radius:18px;background:#4f2457;padding:24px">
-        <div style="font:700 11px/1.5 Arial,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#f0c9f2">Catalog production</div>
-        <div style="font:700 24px/1.3 Arial,sans-serif;color:#ffffff;padding-top:5px">Generation completed report</div>
-        <div style="font:400 13px/1.6 Arial,sans-serif;color:#eadfea;padding-top:6px">${escapeHtml(organizationName)} · ${escapeHtml(reportDate)} · ${rows.length} SKU${rows.length === 1 ? "" : "s"}</div>
+  return `<div style="margin:0;padding:24px 12px;background:#faf8ff;font-family:Arial,Helvetica,sans-serif">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:960px;margin:0 auto;border-collapse:collapse">
+      <tr><td style="border-radius:18px;background:#4f2457;padding:26px">
+        <div style="font:700 11px/1.5 Arial,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#f0c9f2">Catalog approval handoff</div>
+        <div style="font:700 24px/1.3 Arial,sans-serif;color:#ffffff;padding-top:5px">Approved five-pose packages</div>
+        <div style="font:400 13px/1.6 Arial,sans-serif;color:#eadfea;padding-top:6px">${escapeHtml(organizationName)} · business date ${escapeHtml(reportDate)} · ${rows.length} SKU${rows.length === 1 ? "" : "s"}</div>
       </td></tr>
+      <tr><td style="padding:14px 8px 0;font:400 12px/1.6 Arial,sans-serif;color:#655d6b">These SKU sets passed final human review and are ready for marketplace listing. Late, weekend, and holiday approvals are included in the next configured business-day digest.</td></tr>
       <tr><td style="padding-top:16px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e7e2ee;border-radius:14px;background:#ffffff;overflow:hidden">
         <thead><tr style="background:#f0eaf2">
-          <th align="left" style="padding:12px;font:700 10px/1.4 Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#655d6b">SKU</th>
-          <th align="left" style="padding:12px;font:700 10px/1.4 Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#655d6b">Generation owner</th>
-          <th align="left" style="padding:12px;font:700 10px/1.4 Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#655d6b">Time</th>
-          <th align="left" style="padding:12px;font:700 10px/1.4 Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#655d6b">Assets</th>
+          <th align="left" style="padding:12px;font:700 10px/1.4 Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#655d6b">Requirement / SKU</th>
+          <th align="left" style="padding:12px;font:700 10px/1.4 Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#655d6b">Campaign / deadline</th>
+          <th align="left" style="padding:12px;font:700 10px/1.4 Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#655d6b">Approved assets</th>
+          <th align="left" style="padding:12px;font:700 10px/1.4 Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#655d6b">Approval / remarks</th>
         </tr></thead><tbody>${itemRows}</tbody>
       </table></td></tr>
-      <tr><td style="padding:16px 8px 0;font:400 12px/1.6 Arial,sans-serif;color:#655d6b">QC must pass before the Listing Done action is available. Open Catalog Production to review prompts, references, and download the full pose set.</td></tr>
     </table>
   </div>`;
 }
@@ -4148,41 +4238,236 @@ async function listingTeamRecipients(orgId: string) {
   return cleanEmails((members || []).map((member) => member.email));
 }
 
-async function sendTrackedCatalogReport(args: { orgId: string; reportDate: string; recipients: string[]; subject: string; html: string; payload: JsonRecord }) {
-  const { data: existing, error: existingError } = await service.from("catalog_report_deliveries")
-    .select("id,status,updated_at").eq("organization_id", args.orgId).eq("report_date", args.reportDate).maybeSingle();
+async function catalogHandoffSettings(orgId: string) {
+  const { data: existing, error } = await service.from("catalog_handoff_settings").select("*").eq("organization_id", orgId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (existing) return existing as JsonRecord;
+  const legacy = await automationSettings(orgId);
+  const { data, error: createError } = await service.from("catalog_handoff_settings").insert({
+    organization_id: orgId,
+    timezone: String(legacy.timezone || "Asia/Kolkata"),
+    custom_recipients: cleanEmails(legacy.report_recipients),
+  }).select("*").single();
+  if (createError || !data) throw new Error(createError?.message || "Could not initialize catalog handoff settings.");
+  return data as JsonRecord;
+}
+
+async function catalogDigestRows(orgId: string, settings: JsonRecord, handoffIds?: string[]) {
+  let handoffsQuery = service.from("catalog_listing_handoffs").select("*").eq("organization_id", orgId);
+  if (handoffIds?.length) handoffsQuery = handoffsQuery.in("id", handoffIds);
+  else handoffsQuery = handoffsQuery.eq("status", "ready");
+  const { data: handoffs, error: handoffError } = await handoffsQuery.order("approved_at").limit(500);
+  if (handoffError) throw new Error(handoffError.message);
+  const timezone = String(settings.timezone || "Asia/Kolkata");
+  const todayIso = localDateParts(timezone).iso;
+  const eligible = (handoffs || []).filter((handoff) => handoffIds?.length || localDateParts(timezone, new Date(handoff.approved_at)).iso < todayIso);
+  if (!eligible.length) return [];
+
+  const eligibleIds = eligible.map((handoff) => String(handoff.id));
+  const workItemIds = [...new Set(eligible.map((handoff) => String(handoff.work_item_id)))];
+  const [deliveryItemsResult, workItemsResult, handoffAssetsResult] = await Promise.all([
+    service.from("catalog_report_delivery_items").select("handoff_id,delivery_id,sent_at").eq("organization_id", orgId).in("handoff_id", eligibleIds),
+    service.from("catalog_work_items").select("*").eq("organization_id", orgId).in("id", workItemIds),
+    service.from("catalog_listing_handoff_assets").select("handoff_id,asset_version_id,pose_index").eq("organization_id", orgId).in("handoff_id", eligibleIds).order("pose_index"),
+  ]);
+  for (const result of [deliveryItemsResult, workItemsResult, handoffAssetsResult]) if (result.error) throw new Error(result.error.message);
+  const includedHandoffs = new Set((deliveryItemsResult.data || []).map((item) => String(item.handoff_id)));
+  const filtered = handoffIds?.length ? eligible : eligible.filter((handoff) => !includedHandoffs.has(String(handoff.id)));
+  if (!filtered.length) return [];
+
+  const assetVersionIds = [...new Set((handoffAssetsResult.data || []).map((asset) => String(asset.asset_version_id)))];
+  const { data: versions, error: versionsError } = assetVersionIds.length
+    ? await service.from("catalog_pose_asset_versions").select("*").eq("organization_id", orgId).in("id", assetVersionIds)
+    : { data: [], error: null };
+  if (versionsError) throw new Error(versionsError.message);
+  const batchIds = [...new Set((workItemsResult.data || []).map((item) => String(item.planning_batch_id || "")).filter(Boolean))];
+  const { data: batches, error: batchesError } = batchIds.length
+    ? await service.from("planning_batches").select("id,name,campaign_season").eq("organization_id", orgId).in("id", batchIds)
+    : { data: [], error: null };
+  if (batchesError) throw new Error(batchesError.message);
+  const appUrl = (Deno.env.get("APP_URL") || Deno.env.get("SITE_URL") || "").replace(/\/$/, "");
+
+  return filtered.map((handoff) => {
+    const item = (workItemsResult.data || []).find((candidate) => candidate.id === handoff.work_item_id) || {};
+    const batch = ((batches || []).find((candidate) => candidate.id === item.planning_batch_id) || {}) as JsonRecord;
+    const links = (handoffAssetsResult.data || [])
+      .filter((asset) => asset.handoff_id === handoff.id)
+      .map((asset) => {
+        const version = (versions || []).find((candidate) => candidate.id === asset.asset_version_id) || {};
+        return {
+          poseIndex: asset.pose_index,
+          versionNumber: version.version_number,
+          previewUrl: version.preview_url,
+          originalUrl: version.original_url,
+          finalAssetUrl: version.final_asset_url,
+        };
+      })
+      .sort((left, right) => Number(left.poseIndex) - Number(right.poseIndex));
+    return {
+      handoffId: handoff.id,
+      workItemId: item.id,
+      batchName: batch.name || item.campaign_season || "Standalone requirement",
+      skuCode: item.request_code,
+      skuName: item.sku_name,
+      campaign: item.campaign_season || batch.campaign_season || "",
+      marketplaces: Array.isArray(item.marketplaces) ? item.marketplaces.join(", ") : item.portal || item.marketplace_brand || "",
+      folderKey: handoff.folder_key,
+      folderLink: appUrl ? `${appUrl}/planning?tab=production&workItem=${item.id}` : "",
+      poses: links,
+      approvedAt: new Date(handoff.approved_at).toLocaleString("en-IN", { timeZone: timezone }),
+      approvedAtIso: handoff.approved_at,
+      priority: item.priority,
+      deadlineAt: item.deadline_at,
+      remarks: item.remarks || item.special_instructions || handoff.remarks || "",
+    };
+  }).filter((row) => row.poses.length === 5);
+}
+
+function catalogRecipients(settings: JsonRecord, listingRecipients: string[]) {
+  const custom = cleanEmails(settings.custom_recipients);
+  const mode = String(settings.recipient_mode || "listing_team");
+  if (mode === "custom") return custom;
+  if (mode === "listing_team_and_custom") return cleanEmails([...listingRecipients, ...custom]);
+  return listingRecipients.length ? listingRecipients : custom;
+}
+
+async function sendTrackedCatalogReport(args: {
+  orgId: string;
+  reportDate: string;
+  recipients: string[];
+  subject: string;
+  html: string;
+  payload: JsonRecord;
+  rows: JsonRecord[];
+  triggerType: "scheduled" | "manual" | "retry" | "resend";
+  actorMemberId?: string;
+  forceResend?: boolean;
+  existingDeliveryId?: string;
+}) {
+  const deliveryKey = `daily:${args.reportDate}`;
+  let existingQuery = service.from("catalog_report_deliveries").select("*").eq("organization_id", args.orgId);
+  existingQuery = args.existingDeliveryId
+    ? existingQuery.eq("id", args.existingDeliveryId)
+    : existingQuery.eq("delivery_key", deliveryKey);
+  const { data: existing, error: existingError } = await existingQuery.maybeSingle();
   if (existingError) throw new Error(existingError.message);
-  if (existing?.status === "sent") return { sent: false, skipped: true };
-  if (existing?.status === "pending" && Date.now() - Date.parse(existing.updated_at) < 10 * 60_000) return { sent: false, skipped: true };
+  if (existing?.status === "sent" && !args.forceResend) return { sent: false, skipped: true, deliveryId: existing.id };
+  if (existing?.status === "pending" && Date.now() - Date.parse(existing.updated_at) < 10 * 60_000) return { sent: false, skipped: true, deliveryId: existing.id };
+  const attemptNumber = Number(existing?.attempt_count || 0) + 1;
+  const now = new Date().toISOString();
   const row = {
     organization_id: args.orgId,
     report_date: args.reportDate,
+    delivery_key: existing?.delivery_key || deliveryKey,
+    delivery_kind: args.triggerType === "scheduled" ? "daily" : "manual",
     recipients: args.recipients,
     subject: args.subject,
     status: "pending",
     error_message: "",
     payload: args.payload,
-    updated_at: new Date().toISOString(),
+    attempt_count: attemptNumber,
+    last_attempt_at: now,
+    next_retry_at: null,
+    created_by_member_id: args.actorMemberId || null,
+    updated_at: now,
   };
   const { data: delivery, error } = existing
     ? await service.from("catalog_report_deliveries").update(row).eq("id", existing.id).select("id").single()
     : await service.from("catalog_report_deliveries").insert(row).select("id").single();
   if (error || !delivery) {
-    if (error?.code === "23505") return { sent: false, skipped: true };
+    if (error?.code === "23505") return { sent: false, skipped: true, deliveryId: existing?.id };
     throw new Error(error?.message || "Could not reserve the catalog report delivery.");
   }
-  try {
-    const providerMessageId = await sendEmail({ recipients: args.recipients, subject: args.subject, html: args.html });
-    await service.from("catalog_report_deliveries").update({
-      status: "sent", provider_message_id: providerMessageId, sent_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-    }).eq("id", delivery.id);
-    return { sent: true, skipped: false };
-  } catch (error) {
-    await service.from("catalog_report_deliveries").update({
-      status: "failed", error_message: errorMessage(error), updated_at: new Date().toISOString(),
-    }).eq("id", delivery.id);
-    throw error;
+
+  const deliveryItems = args.rows.map((digestRow) => ({
+    organization_id: args.orgId,
+    delivery_id: delivery.id,
+    handoff_id: digestRow.handoffId,
+    work_item_id: digestRow.workItemId,
+  }));
+  if (deliveryItems.length && !args.forceResend) {
+    const { error: itemsError } = await service.from("catalog_report_delivery_items").insert(deliveryItems);
+    if (itemsError) {
+      await service.from("catalog_report_deliveries").update({ status: "failed", error_message: itemsError.message, updated_at: new Date().toISOString() }).eq("id", delivery.id);
+      throw new Error(`Could not reserve idempotent handoff items: ${itemsError.message}`);
+    }
   }
+  const { data: attempt, error: attemptError } = await service.from("catalog_report_delivery_attempts").insert({
+    organization_id: args.orgId,
+    delivery_id: delivery.id,
+    attempt_number: attemptNumber,
+    trigger_type: args.triggerType,
+    status: "pending",
+    recipients: args.recipients,
+    actor_member_id: args.actorMemberId || null,
+    metadata: { itemCount: args.rows.length },
+  }).select("id").single();
+  if (attemptError || !attempt) throw new Error(attemptError?.message || "Could not record the delivery attempt.");
+  let providerMessageId = "";
+  try {
+    const providerIdempotencyKey = args.triggerType === "resend"
+      ? `catalog-handoff-${delivery.id}-resend-${attemptNumber}`
+      : `catalog-handoff-${delivery.id}`;
+    providerMessageId = await sendEmail({
+      recipients: args.recipients,
+      subject: args.subject,
+      html: args.html,
+      idempotencyKey: providerIdempotencyKey,
+    });
+  } catch (sendError) {
+    const failedAt = new Date().toISOString();
+    const nextRetryAt = new Date(Date.now() + Math.min(60, 15 * attemptNumber) * 60_000).toISOString();
+    const trackingResults = await Promise.all([
+      service.from("catalog_report_deliveries").update({
+        status: "failed", error_message: errorMessage(sendError), next_retry_at: nextRetryAt, updated_at: failedAt,
+      }).eq("id", delivery.id),
+      service.from("catalog_report_delivery_attempts").update({
+        status: "failed", error_message: errorMessage(sendError), completed_at: failedAt,
+      }).eq("id", attempt.id),
+    ]);
+    assertSupabaseResults(trackingResults, "Could not record the failed catalog email attempt");
+    throw sendError;
+  }
+  const sentAt = new Date().toISOString();
+  const completionResults = await Promise.all([
+    service.from("catalog_report_deliveries").update({
+      status: "sent", provider_message_id: providerMessageId, sent_at: sentAt, error_message: "", updated_at: sentAt,
+    }).eq("id", delivery.id),
+    service.from("catalog_report_delivery_attempts").update({
+      status: "sent", provider_message_id: providerMessageId, completed_at: sentAt,
+    }).eq("id", attempt.id),
+    service.from("catalog_report_delivery_items").update({ sent_at: sentAt }).eq("delivery_id", delivery.id),
+    service.from("catalog_listing_handoffs").update({ status: "sent", sent_at: sentAt, updated_at: sentAt })
+      .eq("organization_id", args.orgId).in("id", args.rows.map((digestRow) => String(digestRow.handoffId))),
+    service.from("catalog_work_items").update({ listing_sent_at: sentAt, listing_status: "pending" })
+      .eq("organization_id", args.orgId).in("id", args.rows.map((digestRow) => String(digestRow.workItemId))),
+    service.from("catalog_work_item_events").insert(args.rows.map((digestRow) => ({
+      organization_id: args.orgId,
+      work_item_id: digestRow.workItemId,
+      event_type: "sent_to_listing_team",
+      actor_member_id: args.actorMemberId || null,
+      source: args.triggerType === "scheduled" ? "automation" : "user",
+      stage_code: "sent_to_listing_team",
+      message: `Included in Listing Team handoff ${args.reportDate}`,
+      metadata: { deliveryId: delivery.id, attemptNumber },
+    }))),
+  ]);
+  assertSupabaseResults(completionResults, "Catalog email was accepted but delivery tracking could not be finalized");
+  return { sent: true, skipped: false, deliveryId: delivery.id, providerMessageId };
+}
+
+async function catalogDigestContext(orgId: string, organizationName: string, options: { handoffIds?: string[] } = {}) {
+  const settings = await catalogHandoffSettings(orgId);
+  const timezone = String(settings.timezone || "Asia/Kolkata");
+  const today = localDateTimeParts(timezone);
+  const weekdays = Array.isArray(settings.business_weekdays) ? settings.business_weekdays.map(Number) : [1, 2, 3, 4, 5];
+  const holidays = Array.isArray(settings.holiday_dates) ? settings.holiday_dates.map(String) : [];
+  const reportDate = previousBusinessDate(today.iso, weekdays, holidays);
+  const listingRecipients = await listingTeamRecipients(orgId);
+  const recipients = catalogRecipients(settings, listingRecipients);
+  const rows = await catalogDigestRows(orgId, settings, options.handoffIds);
+  const subject = `${organizationName} · ${rows.length} approved catalog package${rows.length === 1 ? "" : "s"} · ${reportDate}`;
+  return { settings, timezone, today, weekdays, holidays, reportDate, listingRecipients, recipients, rows, subject };
 }
 
 async function runCatalogProductionAutomationOperation(request: Request) {
@@ -4193,59 +4478,206 @@ async function runCatalogProductionAutomationOperation(request: Request) {
   for (const organization of organizations || []) {
     const orgId = String(organization.id);
     try {
-      const settings = await automationSettings(orgId);
-      const timezone = String(settings.timezone || "Asia/Kolkata");
-      const reportDate = shiftIsoDate(localDateParts(timezone).iso, -1);
-      const candidateSince = new Date(Date.now() - 72 * 60 * 60_000).toISOString();
-      const { data: items, error: itemsError } = await service.from("catalog_work_items")
-        .select("id,sku_name,generation_started_at,generation_completed_at,catalog_session_id,generation_assigned_member:generation_assigned_member_id(display_name,email)")
+      const { data: failedDelivery, error: failedDeliveryError } = await service.from("catalog_report_deliveries")
+        .select("id,report_date,next_retry_at,subject")
         .eq("organization_id", orgId)
-        .eq("generation_status", "completed")
-        .gte("generation_completed_at", candidateSince)
-        .order("generation_completed_at");
-      if (itemsError) throw new Error(itemsError.message);
-      const completed = (items || []).filter((item) => localDateParts(timezone, new Date(item.generation_completed_at)).iso === reportDate);
-      if (!completed.length) {
-        results.push({ orgId, reportDate, sent: false, reason: "no_completed_generation" });
+        .eq("status", "failed")
+        .lte("next_retry_at", new Date().toISOString())
+        .order("next_retry_at")
+        .limit(1)
+        .maybeSingle();
+      if (failedDeliveryError) throw new Error(failedDeliveryError.message);
+      if (failedDelivery) {
+        const { data: failedItems, error: failedItemsError } = await service.from("catalog_report_delivery_items")
+          .select("handoff_id").eq("organization_id", orgId).eq("delivery_id", failedDelivery.id);
+        if (failedItemsError) throw new Error(failedItemsError.message);
+        const retryHandoffIds = (failedItems || []).map((item) => String(item.handoff_id));
+        if (retryHandoffIds.length) {
+          const retryContext = await catalogDigestContext(orgId, String(organization.name || "Youthnic"), { handoffIds: retryHandoffIds });
+          if (!retryContext.recipients.length) throw new Error("No active Listing Team member or custom handoff recipient is configured.");
+          if (!retryContext.rows.length) {
+            await service.from("catalog_report_deliveries").update({
+              status: "failed",
+              error_message: "Retry paused because the previously selected handoff no longer has a complete five-pose package.",
+              next_retry_at: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+              updated_at: new Date().toISOString(),
+            }).eq("id", failedDelivery.id).eq("organization_id", orgId);
+            results.push({ orgId, reportDate: String(failedDelivery.report_date), sent: false, retry: true, reason: "incomplete_five_pose_package" });
+            continue;
+          }
+          const retryReportDate = String(failedDelivery.report_date);
+          const retrySubject = `${organization.name} · ${retryContext.rows.length} approved catalog package${retryContext.rows.length === 1 ? "" : "s"} · ${retryReportDate}`;
+          const retry = await sendTrackedCatalogReport({
+            orgId,
+            reportDate: retryReportDate,
+            recipients: retryContext.recipients,
+            subject: retrySubject,
+            html: catalogProductionReportHtml(String(organization.name || "Youthnic"), retryReportDate, retryContext.rows),
+            payload: { itemCount: retryContext.rows.length, workItemIds: retryContext.rows.map((row) => row.workItemId), handoffIds: retryHandoffIds, timezone: retryContext.timezone, retry: true },
+            rows: retryContext.rows,
+            triggerType: "retry",
+            forceResend: true,
+            existingDeliveryId: String(failedDelivery.id),
+          });
+          results.push({ orgId, reportDate: retryReportDate, sent: retry.sent, retry: true, itemCount: retryContext.rows.length });
+          continue;
+        }
+      }
+      const context = await catalogDigestContext(orgId, String(organization.name || "Youthnic"));
+      if (context.settings.enabled === false) {
+        results.push({ orgId, sent: false, reason: "disabled" });
         continue;
       }
-      const sessionIds = completed.map((item) => String(item.catalog_session_id || "")).filter(Boolean);
-      const posesResult = sessionIds.length
-        ? await service.from("session_generations").select("session_id,pose_index,output_url,status").in("session_id", sessionIds).eq("status", "completed").order("pose_index")
-        : { data: [], error: null };
-      if (posesResult.error) throw new Error(posesResult.error.message);
-      const rows = completed.map((item) => {
-        const owner = item.generation_assigned_member as unknown as JsonRecord | null;
-        return {
-          workItemId: item.id,
-          skuName: item.sku_name,
-          generationOwner: String(owner?.display_name || owner?.email || "Unassigned"),
-          duration: catalogDuration(item.generation_started_at, item.generation_completed_at),
-          completedAt: item.generation_completed_at,
-          poses: (posesResult.data || []).filter((pose) => pose.session_id === item.catalog_session_id).map((pose) => ({
-            poseIndex: pose.pose_index,
-            outputUrl: pose.output_url,
-          })),
-        };
-      });
-      const listingRecipients = await listingTeamRecipients(orgId);
-      const recipients = listingRecipients.length ? listingRecipients : cleanEmails(settings.report_recipients);
-      if (!recipients.length) throw new Error("No active Listing Team member or fallback report recipient is configured.");
-      const subject = `${organization.name} · ${rows.length} catalog generation${rows.length === 1 ? "" : "s"} completed · ${reportDate}`;
+      const isBusinessDay = context.weekdays.includes(isoWeekday(context.today.iso)) && !context.holidays.includes(context.today.iso);
+      const sendTime = String(context.settings.send_local_time || "10:00").slice(0, 5);
+      if (!isBusinessDay || context.today.time < sendTime) {
+        results.push({ orgId, sent: false, reason: !isBusinessDay ? "non_business_day" : "before_send_time", localTime: context.today.time, sendTime });
+        continue;
+      }
+      if (!context.rows.length) {
+        results.push({ orgId, reportDate: context.reportDate, sent: false, reason: "no_final_approvals" });
+        continue;
+      }
+      if (!context.recipients.length) throw new Error("No active Listing Team member or custom handoff recipient is configured.");
       const delivery = await sendTrackedCatalogReport({
         orgId,
-        reportDate,
-        recipients,
-        subject,
-        html: catalogProductionReportHtml(String(organization.name || "Youthnic"), reportDate, rows),
-        payload: { itemCount: rows.length, workItemIds: rows.map((row) => row.workItemId), timezone, listingTeamRecipients: listingRecipients.length },
+        reportDate: context.reportDate,
+        recipients: context.recipients,
+        subject: context.subject,
+        html: catalogProductionReportHtml(String(organization.name || "Youthnic"), context.reportDate, context.rows),
+        payload: {
+          itemCount: context.rows.length,
+          workItemIds: context.rows.map((row) => row.workItemId),
+          handoffIds: context.rows.map((row) => row.handoffId),
+          timezone: context.timezone,
+          listingTeamRecipients: context.listingRecipients.length,
+        },
+        rows: context.rows,
+        triggerType: "scheduled",
       });
-      results.push({ orgId, reportDate, sent: delivery.sent, skipped: delivery.skipped, itemCount: rows.length, recipients: recipients.length });
+      results.push({ orgId, reportDate: context.reportDate, sent: delivery.sent, skipped: delivery.skipped, itemCount: context.rows.length, recipients: context.recipients.length });
     } catch (automationError) {
       results.push({ orgId, error: errorMessage(automationError) });
     }
   }
   return { processed: results.length, results };
+}
+
+async function catalogHandoffAdminOperation(request: Request) {
+  const { workspace } = await workspaceFor(request, "planning.manage");
+  const context = await catalogDigestContext(workspace.organization.id, workspace.organization.name);
+  const { data: deliveries, error } = await service.from("catalog_report_deliveries")
+    .select("*").eq("organization_id", workspace.organization.id).order("created_at", { ascending: false }).limit(50);
+  if (error) throw new Error(error.message);
+  const deliveryIds = (deliveries || []).map((delivery) => String(delivery.id));
+  const [attemptsResult, itemsResult] = deliveryIds.length ? await Promise.all([
+    service.from("catalog_report_delivery_attempts").select("*").eq("organization_id", workspace.organization.id).in("delivery_id", deliveryIds).order("attempt_number", { ascending: false }),
+    service.from("catalog_report_delivery_items").select("*").eq("organization_id", workspace.organization.id).in("delivery_id", deliveryIds),
+  ]) : [{ data: [], error: null }, { data: [], error: null }];
+  if (attemptsResult.error || itemsResult.error) throw new Error(attemptsResult.error?.message || itemsResult.error?.message || "Could not load delivery history.");
+  return {
+    settings: context.settings,
+    preview: { reportDate: context.reportDate, recipients: context.recipients, rows: context.rows, subject: context.subject },
+    deliveries: (deliveries || []).map((delivery) => ({
+      ...delivery,
+      attempts: (attemptsResult.data || []).filter((attempt) => attempt.delivery_id === delivery.id),
+      itemCount: (itemsResult.data || []).filter((item) => item.delivery_id === delivery.id).length,
+    })),
+  };
+}
+
+async function updateCatalogHandoffSettingsOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.manage");
+  const timezone = String(args.timezone || "Asia/Kolkata").trim();
+  try { new Intl.DateTimeFormat("en", { timeZone: timezone }).format(); } catch { throw new Error("Choose a valid IANA timezone."); }
+  const sendLocalTime = String(args.sendLocalTime || "10:00").trim();
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(sendLocalTime)) throw new Error("Send time must use HH:mm format.");
+  const businessWeekdays = [...new Set((Array.isArray(args.businessWeekdays) ? args.businessWeekdays : []).map(Number).filter((day) => day >= 1 && day <= 7))].sort();
+  if (!businessWeekdays.length) throw new Error("Select at least one business weekday.");
+  const holidayDates = [...new Set((Array.isArray(args.holidayDates) ? args.holidayDates : []).map(String).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))].sort();
+  const recipientMode = ["listing_team", "custom", "listing_team_and_custom"].includes(String(args.recipientMode)) ? String(args.recipientMode) : "listing_team";
+  const customRecipients = cleanEmails(args.customRecipients);
+  if (recipientMode === "custom" && !customRecipients.length) throw new Error("Add at least one custom recipient.");
+  const row = {
+    organization_id: workspace.organization.id,
+    enabled: args.enabled !== false,
+    timezone,
+    send_local_time: sendLocalTime,
+    recipient_mode: recipientMode,
+    custom_recipients: customRecipients,
+    business_weekdays: businessWeekdays,
+    holiday_dates: holidayDates,
+    late_approval_policy: "next_business_digest",
+    updated_by_member_id: workspace.member.id,
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await service.from("catalog_handoff_settings").upsert(row, { onConflict: "organization_id" }).select("*").single();
+  if (error || !data) throw new Error(error?.message || "Could not update handoff settings.");
+  await service.from("audit_logs").insert({
+    organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
+    action: "catalog.handoff_settings.updated", resource_type: "catalog_handoff_settings", resource_id: data.id,
+    metadata: { timezone, sendLocalTime, recipientMode, recipientCount: customRecipients.length, businessWeekdays, holidayDates },
+  });
+  return data;
+}
+
+async function sendCatalogHandoffDigestOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.manage");
+  const resendDeliveryId = String(args.deliveryId || "").trim();
+  let handoffIds: string[] | undefined;
+  let forceResend = false;
+  let resendReportDate = "";
+  if (resendDeliveryId) {
+    const { data: delivery, error } = await service.from("catalog_report_deliveries").select("id,report_date")
+      .eq("organization_id", workspace.organization.id).eq("id", resendDeliveryId).maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!delivery) throw new Error("Delivery record not found.");
+    resendReportDate = String(delivery.report_date);
+    const { data: deliveryItems, error: itemsError } = await service.from("catalog_report_delivery_items").select("handoff_id")
+      .eq("organization_id", workspace.organization.id).eq("delivery_id", delivery.id);
+    if (itemsError) throw new Error(itemsError.message);
+    handoffIds = (deliveryItems || []).map((item) => String(item.handoff_id));
+    if (!handoffIds.length) {
+      const { data: deliveryPayload } = await service.from("catalog_report_deliveries").select("payload")
+        .eq("organization_id", workspace.organization.id).eq("id", delivery.id).maybeSingle();
+      handoffIds = Array.isArray(deliveryPayload?.payload?.handoffIds)
+        ? deliveryPayload.payload.handoffIds.map(String)
+        : [];
+    }
+    if (!handoffIds?.length) throw new Error("This delivery has no SKU handoff items to resend.");
+    forceResend = true;
+  }
+  const context = await catalogDigestContext(workspace.organization.id, workspace.organization.name, { handoffIds });
+  if (!context.rows.length) throw new Error("No approved, undelivered five-pose packages are ready.");
+  if (!context.recipients.length) throw new Error("No active Listing Team member or custom handoff recipient is configured.");
+  const effectiveReportDate = resendReportDate || context.reportDate;
+  const effectiveSubject = `${workspace.organization.name} · ${context.rows.length} approved catalog package${context.rows.length === 1 ? "" : "s"} · ${effectiveReportDate}`;
+  const result = await sendTrackedCatalogReport({
+    orgId: workspace.organization.id,
+    reportDate: effectiveReportDate,
+    recipients: context.recipients,
+    subject: effectiveSubject,
+    html: catalogProductionReportHtml(workspace.organization.name, effectiveReportDate, context.rows),
+    payload: {
+      itemCount: context.rows.length,
+      workItemIds: context.rows.map((row) => row.workItemId),
+      handoffIds: context.rows.map((row) => row.handoffId),
+      timezone: context.timezone,
+      manual: true,
+    },
+    rows: context.rows,
+    triggerType: forceResend ? "resend" : "manual",
+    actorMemberId: workspace.member.id,
+    forceResend,
+    existingDeliveryId: resendDeliveryId || undefined,
+  });
+  await service.from("audit_logs").insert({
+    organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
+    action: forceResend ? "catalog.handoff_digest.resent" : "catalog.handoff_digest.sent",
+    resource_type: "catalog_report_delivery", resource_id: String(result.deliveryId || ""),
+    metadata: { itemCount: context.rows.length, recipientCount: context.recipients.length, reportDate: effectiveReportDate },
+  });
+  return result;
 }
 
 function matchesFilterList(values: unknown, selected: string[]) {
@@ -4537,6 +4969,20 @@ Deno.serve(async (request) => {
         const { workspace } = await workspaceFor(request, "planning.manage");
         return createFromPlanningRequests(service, workspace, args);
       },
+      "catalogProduction.workflow.get": async () => {
+        const { workspace } = await workspaceFor(request, "planning.view");
+        const workflow = await getCatalogWorkflowDetail(service, workspace, args);
+        if (!workflow) throw new Error("Catalog workflow item not found.");
+        return workflow;
+      },
+      "catalogProduction.update": async () => {
+        const { workspace } = await workspaceFor(request, "planning.manage");
+        return updateCatalogWorkItem(service, workspace, args);
+      },
+      "catalogProduction.comment": async () => {
+        const { workspace } = await workspaceFor(request, "planning.view");
+        return addCatalogWorkItemComment(service, workspace, args);
+      },
       "catalogProduction.assign": async () => {
         const { workspace } = await workspaceFor(request, "planning.manage");
         return assignCatalogWorkItem(service, workspace, args);
@@ -4544,6 +4990,53 @@ Deno.serve(async (request) => {
       "catalogProduction.reviewQc": async () => {
         const { workspace } = await workspaceFor(request, "planning.approve");
         return reviewCatalogQc(service, workspace, args);
+      },
+      "catalogProduction.regeneratePose": async () => {
+        const { workspace } = await workspaceFor(request, "planning.approve");
+        const workItemId = String(args.workItemId || "");
+        const poseId = String(args.poseId || args.generationId || "");
+        if (!workItemId || !poseId) throw new Error("A catalog item and pose are required.");
+        const { data: item, error: itemError } = await service.from("catalog_work_items").select("id,catalog_session_id")
+          .eq("organization_id", workspace.organization.id).eq("id", workItemId).maybeSingle();
+        if (itemError) throw new Error(itemError.message);
+        if (!item) throw new Error("Catalog work item not found.");
+        const { data: pose, error: poseError } = await service.from("session_generations").select("generation_id,pose_index")
+          .eq("session_id", item.catalog_session_id).eq("generation_id", poseId).maybeSingle();
+        if (poseError) throw new Error(poseError.message);
+        if (!pose) throw new Error("This pose does not belong to the selected catalog item.");
+        const result = await regeneratePose(request, { poseId, extraInstructions: args.extraInstructions }, { allowManagedCatalog: true });
+        const now = new Date().toISOString();
+        const regenerationResults = await Promise.all([
+          service.from("catalog_work_items").update({
+            status: "in_progress", generation_status: "generating", qc_status: "not_started", listing_status: "not_required",
+            listing_started_at: null, listing_completed_at: null, completed_at: null,
+            blocked_reason: "", failure_code: "", final_approved_at: null, final_approved_by_member_id: null,
+            generation_started_at: now, generation_completed_at: null,
+          }).eq("organization_id", workspace.organization.id).eq("id", workItemId),
+          service.from("catalog_work_item_events").insert({
+            organization_id: workspace.organization.id, work_item_id: workItemId,
+            event_type: "pose_regeneration_started", actor_member_id: workspace.member.id,
+            source: "user", stage_code: "generation_in_progress",
+            message: String(args.extraInstructions || "Pose re-generation requested"),
+            metadata: { poseId, poseIndex: pose.pose_index },
+          }),
+          service.from("audit_logs").insert({
+            organization_id: workspace.organization.id, actor_member_id: workspace.member.id,
+            actor_email: workspace.user.email, action: "catalog.pose.regeneration_started",
+            resource_type: "catalog_work_item", resource_id: workItemId,
+            metadata: { poseId, poseIndex: pose.pose_index, instructions: String(args.extraInstructions || "") },
+          }),
+        ]);
+        assertSupabaseResults(regenerationResults, "Could not record the pose re-generation workflow state");
+        return result;
+      },
+      "catalogProduction.startListing": async () => {
+        const { workspace } = await workspaceFor(request, "planning.view");
+        const canCompleteListing = workspace.isAdmin
+          || workspace.permissions.includes("planning.manage")
+          || workspace.roles.some((role) => role.slug === "listing-team");
+        if (!canCompleteListing) throw new Error("Only the Listing Team or a planning manager can start listing work.");
+        return markListingStarted(service, workspace, args);
       },
       "catalogProduction.markListingDone": async () => {
         const { workspace } = await workspaceFor(request, "planning.view");
@@ -4558,6 +5051,9 @@ Deno.serve(async (request) => {
         const { workspace } = await workspaceFor(request, "planning.manage");
         return reconcileExistingGenerations(service, workspace, args);
       },
+      "catalogProduction.handoffs.admin": () => catalogHandoffAdminOperation(request),
+      "catalogProduction.handoffs.updateSettings": () => updateCatalogHandoffSettingsOperation(request, args),
+      "catalogProduction.handoffs.send": () => sendCatalogHandoffDigestOperation(request, args),
       "catalogProduction.bulkGenerate": async () => {
         const { workspace } = await workspaceFor(request, "planning.manage");
         const result = await bulkGenerateCatalogWorkItems(service, workspace, args);

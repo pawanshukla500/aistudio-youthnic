@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Bell, Calendar as CalendarIcon, CalendarDays, ChevronLeft, ChevronRight, History, LayoutDashboard, Loader2, LogOut, Pencil, Shield, Wand2, X } from "lucide-react";
+import { Bell, Calendar as CalendarIcon, CalendarDays, ChevronLeft, ChevronRight, History, LayoutDashboard, Loader2, LogOut, Menu, Pencil, Shield, Wand2, X } from "lucide-react";
 import { api, useMutation, useQuery } from "../../lib/backend";
 import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
 import { useWorkspace } from "../../lib/WorkspaceContext";
@@ -22,6 +22,7 @@ export function Layout() {
       return false;
     }
   });
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const updateProfile = useMutation(api.profile.update);
   const memberProfile = membership.profile && typeof membership.profile === "object" ? membership.profile : {};
   const [profileOpen, setProfileOpen] = useState(false);
@@ -52,7 +53,7 @@ export function Layout() {
     });
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
-    `relative flex items-center rounded-xl text-[14px] transition ${collapsed ? "justify-center px-0 py-3" : "gap-3 px-4 py-3"} ${isActive ? "bg-soft-blush font-bold text-primary" : "font-medium text-secondary hover:bg-paper-canvas hover:text-on-surface"}`;
+    `relative flex items-center gap-3 rounded-xl px-4 py-3 text-[14px] transition ${collapsed ? "lg:justify-center lg:gap-0 lg:px-0" : ""} ${isActive ? "bg-soft-blush font-bold text-primary" : "font-medium text-secondary hover:bg-paper-canvas hover:text-on-surface"}`;
 
   const items: Array<{ to: string; icon: any; label: string; show: boolean; badge?: number }> = [
     { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", show: can("reports.view") },
@@ -65,18 +66,20 @@ export function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background font-manrope text-on-background">
-      <aside className={`flex flex-col border-r border-outline-variant bg-surface-container-lowest transition-all duration-200 ${collapsed ? "w-20" : "w-sidebar-expanded"}`}>
-        <div className={`flex h-20 items-center gap-3 ${collapsed ? "justify-center px-0" : "px-6"}`}>
+      {mobileNavOpen && <button className="fixed inset-0 z-40 bg-[#111827]/45 backdrop-blur-sm lg:hidden" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation overlay" />}
+      <aside className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-outline-variant bg-surface-container-lowest shadow-2xl transition-all duration-200 lg:static lg:z-auto lg:translate-x-0 lg:shadow-none ${mobileNavOpen ? "translate-x-0" : "-translate-x-full"} ${collapsed ? "lg:w-20" : "lg:w-sidebar-expanded"}`}>
+        <div className={`flex h-20 items-center gap-3 px-6 ${collapsed ? "lg:justify-center lg:px-0" : ""}`}>
           <img src="/logo.png" alt="Youthnic" className="h-11 w-11 object-contain" />
-          {!collapsed && (
+          {(!collapsed || mobileNavOpen) && (
             <div>
               <p className="font-syne text-lg font-bold leading-none text-on-surface">Youthnic</p>
               <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.2em] text-primary">AI Studio</p>
             </div>
           )}
+          <button onClick={() => setMobileNavOpen(false)} className="ml-auto rounded-lg p-2 text-secondary hover:bg-surface-container lg:hidden" aria-label="Close navigation"><X className="h-5 w-5" /></button>
         </div>
 
-        {!collapsed && (
+        {(!collapsed || mobileNavOpen) && (
           <div className="mx-4 rounded-xl border border-outline-variant/50 bg-surface-container-low p-3">
             <p className="truncate text-xs font-bold text-on-surface">{organization.name}</p>
             <p className="mt-1 truncate text-[10px] text-secondary">Secure production workspace</p>
@@ -85,21 +88,21 @@ export function Layout() {
 
         <nav className="flex-1 space-y-1 px-4 py-5">
           {items.filter((item) => item.show).map((item) => (
-            <NavLink key={item.to} to={item.to} title={collapsed ? item.label : undefined} className={navClass}>
+            <NavLink key={item.to} to={item.to} onClick={() => setMobileNavOpen(false)} title={collapsed ? item.label : undefined} className={navClass}>
               <item.icon className="h-5 w-5 shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
-              {!collapsed && item.badge ? (
+              {(!collapsed || mobileNavOpen) && <span>{item.label}</span>}
+              {(!collapsed || mobileNavOpen) && item.badge ? (
                 <span className="ml-auto min-w-5 rounded-full bg-primary px-1.5 text-center text-[10px] font-bold text-white">{item.badge}</span>
               ) : null}
-              {collapsed && item.badge ? <span className="absolute right-2.5 top-2 h-2 w-2 rounded-full bg-primary" /> : null}
+              {collapsed && !mobileNavOpen && item.badge ? <span className="absolute right-2.5 top-2 h-2 w-2 rounded-full bg-primary" /> : null}
             </NavLink>
           ))}
           {canAdmin && (
             <>
               <div className="mx-3 my-4 border-t border-outline-variant/50" />
-              <NavLink to="/admin" title={collapsed ? "Administration" : undefined} className={navClass}>
+              <NavLink to="/admin" onClick={() => setMobileNavOpen(false)} title={collapsed ? "Administration" : undefined} className={navClass}>
                 <Shield className="h-5 w-5 shrink-0" />
-                {!collapsed && <span>Administration</span>}
+                {(!collapsed || mobileNavOpen) && <span>Administration</span>}
               </NavLink>
             </>
           )}
@@ -108,7 +111,7 @@ export function Layout() {
         <button
           onClick={toggle}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className={`mx-4 mb-2 flex items-center rounded-xl py-2.5 text-secondary transition hover:bg-paper-canvas hover:text-on-surface ${collapsed ? "justify-center px-0" : "gap-3 px-4"}`}
+          className={`mx-4 mb-2 hidden items-center rounded-xl py-2.5 text-secondary transition hover:bg-paper-canvas hover:text-on-surface lg:flex ${collapsed ? "justify-center px-0" : "gap-3 px-4"}`}
         >
           <ChevronLeft className={`h-5 w-5 shrink-0 transition-transform ${collapsed ? "rotate-180" : ""}`} />
           {!collapsed && <span className="text-[13px] font-semibold">Collapse</span>}
@@ -119,7 +122,7 @@ export function Layout() {
             <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-container text-sm font-bold text-on-primary-container">
               {user.displayName.slice(0, 1).toUpperCase()}
             </div>
-            {!collapsed && (
+            {(!collapsed || mobileNavOpen) && (
               <>
                 <button onClick={() => { setProfileDraft({ displayName: user.displayName, jobTitle: String(memberProfile.jobTitle || ""), phone: String(memberProfile.phone || "") }); setProfileOpen(true); }} className="min-w-0 flex-1 rounded-lg text-left hover:text-primary" title="Edit your profile">
                   <p className="truncate text-xs font-bold text-on-surface">{user.displayName}</p>
@@ -131,7 +134,7 @@ export function Layout() {
               </>
             )}
           </div>
-          {collapsed && (
+          {collapsed && !mobileNavOpen && (
             <button onClick={() => void signOut()} title="Sign out" className="mt-2 flex w-full justify-center rounded-lg p-2 text-secondary transition hover:bg-danger-surface hover:text-danger">
               <LogOut className="h-4 w-4" />
             </button>
@@ -139,8 +142,9 @@ export function Layout() {
         </div>
       </aside>
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background">
-        <header className="flex h-16 shrink-0 items-center justify-between border-b border-outline-variant/50 bg-surface-container-lowest px-8">
-          <div className="flex items-center gap-2 text-xs text-secondary">
+        <header className="flex h-16 shrink-0 items-center justify-between border-b border-outline-variant/50 bg-surface-container-lowest px-4 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-2 text-xs text-secondary">
+            <button onClick={() => setMobileNavOpen(true)} className="mr-1 rounded-lg p-2 text-secondary hover:bg-surface-container lg:hidden" aria-label="Open navigation"><Menu className="h-5 w-5" /></button>
             <span>{organization.name}</span>
             <ChevronRight className="h-3.5 w-3.5" />
             <span className="font-semibold text-on-surface">Production workspace</span>
@@ -150,7 +154,7 @@ export function Layout() {
             <p className="text-[10px] text-secondary">{user.email}</p>
           </div>
         </header>
-        <div className="flex-1 p-8">
+        <div className="flex-1 p-3 sm:p-5 lg:p-8">
           <ErrorBoundary key={location.pathname}>
             <Outlet />
           </ErrorBoundary>
