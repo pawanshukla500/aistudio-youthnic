@@ -104,12 +104,17 @@ function jobSummary(row: Record<string, any>, members: Record<string, any>[] = [
   const jobData = record(row.job_data);
   const references = Array.isArray(jobData.references) ? jobData.references : [];
   const member = members.find((entry) => entry.firebase_uid === row.user_id);
+  const status = String(row.status || "");
   return {
     _id: row.job_id,
     skuId: jobData.skuId || row.sku_name || row.planning_request_id,
     skuName: row.sku_name || jobData.skuName || "Untitled product",
-    status: row.status,
-    detailedStatus: String(jobData.detailedStatus || ""),
+    status,
+    // Worker progress text is intentionally retained in job_data for audit/debugging,
+    // but it must not override a terminal status in History. Otherwise a completed
+    // job can keep rendering its last message (for example, "Pose 5 generating")
+    // and appear to run forever.
+    detailedStatus: ["queued", "processing"].includes(status) ? String(jobData.detailedStatus || "") : "",
     createdAt: milliseconds(row.created_at),
     totalPoses: Number(row.total_poses || 5),
     completedPoses: Number(row.completed_poses || 0),
