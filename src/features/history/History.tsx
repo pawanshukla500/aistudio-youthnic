@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Ban, ChevronDown, ChevronUp, Download, Image as ImageIcon, Images, RefreshCcw, Search, Trash2, Loader2, Clock, AlertCircle, X, Brain } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, getJobReferenceImages, invokeAppApi, useMutation, useQuery, type Id } from "../../lib/backend";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import JSZip from "jszip";
@@ -571,6 +571,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 export function History() {
   const { organization } = useWorkspace();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const cancelJob = useMutation(api.jobs.cancel);
   const removeJob = useMutation(api.jobs.remove);
   const regenerateSession = useMutation(api.jobs.regenerateSession);
@@ -579,10 +580,13 @@ export function History() {
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  // Keep the archive useful during daily operations. Historical rows remain
-  // queryable through All statuses; they are never deleted just to reduce noise.
-  const [status, setStatus] = useState("active");
-  const [sourceType, setSourceType] = useState("");
+  // History is an archive, so it must open on stored generations rather than
+  // the empty active queue. Active is still available as an explicit filter.
+  const [status, setStatus] = useState("");
+  const [sourceType, setSourceType] = useState(() => {
+    const source = params.get("source");
+    return source === "studio" || source === "catalog" ? source : "";
+  });
   const [expanded, setExpanded] = useState<Id<"generationJobs"> | null>(null);
   const [error, setError] = useState("");
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
@@ -596,6 +600,14 @@ export function History() {
     sourceType,
   }) as { data: { items: any[]; page: number; pageSize: number; total: number; totalPages: number } | undefined, error: any };
   const jobs = jobsPage?.items;
+
+  useEffect(() => {
+    const source = params.get("source");
+    const nextSource = source === "studio" || source === "catalog" ? source : "";
+    setSourceType(nextSource);
+    setPage(1);
+    setExpanded(null);
+  }, [params]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -673,8 +685,8 @@ export function History() {
                onChange={(event) => { setStatus(event.target.value); setPage(1); setExpanded(null); }} 
                className="h-10 rounded-xl border border-outline-variant bg-white px-4 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20 shadow-sm cursor-pointer"
             >
+               <option value="">All generations</option>
                <option value="active">Active generations</option>
-               <option value="">All statuses</option>
                <option value="queued">Queued</option>
                <option value="processing">Processing</option>
                <option value="completed">Completed</option>

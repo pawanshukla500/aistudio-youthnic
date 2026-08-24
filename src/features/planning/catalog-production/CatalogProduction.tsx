@@ -88,12 +88,12 @@ export function CatalogProduction() {
       generation_assigned_member:generation_assigned_member_id (id, display_name, email),
       listing_assigned_member:listing_assigned_member_id (id, display_name, email),
       planning_batch:planning_batches!planning_batch_id (id, name)
-    `);
+    `).is("archived_at", null);
     const requests = [
       workItemsQuery.order("created_at", { ascending: false }),
       supabase.from("organization_members").select("id,display_name,email").eq("organization_id", workspace.organization.id).eq("status", "active").order("display_name"),
       canManagePlanning
-        ? supabase.from("planning_requests").select("id,request_code,sku_name,color_label,generation_status,updated_at,planning_batches(name)").eq("organization_id", workspace.organization.id).order("updated_at", { ascending: false }).limit(500)
+        ? supabase.from("planning_requests").select("id,request_code,sku_name,color_label,generation_status,updated_at,planning_batches(name)").eq("organization_id", workspace.organization.id).is("archived_at", null).order("updated_at", { ascending: false }).limit(500)
         : Promise.resolve({ data: [], error: null }),
     ] as const;
     const [itemsResult, membersResult, skuResult] = await Promise.all(requests);
