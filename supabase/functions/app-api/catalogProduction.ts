@@ -905,6 +905,22 @@ function isoMillis(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function tenantCatalogAssetPath(orgId: string, requestedPath: string) {
+  const normalized = requestedPath.replace(/^\/+/, "");
+  const legacyPrefix = `organizations/${orgId}/`;
+  const path = normalized.startsWith(legacyPrefix) ? `${orgId}/${normalized.slice(legacyPrefix.length)}` : normalized;
+  if (!path.startsWith(`${orgId}/`) || path.includes("../")) throw new Error("Catalog Storage path is outside the organization prefix.");
+  return path;
+}
+
+async function signedCatalogAssetUrl(service: SupabaseClient, orgId: string, row: JsonRecord, fallbackField: string) {
+  const fallback = text(row[fallbackField]);
+  if (text(row.storage_backend) !== "supabase" || !text(row.storage_path)) return fallback;
+  const storagePath = tenantCatalogAssetPath(orgId, text(row.storage_path));
+  const { data, error } = await service.storage.from("catalog-assets").createSignedUrl(storagePath, 7 * 24 * 60 * 60);
+  return error || !data?.signedUrl ? fallback : data.signedUrl;
+}
+
 export async function getCatalogWorkflowDetail(
   service: SupabaseClient,
   workspace: CatalogWorkspace,
@@ -1010,8 +1026,19 @@ export async function getCatalogWorkflowDetail(
     };
   });
 
-  const poseVersions = versionsResult.data || [];
-  const poseRows = posesResult.data || [];
+  const poseVersions = await Promise.all((versionsResult.data || []).map(async (version) => {
+    const signedUrl = await signedCatalogAssetUrl(service, workspace.organization.id, version as JsonRecord, "original_url");
+    return {
+      ...version,
+      preview_url: signedUrl || version.preview_url,
+      original_url: signedUrl || version.original_url,
+      final_asset_url: version.final_asset_url ? signedUrl || version.final_asset_url : version.final_asset_url,
+    };
+  }));
+  const poseRows = await Promise.all((posesResult.data || []).map(async (pose) => ({
+    ...pose,
+    output_url: await signedCatalogAssetUrl(service, workspace.organization.id, pose as JsonRecord, "output_url") || pose.output_url,
+  })));
   const latestByPose = [1, 2, 3, 4, 5].map((poseIndex) => {
     const versions = poseVersions.filter((version) => Number(version.pose_index) === poseIndex);
     const currentPose = poseRows.find((pose) => Number(pose.pose_index) === poseIndex);
@@ -1039,7 +1066,10 @@ export async function getCatalogWorkflowDetail(
   });
   const completedPoseCount = latestByPose.filter((pose) => pose.current && ["completed", "approved"].includes(text(pose.current.generation_status || pose.current.approval_status))).length;
 
-  const references = assetsResult.data || [];
+  const references = await Promise.all((assetsResult.data || []).map(async (asset) => ({
+    ...asset,
+    image_url: await signedCatalogAssetUrl(service, workspace.organization.id, asset as JsonRecord, "image_url") || asset.image_url,
+  })));
   const request = requestResult.data;
   const hasFront = Boolean(request?.front_image_url) || references.some((asset) => asset.asset_role === "front" && (asset.image_url || asset.storage_path));
   const hasBack = Boolean(request?.back_image_url) || references.some((asset) => asset.asset_role === "back" && (asset.image_url || asset.storage_path));

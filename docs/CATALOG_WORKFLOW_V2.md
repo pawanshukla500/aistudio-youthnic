@@ -62,7 +62,7 @@ The migration extends existing tables instead of replacing them:
 - `catalog_handoff_settings` stores the organization timezone, local send time, recipients, weekdays, holidays, and late-approval policy.
 - Existing member `notification_preferences` now controls assignment alerts and participation in role-targeted catalog handoff email. Both preferences are editable from the member profile.
 - `catalog_report_delivery_attempts` and `catalog_report_delivery_items` extend the existing report record with retry history and SKU-level idempotency.
-- Existing Firebase file paths and URLs remain valid. New asset metadata includes a storage backend so a later binary migration to a tenant-prefixed Supabase Storage bucket can be performed without breaking current assets.
+- Existing Firebase file paths and URLs remain valid. New browser reference uploads and Edge-generated assets default to the private, tenant-prefixed Supabase Storage bucket; storage-aware readers mint fresh signed URLs and retain Firebase compatibility for historical records. `CATALOG_ASSET_STORAGE_BACKEND=firebase` is an emergency rollback switch for new Edge-generated writes, not the normal production mode.
 
 All new organization-owned tables include `organization_id`, RLS, an organization-leading index, explicit authenticated read grants, and server-only writes through the permission-checked Edge API. Browser clients cannot write audit, approval, assignment, handoff, or delivery records directly.
 
@@ -134,6 +134,10 @@ The implementation was verified locally on 24 August 2026 with:
 
 The Excel import/template now carries the same operational data as in-app intake: SKU/product, front and back references, priority, owners, deadline, marketplaces/campaign, special instructions, and all creative-direction fields. Dry-run validation reports unknown assignees, invalid dates/priorities, missing references, and queue-ready rows before import.
 
+Catalog Production now filters live records by batch, SKU/search text, assignee, stage/status, campaign, marketplace, priority, and date, and supports active-first/deadline/newest/SKU sorting across its list and Kanban views.
+
+Catalog Production no longer uses browser prompt/confirm controls. QC, re-generation guidance, spreadsheet dry-run review, bulk generation, handoff send, and resend use accessible responsive action dialogs with explicit validation and retry-preserving error behavior.
+
 The base V2 migration, Edge Function, and client were deployed from the merged implementation PR on 24 August 2026. The follow-up hardening migration and corresponding API/UI changes remain gated by their own PR and must deploy in the same order: additive migration, server/Edge API, then client. Cross-tenant RLS, role-specific transitions, Realtime delivery, Storage access, scheduled invocation, email-provider behavior, and existing-data backfill still require the authenticated manager/generator/reviewer/Listing Team/read-only acceptance run below; a green deployment job alone does not prove those user-level behaviors.
 
 ### Authenticated live acceptance command
@@ -146,6 +150,10 @@ After deployment, run `npm run verify:catalog-workflow:live` with:
 
 The first five users must share one organization and default to the Planning Manager, Creative Team, Review Team, Listing Team, and Viewer roles. The final user must belong to a different organization. Optional `CATALOG_TEST_*_ROLE` values override those expected role slugs. The command is non-destructive: it reads one supplied workflow, probes invalid IDs for role boundaries, verifies direct server-owned writes are denied, checks cross-tenant database and Storage reads return no rows, and audits visible notification addressing.
 
-## Known migration boundary
+## Storage cutover boundary
 
-Binary assets remain in Firebase Storage in this phase because the active generator and signed download path already depend on it. The new normalized version/handoff records are storage-provider neutral. Moving existing binaries to Supabase Storage is a separate, reversible migration with checksum verification, dual-read support, and a tenant-prefixed path policy; it must not be mixed into the operational workflow rollout.
+New reference uploads and generated pose binaries use Supabase Storage by default. Paths begin with the organization UUID, the bucket is private, browser operations are RLS-controlled, Edge operations validate the tenant prefix before using the service role, and UI/email consumers refresh time-limited signed URLs from the stable storage path. The authenticated live acceptance harness performs a real same-tenant upload/upsert/read/delete cycle plus cross-tenant read/write denial.
+
+Historical binaries are deliberately not bulk-copied or deleted from Firebase by this PR. Dual-read and backend-aware cleanup keep those records usable while a later checksum-verified copy job migrates them in reversible batches. That historical migration is operational cleanup rather than a blocker for new assets using Supabase Storage.
+
+The requirement-to-evidence mapping and remaining production sign-off gates are tracked in [`CATALOG_WORKFLOW_ACCEPTANCE_MATRIX.md`](./CATALOG_WORKFLOW_ACCEPTANCE_MATRIX.md).

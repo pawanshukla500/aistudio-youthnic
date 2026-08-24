@@ -19,15 +19,13 @@ import {
   UploadCloud,
   X,
 } from "lucide-react";
-import { getDownloadURL, ref as firebaseStorageRef, uploadBytes } from "firebase/storage";
 import { api, useMutation, useQuery, type Id } from "../../lib/backend";
 import { useWorkspace } from "../../lib/WorkspaceContext";
-import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
-import { firebaseStorage } from "../../lib/firebase";
 import { getErrorMessage } from "../../lib/errors";
 import { StylingPlanEditor } from "../../components/ui/StylingPlanEditor";
 import { normalizePlan, type StylingPlan } from "../../lib/stylingPlan";
 import { supabase } from "../../lib/supabase";
+import { uploadCatalogAsset } from "../../lib/catalogStorage";
 
 const CATEGORIES = ["ethnic/fusion", "western/casual", "dress", "formal", "streetwear", "activewear"];
 const ASPECTS = ["3:4", "4:5", "2:3", "9:16", "1:1", "16:9"];
@@ -123,7 +121,6 @@ function nextMorningSlot() {
 
 export function Planning() {
   const { organization, user } = useWorkspace();
-  const { user: firebaseUser } = useFirebaseAuth();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
 
@@ -224,20 +221,22 @@ export function Planning() {
   }, [selectedId, selectedLoaded, selectedPreferredSchedule]);
 
   const uploadRef = async (role: string, file: File, sku: string, catalogId: Id<"catalogs">) => {
-    if (!firebaseUser) throw new Error("Your session expired. Please sign in again.");
-    const safe = file.name.replace(/[^a-zA-Z0-9._-]+/g, "-");
-    const storagePath = ["users", firebaseUser.uid, "organizations", String(organization._id), "catalog", String(catalogId), sku.replace(/[^a-zA-Z0-9._-]+/g, "-"), role, `${crypto.randomUUID()}-${safe}`].join("/");
-    const uploaded = await uploadBytes(firebaseStorageRef(firebaseStorage, storagePath), file, { contentType: file.type, customMetadata: { organizationId: String(organization._id), role } });
-    const downloadUrl = await getDownloadURL(uploaded.ref);
+    const uploaded = await uploadCatalogAsset({
+      organizationId: String(organization._id),
+      scope: "catalog",
+      ownerKey: `${String(catalogId)}-${sku}`,
+      role,
+      file,
+    });
     return saveReference({
       organizationId: organization._id,
       uploadedBy: user._id,
       catalogId,
       skuId: sku,
       role,
-      storageProvider: "firebase",
-      storagePath,
-      downloadUrl,
+      storageProvider: uploaded.storageBackend,
+      storagePath: uploaded.storagePath,
+      downloadUrl: uploaded.downloadUrl,
       hash: await fileHash(file),
       filename: file.name,
       mimeType: file.type,

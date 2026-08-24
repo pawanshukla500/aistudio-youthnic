@@ -51,6 +51,113 @@ const service = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+const CATALOG_ASSET_BUCKET = "catalog-assets";
+const CATALOG_ASSET_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
+type CatalogStorageBackend = "firebase" | "supabase" | "external";
+
+function configuredCatalogStorageBackend(): CatalogStorageBackend {
+  const configured = String(Deno.env.get("CATALOG_ASSET_STORAGE_BACKEND") || "supabase").trim().toLowerCase();
+  if (configured === "firebase" || configured === "external") return configured;
+  return "supabase";
+}
+
+function supabaseCatalogPath(orgId: string, requestedPath: string) {
+  const normalized = requestedPath.replace(/^\/+/, "");
+  const legacyPrefix = `organizations/${orgId}/`;
+  const path = normalized.startsWith(legacyPrefix) ? `${orgId}/${normalized.slice(legacyPrefix.length)}` : normalized;
+  if (!path.startsWith(`${orgId}/`) || path.includes("../")) throw new Error("Catalog Storage path is outside the organization prefix.");
+  return path;
+}
+
+async function signCatalogObject(orgId: string, storagePath: string, storageBackend: unknown, fallbackUrl = "") {
+  if (String(storageBackend || "firebase") !== "supabase" || !storagePath) return fallbackUrl;
+  const tenantPath = supabaseCatalogPath(orgId, storagePath);
+  const { data, error } = await service.storage.from(CATALOG_ASSET_BUCKET).createSignedUrl(tenantPath, CATALOG_ASSET_URL_TTL_SECONDS);
+  if (error || !data?.signedUrl) throw new Error(`Could not sign catalog asset: ${error?.message || "no signed URL returned"}`);
+  return data.signedUrl;
+}
+
+async function uploadCatalogObject(args: { orgId: string; storagePath: string; blob: Blob; mimeType: string }) {
+  const backend = configuredCatalogStorageBackend();
+  if (backend === "firebase") {
+    const stored = await uploadFirebaseObject({ storagePath: args.storagePath, blob: args.blob, mimeType: args.mimeType });
+    return { ...stored, storageBackend: "firebase" as const };
+  }
+  if (backend === "external") throw new Error("External catalog asset storage is read-only.");
+  const storagePath = supabaseCatalogPath(args.orgId, args.storagePath);
+  const bucket = service.storage.from(CATALOG_ASSET_BUCKET);
+  const { error } = await bucket.upload(storagePath, args.blob, {
+    contentType: args.mimeType || "image/png",
+    cacheControl: "31536000",
+    upsert: false,
+  });
+  if (error) throw new Error(`Supabase Storage upload failed: ${error.message}`);
+  try {
+    const downloadUrl = await signCatalogObject(args.orgId, storagePath, "supabase");
+    return { downloadUrl, storagePath, storageBackend: "supabase" as const };
+  } catch (error) {
+    await bucket.remove([storagePath]);
+    throw error;
+  }
+}
+
+async function downloadCatalogObject(orgId: string, storagePath: string, storageBackend: unknown, fallbackUrl = "") {
+  const backend = String(storageBackend || "firebase") as CatalogStorageBackend;
+  if (backend === "supabase") {
+    const tenantPath = supabaseCatalogPath(orgId, storagePath);
+    const { data, error } = await service.storage.from(CATALOG_ASSET_BUCKET).download(tenantPath);
+    if (error || !data) throw new Error(`Supabase Storage download failed: ${error?.message || "object unavailable"}`);
+    return data;
+  }
+  if (/^https:\/\//i.test(storagePath)) {
+    const response = await fetch(storagePath);
+    if (!response.ok) throw new Error(`Asset download failed (${response.status}).`);
+    return response.blob();
+  }
+  if (/^http:\/\//i.test(storagePath)) throw new Error("Catalog asset URLs must use HTTPS.");
+  if (backend === "external") {
+    if (!fallbackUrl) throw new Error("External asset URL is unavailable.");
+    const response = await fetch(fallbackUrl);
+    if (!response.ok) throw new Error(`External asset download failed (${response.status}).`);
+    return response.blob();
+  }
+  assertCatalogReferenceOwnership(orgId, { role: "stored_asset", storagePath, storageBackend: "firebase", hash: "", filename: "stored-asset", mimeType: "", size: 0 });
+  return downloadFirebaseObject(storagePath);
+}
+
+async function deleteCatalogObject(orgId: string, storagePath: string, storageBackend: unknown) {
+  if (!storagePath) return;
+  if (String(storageBackend || "firebase") === "supabase") {
+    const tenantPath = supabaseCatalogPath(orgId, storagePath);
+    const { error } = await service.storage.from(CATALOG_ASSET_BUCKET).remove([tenantPath]);
+    if (error) throw new Error(`Supabase Storage deletion failed: ${error.message}`);
+    return;
+  }
+  if (String(storageBackend || "firebase") === "external" || /^https:\/\//i.test(storagePath)) return;
+  if (/^http:\/\//i.test(storagePath)) throw new Error("Catalog asset URLs must use HTTPS.");
+  assertCatalogReferenceOwnership(orgId, { role: "stored_asset", storagePath, storageBackend: "firebase", hash: "", filename: "stored-asset", mimeType: "", size: 0 });
+  await deleteFirebaseObject(storagePath);
+}
+
+function assertCatalogReferenceOwnership(orgId: string, reference: ReferenceInput) {
+  const backend = String(reference.storageBackend || "firebase");
+  const storagePath = String(reference.storagePath || "");
+  const downloadUrl = String(reference.downloadUrl || "");
+  if (backend === "supabase") {
+    if (!storagePath) throw new Error("A Supabase catalog reference must include its private storage path.");
+    supabaseCatalogPath(orgId, storagePath);
+    return;
+  }
+  if (backend === "firebase" && storagePath) {
+    const normalized = storagePath.replace(/^\/+/, "");
+    if (!normalized.includes(`organizations/${orgId}/`) && !normalized.startsWith(`${orgId}/`)) {
+      throw new Error("The Firebase reference path is outside the current organization.");
+    }
+    return;
+  }
+  if (!/^https:\/\//i.test(downloadUrl)) throw new Error("Reference links must use HTTPS.");
+}
+
 async function recordAiRun(args: JsonRecord) {
   const { error } = await service.from("ai_runs").insert(args);
   if (error) console.error(`Failed to record ai_run telemetry: ${error.message}`);
@@ -61,6 +168,7 @@ type ReferenceInput = {
   role: string;
   downloadUrl?: string;
   storagePath?: string;
+  storageBackend?: CatalogStorageBackend;
   hash: string;
   filename: string;
   mimeType: string;
@@ -349,24 +457,25 @@ async function geminiGroundedJson(prompt: string) {
   return { model, raw: data, json: parseJsonResponse(text), citations };
 }
 
-async function loadReference(reference: ReferenceInput): Promise<LoadedReference> {
+async function loadReference(reference: ReferenceInput, orgId: string): Promise<LoadedReference> {
   let blob: Blob | null = null;
-  if (reference.downloadUrl) {
+  assertCatalogReferenceOwnership(orgId, reference);
+  if (reference.storagePath) blob = await downloadCatalogObject(orgId, reference.storagePath, reference.storageBackend, reference.downloadUrl);
+  if (!blob && reference.downloadUrl) {
     const response = await fetch(reference.downloadUrl);
     if (response.ok) blob = await response.blob();
   }
-  if (!blob && reference.storagePath) blob = await downloadFirebaseObject(reference.storagePath);
-  if (!blob) throw new Error(`Could not load ${reference.filename} from Firebase Storage.`);
+  if (!blob) throw new Error(`Could not load ${reference.filename} from catalog asset storage.`);
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const mimeType = reference.mimeType || blob.type || "image/jpeg";
   return { ...reference, mimeType, blob: new Blob([bytes], { type: mimeType }), base64: bytesToBase64(bytes) };
 }
 
-async function loadAvailableReferences(references: ReferenceInput[]): Promise<LoadedReference[]> {
+async function loadAvailableReferences(references: ReferenceInput[], orgId: string): Promise<LoadedReference[]> {
   const loaded: LoadedReference[] = [];
   for (const reference of references) {
     try {
-      loaded.push(await loadReference(reference));
+      loaded.push(await loadReference(reference, orgId));
     } catch (error) {
       if (reference.role === "front" || reference.role === "back") {
         throw new Error(
@@ -487,12 +596,13 @@ async function geminiJson(policy: GeminiPolicy, parts: JsonRecord[], attempt = 1
 async function analyze(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "studio.generate");
   const references = canonicalReferences((Array.isArray(args.references) ? args.references : []) as ReferenceInput[]);
+  const orgId = workspace.organization.id;
+  references.forEach((reference) => assertCatalogReferenceOwnership(orgId, reference));
   if (!references.some((reference) => reference.role === "front")) throw new Error("A front product image is required before analysis.");
   if (!references.some((reference) => reference.role === "back")) throw new Error("A back product image is required before analysis.");
   const pHash = productHash(args);
   const rHash = referenceHash(references);
   const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}`);
-  const orgId = workspace.organization.id;
   // House preference is an analysis input, so it belongs in the cache identity:
   // otherwise a cached plan keeps proposing the styling a stylist corrected, for
   // up to the cache's thirty days. It stays out of the fingerprint on purpose -
@@ -514,7 +624,7 @@ async function analyze(request: Request, args: JsonRecord) {
   }
   const started = Date.now();
   if (!normalized) {
-    const loaded = await loadAvailableReferences(references);
+    const loaded = await loadAvailableReferences(references, orgId);
     const manifest: Array<{ number: number; role: string }> = [];
     const parts: JsonRecord[] = [];
     loaded.forEach((reference, index) => {
@@ -564,16 +674,16 @@ async function analyze(request: Request, args: JsonRecord) {
   const assetRows = references.map((reference) => ({
     organization_id: orgId, planning_request_id: planningRequest.id, sku_name: String(args.skuName || "Untitled studio product"),
     prompt: "", image_url: reference.downloadUrl || "", storage_path: reference.storagePath || "", sku_matched: true,
-    asset_role: reference.role, storage_backend: "firebase", metadata: { hash: reference.hash, filename: reference.filename, mimeType: reference.mimeType, size: reference.size },
+    asset_role: reference.role, storage_backend: reference.storageBackend || "firebase", metadata: { hash: reference.hash, filename: reference.filename, mimeType: reference.mimeType, size: reference.size, storageBackend: reference.storageBackend || "firebase" },
   }));
-  const { data: assets, error: assetError } = await service.from("planning_assets").insert(assetRows).select("id,asset_role,image_url,storage_path,metadata");
+  const { data: assets, error: assetError } = await service.from("planning_assets").insert(assetRows).select("id,asset_role,image_url,storage_path,storage_backend,metadata");
   if (assetError) console.error(assetError.message);
   const sessionId = `session_${crypto.randomUUID()}`;
   const sessionData = {
     skuId: String(args.skuId || requestCode), skuName: String(args.skuName || "Untitled studio product"),
     productDetails: String(args.productDetails || ""), category: String(args.category || "ethnic/fusion"),
     referenceIds: (assets || []).map((asset) => asset.id), references: (assets || []).map((asset) => ({
-      id: asset.id, role: asset.asset_role, downloadUrl: asset.image_url, storagePath: asset.storage_path,
+      id: asset.id, role: asset.asset_role, downloadUrl: asset.image_url, storagePath: asset.storage_path, storageBackend: asset.storage_backend as CatalogStorageBackend,
       hash: String((asset.metadata as JsonRecord)?.hash || ""), filename: String((asset.metadata as JsonRecord)?.filename || `${asset.asset_role}.jpg`),
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     })), productIdentity: normalized.productIdentity, creativeDirection: normalized.creativeDirection,
@@ -1084,7 +1194,7 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
       // approving a plan at this moment must not lose the anchor, and vice versa.
       const { error: anchorError } = await service.rpc("merge_catalog_memory", {
         p_batch_id: batchId,
-        p_patch: { anchorOutputUrl: anchor.output_url, anchorStoragePath: anchor.storage_path, anchorJobId: job.job_id },
+        p_patch: { anchorOutputUrl: anchor.output_url, anchorStoragePath: anchor.storage_path, anchorStorageBackend: anchor.storage_backend || "firebase", anchorJobId: job.job_id },
         p_require_absent: null,
       });
       // Stamping the memory as current after a failed merge would claim an anchor
@@ -1149,9 +1259,10 @@ async function archiveRejectedAttempt(args: {
 }): Promise<JsonRecord | null> {
   try {
     const storagePath = `organizations/${args.job.org_id}/generated/${args.job.job_id}/rejected/${args.pose.pose_index}-attempt-${args.attempt}-${crypto.randomUUID()}.${extensionForMimeType(args.generated.mimeType)}`;
-    const stored = await uploadFirebaseObject({ storagePath, blob: args.generated.blob, mimeType: args.generated.mimeType });
+    const stored = await uploadCatalogObject({ orgId: String(args.job.org_id), storagePath, blob: args.generated.blob, mimeType: args.generated.mimeType });
     return {
       attempt: args.attempt, url: stored.downloadUrl, storagePath: stored.storagePath,
+      storageBackend: stored.storageBackend,
       mimeType: args.generated.mimeType, reason: args.qa.reason, failed: args.qa.failed,
       score: args.qa.score, createdAt: Date.now(),
     };
@@ -1243,7 +1354,10 @@ async function finalizeCancelledJob(job: JsonRecord, message = "Generation cance
 async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
   const inputs = node.inputs as JsonRecord;
   const references = inputs.references as ReferenceInput[];
-  const loaded = await loadAvailableReferences(references);
+  const { data: batch, error: batchError } = await service.from("planning_batches").select("*").eq("id", inputs.batchId).maybeSingle();
+  if (batchError) throw new Error(batchError.message);
+  if (!batch) throw new Error("Catalog batch not found for visual analysis.");
+  const loaded = await loadAvailableReferences(references, String(batch.organization_id));
   
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
@@ -1252,10 +1366,9 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
   });
 
-  const { data: batch, error: batchError } = await service.from("planning_batches").select("*").eq("id", inputs.batchId).maybeSingle();
-  if (batchError) throw new Error(batchError.message);
-  const { data: variant, error: variantError } = await service.from("planning_requests").select("*").eq("id", inputs.variantId).maybeSingle();
+  const { data: variant, error: variantError } = await service.from("planning_requests").select("*").eq("id", inputs.variantId).eq("batch_id", inputs.batchId).maybeSingle();
   if (variantError) throw new Error(variantError.message);
+  if (!variant) throw new Error("Catalog SKU not found for visual analysis.");
   const settings = (batch?.generation_settings || {}) as JsonRecord;
   const category = String(settings.category || variant?.category || "ethnic/fusion");
   const orgId = String(batch?.organization_id || "");
@@ -1514,23 +1627,23 @@ async function processNode(request: Request, args: JsonRecord) {
 
 async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, pose: JsonRecord) {
   const sourceInputs = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
-  const loadedReferences = await loadAvailableReferences(sourceInputs);
+  const loadedReferences = await loadAvailableReferences(sourceInputs, String(job.org_id));
   let { data: anchorPose } = Number(pose.pose_index) > 1
-    ? await service.from("session_generations").select("output_url,storage_path,title").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
+    ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
     : { data: null };
   if (!anchorPose?.output_url && !anchorPose?.storage_path && job.batch_id) {
     const { data: batchRow } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
     const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
     if (memory.anchorOutputUrl || memory.anchorStoragePath) {
-      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), title: "catalog anchor" };
+      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor" };
     }
   }
   const approved: LoadedReference[] = [];
   if (anchorPose?.output_url || anchorPose?.storage_path) {
     const loaded = await loadReference({
-      role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path,
+      role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path, storageBackend: anchorPose.storage_backend as CatalogStorageBackend,
       hash: smallHash(String(anchorPose.output_url || anchorPose.storage_path)), filename: "approved-pose-1", mimeType: "", size: 0,
-    });
+    }, String(job.org_id));
     loaded.filename = `approved-pose-1.${extensionForMimeType(loaded.mimeType)}`;
     approved.push(loaded);
   }
@@ -1608,9 +1721,9 @@ async function processWorker(request: Request, args: JsonRecord) {
   ]);
   const sessionData = session.session_data as JsonRecord;
   const sourceInputs = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
-  const loadedReferences = await loadAvailableReferences(sourceInputs);
+  const loadedReferences = await loadAvailableReferences(sourceInputs, String(job.org_id));
   let { data: anchorPose } = Number(pose.pose_index) > 1
-    ? await service.from("session_generations").select("output_url,storage_path,title").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
+    ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
     : { data: null };
   // A bulk catalog has to look like one shoot day across every colourway, but each
   // SKU is its own session, so pose 1 of SKU 2 had no anchor at all - only text
@@ -1621,7 +1734,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     if (batchRowError) throw new Error(batchRowError.message);
     const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
     if (memory.anchorOutputUrl || memory.anchorStoragePath) {
-      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), title: "catalog anchor" };
+      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor" };
     }
   }
   const approved: LoadedReference[] = [];
@@ -1631,9 +1744,9 @@ async function processWorker(request: Request, args: JsonRecord) {
     // loadReference() falls back to the fetched blob's actual Content-Type.
     // Pose 1 is now stored as JPEG, but could be PNG or WebP for legacy data.
     const loaded = await loadReference({
-      role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path,
+      role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path, storageBackend: anchorPose.storage_backend as CatalogStorageBackend,
       hash: smallHash(String(anchorPose.output_url || anchorPose.storage_path)), filename: "approved-pose-1", mimeType: "", size: 0,
-    });
+    }, String(job.org_id));
     // Update filename to include the correct extension based on resolved MIME type
     loaded.filename = `approved-pose-1.${extensionForMimeType(loaded.mimeType)}`;
     approved.push(loaded);
@@ -1784,12 +1897,12 @@ async function processWorker(request: Request, args: JsonRecord) {
     if (["cancelling", "cancelled"].includes(String(latestJob?.status || ""))) return finalizeCancelledJob(job);
     const safeSku = String((job.job_data as JsonRecord)?.skuId || job.sku_name || "product").replace(/[^a-zA-Z0-9._-]+/g, "-");
     const storagePath = `organizations/${job.org_id}/generated/${job.job_id}/${pose.pose_index}-${safeSku}-${crypto.randomUUID()}.${extensionForMimeType(generated.mimeType)}`;
-    const stored = await uploadFirebaseObject({ storagePath, blob: generated.blob, mimeType: generated.mimeType });
+    const stored = await uploadCatalogObject({ orgId: String(job.org_id), storagePath, blob: generated.blob, mimeType: generated.mimeType });
     const completedAt = new Date().toISOString();
     const usagePatch = accumulatedUsage(pose as JsonRecord, generated.usage, generated.requestId, attemptCost);
     await Promise.all([
       service.from("session_generations").update({
-        status: "completed", output_url: stored.downloadUrl, storage_path: stored.storagePath,
+        status: "completed", output_url: stored.downloadUrl, storage_path: stored.storagePath, storage_backend: stored.storageBackend,
         qa_status: qaUnavailable ? "unverified" : "passed", qa_payload: { ...qa, qaUnavailable },
         error: qaUnavailable ? `Delivered without automatic consistency QA: ${qaUnavailable}`.slice(0, 1000) : "", updated_at: completedAt,
         generation_data: { ...storedPoseData, correction: "", corrections: [], completedAt: Date.now(), mimeType: generated.mimeType },
@@ -1798,7 +1911,7 @@ async function processWorker(request: Request, args: JsonRecord) {
       service.from("planning_assets").insert({
         organization_id: job.org_id, planning_request_id: job.planning_request_id, sku_name: job.sku_name,
         prompt, image_url: stored.downloadUrl, storage_path: stored.storagePath, generation_job_id: job.job_id,
-        sku_matched: true, asset_role: "generated", storage_backend: "firebase",
+        sku_matched: true, asset_role: "generated", storage_backend: stored.storageBackend,
         metadata: {
           poseIndex: pose.pose_index, poseType: pose.pose_type, qa, qaStatus: qaUnavailable ? "unverified" : "passed",
           model: job.model, quality: job.quality,
@@ -1986,23 +2099,28 @@ async function regenerateSession(request: Request, args: JsonRecord) {
 // A pose owns more than its final image: attempts rejected by consistency QA are
 // archived so nothing the organization paid for is destroyed. Ownership checks and
 // deletion therefore have to cover that archive as well as the delivered image.
-function rejectedAttemptPaths(rows: JsonRecord[]) {
+function rejectedAttemptAssets(rows: JsonRecord[]) {
   return rows.flatMap((row) => {
     const data = (row.generation_data || {}) as JsonRecord;
-    return (Array.isArray(data.rejectedAttempts) ? data.rejectedAttempts as JsonRecord[] : []).map((entry) => String(entry.storagePath || ""));
+    return (Array.isArray(data.rejectedAttempts) ? data.rejectedAttempts as JsonRecord[] : []).map((entry) => ({
+      storagePath: String(entry.storagePath || ""),
+      storageBackend: String(entry.storageBackend || row.storage_backend || "firebase"),
+      fallbackUrl: String(entry.url || ""),
+    }));
   });
 }
 
-async function jobImagePaths(job: JsonRecord) {
+async function jobImageAssets(job: JsonRecord) {
   const [{ data: poses }, { data: generatedAssets }] = await Promise.all([
-    service.from("session_generations").select("storage_path,generation_data").eq("session_id", job.session_id),
-    service.from("planning_assets").select("storage_path").eq("generation_job_id", job.job_id).eq("asset_role", "generated"),
+    service.from("session_generations").select("storage_path,storage_backend,generation_data,output_url").eq("session_id", job.session_id),
+    service.from("planning_assets").select("storage_path,storage_backend,image_url").eq("generation_job_id", job.job_id).eq("asset_role", "generated"),
   ]);
-  return new Set([
-    ...(poses || []).map((row) => String(row.storage_path || "")),
-    ...rejectedAttemptPaths((poses || []) as JsonRecord[]),
-    ...(generatedAssets || []).map((row) => String(row.storage_path || "")),
-  ].filter(Boolean));
+  const assets = [
+    ...(poses || []).map((row) => ({ storagePath: String(row.storage_path || ""), storageBackend: String(row.storage_backend || "firebase"), fallbackUrl: String(row.output_url || "") })),
+    ...rejectedAttemptAssets((poses || []) as JsonRecord[]),
+    ...(generatedAssets || []).map((row) => ({ storagePath: String(row.storage_path || ""), storageBackend: String(row.storage_backend || "firebase"), fallbackUrl: String(row.image_url || "") })),
+  ].filter((asset) => asset.storagePath);
+  return [...new Map(assets.map((asset) => [asset.storagePath, asset])).values()];
 }
 
 async function removeJob(request: Request, args: JsonRecord) {
@@ -2013,13 +2131,13 @@ async function removeJob(request: Request, args: JsonRecord) {
   if (!job) throw new Error("Generation job not found.");
   if (["queued", "processing", "cancelling"].includes(job.status)) throw new Error("Cancel the active generation before deleting it.");
   if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid) throw new Error("You can delete only your own generation jobs.");
-  const generatedPaths = [...await jobImagePaths(job)];
+  const generatedAssets = await jobImageAssets(job);
   await service.from("planning_assets").delete().eq("generation_job_id", jobId).eq("asset_role", "generated");
   await service.from("catalog_sessions").delete().eq("session_id", job.session_id);
   await service.from("generation_jobs").delete().eq("job_id", jobId);
-  const deletionResults = await Promise.allSettled(generatedPaths.map(deleteFirebaseObject));
+  const deletionResults = await Promise.allSettled(generatedAssets.map((asset) => deleteCatalogObject(workspace.organization.id, asset.storagePath, asset.storageBackend)));
   const storageDeleteFailures = deletionResults.filter((result) => result.status === "rejected").length;
-  return { success: true, deletedImages: generatedPaths.length - storageDeleteFailures, storageDeleteFailures };
+  return { success: true, deletedImages: generatedAssets.length - storageDeleteFailures, storageDeleteFailures };
 }
 
 // Browsers can render Firebase Storage download URLs directly in <img> tags without any
@@ -2036,9 +2154,10 @@ async function downloadGeneratedAsset(request: Request, args: JsonRecord) {
   const { data: job, error: jobError } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
   if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
-  const allowed = await jobImagePaths(job);
-  if (!allowed.has(storagePath)) throw new Error("This image does not belong to the requested generation job.");
-  const blob = await downloadFirebaseObject(storagePath);
+  const allowed = await jobImageAssets(job);
+  const asset = allowed.find((candidate) => candidate.storagePath === storagePath);
+  if (!asset) throw new Error("This image does not belong to the requested generation job.");
+  const blob = await downloadCatalogObject(workspace.organization.id, storagePath, asset.storageBackend, asset.fallbackUrl);
   return { base64: await blobToBase64(blob), mimeType: blob.type || "image/png" };
 }
 
@@ -2055,11 +2174,12 @@ async function downloadGeneratedAssets(request: Request, args: JsonRecord) {
   const { data: job, error: jobError } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
   if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
-  const allowed = await jobImagePaths(job);
+  const allowed = await jobImageAssets(job);
   const assetResults = await Promise.all(storagePaths.map(async (storagePath) => {
-    if (!allowed.has(storagePath)) return { storagePath, error: "This image does not belong to the requested generation job." };
+    const asset = allowed.find((candidate) => candidate.storagePath === storagePath);
+    if (!asset) return { storagePath, error: "This image does not belong to the requested generation job." };
     try {
-      const blob = await downloadFirebaseObject(storagePath);
+      const blob = await downloadCatalogObject(workspace.organization.id, storagePath, asset.storageBackend, asset.fallbackUrl);
       return { storagePath, base64: await blobToBase64(blob), mimeType: blob.type || "image/png" };
     } catch (error) {
       return { storagePath, error: errorMessage(error) };
@@ -2090,7 +2210,7 @@ async function downloadCatalogProductionAssets(request: Request, args: JsonRecor
   if (workItemError) throw new Error(workItemError.message);
   if (!workItem?.catalog_session_id) throw new Error("This work item has no generated session assets.");
   const { data: poses, error: posesError } = await service.from("session_generations")
-    .select("generation_id,pose_index,title,storage_path,output_url,status")
+    .select("generation_id,pose_index,title,storage_path,storage_backend,output_url,status")
     .eq("session_id", workItem.catalog_session_id)
     .eq("status", "completed")
     .order("pose_index");
@@ -2106,14 +2226,9 @@ async function downloadCatalogProductionAssets(request: Request, args: JsonRecor
     const storagePath = String(pose.storage_path || "");
     const outputUrl = String(pose.output_url || "");
     try {
-      let blob: Blob;
-      if (storagePath && !/^https?:\/\//i.test(storagePath)) {
-        blob = await downloadFirebaseObject(storagePath);
-      } else {
-        const response = await fetch(outputUrl || storagePath);
-        if (!response.ok) throw new Error(`Asset download failed (${response.status}).`);
-        blob = await response.blob();
-      }
+      const blob = storagePath
+        ? await downloadCatalogObject(workspace.organization.id, storagePath, pose.storage_backend, outputUrl)
+        : await downloadCatalogObject(workspace.organization.id, outputUrl, "external", outputUrl);
       return {
         storagePath,
         poseIndex: Number(pose.pose_index || 0),
@@ -2546,16 +2661,19 @@ async function catalogBatch(workspace: Awaited<ReturnType<typeof workspaceFor>>[
 // Best-effort cleanup for the batch-level reference entries mutate_planning_batch_reference_images
 // just replaced or removed from planning_batches.reference_images. A failure here never rolls
 // back or blocks the reference-image update that already committed - it only leaves an orphaned
-// Firebase Storage object, the same tolerance removeJob() already applies to generated images.
-// deleteFirebaseObject() itself tolerates a 404 (already-gone object), so this is safe to call
-// even if the same path was already cleaned up by a concurrent request.
-async function cleanupOrphanedBatchReferences(removed: unknown) {
+// object. Existing Firebase references and new Supabase references share this cleanup path.
+async function cleanupOrphanedBatchReferences(orgId: string, removed: unknown) {
   const entries = Array.isArray(removed) ? removed as JsonRecord[] : [];
-  const paths = [...new Set(entries.map((entry) => String(entry.storagePath || entry.storage_path || "")).filter(Boolean))];
-  if (!paths.length) return;
-  const results = await Promise.allSettled(paths.map(deleteFirebaseObject));
+  const assetsByPath = new Map<string, { storagePath: string; storageBackend: string }>();
+  for (const entry of entries) {
+    const storagePath = String(entry.storagePath || entry.storage_path || "");
+    if (storagePath) assetsByPath.set(storagePath, { storagePath, storageBackend: String(entry.storageProvider || entry.storageBackend || entry.storage_backend || "firebase") });
+  }
+  const assets = [...assetsByPath.values()];
+  if (!assets.length) return;
+  const results = await Promise.allSettled(assets.map((asset) => deleteCatalogObject(orgId, asset.storagePath, asset.storageBackend)));
   const failures = results.filter((result) => result.status === "rejected").length;
-  if (failures) console.warn(`Could not delete ${failures} orphaned catalog reference object(s) from Firebase Storage.`);
+  if (failures) console.warn(`Could not delete ${failures} orphaned catalog reference object(s) from catalog storage.`);
 }
 
 async function saveReferenceOperation(request: Request, args: JsonRecord) {
@@ -2563,11 +2681,15 @@ async function saveReferenceOperation(request: Request, args: JsonRecord) {
   if (!hasAnyPermission(workspace, ["studio.generate", "planning.manage"])) throw new Error("You do not have permission to upload product references.");
   const batchId = String(args.catalogId || "");
   const role = String(args.role || "reference");
+  const storageProvider = ["firebase", "supabase", "external"].includes(String(args.storageProvider))
+    ? String(args.storageProvider) as CatalogStorageBackend
+    : "firebase";
   const reference = {
     id: crypto.randomUUID(), role, downloadUrl: String(args.downloadUrl || ""), storagePath: String(args.storagePath || ""),
     hash: String(args.hash || ""), filename: String(args.filename || "reference.jpg"), mimeType: String(args.mimeType || "image/jpeg"),
-    size: Number(args.size || 0), storageProvider: String(args.storageProvider || "firebase"),
+    size: Number(args.size || 0), storageProvider,
   };
+  assertCatalogReferenceOwnership(workspace.organization.id, { ...reference, storageBackend: storageProvider });
   if (!batchId) return reference.id;
   await catalogBatch(workspace, batchId); // Org-scoped access check; throws if not found/accessible.
   // Batch-level shared references (visible to every variant in the catalog, not tied to one
@@ -2582,7 +2704,7 @@ async function saveReferenceOperation(request: Request, args: JsonRecord) {
       p_batch_id: batchId, p_add: reference, p_replace_role: role === "model_identity" ? "model_identity" : null, p_remove_id: null,
     });
     if (error) throw new Error(error.message);
-    scheduleBackground(cleanupOrphanedBatchReferences(removed));
+    scheduleBackground(cleanupOrphanedBatchReferences(workspace.organization.id, removed));
     // The batch memory holds the scene, model and anchor frame derived from the
     // previous references, and applyCatalogMemory replays it over every later
     // analysis. Leaving it in place is why uploading a new reference appeared to
@@ -2600,7 +2722,7 @@ async function saveReferenceOperation(request: Request, args: JsonRecord) {
   const { data: asset, error } = await service.from("planning_assets").insert({
     organization_id: workspace.organization.id, planning_request_id: planningRequest.id, sku_name: String(args.skuId || ""), prompt: "",
     image_url: reference.downloadUrl, storage_path: reference.storagePath, sku_matched: true, asset_role: role,
-    storage_backend: "firebase", metadata: reference,
+    storage_backend: reference.storageProvider, metadata: reference,
   }).select("id").single();
   if (error || !asset) throw new Error(error?.message || "Could not save the product reference.");
   return asset.id;
@@ -2747,7 +2869,7 @@ async function removeCatalogStyleReferenceOperation(request: Request, args: Json
     p_batch_id: catalogId, p_add: null, p_replace_role: null, p_remove_id: referenceId,
   });
   if (error) throw new Error(error.message);
-  scheduleBackground(cleanupOrphanedBatchReferences(removed));
+  scheduleBackground(cleanupOrphanedBatchReferences(workspace.organization.id, removed));
   await service.from("planning_requests").update({ analysis_status: "stale", analysis_fingerprint: "", updated_at: new Date().toISOString() }).eq("batch_id", catalogId).not("front_image_url", "is", null).not("back_image_url", "is", null);
   scheduleBackground(kickCatalogPreflight(catalogId));
   return { success: true };
@@ -2855,7 +2977,7 @@ async function retryVariantOperation(request: Request, args: JsonRecord) {
 }
 
 async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, references: ReferenceInput[]) {
-  const loaded = await loadAvailableReferences(references);
+  const loaded = await loadAvailableReferences(references, String(batch.organization_id));
   const settings = (batch.generation_settings || {}) as JsonRecord;
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
@@ -2880,7 +3002,7 @@ async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
   const productRefs: ReferenceInput[] = (assets || [])
     .filter((asset) => ["front", "back", "fabric_pattern", "mannequin", "additional_product"].includes(asset.asset_role))
     .map((asset) => ({
-      id: asset.id, role: asset.asset_role, downloadUrl: asset.image_url, storagePath: asset.storage_path,
+      id: asset.id, role: asset.asset_role, downloadUrl: asset.image_url, storagePath: asset.storage_path, storageBackend: asset.storage_backend as CatalogStorageBackend,
       hash: String((asset.metadata as JsonRecord)?.hash || asset.id), filename: String((asset.metadata as JsonRecord)?.filename || `${asset.asset_role}.jpg`),
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     }));
@@ -2897,6 +3019,7 @@ async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
       role,
       downloadUrl,
       storagePath,
+      storageBackend: "firebase",
       hash: smallHash(`${downloadUrl}|${storagePath}`),
       filename: `${role}.jpg`,
       mimeType: "image/jpeg",
@@ -2908,7 +3031,7 @@ async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
   // everything to "style_reference", or a model-identity upload would silently be treated as
   // creative direction only and never reach the FACE & IDENTITY LOCK in the generation prompt.
   const sharedRefs: ReferenceInput[] = (Array.isArray(batch.reference_images) ? batch.reference_images as JsonRecord[] : []).map((entry) => ({
-    id: String(entry.id || ""), role: String(entry.role || "style_reference"), downloadUrl: String(entry.downloadUrl || entry.image_url || ""), storagePath: String(entry.storagePath || entry.storage_path || ""),
+    id: String(entry.id || ""), role: String(entry.role || "style_reference"), downloadUrl: String(entry.downloadUrl || entry.image_url || ""), storagePath: String(entry.storagePath || entry.storage_path || ""), storageBackend: String(entry.storageProvider || entry.storageBackend || entry.storage_backend || "firebase") as CatalogStorageBackend,
     hash: String(entry.hash || entry.id || ""), filename: String(entry.filename || "style-reference.jpg"), mimeType: String(entry.mimeType || "image/jpeg"), size: Number(entry.size || 0),
   }));
   return { productRefs, references: canonicalReferences([...productRefs, ...sharedRefs]) };
@@ -4299,6 +4422,15 @@ async function catalogDigestRows(orgId: string, settings: JsonRecord, handoffIds
     ? await service.from("catalog_pose_asset_versions").select("*").eq("organization_id", orgId).in("id", assetVersionIds)
     : { data: [], error: null };
   if (versionsError) throw new Error(versionsError.message);
+  const resolvedVersions = await Promise.all((versions || []).map(async (version) => {
+    const signedUrl = await signCatalogObject(orgId, String(version.storage_path || ""), version.storage_backend, String(version.original_url || version.preview_url || ""));
+    return {
+      ...version,
+      preview_url: signedUrl || version.preview_url,
+      original_url: signedUrl || version.original_url,
+      final_asset_url: version.final_asset_url ? signedUrl || version.final_asset_url : version.final_asset_url,
+    };
+  }));
   const batchIds = [...new Set((workItemsResult.data || []).map((item) => String(item.planning_batch_id || "")).filter(Boolean))];
   const { data: batches, error: batchesError } = batchIds.length
     ? await service.from("planning_batches").select("id,name,campaign_season").eq("organization_id", orgId).in("id", batchIds)
@@ -4312,7 +4444,7 @@ async function catalogDigestRows(orgId: string, settings: JsonRecord, handoffIds
     const links = (handoffAssetsResult.data || [])
       .filter((asset) => asset.handoff_id === handoff.id)
       .map((asset) => {
-        const version = (versions || []).find((candidate) => candidate.id === asset.asset_version_id) || {};
+        const version = resolvedVersions.find((candidate) => candidate.id === asset.asset_version_id) || {};
         return {
           poseIndex: asset.pose_index,
           versionNumber: version.version_number,

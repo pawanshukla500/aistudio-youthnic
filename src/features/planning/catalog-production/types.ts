@@ -45,6 +45,8 @@ export type CatalogWorkItem = {
   listing_completed_at?: string | null;
   completed_at?: string | null;
   planning_request_id?: string | null;
+  planning_batch_id?: string | null;
+  planning_batch?: { id: string; name?: string | null } | null;
   generation_job_id?: string | null;
   catalog_session_id?: string | null;
   reference_image_url?: string | null;

@@ -10,6 +10,7 @@ import { ProductionTable } from "./ProductionTable";
 import { AssetViewerModal } from "./AssetViewerModal";
 import { WorkItemWorkflowModal } from "./WorkItemWorkflowModal";
 import { HandoffAdmin } from "./HandoffAdmin";
+import { ActionDialog } from "../../../components/ui/ActionDialog";
 import {
   canQueueGeneration,
   isCompleted,
@@ -20,6 +21,17 @@ import {
 } from "./types";
 
 type Tab = "overview" | "kanban" | "list" | "handoffs";
+
+type ImportPreview = {
+  scanned: number;
+  newRows: number;
+  matchedRows: number;
+  duplicates: number;
+  invalidSkus: number;
+  unknownStatuses: string[];
+  unknownAssigneeEmails: string[];
+  invalidDeadlines: number;
+};
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error || "Unknown error");
@@ -42,8 +54,13 @@ export function CatalogProduction() {
   const [selectedSkuIds, setSelectedSkuIds] = useState<Set<string>>(new Set());
   const [selectedTableIds, setSelectedTableIds] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
+  const [qcDialog, setQcDialog] = useState<{ id: string; decision: "passed" | "rejected" } | null>(null);
+  const [qcComments, setQcComments] = useState("");
+  const [generationDialog, setGenerationDialog] = useState<{ mode: "selected" | "ready"; ids: string[] } | null>(null);
+  const [importDialog, setImportDialog] = useState<{ rows: Record<string, unknown>[]; preview: ImportPreview; autoStart: boolean } | null>(null);
   const [filters, setFilters] = useState({
     query: "",
+    batch: "all",
     stage: "all",
     assignee: "all",
     campaign: "all",
@@ -69,7 +86,8 @@ export function CatalogProduction() {
     const workItemsQuery = supabase.from("catalog_work_items").select(`
       *,
       generation_assigned_member:generation_assigned_member_id (id, display_name, email),
-      listing_assigned_member:listing_assigned_member_id (id, display_name, email)
+      listing_assigned_member:listing_assigned_member_id (id, display_name, email),
+      planning_batch:planning_batches!planning_batch_id (id, name)
     `);
     const requests = [
       workItemsQuery.order("created_at", { ascending: false }),
@@ -129,6 +147,11 @@ export function CatalogProduction() {
   }, [params, workItems, workflowItem]);
 
   const filterOptions = useMemo(() => ({
+    batches: [...new Map(workItems
+      .filter((item) => item.planning_batch_id)
+      .map((item) => [String(item.planning_batch_id), item.planning_batch?.name || item.campaign_season || "Unnamed batch"])).entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((left, right) => left.name.localeCompare(right.name)),
     stages: [...new Set(workItems.map((item) => item.workflow_stage || "requirement_created"))].sort(),
     campaigns: [...new Set(workItems.map((item) => item.campaign_season || "").filter(Boolean))].sort(),
     marketplaces: [...new Set(workItems.flatMap((item) => [
@@ -143,11 +166,12 @@ export function CatalogProduction() {
     const from = filters.dateFrom ? Date.parse(`${filters.dateFrom}T00:00:00`) : 0;
     const to = filters.dateTo ? Date.parse(`${filters.dateTo}T23:59:59`) : Number.POSITIVE_INFINITY;
     const filtered = workItems.filter((item) => {
-      const searchable = [item.sku_name, item.request_code, item.color_label, item.campaign_season, item.theme, item.remarks, ...(item.marketplaces || [])].join(" ").toLowerCase();
+      const searchable = [item.sku_name, item.request_code, item.color_label, item.planning_batch?.name, item.campaign_season, item.theme, item.remarks, ...(item.marketplaces || [])].join(" ").toLowerCase();
       const itemDate = Date.parse(item.request_date || item.created_at);
       const assignees = [item.generation_assigned_member_id, item.listing_assigned_member_id].filter(Boolean);
       const marketplaces = [...(item.marketplaces || []), item.portal || "", item.marketplace_brand || ""];
       return (!query || searchable.includes(query))
+        && (filters.batch === "all" || item.planning_batch_id === filters.batch)
         && (filters.stage === "all" || (item.workflow_stage || "requirement_created") === filters.stage)
         && (filters.assignee === "all" || (filters.assignee === "unassigned" ? !assignees.length : assignees.includes(filters.assignee)))
         && (filters.campaign === "all" || item.campaign_season === filters.campaign)
@@ -216,15 +240,23 @@ export function CatalogProduction() {
   };
 
   const handleQc = async (id: string, decision: "passed" | "rejected") => {
-    const comments = decision === "rejected"
-      ? window.prompt("Describe what must change before re-generation:", "")
-      : window.prompt("Optional approval comments for the Listing Team:", "");
-    if (comments === null || (decision === "rejected" && !comments.trim())) return;
-    await runAction(
-      `qc:${id}`,
-      () => invokeAppApi("catalogProduction.reviewQc", { workItemId: id, decision, comments }),
-      decision === "passed" ? "QC passed. The SKU is ready for the Listing Team." : "QC rejected. The SKU moved to Blocked.",
-    ).catch(() => undefined);
+    setQcComments("");
+    setQcDialog({ id, decision });
+  };
+
+  const confirmQc = async () => {
+    if (!qcDialog || (qcDialog.decision === "rejected" && !qcComments.trim())) return;
+    try {
+      await runAction(
+        `qc:${qcDialog.id}`,
+        () => invokeAppApi("catalogProduction.reviewQc", { workItemId: qcDialog.id, decision: qcDialog.decision, comments: qcComments.trim() }),
+        qcDialog.decision === "passed" ? "QC passed. The SKU is ready for the Listing Team." : "QC rejected. Re-generation guidance was recorded.",
+      );
+      setQcDialog(null);
+      setQcComments("");
+    } catch {
+      // The dialog stays open so the reviewer can correct the note and retry.
+    }
   };
 
   const openWorkflow = (item: CatalogWorkItem) => {
@@ -352,35 +384,41 @@ export function CatalogProduction() {
         if (Object.keys(value).length) rows.push(value);
       });
       if (!rows.length) throw new Error("No data found in the uploaded file.");
-      const preview = await invokeAppApi<{ scanned: number; newRows: number; matchedRows: number; duplicates: number; invalidSkus: number; unknownStatuses: string[]; unknownAssigneeEmails: string[]; invalidDeadlines: number }>(
+      const preview = await invokeAppApi<ImportPreview>(
         "catalogProduction.importGoogleSheetDryRun",
         { rows },
       );
-      const confirmed = window.confirm(
-        `Import ${preview.newRows} new SKU${preview.newRows === 1 ? "" : "s"}?\n\n${preview.matchedRows} already tracked · ${preview.duplicates} duplicate rows · ${preview.invalidSkus} invalid SKU rows · ${preview.invalidDeadlines} invalid deadlines · ${preview.unknownAssigneeEmails.length} unknown assignee emails · ${preview.unknownStatuses.length} invalid priority values`,
-      );
-      if (!confirmed) return;
-      const result = await invokeAppApi<{ inserted: number; skipped: number; errors: unknown[]; workItemIds: string[]; queueableWorkItemIds: string[] }>("catalogProduction.importGoogleSheet", { rows });
-      
-      let queuedMessage = "";
-       if (result.queueableWorkItemIds.length > 0) {
-          const autoStartConfirmed = window.confirm(`Import finished: ${result.inserted} inserted. Start generation now for ${result.queueableWorkItemIds.length} SKU${result.queueableWorkItemIds.length === 1 ? "" : "s"} with complete front and back references?`);
-          if (autoStartConfirmed) {
-             const queued = await invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", { workItemIds: result.queueableWorkItemIds });
-             queuedMessage = ` Started generation for ${queued.queued} SKU${queued.queued === 1 ? "" : "s"}.`;
-          }
-      }
-
-      setNotice({
-        tone: result.errors.length ? "error" : "success",
-        message: `Import finished: ${result.inserted} inserted, ${result.skipped} skipped${result.errors.length ? `, ${result.errors.length} failed` : ""}.${queuedMessage}`,
-      });
-      await fetchWorkItems(true);
+      setImportDialog({ rows, preview, autoStart: true });
     } catch (error) {
       setNotice({ tone: "error", message: `Upload failed: ${errorMessage(error)}` });
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!importDialog || uploading) return;
+    const pending = importDialog;
+    setUploading(true);
+    setNotice(null);
+    try {
+      const result = await invokeAppApi<{ inserted: number; skipped: number; errors: unknown[]; workItemIds: string[]; queueableWorkItemIds: string[] }>("catalogProduction.importGoogleSheet", { rows: pending.rows });
+      let queuedMessage = "";
+      if (pending.autoStart && result.queueableWorkItemIds.length) {
+        const queued = await invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", { workItemIds: result.queueableWorkItemIds });
+        queuedMessage = ` Started generation for ${queued.queued} queue-ready SKU${queued.queued === 1 ? "" : "s"}.`;
+      }
+      setNotice({
+        tone: result.errors.length ? "error" : "success",
+        message: `Import finished: ${result.inserted} inserted, ${result.skipped} skipped${result.errors.length ? `, ${result.errors.length} failed` : ""}.${queuedMessage}`,
+      });
+      setImportDialog(null);
+      await fetchWorkItems(true);
+    } catch (error) {
+      setNotice({ tone: "error", message: `Import failed: ${errorMessage(error)}` });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -414,13 +452,17 @@ export function CatalogProduction() {
   };
   const handleBulkGenerate = async () => {
     if (!selectedTableIds.size) return;
-    const confirmed = window.confirm(`Generate ${selectedTableIds.size} catalog item(s)?`);
-    if (!confirmed) return;
-    
+    setGenerationDialog({ mode: "selected", ids: [...selectedTableIds] });
+  };
+
+  const confirmGeneration = async () => {
+    if (!generationDialog) return;
+    const pending = generationDialog;
     try {
-      await runAction("bulkGenerate", () => invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", {
-        workItemIds: Array.from(selectedTableIds),
-      }), "Bulk generation started successfully.");
+      await runAction(pending.mode === "selected" ? "bulkGenerate" : "autoStart", () => invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", {
+        workItemIds: pending.ids,
+      }), `Started generation for ${pending.ids.length} catalog item${pending.ids.length === 1 ? "" : "s"}.`);
+      setGenerationDialog(null);
       setSelectedTableIds(new Set());
     } catch {
       // runAction already surfaces the actionable backend error and preserves the
@@ -430,15 +472,7 @@ export function CatalogProduction() {
 
   const handleAutoStartPending = async () => {
     if (!autoStartIds.size) return;
-    const confirmed = window.confirm(`Auto-start generation for all ${autoStartIds.size} ready catalog item(s)? Rejected items remain available for an intentional re-generation action.`);
-    if (!confirmed) return;
-    
-    try {
-      await runAction("autoStart", () => invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", {
-        workItemIds: Array.from(autoStartIds),
-      }), `Started generation for ${autoStartIds.size} ready item(s).`);
-      setSelectedTableIds(new Set());
-    } catch {}
+    setGenerationDialog({ mode: "ready", ids: [...autoStartIds] });
   };
 
   return (
@@ -524,7 +558,7 @@ export function CatalogProduction() {
               <button onClick={() => setShowFilters((value) => !value)} className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-xs font-bold ${showFilters || activeFilterCount ? "border-primary bg-primary/5 text-primary" : "border-outline-variant text-secondary"}`}><Filter className="h-3.5 w-3.5" /> More filters{activeFilterCount ? ` · ${activeFilterCount}` : ""}</button>
               <span className="shrink-0 text-xs font-semibold text-secondary">{filteredWorkItems.length} of {workItems.length}</span>
             </div>
-            {showFilters && <div className="mt-3 grid gap-3 border-t border-outline-variant/25 pt-3 sm:grid-cols-2 lg:grid-cols-6"><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">Priority<select value={filters.priority} onChange={(event) => setFilters({ ...filters, priority: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant bg-white px-2 text-xs font-semibold normal-case tracking-normal"><option value="all">All priorities</option>{["urgent", "high", "normal", "low"].map((value) => <option key={value}>{value}</option>)}</select></label><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">Campaign<select value={filters.campaign} onChange={(event) => setFilters({ ...filters, campaign: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant bg-white px-2 text-xs font-semibold normal-case tracking-normal"><option value="all">All campaigns</option>{filterOptions.campaigns.map((value) => <option key={value}>{value}</option>)}</select></label><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">Marketplace<select value={filters.marketplace} onChange={(event) => setFilters({ ...filters, marketplace: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant bg-white px-2 text-xs font-semibold normal-case tracking-normal"><option value="all">All marketplaces</option>{filterOptions.marketplaces.map((value) => <option key={value}>{value}</option>)}</select></label><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">From<input type="date" value={filters.dateFrom} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant px-2 text-xs font-semibold normal-case tracking-normal" /></label><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">To<input type="date" value={filters.dateTo} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant px-2 text-xs font-semibold normal-case tracking-normal" /></label><button onClick={() => setFilters({ query: "", stage: "all", assignee: "all", campaign: "all", marketplace: "all", priority: "all", dateFrom: "", dateTo: "", sort: "active" })} className="mt-4 h-9 rounded-lg border border-outline-variant px-3 text-xs font-bold text-secondary hover:bg-surface-container">Clear filters</button></div>}
+            {showFilters && <div className="mt-3 grid gap-3 border-t border-outline-variant/25 pt-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7"><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">Batch<select value={filters.batch} onChange={(event) => setFilters({ ...filters, batch: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant bg-white px-2 text-xs font-semibold normal-case tracking-normal"><option value="all">All batches</option>{filterOptions.batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name}</option>)}</select></label><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">Priority<select value={filters.priority} onChange={(event) => setFilters({ ...filters, priority: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant bg-white px-2 text-xs font-semibold normal-case tracking-normal"><option value="all">All priorities</option>{["urgent", "high", "normal", "low"].map((value) => <option key={value}>{value}</option>)}</select></label><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">Campaign<select value={filters.campaign} onChange={(event) => setFilters({ ...filters, campaign: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant bg-white px-2 text-xs font-semibold normal-case tracking-normal"><option value="all">All campaigns</option>{filterOptions.campaigns.map((value) => <option key={value}>{value}</option>)}</select></label><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">Marketplace<select value={filters.marketplace} onChange={(event) => setFilters({ ...filters, marketplace: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant bg-white px-2 text-xs font-semibold normal-case tracking-normal"><option value="all">All marketplaces</option>{filterOptions.marketplaces.map((value) => <option key={value}>{value}</option>)}</select></label><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">From<input type="date" value={filters.dateFrom} onChange={(event) => setFilters({ ...filters, dateFrom: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant px-2 text-xs font-semibold normal-case tracking-normal" /></label><label className="text-[10px] font-bold uppercase tracking-wide text-secondary">To<input type="date" value={filters.dateTo} onChange={(event) => setFilters({ ...filters, dateTo: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-outline-variant px-2 text-xs font-semibold normal-case tracking-normal" /></label><button onClick={() => setFilters({ query: "", batch: "all", stage: "all", assignee: "all", campaign: "all", marketplace: "all", priority: "all", dateFrom: "", dateTo: "", sort: "active" })} className="mt-4 h-9 rounded-lg border border-outline-variant px-3 text-xs font-bold text-secondary hover:bg-surface-container">Clear filters</button></div>}
           </div>
         )}
       </div>
@@ -608,6 +642,83 @@ export function CatalogProduction() {
           </div>
         </div>
       )}
+
+      <ActionDialog
+        open={Boolean(qcDialog)}
+        title={qcDialog?.decision === "rejected" ? "Request re-generation" : "Approve five-pose set"}
+        description={qcDialog?.decision === "rejected"
+          ? "Explain exactly what failed so the generation owner has actionable guidance. This decision is added to the SKU activity history."
+          : "Confirm that the latest five pose versions meet catalog and marketplace requirements. Your note will be visible to the Listing Team."}
+        confirmLabel={qcDialog?.decision === "rejected" ? "Reject and request changes" : "Approve final set"}
+        tone={qcDialog?.decision === "rejected" ? "danger" : "primary"}
+        busy={Boolean(qcDialog && busyKey === `qc:${qcDialog.id}`)}
+        confirmDisabled={qcDialog?.decision === "rejected" && !qcComments.trim()}
+        onCancel={() => { if (!busyKey) { setQcDialog(null); setQcComments(""); } }}
+        onConfirm={() => void confirmQc()}
+      >
+        <label className="block text-xs font-bold text-secondary">
+          {qcDialog?.decision === "rejected" ? "Required re-generation guidance" : "Approval note (optional)"}
+          <textarea
+            autoFocus
+            rows={4}
+            maxLength={4000}
+            value={qcComments}
+            onChange={(event) => setQcComments(event.target.value)}
+            placeholder={qcDialog?.decision === "rejected" ? "Describe the affected poses, visual defects, and expected correction…" : "Add marketplace, deadline, or Listing Team context…"}
+            className="mt-2 w-full rounded-xl border border-outline-variant bg-surface-container/20 px-3 py-2.5 text-sm font-normal text-on-surface outline-none focus:border-primary"
+          />
+          <span className="mt-1 block text-right text-[10px] font-normal text-secondary">{qcComments.length}/4000</span>
+        </label>
+      </ActionDialog>
+
+      <ActionDialog
+        open={Boolean(generationDialog)}
+        title={generationDialog?.mode === "ready" ? "Start all ready SKUs" : "Start selected generation"}
+        description={generationDialog?.mode === "ready"
+          ? `Queue ${generationDialog.ids.length} ready SKU${generationDialog.ids.length === 1 ? "" : "s"}. Items awaiting references, blocked items, and rejected sets are excluded.`
+          : `Queue the ${generationDialog?.ids.length || 0} selected SKU${generationDialog?.ids.length === 1 ? "" : "s"} for five-pose generation.`}
+        confirmLabel={`Start ${generationDialog?.ids.length || 0} generation task${generationDialog?.ids.length === 1 ? "" : "s"}`}
+        busy={busyKey === "bulkGenerate" || busyKey === "autoStart"}
+        onCancel={() => { if (!busyKey) setGenerationDialog(null); }}
+        onConfirm={() => void confirmGeneration()}
+      >
+        <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">What happens next</p>
+          <p className="mt-2 text-sm leading-6 text-secondary">Each SKU enters Generation in progress, creates or resumes its durable job, and reports pose-level progress back to this live queue.</p>
+        </div>
+      </ActionDialog>
+
+      <ActionDialog
+        open={Boolean(importDialog)}
+        title="Review spreadsheet import"
+        description={`The dry run scanned ${importDialog?.preview.scanned || 0} row${importDialog?.preview.scanned === 1 ? "" : "s"}. Review validation results before any production task is created.`}
+        confirmLabel={`Import ${importDialog?.preview.newRows || 0} new SKU${importDialog?.preview.newRows === 1 ? "" : "s"}`}
+        busy={uploading}
+        confirmDisabled={!importDialog?.preview.newRows}
+        onCancel={() => { if (!uploading) setImportDialog(null); }}
+        onConfirm={() => void confirmImport()}
+      >
+        {importDialog && <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {[
+              ["New SKUs", importDialog.preview.newRows, "text-emerald-700 bg-emerald-50"],
+              ["Already tracked", importDialog.preview.matchedRows, "text-secondary bg-surface-container"],
+              ["Duplicates", importDialog.preview.duplicates, "text-secondary bg-surface-container"],
+              ["Invalid SKUs", importDialog.preview.invalidSkus, importDialog.preview.invalidSkus ? "text-red-700 bg-red-50" : "text-secondary bg-surface-container"],
+              ["Invalid deadlines", importDialog.preview.invalidDeadlines, importDialog.preview.invalidDeadlines ? "text-red-700 bg-red-50" : "text-secondary bg-surface-container"],
+              ["Assignee issues", importDialog.preview.unknownAssigneeEmails.length, importDialog.preview.unknownAssigneeEmails.length ? "text-amber-800 bg-amber-50" : "text-secondary bg-surface-container"],
+            ].map(([label, value, tone]) => <div key={String(label)} className={`rounded-xl p-3 ${tone}`}><p className="text-[10px] font-bold uppercase tracking-wide opacity-70">{label}</p><p className="mt-1 text-lg font-bold">{value}</p></div>)}
+          </div>
+          {(importDialog.preview.unknownStatuses.length > 0 || importDialog.preview.unknownAssigneeEmails.length > 0) && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+            {importDialog.preview.unknownStatuses.length > 0 && <p><strong>Invalid priorities:</strong> {importDialog.preview.unknownStatuses.join(", ")}</p>}
+            {importDialog.preview.unknownAssigneeEmails.length > 0 && <p><strong>Unknown assignees:</strong> {importDialog.preview.unknownAssigneeEmails.join(", ")}</p>}
+          </div>}
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-outline-variant/40 p-3">
+            <input type="checkbox" checked={importDialog.autoStart} onChange={(event) => setImportDialog({ ...importDialog, autoStart: event.target.checked })} className="mt-0.5 h-4 w-4 accent-primary" />
+            <span><span className="block text-sm font-bold text-on-surface">Start queue-ready SKUs after import</span><span className="mt-1 block text-xs leading-5 text-secondary">Only rows with complete front and back references are queued. Rejected or blocked work is not restarted automatically.</span></span>
+          </label>
+        </div>}
+      </ActionDialog>
     </div>
   );
 }

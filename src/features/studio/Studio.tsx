@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Ban, CheckCircle2, Images, Loader2, Sparkles } from "lucide-react";
-import { getDownloadURL, ref as firebaseStorageRef, uploadBytes } from "firebase/storage";
 import { api, useAction, useMutation, useQuery, type Id } from "../../lib/backend";
 import { Button } from "../../components/ui/Button";
 import { useWorkspace } from "../../lib/WorkspaceContext";
-import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
-import { firebaseStorage } from "../../lib/firebase";
+import { uploadCatalogAsset } from "../../lib/catalogStorage";
 import { AnalysisProfile } from "./components/AnalysisProfile";
 import { OutputSettings } from "./components/OutputSettings";
 import { PosePlan } from "./components/PosePlan";
@@ -62,7 +60,6 @@ function validateFile(file: File) {
 
 export function Studio() {
   const { organization, user } = useWorkspace();
-  const { user: firebaseUser } = useFirebaseAuth();
   const analyzeReferences = useAction(api.analysis.analyzeReferences);
   const updateStylingPlan = useMutation(api.styling.updateSessionPlan);
   const queueSku = useMutation(api.generation.queueSku);
@@ -246,29 +243,21 @@ export function Studio() {
     const inFlight = uploadPromisesRef.current.get(reference.id);
     if (inFlight) return inFlight;
     const promise = (async () => {
-      if (!firebaseUser) throw new Error("Your Firebase session expired. Please sign in again.");
-      const safeFilename = reference.file.name.replace(/[^a-zA-Z0-9._-]+/g, "-");
-      const storagePath = [
-        "users",
-        firebaseUser.uid,
-        "organizations",
-        String(organization._id),
-        "references",
-        effectiveSkuId.replace(/[^a-zA-Z0-9._-]+/g, "-"),
-        reference.role,
-        `${reference.id}-${safeFilename}`,
-      ].join("/");
-      const objectRef = firebaseStorageRef(firebaseStorage, storagePath);
-      const uploaded = await uploadBytes(objectRef, reference.file, {
-        contentType: reference.file.type,
-        customMetadata: {
-          organizationId: String(organization._id),
-          role: reference.role,
-          skuId: effectiveSkuId,
-        },
+      const uploaded = await uploadCatalogAsset({
+        organizationId: String(organization._id),
+        scope: "references",
+        ownerKey: effectiveSkuId,
+        role: reference.role,
+        file: reference.file,
       });
-      const downloadUrl = await getDownloadURL(uploaded.ref);
-      return { ...reference, uploadedId: reference.id, storagePath, downloadUrl, hash: await fileHash(reference.file) };
+      return {
+        ...reference,
+        uploadedId: reference.id,
+        storageBackend: uploaded.storageBackend,
+        storagePath: uploaded.storagePath,
+        downloadUrl: uploaded.downloadUrl,
+        hash: await fileHash(reference.file),
+      };
     })();
     uploadPromisesRef.current.set(reference.id, promise);
     try {
@@ -312,6 +301,7 @@ export function Studio() {
           role: reference.role,
           downloadUrl: reference.downloadUrl,
           storagePath: reference.storagePath,
+          storageBackend: reference.storageBackend,
           hash: reference.hash,
           filename: reference.file.name,
           mimeType: reference.file.type,

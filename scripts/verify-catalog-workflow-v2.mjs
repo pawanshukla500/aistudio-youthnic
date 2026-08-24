@@ -10,8 +10,12 @@ const catalogApi = await readFile("supabase/functions/app-api/catalogProduction.
 const flow = await readFile("src/features/history/generation-flow/OperationalWorkflowView.tsx", "utf8");
 const productionTable = await readFile("src/features/planning/catalog-production/ProductionTable.tsx", "utf8");
 const productionBoard = await readFile("src/features/planning/catalog-production/ProductionBoard.tsx", "utf8");
+const catalogProduction = await readFile("src/features/planning/catalog-production/CatalogProduction.tsx", "utf8");
 const handoffAdmin = await readFile("src/features/planning/catalog-production/HandoffAdmin.tsx", "utf8");
+const actionDialog = await readFile("src/components/ui/ActionDialog.tsx", "utf8");
 const layout = await readFile("src/components/ui/Layout.tsx", "utf8");
+const catalogStorage = await readFile("src/lib/catalogStorage.ts", "utf8");
+const liveVerifier = await readFile("scripts/verify-catalog-workflow-live.mjs", "utf8");
 
 const stageCodes = [
   "requirement_created",
@@ -50,6 +54,14 @@ for (const table of tenantTables) {
 assert.match(migration, /organization_id = \(select private\.current_organization_id\(\)\)/, "Tenant RLS predicate is missing");
 assert.match(migration, /revoke insert, update, delete .* authenticated/, "Authenticated direct mutations are not revoked");
 assert.match(migration, /storage\.foldername\(name\)\)\[1\].*current_organization_id/s, "Storage paths are not tenant-prefixed");
+assert.match(catalogStorage, /storage\.from\(CATALOG_ASSET_BUCKET\)\.upload|const bucket = supabase\.storage\.from\(CATALOG_ASSET_BUCKET\)/, "Browser reference uploads do not use Supabase Storage");
+assert.match(edge, /CATALOG_ASSET_STORAGE_BACKEND[\s\S]*\|\| "supabase"/, "Generated catalog assets do not default to Supabase Storage");
+assert.match(edge, /uploadCatalogObject[\s\S]*storage_backend: stored\.storageBackend/, "Generated asset metadata does not preserve its Storage backend");
+assert.match(edge, /assertCatalogReferenceOwnership[\s\S]*outside the current organization/, "Service-role reference loading does not enforce the tenant path prefix");
+assert.match(edge, /signCatalogObject[\s\S]*supabaseCatalogPath\(orgId, storagePath\)/, "Service-role signed URLs do not validate the active tenant prefix");
+assert.match(edge, /downloadCatalogObject[\s\S]*supabaseCatalogPath\(orgId, storagePath\)/, "Service-role Storage downloads do not validate the active tenant prefix");
+assert.match(edge, /deleteCatalogObject[\s\S]*supabaseCatalogPath\(orgId, storagePath\)/, "Service-role Storage deletion does not validate the active tenant prefix");
+assert.match(liveVerifier, /managerStorage\.upload[\s\S]*upsert: true[\s\S]*viewerUpload\.error[\s\S]*viewerDelete\.error[\s\S]*otherOrgStorage\.download[\s\S]*managerStorage\.remove/, "Live verification does not exercise permission-controlled, tenant-safe Storage writes, reads, upserts, and cleanup");
 assert.match(migration, /catalog_pose_asset_versions_current_approved_uidx/, "One-approved-version-per-pose invariant is missing");
 assert.match(migration, /catalog_report_delivery_items.*unique \(handoff_id\)/s, "Per-handoff email idempotency is missing");
 assert.match(migration, /sync_catalog_pose_asset_version/, "Pose-version synchronization trigger is missing");
@@ -107,9 +119,13 @@ assert.match(catalogApi, /\.eq\("listing_status", "in_progress"\)[\s\S]*\.not\("
 assert.doesNotMatch(productionTable, /listing_status === "pending" && !item\.listing_sent_at/, "Table still exposes Listing Done before handoff/start");
 assert.doesNotMatch(productionBoard, /listing_status === "pending" && !item\.listing_sent_at/, "Kanban still exposes Listing Done before handoff/start");
 assert.match(handoffAdmin, /recipientRoleSlug/, "Handoff administrator cannot choose a recipient group");
+assert.match(handoffAdmin, /type="submit"[\s\S]*Save handoff settings/, "Handoff settings save control is not wired to form submission");
+assert.match(catalogProduction, /<ActionDialog[\s\S]*confirmImport/, "Spreadsheet dry-run results are not confirmed in the in-app dialog");
+assert.match(catalogProduction, /planning_batch:planning_batches!planning_batch_id[\s\S]*filters\.batch === "all"[\s\S]*All batches/, "Catalog Production is missing its database-backed batch filter");
+assert.match(actionDialog, /role="dialog"[\s\S]*aria-modal="true"/, "Workflow action dialogs are not exposed accessibly");
 assert.match(layout, /catalogAssignmentsInApp[\s\S]*catalogHandoffEmail/, "Member notification preferences are not configurable");
 assert.match(flow, /data\.stages/, "Flow View is not data-driven");
 assert.doesNotMatch(flow, /const\s+stages\s*=\s*\[/, "Flow View contains static stage fixtures");
-assert.doesNotMatch(flow, /window\.(?:prompt|confirm)/, "Flow View still relies on unpolished browser prompt controls");
+assert.doesNotMatch([flow, catalogProduction, handoffAdmin].join("\n"), /window\.(?:prompt|confirm)/, "Catalog workflow still relies on unpolished browser prompt controls");
 
 console.log(`Catalog Workflow V2 contract verified: ${stageCodes.length} stages, ${tenantTables.length} tenant tables, live actions, five-pose approval, and idempotent handoff checks.`);

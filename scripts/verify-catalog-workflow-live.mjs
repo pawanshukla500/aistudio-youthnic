@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createClient } from "@supabase/supabase-js";
 
 const required = (name) => {
   const value = process.env[name]?.trim();
@@ -21,6 +22,13 @@ const actors = {
 
 function headers(token, extra = {}) {
   return { apikey: publishableKey, Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...extra };
+}
+
+function storageClient(actor) {
+  return createClient(supabaseUrl, publishableKey, {
+    accessToken: async () => actor.token,
+    auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
+  });
 }
 
 async function responseJson(response) {
@@ -116,6 +124,32 @@ const foreignStorage = await rest(actors.manager, "/storage/v1/object/list/catal
 assert.equal(foreignStorage.response.ok, true, `Storage RLS probe failed unexpectedly: ${errorText(foreignStorage)}`);
 assert.deepEqual(foreignStorage.body, [], "Tenant-prefixed Storage RLS exposed another organization's objects.");
 
+const managerStorage = storageClient(actors.manager).storage.from("catalog-assets");
+const viewerStorage = storageClient(actors.viewer).storage.from("catalog-assets");
+const otherOrgStorage = storageClient(actors.otherOrg).storage.from("catalog-assets");
+const acceptancePath = `${primaryOrg}/acceptance/${crypto.randomUUID()}.png`;
+const pixel = Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
+try {
+  const firstUpload = await managerStorage.upload(acceptancePath, pixel, { contentType: "image/png", upsert: false });
+  assert.equal(firstUpload.error, null, `Same-tenant Storage upload failed: ${firstUpload.error?.message || "unknown error"}`);
+  const upsert = await managerStorage.upload(acceptancePath, pixel, { contentType: "image/png", upsert: true });
+  assert.equal(upsert.error, null, `Same-tenant Storage upsert failed: ${upsert.error?.message || "unknown error"}`);
+  const ownDownload = await viewerStorage.download(acceptancePath);
+  assert.equal(ownDownload.error, null, `Same-tenant Storage read failed: ${ownDownload.error?.message || "unknown error"}`);
+  assert.ok(ownDownload.data && ownDownload.data.size > 0, "Same-tenant Storage read returned no bytes.");
+  const viewerUpload = await viewerStorage.upload(`${primaryOrg}/acceptance/${crypto.randomUUID()}.png`, pixel, { contentType: "image/png", upsert: false });
+  assert.ok(viewerUpload.error, "A read-only workspace member uploaded a catalog object.");
+  const viewerDelete = await viewerStorage.remove([acceptancePath]);
+  assert.ok(viewerDelete.error, "A read-only workspace member deleted a catalog object.");
+  const crossTenantDownload = await otherOrgStorage.download(acceptancePath);
+  assert.ok(crossTenantDownload.error, "A user in another organization downloaded the acceptance object.");
+  const crossTenantUpload = await otherOrgStorage.upload(`${primaryOrg}/acceptance/${crypto.randomUUID()}.png`, pixel, { contentType: "image/png", upsert: false });
+  assert.ok(crossTenantUpload.error, "A user in another organization uploaded into the primary tenant prefix.");
+} finally {
+  const cleanup = await managerStorage.remove([acceptancePath]);
+  assert.equal(cleanup.error, null, `Acceptance Storage cleanup failed: ${cleanup.error?.message || "unknown error"}`);
+}
+
 const notificationRows = await rest(actors.viewer, "/rest/v1/notifications?select=recipient_member_id,recipient_team,recipient_email&limit=200");
 assert.equal(notificationRows.response.ok, true, `Notification RLS probe failed: ${errorText(notificationRows)}`);
 const viewerRoles = new Set((workspaces.viewer.roles || []).map((role) => String(role.slug)));
@@ -127,4 +161,4 @@ for (const row of notificationRows.body || []) {
   assert.ok(directlyAddressed || roleAddressed || emailAddressed || broadcast, "Notification RLS exposed a row addressed to another member or team.");
 }
 
-console.log("Live Catalog Workflow verification passed: six roles, cross-tenant RLS, action authorization, server-owned writes, notification targeting, and Storage isolation.");
+console.log("Live Catalog Workflow verification passed: six roles, cross-tenant RLS, action authorization, server-owned writes, notification targeting, and tenant-safe Storage upload/upsert/read/delete.");
