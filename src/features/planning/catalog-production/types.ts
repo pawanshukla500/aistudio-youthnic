@@ -66,7 +66,8 @@ export type PlanningSku = {
 export type ProductionActionProps = {
   items: CatalogWorkItem[];
   members: CatalogMember[];
-  canManage: boolean;
+  canAssign: boolean;
+  canGenerate: boolean;
   canReviewQc: boolean;
   canCompleteListing: boolean;
   busyKey: string;

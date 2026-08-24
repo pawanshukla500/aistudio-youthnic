@@ -55,10 +55,13 @@ export function CatalogProduction() {
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const canManage = workspace.isAdmin || workspace.permissions.includes("planning.manage");
+  const canManagePlanning = workspace.isAdmin || workspace.permissions.includes("planning.manage");
+  const canGenerate = workspace.isAdmin || workspace.permissions.includes("planning.generate_images");
+  const canAssign = workspace.isAdmin || workspace.permissions.includes("catalog.assign");
+  const canManageHandoffs = workspace.isAdmin || workspace.permissions.includes("catalog.handoff.manage");
   const canReviewQc = workspace.isAdmin || workspace.permissions.includes("planning.approve");
   const canCompleteListing = workspace.isAdmin
-    || workspace.permissions.includes("planning.manage")
+    || workspace.permissions.includes("catalog.listing.complete")
     || workspace.roles.some((role) => role.slug === "listing-team");
 
   const fetchWorkItems = useCallback(async (silent = false) => {
@@ -71,7 +74,7 @@ export function CatalogProduction() {
     const requests = [
       workItemsQuery.order("created_at", { ascending: false }),
       supabase.from("organization_members").select("id,display_name,email").eq("organization_id", workspace.organization.id).eq("status", "active").order("display_name"),
-      canManage
+      canManagePlanning
         ? supabase.from("planning_requests").select("id,request_code,sku_name,color_label,generation_status,updated_at,planning_batches(name)").eq("organization_id", workspace.organization.id).order("updated_at", { ascending: false }).limit(500)
         : Promise.resolve({ data: [], error: null }),
     ] as const;
@@ -85,7 +88,7 @@ export function CatalogProduction() {
       setPlanningSkus((skuResult.data || []) as unknown as PlanningSku[]);
     }
     if (!silent) setLoading(false);
-  }, [canManage, workspace.organization.id]);
+  }, [canManagePlanning, workspace.organization.id]);
 
   useEffect(() => {
     void fetchWorkItems();
@@ -384,7 +387,8 @@ export function CatalogProduction() {
   const tableProps = {
     items: filteredWorkItems,
     members,
-    canManage,
+    canAssign,
+    canGenerate,
     canReviewQc,
     canCompleteListing,
     busyKey,
@@ -396,7 +400,7 @@ export function CatalogProduction() {
     onViewWorkflow: openWorkflow,
     selectedIds: selectedTableIds,
     onToggleSelect: (id: string) => setSelectedTableIds(prev => {
-      if (!canManage || !queueableIds.has(id)) return prev;
+      if (!canGenerate || !queueableIds.has(id)) return prev;
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -454,7 +458,7 @@ export function CatalogProduction() {
               { id: "overview", label: "Overview" },
               { id: "kanban", label: "Kanban" },
               { id: "list", label: "List" },
-              ...(canManage ? [{ id: "handoffs", label: "Handoffs" }] : []),
+              ...(canManageHandoffs ? [{ id: "handoffs", label: "Handoffs" }] : []),
             ] as Array<{ id: Tab; label: string }>).map((tab) => (
               <button
                 key={tab.id}
@@ -464,33 +468,33 @@ export function CatalogProduction() {
                 {tab.id === "handoffs" && <MailCheck className="h-3.5 w-3.5" />}{tab.label}
               </button>
             ))}
-            {canManage && <span className="mx-1 hidden h-7 w-px bg-outline-variant/50 md:block" />}
-            {canManage && (
+            {(canManagePlanning || canGenerate || canManageHandoffs) && <span className="mx-1 hidden h-7 w-px bg-outline-variant/50 md:block" />}
+            {canManagePlanning && (
               <button onClick={() => setShowSkuPicker(true)} className="inline-flex items-center gap-2 rounded-lg border border-primary px-3 py-2 text-sm font-semibold text-primary hover:bg-primary/5">
                 <Plus className="h-4 w-4" /> Select SKUs
               </button>
             )}
-            {canManage && selectedTableIds.size > 0 && (
+            {canGenerate && selectedTableIds.size > 0 && (
               <button onClick={handleBulkGenerate} disabled={busyKey === "bulkGenerate"} className="inline-flex items-center gap-2 rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-50">
                 <RefreshCw className={`h-4 w-4 ${busyKey === "bulkGenerate" ? "animate-spin" : ""}`} /> Generate Selected ({selectedTableIds.size})
               </button>
             )}
-            {canManage && autoStartIds.size > 0 && selectedTableIds.size === 0 && (
+            {canGenerate && autoStartIds.size > 0 && selectedTableIds.size === 0 && (
               <button onClick={handleAutoStartPending} disabled={busyKey === "autoStart"} className="inline-flex items-center gap-2 rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-50 shadow-sm shadow-primary/20 transition-all hover:shadow-md">
                 <RefreshCw className={`h-4 w-4 ${busyKey === "autoStart" ? "animate-spin" : ""}`} /> Auto-Start Ready ({autoStartIds.size})
               </button>
             )}
-            {canManage && (
+            {canManagePlanning && (
               <button onClick={handleReconcile} disabled={busyKey === "reconcile"} className="inline-flex items-center gap-2 rounded-lg border border-outline-variant px-3 py-2 text-sm font-semibold text-secondary hover:bg-surface-container disabled:opacity-50">
                 <RefreshCw className={`h-4 w-4 ${busyKey === "reconcile" ? "animate-spin" : ""}`} /> Reconcile
               </button>
             )}
-            {canManage && (
+            {canManagePlanning && (
               <button onClick={downloadTemplate} className="inline-flex items-center gap-2 rounded-lg border border-outline-variant px-3 py-2 text-sm font-semibold text-secondary hover:bg-surface-container">
                 <Download className="h-4 w-4" /> Excel template
               </button>
             )}
-            {canManage && (
+            {canManagePlanning && (
               <>
                 <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleFileUpload} />
                 <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-50">
@@ -535,7 +539,7 @@ export function CatalogProduction() {
             {activeTab === "overview" && <ProductionOverview items={filteredWorkItems} />}
             {activeTab === "kanban" && <ProductionBoard {...tableProps} />}
             {activeTab === "list" && <ProductionTable {...tableProps} />}
-            {activeTab === "handoffs" && canManage && <HandoffAdmin />}
+            {activeTab === "handoffs" && canManageHandoffs && <HandoffAdmin />}
           </>
         )}
       </div>

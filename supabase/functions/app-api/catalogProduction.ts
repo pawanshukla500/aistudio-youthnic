@@ -347,15 +347,17 @@ export async function assignCatalogWorkItem(
   const assignment = text(args.assignment);
   const memberId = text(args.memberId) || null;
   if (!workItemId || !["generation", "listing"].includes(assignment)) throw new Error("Invalid assignment request.");
+  let targetMember: JsonRecord | null = null;
   if (memberId) {
-    const { data: member, error } = await service.from("organization_members").select("id")
+    const { data: member, error } = await service.from("organization_members").select("id,email,display_name,notification_preferences")
       .eq("id", memberId).eq("organization_id", workspace.organization.id).eq("status", "active").maybeSingle();
     if (error) throw new Error(error.message);
     if (!member) throw new Error("The selected member is not active in this workspace.");
+    targetMember = member as JsonRecord;
   }
   const field = assignment === "generation" ? "generation_assigned_member_id" : "listing_assigned_member_id";
   const { data: current, error: currentError } = await service.from("catalog_work_items")
-    .select(`id,${field}`).eq("id", workItemId).eq("organization_id", workspace.organization.id).maybeSingle();
+    .select(`id,sku_name,request_code,${field}`).eq("id", workItemId).eq("organization_id", workspace.organization.id).maybeSingle();
   if (currentError) throw new Error(currentError.message);
   if (!current) throw new Error("Catalog work item not found.");
   const previousMemberId = text((current as JsonRecord)[field]) || null;
@@ -398,6 +400,20 @@ export async function assignCatalogWorkItem(
       assigned_at: now,
       active: true,
     }));
+    if (asRecord(targetMember?.notification_preferences).catalog_assignments_in_app !== false) {
+      operations.push(service.from("notifications").insert({
+        organization_id: workspace.organization.id,
+        recipient_member_id: memberId,
+        type: "catalog_assignment",
+        channel: "in_app",
+        title: `${assignment === "generation" ? "Generation" : "Listing"} task assigned`,
+        body: `${current.request_code} · ${current.sku_name} is assigned to you.`,
+        status: "sent",
+        sent_at: now,
+        created_by_member_id: workspace.member.id,
+        payload: { entityType: "catalog_work_item", entityId: workItemId, assignment },
+      }));
+    }
   }
   assertQueryResults(await Promise.all(operations), "Could not finish the assignment change");
   return { success: true };
@@ -416,20 +432,37 @@ export async function reviewCatalogQc(
   if (decision === "rejected" && !comments) throw new Error("Add reviewer guidance before requesting re-generation.");
 
   const { data: item, error: itemError } = await service.from("catalog_work_items")
-    .select("id,generation_status,catalog_session_id")
+    .select("id,generation_status,qc_status,listing_status,listing_sent_at,catalog_session_id,sku_name,request_code,generation_assigned_member_id,created_by_member_id")
     .eq("id", workItemId).eq("organization_id", workspace.organization.id).maybeSingle();
   if (itemError) throw new Error(itemError.message);
   if (!item || item.generation_status !== "completed") throw new Error("Generation must be complete before QC review.");
+  if (item.listing_sent_at || ["in_progress", "completed"].includes(text(item.listing_status))) {
+    throw new Error("This approved package has already been handed to the Listing Team and is immutable. Create a new catalog revision for further changes.");
+  }
+  if ((decision === "passed" && item.qc_status === "passed") || (decision === "rejected" && item.qc_status === "rejected")) {
+    throw new Error(`This five-pose set is already ${decision === "passed" ? "approved" : "rejected"}.`);
+  }
   if (decision === "passed") {
     const { data: versions, error: versionsError } = await service.from("catalog_pose_asset_versions")
-      .select("pose_index,version_number")
+      .select("pose_index,version_number,generation_status,approval_status")
       .eq("organization_id", workspace.organization.id)
       .eq("work_item_id", workItemId)
-      .eq("generation_status", "completed");
+      .order("pose_index")
+      .order("version_number", { ascending: false });
     if (versionsError) throw new Error(versionsError.message);
-    const completedPoseIndexes = new Set((versions || []).map((version) => Number(version.pose_index)));
+    const latestVersions = new Map<number, JsonRecord>();
+    for (const version of versions || []) {
+      const poseIndex = Number(version.pose_index);
+      if (!latestVersions.has(poseIndex)) latestVersions.set(poseIndex, version as JsonRecord);
+    }
+    const completedPoseIndexes = new Set([...latestVersions.entries()]
+      .filter(([, version]) => version.generation_status === "completed")
+      .map(([poseIndex]) => poseIndex));
     if ([1, 2, 3, 4, 5].some((poseIndex) => !completedPoseIndexes.has(poseIndex))) {
       throw new Error("All five pose outputs must be complete before final approval.");
+    }
+    if ([...latestVersions.values()].some((version) => version.approval_status === "rejected")) {
+      throw new Error("A rejected pose must be regenerated or approved before the five-pose set can pass final review.");
     }
   }
   const patch = decision === "passed"
@@ -438,13 +471,18 @@ export async function reviewCatalogQc(
       final_approved_at: new Date().toISOString(), final_approved_by_member_id: workspace.member.id,
       blocked_reason: "", failure_code: "",
     }
-    : { qc_status: "rejected", status: "blocked", blocked_reason: comments, next_action: "Regenerate the rejected pose set" };
+    : {
+      qc_status: "rejected", status: "blocked", listing_status: "not_required",
+      listing_started_at: null, listing_completed_at: null,
+      final_approved_at: null, final_approved_by_member_id: null,
+      blocked_reason: comments, next_action: "Regenerate the rejected pose set",
+    };
   const { data, error } = await service.from("catalog_work_items").update(patch)
     .eq("id", workItemId).eq("organization_id", workspace.organization.id).eq("generation_status", "completed")
     .select("id").maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Generation must be complete before QC review.");
-  assertQueryResults(await Promise.all([
+  const reviewOperations: PromiseLike<unknown>[] = [
     service.from("catalog_asset_reviews").insert({
       organization_id: workspace.organization.id,
       work_item_id: workItemId,
@@ -473,13 +511,203 @@ export async function reviewCatalogQc(
       resource_id: workItemId,
       metadata: { comments },
     }),
-  ]), "Could not finish the QC audit trail");
+  ];
+  if (decision === "passed") {
+    reviewOperations.push(service.from("notifications").insert({
+      organization_id: workspace.organization.id,
+      recipient_team: "listing-team",
+      type: "catalog_ready_for_listing",
+      channel: "in_app",
+      title: "Approved catalog package ready",
+      body: `${item.request_code} · ${item.sku_name} passed final review and is ready for handoff.`,
+      status: "sent",
+      sent_at: new Date().toISOString(),
+      created_by_member_id: workspace.member.id,
+      payload: { entityType: "catalog_work_item", entityId: workItemId },
+    }));
+  } else {
+    reviewOperations.push(service.from("catalog_listing_handoffs").update({ status: "superseded", updated_at: new Date().toISOString() })
+      .eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).eq("status", "ready"));
+    const regenerationOwnerId = item.generation_assigned_member_id || item.created_by_member_id;
+    if (regenerationOwnerId) {
+      reviewOperations.push(service.from("notifications").insert({
+        organization_id: workspace.organization.id,
+        recipient_member_id: regenerationOwnerId,
+        type: "catalog_regeneration_required",
+        channel: "in_app",
+        title: "Catalog re-generation required",
+        body: `${item.request_code} · ${item.sku_name}: ${comments}`,
+        status: "sent",
+        sent_at: new Date().toISOString(),
+        created_by_member_id: workspace.member.id,
+        payload: { entityType: "catalog_work_item", entityId: workItemId },
+      }));
+    }
+  }
+  assertQueryResults(await Promise.all(reviewOperations), "Could not finish the QC audit trail");
   if (decision === "passed" && comments) {
     const { error: versionCommentError } = await service.from("catalog_pose_asset_versions").update({ reviewer_comments: comments })
       .eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).eq("approval_status", "approved");
     if (versionCommentError) throw new Error(versionCommentError.message);
   }
   return { success: true };
+}
+
+export async function reviewCatalogPose(
+  service: SupabaseClient,
+  workspace: CatalogWorkspace,
+  args: JsonRecord,
+) {
+  const workItemId = text(args.workItemId);
+  const assetVersionId = text(args.assetVersionId);
+  const decision = text(args.decision).toLowerCase();
+  const comments = text(args.comments);
+  if (!workItemId || !assetVersionId || !["approved", "rejected"].includes(decision)) throw new Error("Choose a valid pose review decision.");
+  if (comments.length > 4_000) throw new Error("Reviewer comments must be 4,000 characters or fewer.");
+  if (decision === "rejected" && !comments) throw new Error("Describe what must change before rejecting this pose.");
+
+  const [{ data: item, error: itemError }, { data: version, error: versionError }] = await Promise.all([
+    service.from("catalog_work_items")
+      .select("id,sku_name,request_code,generation_status,qc_status,generation_assigned_member_id,created_by_member_id")
+      .eq("organization_id", workspace.organization.id).eq("id", workItemId).maybeSingle(),
+    service.from("catalog_pose_asset_versions")
+      .select("id,pose_index,version_number,generation_status,approval_status,original_url,preview_url")
+      .eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).eq("id", assetVersionId).maybeSingle(),
+  ]);
+  if (itemError || versionError) throw new Error(itemError?.message || versionError?.message || "Could not load the pose review.");
+  if (!item || !version) throw new Error("The selected pose version is not available in this workspace.");
+  if (version.generation_status !== "completed") throw new Error("Only a completed pose version can be reviewed.");
+  if (version.approval_status === decision) throw new Error(`This pose version is already ${decision}.`);
+  const { data: latestVersion, error: latestVersionError } = await service.from("catalog_pose_asset_versions")
+    .select("id,version_number")
+    .eq("organization_id", workspace.organization.id)
+    .eq("work_item_id", workItemId)
+    .eq("pose_index", version.pose_index)
+    .order("version_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestVersionError) throw new Error(latestVersionError.message);
+  if (!latestVersion || latestVersion.id !== assetVersionId) {
+    throw new Error("Only the latest version of a pose can be reviewed. Refresh the workflow and review the current version.");
+  }
+  if (item.qc_status === "passed") {
+    const { data: handoff, error: handoffError } = await service.from("catalog_listing_handoffs")
+      .select("id,status")
+      .eq("organization_id", workspace.organization.id)
+      .eq("work_item_id", workItemId)
+      .order("approval_revision", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (handoffError) throw new Error(handoffError.message);
+    if (handoff && handoff.status !== "ready") {
+      throw new Error("This approved package has already entered Listing Team delivery and is immutable. Create a new catalog revision for further changes.");
+    }
+    if (decision === "approved") throw new Error("This pose is already part of the final approved package.");
+  }
+  const now = new Date().toISOString();
+
+  if (decision === "approved") {
+    const supersedeResult = await service.from("catalog_pose_asset_versions").update({ approval_status: "superseded", updated_at: now })
+      .eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId)
+      .eq("pose_index", version.pose_index).eq("approval_status", "approved").neq("id", assetVersionId);
+    assertQueryResults([supersedeResult], "Could not supersede the previous approved pose version");
+  }
+
+  const versionResult = await service.from("catalog_pose_asset_versions").update({
+    approval_status: decision,
+    approved_by_member_id: decision === "approved" ? workspace.member.id : null,
+    approved_at: decision === "approved" ? now : null,
+    reviewer_comments: comments,
+    final_asset_url: decision === "approved" ? text(version.original_url || version.preview_url) : "",
+    updated_at: now,
+  }).eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).eq("id", assetVersionId);
+  if (versionResult.error) throw new Error(versionResult.error.message);
+
+  let reopenSetReview = false;
+  if (decision === "approved" && item.qc_status === "rejected") {
+    const { data: allVersions, error: allVersionsError } = await service.from("catalog_pose_asset_versions")
+      .select("pose_index,version_number,approval_status")
+      .eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId)
+      .order("pose_index").order("version_number", { ascending: false });
+    if (allVersionsError) throw new Error(allVersionsError.message);
+    const latestByPose = new Map<number, JsonRecord>();
+    for (const candidate of allVersions || []) {
+      const poseIndex = Number(candidate.pose_index);
+      if (!latestByPose.has(poseIndex)) latestByPose.set(poseIndex, candidate as JsonRecord);
+    }
+    reopenSetReview = ![...latestByPose.values()].some((candidate) => candidate.approval_status === "rejected");
+  }
+
+  const operations: PromiseLike<unknown>[] = [
+    service.from("catalog_asset_reviews").insert({
+      organization_id: workspace.organization.id,
+      work_item_id: workItemId,
+      asset_version_id: assetVersionId,
+      review_scope: "pose",
+      decision,
+      reviewer_member_id: workspace.member.id,
+      comments,
+      metadata: { poseIndex: version.pose_index, versionNumber: version.version_number },
+    }),
+    service.from("catalog_work_item_events").insert({
+      organization_id: workspace.organization.id,
+      work_item_id: workItemId,
+      event_type: decision === "approved" ? "pose_approved" : "pose_rejected",
+      actor_member_id: workspace.member.id,
+      source: "user",
+      stage_code: decision === "approved" ? "quality_review" : "regeneration_required",
+      related_asset_version_id: assetVersionId,
+      message: comments || `Pose ${version.pose_index} version ${version.version_number} approved`,
+      metadata: { decision, poseIndex: version.pose_index, versionNumber: version.version_number },
+    }),
+    service.from("audit_logs").insert({
+      organization_id: workspace.organization.id,
+      actor_member_id: workspace.member.id,
+      actor_email: workspace.user.email,
+      action: decision === "approved" ? "catalog.pose.approved" : "catalog.pose.rejected",
+      resource_type: "catalog_pose_asset_version",
+      resource_id: assetVersionId,
+      metadata: { workItemId, comments, poseIndex: version.pose_index, versionNumber: version.version_number },
+    }),
+  ];
+  if (decision === "rejected") {
+    operations.push(service.from("catalog_work_items").update({
+      qc_status: "rejected",
+      status: "blocked",
+      listing_status: "not_required",
+      listing_started_at: null,
+      listing_completed_at: null,
+      final_approved_at: null,
+      final_approved_by_member_id: null,
+      blocked_reason: comments,
+      next_action: `Regenerate pose ${version.pose_index}`,
+    }).eq("organization_id", workspace.organization.id).eq("id", workItemId));
+    operations.push(service.from("catalog_listing_handoffs").update({ status: "superseded", updated_at: now })
+      .eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).eq("status", "ready"));
+    const ownerId = item.generation_assigned_member_id || item.created_by_member_id;
+    if (ownerId) operations.push(service.from("notifications").insert({
+      organization_id: workspace.organization.id,
+      recipient_member_id: ownerId,
+      type: "catalog_regeneration_required",
+      channel: "in_app",
+      title: `Pose ${version.pose_index} needs re-generation`,
+      body: `${item.request_code} · ${item.sku_name}: ${comments}`,
+      status: "sent",
+      sent_at: now,
+      created_by_member_id: workspace.member.id,
+      payload: { entityType: "catalog_work_item", entityId: workItemId, assetVersionId, poseIndex: version.pose_index },
+    }));
+  } else if (reopenSetReview) {
+    operations.push(service.from("catalog_work_items").update({
+      qc_status: "needs_review",
+      status: "in_progress",
+      blocked_reason: "",
+      failure_code: "",
+      next_action: "Approve or reject the five-pose set",
+    }).eq("organization_id", workspace.organization.id).eq("id", workItemId));
+  }
+  assertQueryResults(await Promise.all(operations), "Could not finish the pose review audit trail");
+  return { success: true, decision, poseIndex: version.pose_index, versionNumber: version.version_number };
 }
 
 export async function markListingStarted(
@@ -534,9 +762,12 @@ export async function markListingDone(
     .eq("organization_id", workspace.organization.id)
     .eq("generation_status", "completed")
     .eq("qc_status", "passed")
+    .eq("listing_status", "in_progress")
+    .not("listing_sent_at", "is", null)
+    .not("listing_started_at", "is", null)
     .select("id").maybeSingle();
   if (error) throw new Error(error.message);
-  if (!data) throw new Error("Listing can be completed only after generation is complete and QC has passed.");
+  if (!data) throw new Error("Start listing from the sent Listing Team handoff before marking it complete.");
   assertQueryResults(await Promise.all([
     service.from("catalog_listing_handoffs").update({ status: "listed", listed_at: now, updated_at: now })
       .eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).in("status", ["sent", "listing_in_progress"]),
@@ -656,11 +887,12 @@ export async function addCatalogWorkItemComment(
     visibility,
   }).select("id,created_at").single();
   if (error || !data) throw new Error(error?.message || "Could not save the comment.");
-  await service.from("catalog_work_item_events").insert({
+  const eventResult = await service.from("catalog_work_item_events").insert({
     organization_id: workspace.organization.id, work_item_id: workItemId,
     event_type: "comment_added", actor_member_id: workspace.member.id,
     source: "user", message: body, metadata: { commentId: data.id, visibility },
   });
+  assertQueryResults([eventResult], "Could not record the comment activity");
   return data;
 }
 
@@ -821,16 +1053,18 @@ export async function getCatalogWorkflowDetail(
     { key: "listing_handoff", label: "Listing Team handoff", status: latestHandoff?.sent_at ? "complete" : latestHandoff ? "ready" : "pending" },
   ];
   const canManage = workspace.isAdmin || workspace.permissions.includes("planning.manage");
+  const canManageHandoffs = workspace.isAdmin || workspace.permissions.includes("catalog.handoff.manage");
   const canApprove = workspace.isAdmin || workspace.permissions.includes("planning.approve");
-  const canList = workspace.isAdmin || canManage || workspace.roles.some((role) => role.slug === "listing-team");
-  const canRegenerate = canApprove;
+  const canGenerate = workspace.isAdmin || workspace.permissions.includes("planning.generate_images");
+  const canList = workspace.isAdmin || workspace.permissions.includes("catalog.listing.complete") || workspace.roles.some((role) => role.slug === "listing-team");
+  const canRegenerate = canApprove || canGenerate;
   const actions: JsonRecord[] = [];
-  if (["blocked_failed", "regeneration_required"].includes(item.workflow_stage)) actions.push({ type: "retry_generation", label: "Retry generation", enabled: canManage });
+  if (["blocked_failed", "regeneration_required"].includes(item.workflow_stage)) actions.push({ type: "retry_generation", label: "Retry generation", enabled: canGenerate });
   if (item.workflow_stage === "quality_review") {
     actions.push({ type: "approve", label: "Approve five-pose set", enabled: canApprove && completedPoseCount === 5 });
     actions.push({ type: "reject", label: "Request re-generation", enabled: canApprove });
   }
-  if (item.workflow_stage === "ready_for_listing") actions.push({ type: "send_handoff", label: "Send to Listing Team", enabled: canManage });
+  if (item.workflow_stage === "ready_for_listing") actions.push({ type: "send_handoff", label: "Send to Listing Team", enabled: canManageHandoffs });
   if (item.workflow_stage === "sent_to_listing_team") actions.push({ type: "start_listing", label: "Start listing", enabled: canList });
   if (item.workflow_stage === "listing_in_progress") actions.push({ type: "complete_listing", label: "Mark listed", enabled: canList });
 
@@ -861,7 +1095,7 @@ export async function getCatalogWorkflowDetail(
     handoffs: handoffsResult.data || [],
     references,
     actions,
-    permissions: { canManage, canApprove, canList, canRegenerate },
+    permissions: { canManage, canManageHandoffs, canApprove, canGenerate, canList, canRegenerate },
     progress: {
       percent: Number(item.workflow_progress || 0),
       completedPoseCount,

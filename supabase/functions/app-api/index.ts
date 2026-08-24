@@ -26,6 +26,7 @@ import {
   markListingStarted,
   reconcileExistingGenerations,
   reviewCatalogQc,
+  reviewCatalogPose,
   updateCatalogWorkItem,
 } from "./catalogProduction.ts";
 import { isoWeekday, previousBusinessDate } from "./lib/catalogHandoffCalendar.ts";
@@ -1898,7 +1899,12 @@ async function cancelJob(request: Request, args: JsonRecord) {
 }
 
 async function regeneratePose(request: Request, args: JsonRecord, options: { allowManagedCatalog?: boolean } = {}) {
-  const { workspace } = await workspaceFor(request, options.allowManagedCatalog ? "planning.approve" : "studio.generate");
+  const { workspace } = await workspaceFor(request, options.allowManagedCatalog ? undefined : "studio.generate");
+  if (options.allowManagedCatalog && !workspace.isAdmin
+    && !workspace.permissions.includes("planning.approve")
+    && !workspace.permissions.includes("planning.generate_images")) {
+    throw new Error("Permission required: planning.approve or planning.generate_images");
+  }
   const generationId = String(args.poseId || args.generationId || "");
   const { data: pose, error: poseError } = await service.from("session_generations").select("*").eq("generation_id", generationId).single();
   if (poseError) throw new Error(poseError.message);
@@ -1911,7 +1917,7 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
   const extraInstructions = String(args.extraInstructions || "").trim();
   if (extraInstructions.length > 1000) throw new Error("Regeneration instructions must be 1,000 characters or fewer.");
   const history = Array.isArray(pose.regeneration_history) ? pose.regeneration_history as JsonRecord[] : [];
-  await Promise.all([
+  const regenerationResults = await Promise.all([
     service.from("session_generations").update({
       status: "queued", attempt_count: 0, qa_status: "pending", error: "",
       output_url: "", storage_path: "",
@@ -1934,6 +1940,7 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
       metadata: { jobId: job.job_id, poseIndex: pose.pose_index, extraInstructions },
     }),
   ]);
+  assertSupabaseResults(regenerationResults, "Could not queue the pose re-generation");
   scheduleBackground(kickWorker());
   return { success: true };
 }
@@ -2456,23 +2463,32 @@ async function updateOwnProfileOperation(request: Request, args: JsonRecord) {
   const jobTitle = String(args.jobTitle || "").trim().slice(0, 100);
   const phone = String(args.phone || "").trim().slice(0, 30);
   if (displayName.length < 2 || displayName.length > 80) throw new Error("Your name must contain between 2 and 80 characters.");
-  const { data: member, error } = await service.from("organization_members").select("profile").eq("id", workspace.member.id).eq("organization_id", workspace.organization.id).single();
+  const { data: member, error } = await service.from("organization_members").select("profile,notification_preferences").eq("id", workspace.member.id).eq("organization_id", workspace.organization.id).single();
   if (error || !member) throw new Error("Your organization profile could not be loaded.");
   const currentProfile = member.profile && typeof member.profile === "object" ? member.profile as JsonRecord : {};
+  const currentNotifications = member.notification_preferences && typeof member.notification_preferences === "object" ? member.notification_preferences as JsonRecord : {};
+  const notificationPreferences = {
+    ...currentNotifications,
+    catalog_assignments_in_app: args.catalogAssignmentsInApp !== false,
+    catalog_handoff_email: args.catalogHandoffEmail !== false,
+  };
   const [, memberUpdate, auditInsert] = await Promise.all([
     updateFirebaseUser({ uid: workspace.user.firebaseUid, displayName }),
     service.from("organization_members").update({
-      display_name: displayName, profile: { ...currentProfile, jobTitle, phone }, updated_at: new Date().toISOString(),
+      display_name: displayName,
+      profile: { ...currentProfile, jobTitle, phone },
+      notification_preferences: notificationPreferences,
+      updated_at: new Date().toISOString(),
     }).eq("id", workspace.member.id).eq("organization_id", workspace.organization.id),
     service.from("audit_logs").insert({
       organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
       action: "profile.updated", resource_type: "organization_member", resource_id: workspace.member.id,
-      metadata: { changed: ["displayName", "jobTitle", "phone"] },
+      metadata: { changed: ["displayName", "jobTitle", "phone", "catalogAssignmentsInApp", "catalogHandoffEmail"] },
     }),
   ]);
   if (memberUpdate.error) throw new Error(memberUpdate.error.message);
   if (auditInsert.error) throw new Error(auditInsert.error.message);
-  return { success: true, displayName, jobTitle, phone };
+  return { success: true, displayName, jobTitle, phone, notificationPreferences };
 }
 
 async function deleteMemberOperation(request: Request, args: JsonRecord) {
@@ -4223,8 +4239,8 @@ function catalogProductionReportHtml(organizationName: string, reportDate: strin
   </div>`;
 }
 
-async function listingTeamRecipients(orgId: string) {
-  const { data: roles, error: rolesError } = await service.from("roles").select("id").eq("organization_id", orgId).eq("slug", "listing-team");
+async function catalogRoleRecipients(orgId: string, roleSlug: string) {
+  const { data: roles, error: rolesError } = await service.from("roles").select("id").eq("organization_id", orgId).eq("slug", roleSlug);
   if (rolesError) throw new Error(rolesError.message);
   const roleIds = (roles || []).map((role) => role.id);
   if (!roleIds.length) return [];
@@ -4233,9 +4249,11 @@ async function listingTeamRecipients(orgId: string) {
   const memberIds = [...new Set((memberRoles || []).map((row) => String(row.member_id)).filter(Boolean))];
   if (!memberIds.length) return [];
   const { data: members, error: membersError } = await service.from("organization_members")
-    .select("email").eq("organization_id", orgId).eq("status", "active").in("id", memberIds);
+    .select("email,notification_preferences").eq("organization_id", orgId).eq("status", "active").in("id", memberIds);
   if (membersError) throw new Error(membersError.message);
-  return cleanEmails((members || []).map((member) => member.email));
+  return cleanEmails((members || [])
+    .filter((member) => (member.notification_preferences as JsonRecord | null)?.catalog_handoff_email !== false)
+    .map((member) => member.email));
 }
 
 async function catalogHandoffSettings(orgId: string) {
@@ -4246,6 +4264,7 @@ async function catalogHandoffSettings(orgId: string) {
   const { data, error: createError } = await service.from("catalog_handoff_settings").insert({
     organization_id: orgId,
     timezone: String(legacy.timezone || "Asia/Kolkata"),
+    recipient_role_slug: "listing-team",
     custom_recipients: cleanEmails(legacy.report_recipients),
   }).select("*").single();
   if (createError || !data) throw new Error(createError?.message || "Could not initialize catalog handoff settings.");
@@ -4386,10 +4405,49 @@ async function sendTrackedCatalogReport(args: {
     work_item_id: digestRow.workItemId,
   }));
   if (deliveryItems.length && !args.forceResend) {
-    const { error: itemsError } = await service.from("catalog_report_delivery_items").insert(deliveryItems);
+    const { error: itemsError } = await service.from("catalog_report_delivery_items")
+      .upsert(deliveryItems, { onConflict: "handoff_id", ignoreDuplicates: true });
     if (itemsError) {
       await service.from("catalog_report_deliveries").update({ status: "failed", error_message: itemsError.message, updated_at: new Date().toISOString() }).eq("id", delivery.id);
       throw new Error(`Could not reserve idempotent handoff items: ${itemsError.message}`);
+    }
+  }
+  if (!args.forceResend || args.triggerType === "retry") {
+    const handoffIds = args.rows.map((digestRow) => String(digestRow.handoffId));
+    const workItemIds = args.rows.map((digestRow) => String(digestRow.workItemId));
+    const [reservedItemsResult, handoffsResult, workItemsResult] = await Promise.all([
+      service.from("catalog_report_delivery_items").select("handoff_id")
+        .eq("organization_id", args.orgId).eq("delivery_id", delivery.id).in("handoff_id", handoffIds),
+      service.from("catalog_listing_handoffs").select("id,status")
+        .eq("organization_id", args.orgId).in("id", handoffIds),
+      service.from("catalog_work_items").select("id,qc_status,final_approved_at,listing_sent_at")
+        .eq("organization_id", args.orgId).in("id", workItemIds),
+    ]);
+    assertSupabaseResults([reservedItemsResult, handoffsResult, workItemsResult], "Could not validate the catalog handoff reservation");
+    const reservedIds = new Set((reservedItemsResult.data || []).map((item) => String(item.handoff_id)));
+    const readyIds = new Set((handoffsResult.data || []).filter((handoff) => handoff.status === "ready").map((handoff) => String(handoff.id)));
+    const approvedIds = new Set((workItemsResult.data || [])
+      .filter((item) => item.qc_status === "passed" && item.final_approved_at && !item.listing_sent_at)
+      .map((item) => String(item.id)));
+    const reservationIsCurrent = args.rows.every((digestRow) => reservedIds.has(String(digestRow.handoffId))
+      && readyIds.has(String(digestRow.handoffId)) && approvedIds.has(String(digestRow.workItemId)));
+    if (!reservationIsCurrent) {
+      const skippedAt = new Date().toISOString();
+      const skippedResults = await Promise.all([
+        service.from("catalog_report_delivery_items").delete().eq("organization_id", args.orgId).eq("delivery_id", delivery.id),
+        service.from("catalog_report_deliveries").update({
+          status: "skipped", error_message: "Approval state changed before delivery; no email was sent.", updated_at: skippedAt,
+        }).eq("organization_id", args.orgId).eq("id", delivery.id),
+        service.from("catalog_report_delivery_attempts").insert({
+          organization_id: args.orgId, delivery_id: delivery.id, attempt_number: attemptNumber,
+          trigger_type: args.triggerType, status: "skipped", recipients: args.recipients,
+          actor_member_id: args.actorMemberId || null, completed_at: skippedAt,
+          error_message: "Approval state changed before delivery; no email was sent.",
+          metadata: { itemCount: args.rows.length, reason: "approval_state_changed" },
+        }),
+      ]);
+      assertSupabaseResults(skippedResults, "Could not record the skipped catalog handoff");
+      return { sent: false, skipped: true, deliveryId: delivery.id, reason: "approval_state_changed" };
     }
   }
   const { data: attempt, error: attemptError } = await service.from("catalog_report_delivery_attempts").insert({
@@ -4463,11 +4521,12 @@ async function catalogDigestContext(orgId: string, organizationName: string, opt
   const weekdays = Array.isArray(settings.business_weekdays) ? settings.business_weekdays.map(Number) : [1, 2, 3, 4, 5];
   const holidays = Array.isArray(settings.holiday_dates) ? settings.holiday_dates.map(String) : [];
   const reportDate = previousBusinessDate(today.iso, weekdays, holidays);
-  const listingRecipients = await listingTeamRecipients(orgId);
-  const recipients = catalogRecipients(settings, listingRecipients);
+  const recipientRoleSlug = String(settings.recipient_role_slug || "listing-team");
+  const groupRecipients = await catalogRoleRecipients(orgId, recipientRoleSlug);
+  const recipients = catalogRecipients(settings, groupRecipients);
   const rows = await catalogDigestRows(orgId, settings, options.handoffIds);
   const subject = `${organizationName} · ${rows.length} approved catalog package${rows.length === 1 ? "" : "s"} · ${reportDate}`;
-  return { settings, timezone, today, weekdays, holidays, reportDate, listingRecipients, recipients, rows, subject };
+  return { settings, timezone, today, weekdays, holidays, reportDate, recipientRoleSlug, groupRecipients, recipients, rows, subject };
 }
 
 async function runCatalogProductionAutomationOperation(request: Request) {
@@ -4494,7 +4553,7 @@ async function runCatalogProductionAutomationOperation(request: Request) {
         const retryHandoffIds = (failedItems || []).map((item) => String(item.handoff_id));
         if (retryHandoffIds.length) {
           const retryContext = await catalogDigestContext(orgId, String(organization.name || "Youthnic"), { handoffIds: retryHandoffIds });
-          if (!retryContext.recipients.length) throw new Error("No active Listing Team member or custom handoff recipient is configured.");
+          if (!retryContext.recipients.length) throw new Error("No active member in the configured recipient group or custom handoff recipient is available.");
           if (!retryContext.rows.length) {
             await service.from("catalog_report_deliveries").update({
               status: "failed",
@@ -4513,7 +4572,7 @@ async function runCatalogProductionAutomationOperation(request: Request) {
             recipients: retryContext.recipients,
             subject: retrySubject,
             html: catalogProductionReportHtml(String(organization.name || "Youthnic"), retryReportDate, retryContext.rows),
-            payload: { itemCount: retryContext.rows.length, workItemIds: retryContext.rows.map((row) => row.workItemId), handoffIds: retryHandoffIds, timezone: retryContext.timezone, retry: true },
+            payload: { itemCount: retryContext.rows.length, workItemIds: retryContext.rows.map((row) => row.workItemId), handoffIds: retryHandoffIds, timezone: retryContext.timezone, recipientRoleSlug: retryContext.recipientRoleSlug, retry: true },
             rows: retryContext.rows,
             triggerType: "retry",
             forceResend: true,
@@ -4538,7 +4597,7 @@ async function runCatalogProductionAutomationOperation(request: Request) {
         results.push({ orgId, reportDate: context.reportDate, sent: false, reason: "no_final_approvals" });
         continue;
       }
-      if (!context.recipients.length) throw new Error("No active Listing Team member or custom handoff recipient is configured.");
+      if (!context.recipients.length) throw new Error("No active member in the configured recipient group or custom handoff recipient is available.");
       const delivery = await sendTrackedCatalogReport({
         orgId,
         reportDate: context.reportDate,
@@ -4550,7 +4609,8 @@ async function runCatalogProductionAutomationOperation(request: Request) {
           workItemIds: context.rows.map((row) => row.workItemId),
           handoffIds: context.rows.map((row) => row.handoffId),
           timezone: context.timezone,
-          listingTeamRecipients: context.listingRecipients.length,
+          recipientRoleSlug: context.recipientRoleSlug,
+          roleRecipients: context.groupRecipients.length,
         },
         rows: context.rows,
         triggerType: "scheduled",
@@ -4564,19 +4624,25 @@ async function runCatalogProductionAutomationOperation(request: Request) {
 }
 
 async function catalogHandoffAdminOperation(request: Request) {
-  const { workspace } = await workspaceFor(request, "planning.manage");
+  const { workspace } = await workspaceFor(request, "catalog.handoff.manage");
   const context = await catalogDigestContext(workspace.organization.id, workspace.organization.name);
   const { data: deliveries, error } = await service.from("catalog_report_deliveries")
     .select("*").eq("organization_id", workspace.organization.id).order("created_at", { ascending: false }).limit(50);
   if (error) throw new Error(error.message);
   const deliveryIds = (deliveries || []).map((delivery) => String(delivery.id));
-  const [attemptsResult, itemsResult] = deliveryIds.length ? await Promise.all([
-    service.from("catalog_report_delivery_attempts").select("*").eq("organization_id", workspace.organization.id).in("delivery_id", deliveryIds).order("attempt_number", { ascending: false }),
-    service.from("catalog_report_delivery_items").select("*").eq("organization_id", workspace.organization.id).in("delivery_id", deliveryIds),
-  ]) : [{ data: [], error: null }, { data: [], error: null }];
-  if (attemptsResult.error || itemsResult.error) throw new Error(attemptsResult.error?.message || itemsResult.error?.message || "Could not load delivery history.");
+  const [attemptsResult, itemsResult, rolesResult] = await Promise.all([
+    deliveryIds.length
+      ? service.from("catalog_report_delivery_attempts").select("*").eq("organization_id", workspace.organization.id).in("delivery_id", deliveryIds).order("attempt_number", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+    deliveryIds.length
+      ? service.from("catalog_report_delivery_items").select("*").eq("organization_id", workspace.organization.id).in("delivery_id", deliveryIds)
+      : Promise.resolve({ data: [], error: null }),
+    service.from("roles").select("slug,name,description").eq("organization_id", workspace.organization.id).order("name"),
+  ]);
+  if (attemptsResult.error || itemsResult.error || rolesResult.error) throw new Error(attemptsResult.error?.message || itemsResult.error?.message || rolesResult.error?.message || "Could not load delivery history.");
   return {
     settings: context.settings,
+    recipientGroups: rolesResult.data || [],
     preview: { reportDate: context.reportDate, recipients: context.recipients, rows: context.rows, subject: context.subject },
     deliveries: (deliveries || []).map((delivery) => ({
       ...delivery,
@@ -4587,7 +4653,7 @@ async function catalogHandoffAdminOperation(request: Request) {
 }
 
 async function updateCatalogHandoffSettingsOperation(request: Request, args: JsonRecord) {
-  const { workspace } = await workspaceFor(request, "planning.manage");
+  const { workspace } = await workspaceFor(request, "catalog.handoff.manage");
   const timezone = String(args.timezone || "Asia/Kolkata").trim();
   try { new Intl.DateTimeFormat("en", { timeZone: timezone }).format(); } catch { throw new Error("Choose a valid IANA timezone."); }
   const sendLocalTime = String(args.sendLocalTime || "10:00").trim();
@@ -4598,12 +4664,21 @@ async function updateCatalogHandoffSettingsOperation(request: Request, args: Jso
   const recipientMode = ["listing_team", "custom", "listing_team_and_custom"].includes(String(args.recipientMode)) ? String(args.recipientMode) : "listing_team";
   const customRecipients = cleanEmails(args.customRecipients);
   if (recipientMode === "custom" && !customRecipients.length) throw new Error("Add at least one custom recipient.");
+  const recipientRoleSlug = String(args.recipientRoleSlug || "listing-team").trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(recipientRoleSlug)) throw new Error("Choose a valid recipient group.");
+  if (recipientMode !== "custom") {
+    const { data: recipientRole, error: recipientRoleError } = await service.from("roles").select("id")
+      .eq("organization_id", workspace.organization.id).eq("slug", recipientRoleSlug).maybeSingle();
+    if (recipientRoleError) throw new Error(recipientRoleError.message);
+    if (!recipientRole) throw new Error("The selected recipient group is not available in this workspace.");
+  }
   const row = {
     organization_id: workspace.organization.id,
     enabled: args.enabled !== false,
     timezone,
     send_local_time: sendLocalTime,
     recipient_mode: recipientMode,
+    recipient_role_slug: recipientRoleSlug,
     custom_recipients: customRecipients,
     business_weekdays: businessWeekdays,
     holiday_dates: holidayDates,
@@ -4616,13 +4691,13 @@ async function updateCatalogHandoffSettingsOperation(request: Request, args: Jso
   await service.from("audit_logs").insert({
     organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
     action: "catalog.handoff_settings.updated", resource_type: "catalog_handoff_settings", resource_id: data.id,
-    metadata: { timezone, sendLocalTime, recipientMode, recipientCount: customRecipients.length, businessWeekdays, holidayDates },
+    metadata: { timezone, sendLocalTime, recipientMode, recipientRoleSlug, recipientCount: customRecipients.length, businessWeekdays, holidayDates },
   });
   return data;
 }
 
 async function sendCatalogHandoffDigestOperation(request: Request, args: JsonRecord) {
-  const { workspace } = await workspaceFor(request, "planning.manage");
+  const { workspace } = await workspaceFor(request, "catalog.handoff.manage");
   const resendDeliveryId = String(args.deliveryId || "").trim();
   let handoffIds: string[] | undefined;
   let forceResend = false;
@@ -4649,7 +4724,7 @@ async function sendCatalogHandoffDigestOperation(request: Request, args: JsonRec
   }
   const context = await catalogDigestContext(workspace.organization.id, workspace.organization.name, { handoffIds });
   if (!context.rows.length) throw new Error("No approved, undelivered five-pose packages are ready.");
-  if (!context.recipients.length) throw new Error("No active Listing Team member or custom handoff recipient is configured.");
+  if (!context.recipients.length) throw new Error("No active member in the configured recipient group or custom handoff recipient is available.");
   const effectiveReportDate = resendReportDate || context.reportDate;
   const effectiveSubject = `${workspace.organization.name} · ${context.rows.length} approved catalog package${context.rows.length === 1 ? "" : "s"} · ${effectiveReportDate}`;
   const result = await sendTrackedCatalogReport({
@@ -4663,6 +4738,7 @@ async function sendCatalogHandoffDigestOperation(request: Request, args: JsonRec
       workItemIds: context.rows.map((row) => row.workItemId),
       handoffIds: context.rows.map((row) => row.handoffId),
       timezone: context.timezone,
+      recipientRoleSlug: context.recipientRoleSlug,
       manual: true,
     },
     rows: context.rows,
@@ -4984,22 +5060,36 @@ Deno.serve(async (request) => {
         return addCatalogWorkItemComment(service, workspace, args);
       },
       "catalogProduction.assign": async () => {
-        const { workspace } = await workspaceFor(request, "planning.manage");
+        const { workspace } = await workspaceFor(request, "catalog.assign");
         return assignCatalogWorkItem(service, workspace, args);
       },
       "catalogProduction.reviewQc": async () => {
         const { workspace } = await workspaceFor(request, "planning.approve");
         return reviewCatalogQc(service, workspace, args);
       },
-      "catalogProduction.regeneratePose": async () => {
+      "catalogProduction.reviewPose": async () => {
         const { workspace } = await workspaceFor(request, "planning.approve");
+        return reviewCatalogPose(service, workspace, args);
+      },
+      "catalogProduction.regeneratePose": async () => {
+        const { workspace } = await workspaceFor(request);
+        if (!workspace.isAdmin && !workspace.permissions.includes("planning.approve") && !workspace.permissions.includes("planning.generate_images")) {
+          throw new Error("Permission required: planning.approve or planning.generate_images");
+        }
         const workItemId = String(args.workItemId || "");
         const poseId = String(args.poseId || args.generationId || "");
         if (!workItemId || !poseId) throw new Error("A catalog item and pose are required.");
-        const { data: item, error: itemError } = await service.from("catalog_work_items").select("id,catalog_session_id")
+        const { data: item, error: itemError } = await service.from("catalog_work_items")
+          .select("id,catalog_session_id,qc_status,listing_status,listing_sent_at")
           .eq("organization_id", workspace.organization.id).eq("id", workItemId).maybeSingle();
         if (itemError) throw new Error(itemError.message);
         if (!item) throw new Error("Catalog work item not found.");
+        if (item.listing_sent_at || ["in_progress", "completed"].includes(String(item.listing_status || ""))) {
+          throw new Error("This asset package has already been handed to the Listing Team and cannot be regenerated in place. Create a new catalog revision instead.");
+        }
+        if (item.qc_status === "passed") {
+          throw new Error("Request changes on the approved pose before starting re-generation.");
+        }
         const { data: pose, error: poseError } = await service.from("session_generations").select("generation_id,pose_index")
           .eq("session_id", item.catalog_session_id).eq("generation_id", poseId).maybeSingle();
         if (poseError) throw new Error(poseError.message);
@@ -5033,7 +5123,7 @@ Deno.serve(async (request) => {
       "catalogProduction.startListing": async () => {
         const { workspace } = await workspaceFor(request, "planning.view");
         const canCompleteListing = workspace.isAdmin
-          || workspace.permissions.includes("planning.manage")
+          || workspace.permissions.includes("catalog.listing.complete")
           || workspace.roles.some((role) => role.slug === "listing-team");
         if (!canCompleteListing) throw new Error("Only the Listing Team or a planning manager can start listing work.");
         return markListingStarted(service, workspace, args);
@@ -5041,7 +5131,7 @@ Deno.serve(async (request) => {
       "catalogProduction.markListingDone": async () => {
         const { workspace } = await workspaceFor(request, "planning.view");
         const canCompleteListing = workspace.isAdmin
-          || workspace.permissions.includes("planning.manage")
+          || workspace.permissions.includes("catalog.listing.complete")
           || workspace.roles.some((role) => role.slug === "listing-team");
         if (!canCompleteListing) throw new Error("Only the Listing Team or a planning manager can complete listing work.");
         return markListingDone(service, workspace, args);
@@ -5055,7 +5145,7 @@ Deno.serve(async (request) => {
       "catalogProduction.handoffs.updateSettings": () => updateCatalogHandoffSettingsOperation(request, args),
       "catalogProduction.handoffs.send": () => sendCatalogHandoffDigestOperation(request, args),
       "catalogProduction.bulkGenerate": async () => {
-        const { workspace } = await workspaceFor(request, "planning.manage");
+        const { workspace } = await workspaceFor(request, "planning.generate_images");
         const result = await bulkGenerateCatalogWorkItems(service, workspace, args);
         const scheduleOutcomes: Array<{ batchId: string; success: boolean; error?: string }> = [];
         for (const batchId of result.batchIdsToSchedule) {

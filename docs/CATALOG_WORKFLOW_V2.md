@@ -50,6 +50,7 @@ Live baseline on 24 August 2026:
 The migration extends existing tables instead of replacing them:
 
 - Existing organizations, memberships, roles, permissions, planning batches, planning requests, generation jobs, sessions, automatic QA, and asset metadata remain authoritative.
+- Existing organization-scoped `roles` are also the application's operational team records, and `member_roles` are their normalized memberships. V2 adds granular catalog permissions so the Listing Team, Review Team, Creative Team, and Planning Manager no longer rely on one broad `planning.manage` capability. The configured handoff recipient group can be any workspace role/team.
 - `catalog_work_items` gains operational fields: canonical stage, progress, next action, deadlines, marketplaces, instructions, approval/rejection data, handoff timestamps, current stage start, blocker/error details, and a stable asset-folder key.
 - `catalog_creative_directions` stores the structured brief per work item.
 - `catalog_work_item_assignments` stores immutable generation/listing/reviewer assignment history.
@@ -57,7 +58,9 @@ The migration extends existing tables instead of replacing them:
 - `catalog_asset_reviews` stores human pose/SKU decisions and comments.
 - `catalog_work_item_comments` stores discussion entries with authors and timestamps.
 - `catalog_listing_handoffs` and `catalog_listing_handoff_assets` freeze the five approved versions for one approval revision.
+- A reviewer can reopen a final approval before delivery; doing so supersedes the pending handoff and requires a new approval revision. Once sending starts or the package is sent/listed, that revision is immutable and further work must use a new catalog revision.
 - `catalog_handoff_settings` stores the organization timezone, local send time, recipients, weekdays, holidays, and late-approval policy.
+- Existing member `notification_preferences` now controls assignment alerts and participation in role-targeted catalog handoff email. Both preferences are editable from the member profile.
 - `catalog_report_delivery_attempts` and `catalog_report_delivery_items` extend the existing report record with retry history and SKU-level idempotency.
 - Existing Firebase file paths and URLs remain valid. New asset metadata includes a storage backend so a later binary migration to a tenant-prefixed Supabase Storage bucket can be performed without breaking current assets.
 
@@ -108,8 +111,8 @@ Stage definitions are database records; work items and activity timestamps deter
 
 - Freeze a five-pose handoff only after final approval.
 - Select all unsent approvals before the current local-day cutoff, including late/weekend approvals, and label the delivery with the previous configured business day.
-- Skip empty deliveries; keep an idempotent item record and one attempt row for every send/resend.
-- Acceptance: the same handoff is not included twice by automation, failed sends can retry, manual preview/send/resend is permission-controlled, and delivery history exposes recipients, timestamps, attempts, and errors.
+- Skip empty deliveries; keep an idempotent item record and one attempt row for every send/resend. Revalidate the frozen approval immediately before provider delivery so a concurrently rejected package is skipped instead of emailed.
+- Acceptance: the same handoff is not included twice by automation, failed sends can retry without colliding with their existing item reservation, manual preview/send/resend is permission-controlled, and delivery history exposes recipients, timestamps, attempts, and errors.
 
 ### Phase 5 — verification and rollout
 
@@ -122,16 +125,26 @@ Stage definitions are database records; work items and activity timestamps deter
 The implementation was verified locally on 24 August 2026 with:
 
 - `oxlint` across the React source.
-- A workflow contract test covering all thirteen stage records, tenant-scoped tables, RLS/storage declarations, Realtime publication, five-pose approval gates, implemented UI actions, idempotent delivery items, and the no-empty-email rule.
+- A workflow contract test covering all thirteen stage records, tenant-scoped tables, RLS/storage declarations, Realtime publication, latest-version/five-pose approval gates, immutable delivered revisions, implemented UI actions, idempotent retry reservations, pre-send approval revalidation, and the no-empty-email rule.
 - Five Deno tests for weekday, weekend, configured holiday, year-boundary, and invalid-business-calendar behavior.
 - Deno type checking for the complete `app-api` Edge Function.
-- SQL parsing for all 109 statements in the additive migration.
+- SQL parsing for all 117 statements in the additive migration, using bounded top-level chunks so the verifier remains reliable as PL/pgSQL grows.
 - TypeScript compilation and a production Vite build.
 - Desktop and mobile browser QA of the live-data Flow interface, including Flow, assets, activity, brief editing, responsive stage navigation, loading, and pending-asset behavior.
 
 The Excel import/template now carries the same operational data as in-app intake: SKU/product, front and back references, priority, owners, deadline, marketplaces/campaign, special instructions, and all creative-direction fields. Dry-run validation reports unknown assignees, invalid dates/priorities, missing references, and queue-ready rows before import.
 
 The production database was intentionally not mutated during this implementation. Cross-tenant RLS, role-specific transitions, Realtime delivery, Storage access, scheduled invocation, email-provider behavior, and existing-data backfill must be exercised after the migration and Edge Function are deployed to a Supabase development branch or an approved production rollout. The required order is migration, server/Edge API, client, then authenticated manager/generator/reviewer/Listing Team/read-only acceptance testing.
+
+### Authenticated live acceptance command
+
+After deployment, run `npm run verify:catalog-workflow:live` with:
+
+- `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`.
+- `CATALOG_TEST_WORK_ITEM_ID` pointing to a realistic five-pose catalog item in the primary test organization.
+- Fresh Firebase ID tokens for `CATALOG_TEST_MANAGER_JWT`, `CATALOG_TEST_GENERATOR_JWT`, `CATALOG_TEST_REVIEWER_JWT`, `CATALOG_TEST_LISTING_JWT`, `CATALOG_TEST_VIEWER_JWT`, and `CATALOG_TEST_OTHER_ORG_JWT`.
+
+The first five users must share one organization and default to the Planning Manager, Creative Team, Review Team, Listing Team, and Viewer roles. The final user must belong to a different organization. Optional `CATALOG_TEST_*_ROLE` values override those expected role slugs. The command is non-destructive: it reads one supplied workflow, probes invalid IDs for role boundaries, verifies direct server-owned writes are denied, checks cross-tenant database and Storage reads return no rows, and audits visible notification addressing.
 
 ## Known migration boundary
 
