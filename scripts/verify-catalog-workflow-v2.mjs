@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const migration = await readFile("supabase/migrations/20260824130000_catalog_workflow_v2.sql", "utf8");
+const migration = [
+  await readFile("supabase/migrations/20260824130000_catalog_workflow_v2.sql", "utf8"),
+  await readFile("supabase/migrations/20260824153000_catalog_workflow_v2_hardening.sql", "utf8"),
+].join("\n");
 const edge = await readFile("supabase/functions/app-api/index.ts", "utf8");
 const catalogApi = await readFile("supabase/functions/app-api/catalogProduction.ts", "utf8");
 const flow = await readFile("src/features/history/generation-flow/OperationalWorkflowView.tsx", "utf8");

@@ -128,13 +128,13 @@ The implementation was verified locally on 24 August 2026 with:
 - A workflow contract test covering all thirteen stage records, tenant-scoped tables, RLS/storage declarations, Realtime publication, latest-version/five-pose approval gates, immutable delivered revisions, implemented UI actions, idempotent retry reservations, pre-send approval revalidation, and the no-empty-email rule.
 - Five Deno tests for weekday, weekend, configured holiday, year-boundary, and invalid-business-calendar behavior.
 - Deno type checking for the complete `app-api` Edge Function.
-- SQL parsing for all 117 statements in the additive migration, using bounded top-level chunks so the verifier remains reliable as PL/pgSQL grows.
+- SQL parsing for all 109 statements in the immutable base migration plus all 15 statements in the additive hardening migration, using bounded top-level chunks so the verifier remains reliable as PL/pgSQL grows.
 - TypeScript compilation and a production Vite build.
 - Desktop and mobile browser QA of the live-data Flow interface, including Flow, assets, activity, brief editing, responsive stage navigation, loading, and pending-asset behavior.
 
 The Excel import/template now carries the same operational data as in-app intake: SKU/product, front and back references, priority, owners, deadline, marketplaces/campaign, special instructions, and all creative-direction fields. Dry-run validation reports unknown assignees, invalid dates/priorities, missing references, and queue-ready rows before import.
 
-The production database was intentionally not mutated during this implementation. Cross-tenant RLS, role-specific transitions, Realtime delivery, Storage access, scheduled invocation, email-provider behavior, and existing-data backfill must be exercised after the migration and Edge Function are deployed to a Supabase development branch or an approved production rollout. The required order is migration, server/Edge API, client, then authenticated manager/generator/reviewer/Listing Team/read-only acceptance testing.
+The base V2 migration, Edge Function, and client were deployed from the merged implementation PR on 24 August 2026. The follow-up hardening migration and corresponding API/UI changes remain gated by their own PR and must deploy in the same order: additive migration, server/Edge API, then client. Cross-tenant RLS, role-specific transitions, Realtime delivery, Storage access, scheduled invocation, email-provider behavior, and existing-data backfill still require the authenticated manager/generator/reviewer/Listing Team/read-only acceptance run below; a green deployment job alone does not prove those user-level behaviors.
 
 ### Authenticated live acceptance command
 
