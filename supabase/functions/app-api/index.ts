@@ -4,16 +4,30 @@ import { deleteFirebaseObject, downloadFirebaseObject, uploadFirebaseObject, cre
 import {
   ANALYSIS_VERSION,
   CONSISTENCY_RULES,
+  assertSareeGenerationReady,
   buildCombinedAnalysisPrompt,
   normalizeAnalysis,
   normalizeStylingPlan,
   parseJsonResponse,
+  sareeAnalysisIssues,
   smallHash,
   type JsonRecord,
   type StudioPose,
   type StylingPlanProfile,
 } from "./profiles.ts";
-import { buildPoseQaPrompt, parseQaResponse } from "./qa.ts";
+import { appendRejectedAttemptHistory, buildPoseQaPrompt, parseQaResponse, qaStorageDisposition, unavailableQaResult } from "./qa.ts";
+import { composeGenerationPrompt } from "./lib/generationPrompt.ts";
+import {
+  MAX_IMAGE_REFERENCES,
+  PRODUCT_REFERENCE_ROLES,
+  canUsePoseOneAnchor,
+  canonicalReferences,
+  isSareeReferenceSet,
+  missingRequiredReferenceLabels,
+  roleLabel,
+  selectReferences,
+} from "./lib/referencePolicy.ts";
+export { composeGenerationPrompt };
 import {
   assignCatalogWorkItem,
   addCatalogWorkItemComment,
@@ -37,8 +51,9 @@ const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
 const PUBLISHABLE_KEY = Deno.env.get("SB_PUBLISHABLE_KEY")?.trim() || Deno.env.get("SUPABASE_ANON_KEY")?.trim() || requiredEnv("SUPABASE_ANON_KEY");
 const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/app-api`;
 const OPENAI_MODEL = "gpt-image-2";
-const MAX_REFERENCES = 8;
+const MAX_REFERENCES = MAX_IMAGE_REFERENCES;
 const MAX_GENERATION_ATTEMPTS = 3;
+const QA_VERSION = "saree-qa-v14-listing-grade";
 const WORKER_LEASE_MS = 4 * 60_000;
 const TIER_ONE_RETRY_FLOOR_MS = 30_000;
 
@@ -200,7 +215,7 @@ const GEMINI_PRICING: Record<string, { input: number; output: number; version: s
   "gemini-3.1-pro-preview": { input: 1.25, output: 5.00, version: "2024-08", source: "google_standard_pro" },
 };
 
-type GeminiPurpose = "product_truth" | "shoot_planning" | "qa" | "qa_recheck" | "qa_escalation";
+type GeminiPurpose = "product_truth" | "shoot_planning" | "qa" | "qa_escalation";
 
 type GeminiPolicy = {
   purpose: GeminiPurpose;
@@ -221,9 +236,6 @@ function resolveGeminiPolicy(args: { purpose: GeminiPurpose; garmentFamily?: str
   const QA_MODEL = Deno.env.get("GEMINI_QA_MODEL")?.trim() || "gemini-3.6-flash";
   const QA_THINKING = (Deno.env.get("GEMINI_QA_THINKING_LEVEL")?.trim() as "high" | "medium") || "medium";
 
-  const QA_RECHECK_MODEL = Deno.env.get("GEMINI_QA_RECHECK_MODEL")?.trim() || "gemini-3.6-flash";
-  const QA_RECHECK_THINKING = (Deno.env.get("GEMINI_QA_RECHECK_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
-
   const QA_ESCALATION_MODEL = Deno.env.get("GEMINI_QA_ESCALATION_MODEL")?.trim() || "gemini-3.1-pro-preview";
   const QA_ESCALATION_THINKING = (Deno.env.get("GEMINI_QA_ESCALATION_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
 
@@ -232,8 +244,12 @@ function resolveGeminiPolicy(args: { purpose: GeminiPurpose; garmentFamily?: str
     const isComplex = ["saree", "lehenga", "suit", "multi-piece"].some((fam) => args.garmentFamily?.toLowerCase().includes(fam)) || args.uncertainty || (args.referenceCount && args.referenceCount > 3);
     return isComplex ? { purpose: args.purpose, model: COMPLEX_MODEL, thinkingLevel: COMPLEX_THINKING } : { purpose: args.purpose, model: SIMPLE_MODEL, thinkingLevel: SIMPLE_THINKING };
   }
-  if (args.purpose === "qa") return { purpose: args.purpose, model: QA_MODEL, thinkingLevel: QA_THINKING };
-  if (args.purpose === "qa_recheck") return { purpose: args.purpose, model: QA_RECHECK_MODEL, thinkingLevel: QA_RECHECK_THINKING };
+  if (args.purpose === "qa") {
+    const isComplex = ["saree", "lehenga", "suit", "multi-piece"].some((family) => args.garmentFamily?.toLowerCase().includes(family));
+    return isComplex
+      ? { purpose: args.purpose, model: QA_ESCALATION_MODEL, thinkingLevel: QA_ESCALATION_THINKING }
+      : { purpose: args.purpose, model: QA_MODEL, thinkingLevel: QA_THINKING };
+  }
   if (args.purpose === "qa_escalation") return { purpose: args.purpose, model: QA_ESCALATION_MODEL, thinkingLevel: QA_ESCALATION_THINKING };
 
   return { purpose: args.purpose, model: "gemini-3.6-flash", thinkingLevel: "high" };
@@ -472,13 +488,21 @@ async function loadReference(reference: ReferenceInput, orgId: string): Promise<
   return { ...reference, mimeType, blob: new Blob([bytes], { type: mimeType }), base64: bytesToBase64(bytes) };
 }
 
+function assertRequiredProductReferences(references: ReferenceInput[], garmentFamily = "") {
+  const missing = missingRequiredReferenceLabels(references, garmentFamily);
+  if (missing.length) throw new Error(`Required product references are missing: ${missing.join(", ")}.`);
+}
+
 async function loadAvailableReferences(references: ReferenceInput[], orgId: string): Promise<LoadedReference[]> {
   const loaded: LoadedReference[] = [];
+  const requiredRoles = isSareeReferenceSet(references)
+    ? new Set(["saree_front_drape", "saree_back_drape", "saree_pallu_spread", "saree_body_detail"])
+    : new Set(["front", "back"]);
   for (const reference of references) {
     try {
       loaded.push(await loadReference(reference, orgId));
     } catch (error) {
-      if (reference.role === "front" || reference.role === "back") {
+      if (requiredRoles.has(reference.role)) {
         throw new Error(
           `Could not load required ${reference.role} reference ${reference.filename}: ${errorMessage(error)}`,
         );
@@ -488,35 +512,14 @@ async function loadAvailableReferences(references: ReferenceInput[], orgId: stri
       );
     }
   }
-  if (!loaded.some((reference) => reference.role === "front") || !loaded.some((reference) => reference.role === "back")) {
-    throw new Error("Loadable front and back product references are required.");
-  }
+  assertRequiredProductReferences(loaded);
   return loaded;
-}
-
-function roleLabel(role: string) {
-  const labels: Record<string, string> = {
-    model_identity: "MODEL FACE REFERENCE - the exact, non-negotiable face and identity for the model in every pose; reproduce it as closely as photographically possible, never invent or beautify a different face. Take ONLY the face, skin tone, hair and body proportions from this image: any garment, colour, print, jewellery or styling visible in it belongs to a different product and must have zero influence on the garment being photographed",
-    front: "FRONT PRODUCT - authoritative front product truth",
-    back: "BACK PRODUCT - authoritative back design and construction",
-    fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority texture, print, embroidery, stitching, trim and construction truth",
-    mannequin: "MANNEQUIN / FLAT-LAY SHOT - authoritative garment truth for this exact garment: on a mannequin or dress form it also sets worn shape, fit, proportion and drape; laid flat it sets outline, construction, panel layout and length only, since flat cloth shows no worn drape. Read the garment from it, never reproduce the mannequin, dress form, hanger, pins, clips or the flat surface itself",
-    additional_product: "ADDITIONAL PRODUCT PHOTO - supporting product truth",
-    approved_pose: "APPROVED POSE 1 - shoot-continuity anchor: reproduce its exact set, backdrop, props, floor, light direction, camera height and colour grade, and the same model and styling; also the model identity anchor only when no MODEL FACE REFERENCE was supplied. In a catalog run this frame may show a DIFFERENT colourway or SKU - take the scene and the model from it and nothing else, never its garment, colour, print or trims",
-    style_reference: "STYLE REFERENCE ONLY - background, composition, mood, lighting and creative direction; never product identity",
-  };
-  return labels[role] || role.toUpperCase();
 }
 
 function extensionForMimeType(mimeType: string) {
   if (mimeType === "image/png") return "png";
   if (mimeType === "image/webp") return "webp";
   return "jpg";
-}
-
-function canonicalReferences(references: ReferenceInput[]) {
-  const order: Record<string, number> = { model_identity: 0, front: 1, back: 2, fabric_pattern: 3, mannequin: 4, additional_product: 5, style_reference: 6 };
-  return [...references].sort((left, right) => (order[left.role] ?? 99) - (order[right.role] ?? 99) || left.hash.localeCompare(right.hash));
 }
 
 function productHash(args: JsonRecord) {
@@ -575,7 +578,10 @@ async function geminiJson(policy: GeminiPolicy, parts: JsonRecord[], attempt = 1
     headers: { "Content-Type": "application/json", "x-goog-api-key": requiredEnv("GEMINI_API_KEY") },
     body: JSON.stringify({
       contents: [{ role: "user", parts }],
-      generationConfig: { responseMimeType: "application/json" },
+      generationConfig: {
+        responseMimeType: "application/json",
+        thinkingConfig: { thinkingLevel: policy.thinkingLevel },
+      },
       safetySettings: GEMINI_SAFETY_SETTINGS,
     }),
   });
@@ -599,8 +605,7 @@ async function analyze(request: Request, args: JsonRecord) {
   const references = canonicalReferences((Array.isArray(args.references) ? args.references : []) as ReferenceInput[]);
   const orgId = workspace.organization.id;
   references.forEach((reference) => assertCatalogReferenceOwnership(orgId, reference));
-  if (!references.some((reference) => reference.role === "front")) throw new Error("A front product image is required before analysis.");
-  if (!references.some((reference) => reference.role === "back")) throw new Error("A back product image is required before analysis.");
+  assertRequiredProductReferences(references, String(args.category || ""));
   const pHash = productHash(args);
   const rHash = referenceHash(references);
   const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}`);
@@ -717,198 +722,6 @@ function normalizeImageSize(aspectRatio: string, imageSize: string, model: strin
   return is2k ? "2048x2048" : "1024x1024";
 }
 
-function selectReferences(references: LoadedReference[], approved: LoadedReference[], poseType: string) {
-  // A mannequin/flat-lay shot carries worn shape and drape, so it ranks with the
-  // primary product truth for full-body poses and drops below the detail shot for
-  // the close-up, where texture matters more than silhouette.
-  const order = poseType === "back"
-    ? ["back", "front", "mannequin", "fabric_pattern", "additional_product"]
-    : poseType === "closeup"
-      ? ["fabric_pattern", "front", "back", "mannequin", "additional_product"]
-      : ["front", "back", "mannequin", "fabric_pattern", "additional_product"];
-  // The model face reference (if supplied) leads every pose's image set, including pose 1 -
-  // it is the identity ground truth and must reach every generation and QA call, not just the
-  // poses that also get an approved-pose-1 anchor.
-  const modelRef = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
-  const product = order.flatMap((role) => references.filter((reference) => reference.role === role));
-  // A close-up is where invented motifs and redrawn embroidery show up worst, and
-  // its scene is already fixed by the approved anchor - so those reference slots go
-  // to product truth instead of art direction. With no anchor yet, style still has
-  // to carry the scene.
-  const styleBudget = poseType === "closeup" && approved.length ? 0 : 3;
-  const style = references.filter((reference) => reference.role === "style_reference").slice(0, styleBudget);
-  // The anchor keeps the model and scene identical across the set, so it must
-  // survive truncation. Nothing caps how many additional_product or mannequin
-  // images a caller may attach, and enough of them would otherwise push the
-  // anchor past MAX_REFERENCES and silently break continuity.
-  const anchor = approved.slice(0, 1);
-  const productBudget = Math.max(1, MAX_REFERENCES - modelRef.length - anchor.length);
-  return [...modelRef, ...product.slice(0, productBudget), ...anchor, ...style].slice(0, MAX_REFERENCES);
-}
-
-// Analyses cached before the geometry profiles existed still flow through here,
-// so both readers fall back to the flat legacy fields instead of emitting null.
-function patternGeometryOf(product: JsonRecord) {
-  const geometry = product?.patternGeometry && typeof product.patternGeometry === "object" ? product.patternGeometry as JsonRecord : {};
-  return Object.keys(geometry).length ? geometry : { type: String(product?.pattern || ""), print: String(product?.print || "") };
-}
-
-function embroideryGeometryOf(product: JsonRecord) {
-  const geometry = product?.embroideryGeometry && typeof product.embroideryGeometry === "object" ? product.embroideryGeometry as JsonRecord : {};
-  return Object.keys(geometry).length ? geometry : { placement: String(product?.embroidery || "") };
-}
-
-export function composeGenerationPrompt(args: {
-  skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
-  session: JsonRecord; references: LoadedReference[]; correction?: string; learnings?: string;
-}) {
-  const product = args.session.productIdentity as JsonRecord;
-  const creative = args.session.creativeDirection as JsonRecord;
-  const model = args.session.modelIdentity as JsonRecord;
-  // Null for sessions analysed before v10. They keep the old accessory line
-  // instead of being handed generated defaults dressed up as stylist decisions.
-  const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
-  const rules = Array.isArray(args.session.consistencyRules) ? args.session.consistencyRules.map(String) : CONSISTENCY_RULES;
-  const placement = Array.isArray(product?.detailPlacementMap) ? product.detailPlacementMap.map(String) : [];
-  const absent = Array.isArray(product?.absenceConstraints) ? product.absenceConstraints.map(String) : [];
-  const evidence = Array.isArray(product?.garmentEvidence) ? product.garmentEvidence as JsonRecord[] : [];
-  
-  const isSaree = product?.garmentFamily === "saree";
-  const sareeTruth = isSaree ? product.sareeTruth as JsonRecord : null;
-  const sareeDrapePlan = isSaree ? product.sareeDrapePlan as JsonRecord : null;
-  const manifest = args.references.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
-  const hasApprovedAnchor = args.references.some((reference) => reference.role === "approved_pose");
-  const hasModelReference = args.references.some((reference) => reference.role === "model_identity");
-  const faceVisible = args.pose.id !== "back";
-  const allowedDelta = [
-    `pose/body position: ${args.pose.bodyPosition}`,
-    `camera angle: ${args.pose.cameraAngle}`,
-    `framing: ${args.pose.framing}`,
-    `expression: ${args.pose.expression}`,
-  ];
-  return `Create ONE premium photorealistic fashion e-commerce photograph for ${args.skuName}.
-
-REFERENCE MANIFEST IN UPLOAD ORDER:
-${manifest}
-
-EDIT GOAL:
-Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${args.pose.title}. The finished image must look like the same real professional photoshoot as the other four images.
-
-LOCKED SUBJECT - MUST NOT CHANGE:
-${JSON.stringify(model)}
-- Same recognizable face, skin tone, body proportions, hairstyle, hair length/color, makeup, accessories and footwear across the complete set.
-- Pose 1 is only the subject/scene anchor for later poses. It never overrides original product references.
-
-FACE & IDENTITY LOCK - HIGHEST PRIORITY:
-${hasModelReference
-    ? `The image labeled MODEL FACE REFERENCE in the reference manifest above is the exact, non-negotiable face and identity for this model in EVERY pose, including this one - it outranks every other face source, including the approved-pose anchor. Reproduce it as close to pixel-identical as photographically possible: identical facial bone structure, eyes (shape, color, spacing), eyebrows, nose, lips, jawline, skin tone and texture, and hairstyle. Do not idealize, beautify, average, restyle, or blend it with any other face - this must read as the same real person from that reference photo, not merely a similar-looking model.${hasApprovedAnchor ? " Use the APPROVED POSE 1 image only for scene, lighting, and styling continuity - never as a face source." : ""}`
-    : hasApprovedAnchor
-      ? "The image labeled APPROVED POSE 1 in the reference manifest above is the exact, non-negotiable ground truth for this model's identity. Reproduce the identical facial bone structure, eye shape and color, eyebrow shape, nose, lips, jawline, skin tone and texture, and hairstyle seen in that image - do not idealize, beautify, average, or drift toward a different face."
-      : "This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally beautiful adult face exactly as described in modelIdentity above - every later pose in this set must reproduce this same face."}
-${faceVisible
-    ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct and naturally shaped eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
-    : "The face is turned away and is not the subject of this pose - keep hair color/style, skin tone, and body proportions consistent with the identity anchor."}
-
-LOCKED PRODUCT - MUST NOT CHANGE:
-${JSON.stringify(product)}
-${isSaree ? `SAREE TRUTH - CRITICAL:
-${JSON.stringify(sareeTruth)}
-SAREE DRAPE PLAN:
-${JSON.stringify(sareeDrapePlan)}` : ""}
-User notes: ${args.productDetails}
-Reference authority: FRONT controls front construction; BACK solely controls rear construction; FABRIC/PATTERN resolves material and small construction; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion and drape, while a FLAT-LAY resolves outline, construction, panel layout and length only; ADDITIONAL supports product truth; STYLE controls art direction only.
-- Product references may be flat-lay, folded, pinned or shot on a mannequin or dress form. Rebuild the garment as it falls on a live human body, and never render a mannequin, dress form, hanger, clip, pin, prop stand, or the flat background surface in the output.
-${isSaree ? `- SAREE SPECIFIC RULES: Pallu artwork stays on the pallu, never bleed the border into the main body, do not duplicate the pallu into multiple loose cloth panels, border width stays identical, follow the drape plan explicitly.` : ""}
-
-GARMENT TRUTH CONTRACT (EVIDENCE BY REGION):
-${evidence.length ? evidence.map((e) => `- Region ${String(e.region).toUpperCase() || "UNKNOWN"}: [State: ${String(e.state)}]
-  Construction: ${e.visibleConstruction || "None explicitly proven"}
-  Decoration/Trim: ${e.visibleDecoration || "None explicitly proven"}
-  Closures: ${e.closures || "None"}
-  Absent: ${(Array.isArray(e.explicitlyAbsent) ? e.explicitlyAbsent : []).join(", ") || "None"}
-  Uncertainty: ${e.uncertainty || "None"}`).join("\n") : ""}
-${placement.length ? `Detail placement hard locks:\n${placement.map((rule) => `- ${rule}`).join("\n")}` : "- Preserve every visible detail only in the exact region shown by the authoritative image."}
-${absent.length ? `Negative-evidence hard locks:\n${absent.map((rule) => `- ${rule}`).join("\n")}` : "- Add no button, closure, tassel/latkan, trim, embroidery, pocket, logo, jewelry or hardware unless the authoritative product image proves it exists at that location."}
-
-CRITICAL EVIDENCE RULES:
-- If a region's state is "confirmed_absent", do not render the decoration, trim, closure, or specialized construction represented by that region.
-- If a region's state is "unknown", it MUST be rendered in plain base fabric without any unproven decoration, trim, or specialized construction. UNKNOWN DOES NOT MEAN INFER.
-- Do NOT extrapolate decoration. If trim is confirmed at the front hem but the side seam is unknown, do not extend the trim up the side.
-
-PRINT AND EMBROIDERY GEOMETRY LOCK - the difference between photographing THIS garment and inventing a similar one:
-Pattern geometry: ${JSON.stringify(patternGeometryOf(product))}
-Embroidery geometry: ${JSON.stringify(embroideryGeometryOf(product))}
-- The FABRIC / PATTERN DETAIL image is the pixel-level authority for motif shape, motif scale, spacing, orientation and embroidery construction. Read the geometry off that image rather than reproducing a generic version of the same craft or style.
-- Reproduce motifs at the stated physical scale relative to the body. Do not enlarge, simplify, stylize, redraw or "clean up" a motif, and do not reduce a dense print to fewer, larger shapes.
-- Keep the print's orientation, repeat interval and density identical, including where panels differ - body, sleeves, yoke, bottom wear and dupatta each keep their own stated treatment.
-- Keep every accent colour inside the print. Small secondary-colour details within a motif field are part of this product's identity, not noise to average away.
-- Reproduce embroidery as the same internal geometry: same lattice or motif structure, same count and rhythm of repeated units, same borders, same coverage area, and the same relationship to the neckline, tie, drawstring and tassel.
-- If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".
-
-LOCKED ART DIRECTION - MUST NOT CHANGE BETWEEN POSES:
-${JSON.stringify(creative)}
-- Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, camera height and distance, depth of field and colour grade. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
-
-${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in all five frames:
-- Footwear: ${styling.footwear}
-- Jewellery: ${styling.jewellery}
-- Ornaments and accessories: ${styling.ornaments}
-- Makeup: ${styling.makeup}
-- Hair: ${styling.hair}
-${styling.stylingNotes ? `- Stylist notes: ${styling.stylingNotes}` : ""}
-${styling.themeInterpretation ? `- Theme being served: ${styling.themeInterpretation}` : ""}
-- Style the model with exactly these pieces - the same metal, the same count, the same placement in every frame. Do not add a necklace, bangle, ring, belt, bag, hair ornament or any other accessory this plan does not list, and do not drop one it does.
-- This is styling only. It never becomes part of the garment, never hides or replaces a garment detail, bottom wear or footwear shown in the product references, and never contradicts the placement or absence locks above.
-${creative?.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${creative.suggestedAccessories}` : ""}`
-  : `STYLING ADDITION (optional, locked once chosen):
-${creative?.suggestedAccessories ? `The stylist has proposed adding: ${creative.suggestedAccessories}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}`}
-
-ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
-${allowedDelta.map((value) => `- ${value}`).join("\n")}
-- Hand placement: ${args.pose.handPlacement}
-- Everything not named here stays locked.
-
-POSE REQUIREMENT:
-Description: ${args.pose.description}
-Details to highlight: ${args.pose.highlightedDetails.join(", ")}
-Visibility rules: ${args.pose.productVisibilityRules.join("; ")}
-Purpose: ${args.pose.purpose}
-Consistency notes: ${args.pose.consistencyNotes}
-${args.correction ? `
-CORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:
-${args.correction}
-- Address this correction completely and literally. Do not change anything else that was working.` : ""}
-${args.learnings ? `
-CONTINUOUS LEARNING ADVISORY (PAST QA FEEDBACK FOR THIS CATEGORY):
-${args.learnings}
-- These are historical corrections from other products. They are ADVISORY only.
-- You MUST validate these learnings against the current product's GARMENT TRUTH CONTRACT. If a past correction contradicts the current authoritative product references or evidence, ignore the learning. The current product references ALWAYS override past learnings.
-` : ""}
-
-PROMPT:
-${args.pose.prompt}
-
-REALISTIC INTEGRATION:
-- Treat this as frame ${args.pose.poseNumber} from one photographed contact sheet, not a new image concept. Reuse the same physical set coordinates, time of day, camera family, focal-length character, camera height, exposure, white balance, light direction, shadow density, and color grade established by Pose 1.
-- Preserve natural fabric drape, folds, gravity, occlusion, thickness and construction for this exact material and fit.
-- Match locked lighting direction, color temperature, shadows, contact shadows, perspective, lens feel, depth and scene geometry.
-- Keep anatomy realistic and keep hands away from product details.
-- Preserve believable pores, flyaway hairs, fabric microtexture, seam depth, edge transitions, optical depth of field, and grounded foot/contact shadows. Avoid waxy skin, over-smoothed fabric, duplicated motifs, over-sharpening, floating garments, plastic texture, and other synthetic AI tells.
-${faceVisible ? `- Render the eyes with correct anatomy: two naturally shaped, correctly positioned eyes with realistic iris detail, natural catchlights, and a correctly aligned gaze - never crossed, misaligned, melted, or malformed.
-- Render teeth naturally: a real, slightly imperfect smile with naturally aligned teeth in the correct count - never uniformly perfect, fused, extra, missing, or warped.
-- Skin must show real photographic micro-detail (pores, faint texture variation) rather than an airbrushed, plastic, or over-smoothed "beauty filter" look.` : ""}
-
-PROHIBITED UNRELATED CHANGES:
-${rules.map((rule) => `- ${rule}`).join("\n")}
-- Never complete, mirror, continue, relocate, add or remove decoration for symmetry.
-- Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
-${args.pose.id === "back" ? "- TRUE BACK HARD RULE: shoulders and hips fully face away. Reproduce uploaded BACK exactly; never infer the rear from FRONT." : ""}
-${args.pose.id === "closeup" ? "- POSE 5 HARD RULE: this is a genuine ZOOMED-IN face-to-chest or face-to-waist shot - visibly tighter in scale than the full-body hero pose, never a repeat of that wide framing. The face must be sharp, beautiful, and carry a natural Gen-Z expression, and one real product detail (embroidery, neckline, drape, print, or fabric texture) must also be sharp and clearly visible in the same frame." : ""}
-${args.correction ? `\nEARLIER ATTEMPTS OF THIS EXACT POSE FAILED CONSISTENCY QA. Fix every issue listed below in one image while preserving every lock, and never reintroduce a defect an earlier attempt already corrected:\n${args.correction}` : ""}
-
-Product accuracy is more important than style matching. Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
-}
-
 async function generateImage(args: { prompt: string; model: string; size: string; quality: string; references: LoadedReference[] }) {
   const body = new FormData();
   body.append("model", args.model);
@@ -975,18 +788,13 @@ async function validatePose(args: {
   generated: { base64: string; mimeType: string }; references: LoadedReference[];
   approved: LoadedReference[]; session: JsonRecord; pose: StudioPose & { poseNumber: number };
 }) {
-  const qaRefs = selectReferences(args.references, args.approved, args.pose.id);
-  // Only a session that actually stores a plan gets the plan rule. Appending it
-  // for a pre-v10 session would have QA judge styling against generated defaults
-  // like "minimal jewellery appropriate to the garment", failing frames on a plan
-  // no stylist ever wrote.
+  const garmentFamily = String((args.session.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
+  const qaRefs = selectReferences(args.references, args.approved, args.pose.id, garmentFamily, MAX_REFERENCES);
   const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
   const prompt = buildPoseQaPrompt({
     poseNumber: args.pose.poseNumber, poseType: args.pose.id, poseTitle: args.pose.title, poseDirection: args.pose,
     productIdentity: args.session.productIdentity, creativeDirection: args.session.creativeDirection,
-    modelIdentity: args.session.modelIdentity,
-    // The approved plan rides in with the session rules so styling_addition has
-    // something exact to check rather than a general sense of "looks styled".
+    modelIdentity: args.session.modelIdentity, garmentFamily,
     consistencyRules: [
       ...((args.session.consistencyRules as string[]) || CONSISTENCY_RULES),
       ...(styling
@@ -997,58 +805,59 @@ async function validatePose(args: {
     hasModelReference: qaRefs.some((reference) => reference.role === "model_identity"),
     referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`),
   });
-  const parts: JsonRecord[] = [{ text: prompt }, { text: "IMAGE A: NEWLY GENERATED POSE UNDER TEST" }, { inlineData: { mimeType: args.generated.mimeType, data: args.generated.base64 } }];
+  const baseParts: JsonRecord[] = [
+    { text: prompt },
+    { text: "IMAGE A: NEWLY GENERATED POSE UNDER TEST" },
+    { inlineData: { mimeType: args.generated.mimeType, data: args.generated.base64 } },
+  ];
   qaRefs.forEach((reference) => {
-    parts.push({ text: roleLabel(reference.role) });
-    parts.push({ inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
+    baseParts.push({ text: roleLabel(reference.role) });
+    baseParts.push({ inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
   });
-  const policyMedium = resolveGeminiPolicy({ purpose: "qa" });
-  let result = await geminiJson(policyMedium, parts);
-  let qa = parseQaResponse(result.text);
-  let usageMetadata = (result.raw.usageMetadata || {}) as Record<string, number>;
 
-  // Escalation Step 1: Flash Medium
-  // If clear pass or clear severe defect, return immediately.
-  const hasSevereDefects = qa.reason.includes("Critical attributes far below");
-  if (qa.pass || hasSevereDefects) {
-    return { ...qa, usageMetadata, policy: result.policy };
-  }
-
-  // Escalation Step 2: Flash High (Recheck)
-  // The medium model was uncertain or gave borderline scores.
-  const policyHigh = resolveGeminiPolicy({ purpose: "qa_recheck" });
-  result = await geminiJson(policyHigh, parts);
-  qa = parseQaResponse(result.text);
-  usageMetadata = {
-    ...usageMetadata,
-    promptTokenCount: (usageMetadata.promptTokenCount || 0) + (Number((result.raw.usageMetadata as Record<string, number>)?.promptTokenCount) || 0),
-    candidatesTokenCount: (usageMetadata.candidatesTokenCount || 0) + (Number((result.raw.usageMetadata as Record<string, number>)?.candidatesTokenCount) || 0),
-    totalTokenCount: (usageMetadata.totalTokenCount || 0) + (Number((result.raw.usageMetadata as Record<string, number>)?.totalTokenCount) || 0),
+  const addUsage = (total: Record<string, number>, raw: JsonRecord) => {
+    const usage = (raw.usageMetadata || {}) as Record<string, number>;
+    return {
+      promptTokenCount: Number(total.promptTokenCount || 0) + Number(usage.promptTokenCount || 0),
+      candidatesTokenCount: Number(total.candidatesTokenCount || 0) + Number(usage.candidatesTokenCount || 0),
+      totalTokenCount: Number(total.totalTokenCount || 0) + Number(usage.totalTokenCount || 0),
+      thoughtsTokenCount: Number(total.thoughtsTokenCount || 0) + Number(usage.thoughtsTokenCount || 0),
+    };
+  };
+  const run = async (policy: GeminiPolicy, independent = false) => {
+    const parts = independent
+      ? [...baseParts, { text: "INDEPENDENT RECHECK: disregard prior numeric scores, re-inspect each critical region separately, and return newly reasoned evidence-based scores." }]
+      : baseParts;
+    const result = await geminiJson(policy, parts);
+    return { result, qa: parseQaResponse(result.text, { garmentFamily }) };
   };
 
-  const hasSevereDefectsHigh = qa.reason.includes("Critical attributes far below");
-  if (qa.pass || hasSevereDefectsHigh) {
+  const complex = ["saree", "lehenga", "suit", "multi-piece"].some((family) => garmentFamily.toLowerCase().includes(family));
+  const initialPolicy = resolveGeminiPolicy({ purpose: "qa", garmentFamily });
+  let { result, qa } = await run(initialPolicy);
+  let usageMetadata = addUsage({}, result.raw);
+
+  if (complex) {
+    if (qa.requiresIndependentRecheck) {
+      const independent = await run(resolveGeminiPolicy({ purpose: "qa_escalation", garmentFamily }), true);
+      result = independent.result;
+      qa = independent.qa;
+      usageMetadata = addUsage(usageMetadata, result.raw);
+    }
     return { ...qa, usageMetadata, policy: result.policy };
   }
 
-  // Escalation Step 3: Pro High (Escalation)
-  // Still uncertain. Only escalate to Pro if the defect is a Product Truth issue that would trigger a paid retry.
-  const isProductTruthIssue = qa.failed.some((f) => ["garment_identity", "colors", "print_pattern", "pattern_geometry", "embroidery_geometry", "side_construction", "unknown_region_invention"].includes(f));
-  if (isProductTruthIssue && Number(args.session.attemptNumber || 1) < MAX_GENERATION_ATTEMPTS) {
-    const policyPro = resolveGeminiPolicy({ purpose: "qa_escalation" });
-    result = await geminiJson(policyPro, parts);
-    qa = parseQaResponse(result.text);
-    usageMetadata = {
-      ...usageMetadata,
-      promptTokenCount: (usageMetadata.promptTokenCount || 0) + (Number((result.raw.usageMetadata as Record<string, number>)?.promptTokenCount) || 0),
-      candidatesTokenCount: (usageMetadata.candidatesTokenCount || 0) + (Number((result.raw.usageMetadata as Record<string, number>)?.candidatesTokenCount) || 0),
-      totalTokenCount: (usageMetadata.totalTokenCount || 0) + (Number((result.raw.usageMetadata as Record<string, number>)?.totalTokenCount) || 0),
-    };
+  const hasSevereDefects = qa.reason.includes("Critical attributes far below");
+  if (qa.automaticallyVerified || hasSevereDefects) {
+    return { ...qa, usageMetadata, policy: result.policy };
   }
 
+  const confirmation = await run(resolveGeminiPolicy({ purpose: "qa_escalation", garmentFamily }), qa.requiresIndependentRecheck);
+  result = confirmation.result;
+  qa = confirmation.qa;
+  usageMetadata = addUsage(usageMetadata, result.raw);
   return { ...qa, usageMetadata, policy: result.policy };
 }
-
 async function kickWorker(jobId?: string) {
   return fetch(FUNCTION_URL, {
     method: "POST",
@@ -1075,6 +884,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
   const poses = (Array.isArray(args.poses) ? args.poses : sessionData.posePlan) as StudioPose[];
   const enabled = poses.filter((pose) => pose.enabled !== false && pose.prompt?.trim());
   if (enabled.length !== 5 || enabled.map((pose) => pose.id).join(",") !== "full_front,angled,back,creative,closeup") throw new Error("The current generation session must contain the complete ordered five-pose plan.");
+  assertSareeGenerationReady({ ...sessionData, posePlan: enabled });
   const allowedModels = ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"];
   const model = allowedModels.includes(String(args.model)) ? String(args.model) : OPENAI_MODEL;
   const quality = ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : "medium";
@@ -1189,13 +999,14 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   });
   if (job.batch_id) {
     const batchId = String(job.batch_id);
-    const anchor = poses.find((pose) => Number(pose.pose_index) === 1 && pose.status === "completed");
+    const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
+    const anchor = poses.find((pose) => Number(pose.pose_index) === 1 && pose.status === "completed" && canUsePoseOneAnchor(garmentFamily, pose.qa_status));
     if (anchor?.output_url) {
       // Merged in the database for the same reason as the styling plan: a stylist
       // approving a plan at this moment must not lose the anchor, and vice versa.
       const { error: anchorError } = await service.rpc("merge_catalog_memory", {
         p_batch_id: batchId,
-        p_patch: { anchorOutputUrl: anchor.output_url, anchorStoragePath: anchor.storage_path, anchorStorageBackend: anchor.storage_backend || "firebase", anchorJobId: job.job_id },
+        p_patch: { anchorOutputUrl: anchor.output_url, anchorStoragePath: anchor.storage_path, anchorStorageBackend: anchor.storage_backend || "firebase", anchorJobId: job.job_id, anchorQaStatus: anchor.qa_status, anchorGarmentFamily: garmentFamily },
         p_require_absent: null,
       });
       // Stamping the memory as current after a failed merge would claim an anchor
@@ -1630,15 +1441,17 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
   const sourceInputs = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
   const loadedReferences = await loadAvailableReferences(sourceInputs, String(job.org_id));
   let { data: anchorPose } = Number(pose.pose_index) > 1
-    ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
+    ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title,qa_status").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
     : { data: null };
   if (!anchorPose?.output_url && !anchorPose?.storage_path && job.batch_id) {
     const { data: batchRow } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
     const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
-    if (memory.anchorOutputUrl || memory.anchorStoragePath) {
-      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor" };
+    const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
+    if ((memory.anchorOutputUrl || memory.anchorStoragePath) && canUsePoseOneAnchor(garmentFamily, memory.anchorQaStatus)) {
+      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor", qa_status: String(memory.anchorQaStatus || "") };
     }
   }
+  if (anchorPose && !canUsePoseOneAnchor(String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), anchorPose.qa_status)) anchorPose = null;
   const approved: LoadedReference[] = [];
   if (anchorPose?.output_url || anchorPose?.storage_path) {
     const loaded = await loadReference({
@@ -1650,7 +1463,7 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
   }
   const storedPoseData = (pose.generation_data || {}) as JsonRecord;
   const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
-  const selected = selectReferences(loadedReferences, approved, poseData.id);
+  const selected = selectReferences(loadedReferences, approved, poseData.id, String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), MAX_REFERENCES);
   return { loadedReferences, approved, poseData, selected, storedPoseData };
 }
 
@@ -1714,17 +1527,21 @@ async function processWorker(request: Request, args: JsonRecord) {
     await finalizeJob(job, session, (poses || []) as JsonRecord[]);
     return { processed: true, completed: true, jobId: job.job_id };
   }
+  const sessionData = session.session_data as JsonRecord;
+  // Run the corrected v14 Product Truth gate before changing workflow state or
+  // making any paid provider request. This also protects queued v13 jobs that
+  // existed before the cache-version migration.
+  assertSareeGenerationReady(sessionData);
   const now = new Date().toISOString();
   await Promise.all([
     service.from("session_generations").update({ status: "processing", attempt_count: Number(pose.attempt_count || 0), updated_at: now }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id),
     service.from("generation_jobs").update({ current_pose: pose.pose_index, lock_expires_at: new Date(Date.now() + WORKER_LEASE_MS).toISOString(), updated_at: now, job_data: { ...((job.job_data as JsonRecord) || {}), detailedStatus: `Pose ${pose.pose_index} generating (Attempt ${Number(pose.attempt_count || 0) + 1})` } }).eq("job_id", job.job_id),
     service.from("planning_requests").update({ generation_status: "processing", generation_started_at: job.started_at || now, updated_at: now }).eq("id", job.planning_request_id),
   ]);
-  const sessionData = session.session_data as JsonRecord;
   const sourceInputs = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
   const loadedReferences = await loadAvailableReferences(sourceInputs, String(job.org_id));
   let { data: anchorPose } = Number(pose.pose_index) > 1
-    ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
+    ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title,qa_status").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
     : { data: null };
   // A bulk catalog has to look like one shoot day across every colourway, but each
   // SKU is its own session, so pose 1 of SKU 2 had no anchor at all - only text
@@ -1734,10 +1551,12 @@ async function processWorker(request: Request, args: JsonRecord) {
     const { data: batchRow, error: batchRowError } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
     if (batchRowError) throw new Error(batchRowError.message);
     const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
-    if (memory.anchorOutputUrl || memory.anchorStoragePath) {
-      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor" };
+    const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
+    if ((memory.anchorOutputUrl || memory.anchorStoragePath) && canUsePoseOneAnchor(garmentFamily, memory.anchorQaStatus)) {
+      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor", qa_status: String(memory.anchorQaStatus || "") };
     }
   }
+  if (anchorPose && !canUsePoseOneAnchor(String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), anchorPose.qa_status)) anchorPose = null;
   const approved: LoadedReference[] = [];
   if (anchorPose?.output_url || anchorPose?.storage_path) {
     // Load the reference first to determine the actual MIME type from the blob,
@@ -1800,7 +1619,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     }
     const learningsStr = learningsArr.slice(0, 3).map((c) => `- Past correction: ${c}`).join("\n");
 
-    const selected = selectReferences(loadedReferences, approved, poseData.id);
+    const selected = selectReferences(loadedReferences, approved, poseData.id, String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), MAX_REFERENCES);
     const prompt = composeGenerationPrompt({
       skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || "Untitled product"),
       productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
@@ -1815,7 +1634,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     attemptUsage = generated.usage;
     providerRequestId = generated.requestId;
     attemptCost = generated.costUsd;
-    let qa: ReturnType<typeof parseQaResponse> & { usageMetadata?: unknown } = { pass: true, score: 100, productFidelity: 100, scores: {}, weakest: [], lowConfidence: [], reviewRecommended: false, checks: {}, failed: [], reason: "QA disabled.", correction: "" };
+    let qa: ReturnType<typeof parseQaResponse> & { usageMetadata?: unknown } = unavailableQaResult("Automatic QA was disabled.");
     // A QA call that cannot return a verdict - safety block, provider outage, malformed
     // response - is not evidence that the frame is wrong. The image is already generated
     // and paid for, so it ships flagged for human review instead of being destroyed and
@@ -1830,7 +1649,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         qaLatencyMs = Date.now() - qaStarted;
       } catch (error) {
         qaUnavailable = errorMessage(error);
-        qa = { pass: true, score: 0, productFidelity: 0, scores: {}, weakest: [], lowConfidence: [], reviewRecommended: true, checks: {}, failed: [], reason: `Automatic consistency QA could not run: ${qaUnavailable}`, correction: "" };
+        qa = unavailableQaResult(`Automatic consistency QA could not run: ${qaUnavailable}`);
       }
     }
     await recordAiRun({
@@ -1845,7 +1664,7 @@ async function processWorker(request: Request, args: JsonRecord) {
       cost_usd: attemptCost, cost_source: generated.usage.providerReported ? "provider_reported_tokens_openai_public_rates" : "provider_not_reported",
     });
     
-    if (!qaUnavailable) {
+    if (!qaUnavailable && job.pose_qa !== false) {
        const qaUsage = (qa.usageMetadata || {}) as any;
        const inTok = Number(qaUsage?.promptTokenCount || 0);
        const outTok = Number(qaUsage?.candidatesTokenCount || 0);
@@ -1857,7 +1676,7 @@ async function processWorker(request: Request, args: JsonRecord) {
          job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: policy.model, provider: "google",
          purpose: policy.purpose, thinking_level: policy.thinkingLevel,
          input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt, policy },
-         output_json: { qa }, status: qa.pass ? "completed" : "rejected_by_qa", latency_ms: qaLatencyMs,
+         output_json: { qa, qaVersion: QA_VERSION }, status: qa.outcome, latency_ms: qaLatencyMs,
          provider_request_id: "",
          input_tokens: inTok, input_text_tokens: inTok,
          input_image_tokens: 0, output_tokens: outTok,
@@ -1876,18 +1695,19 @@ async function processWorker(request: Request, args: JsonRecord) {
       const isRepeatedDefect = qaCorrections.length > 0 && qaCorrections[qaCorrections.length - 1].includes(defect);
       qaCorrections = [...qaCorrections, `Attempt ${attempt}: ${defect}`].slice(-MAX_GENERATION_ATTEMPTS);
       const archived = await archiveRejectedAttempt({ job, pose, attempt, generated, qa });
-      if (archived) rejectedAttempts = [...rejectedAttempts, archived].slice(-MAX_GENERATION_ATTEMPTS);
+      if (archived) rejectedAttempts = appendRejectedAttemptHistory(rejectedAttempts, archived, MAX_GENERATION_ATTEMPTS);
       // The verdict is written now, not on the way out: neither deferPoseRetry nor
       // failPoseAndJob touches qa_payload, so a pose that exhausts its retries
       // would otherwise show an archived image with no fidelity breakdown.
       await service.from("session_generations").update({
-        qa_status: "failed", qa_payload: { ...qa, attempt, qaUnavailable: "" }, updated_at: new Date().toISOString(),
+        qa_status: "rejected_by_qa", qa_payload: { ...qa, attempt, qaUnavailable: "", qaVersion: QA_VERSION }, updated_at: new Date().toISOString(),
       }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
       lastError = `Consistency QA failed: ${qa.reason}`;
       await service.from("qa_reviews").insert({
         organization_id: job.org_id, planning_request_id: job.planning_request_id, generation_job_id: job.job_id,
         pose_index: pose.pose_index, reviewer_type: "gemini_auto", score: qa.score, passed: false,
-        issues: qa.failed, notes: qa.reason,
+        issues: qa.failed, notes: qa.reason, qa_version: QA_VERSION, outcome: "rejected_by_qa",
+        generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt, metadata: { qa },
       });
       const qaError = new Error(lastError) as Error & { code?: string };
       qaError.code = isRepeatedDefect ? "same_defect_repeated" : "consistency_qa_failed";
@@ -1900,11 +1720,12 @@ async function processWorker(request: Request, args: JsonRecord) {
     const storagePath = `organizations/${job.org_id}/generated/${job.job_id}/${pose.pose_index}-${safeSku}-${crypto.randomUUID()}.${extensionForMimeType(generated.mimeType)}`;
     const stored = await uploadCatalogObject({ orgId: String(job.org_id), storagePath, blob: generated.blob, mimeType: generated.mimeType });
     const completedAt = new Date().toISOString();
+    const { qaStatus } = qaStorageDisposition({ qaEnabled: job.pose_qa !== false, qaUnavailable: Boolean(qaUnavailable), outcome: qa.outcome });
     const usagePatch = accumulatedUsage(pose as JsonRecord, generated.usage, generated.requestId, attemptCost);
     await Promise.all([
       service.from("session_generations").update({
         status: "completed", output_url: stored.downloadUrl, storage_path: stored.storagePath, storage_backend: stored.storageBackend,
-        qa_status: qaUnavailable ? "unverified" : "passed", qa_payload: { ...qa, qaUnavailable },
+        qa_status: qaStatus, qa_payload: { ...qa, qaUnavailable, qaVersion: QA_VERSION },
         error: qaUnavailable ? `Delivered without automatic consistency QA: ${qaUnavailable}`.slice(0, 1000) : "", updated_at: completedAt,
         generation_data: { ...storedPoseData, correction: "", corrections: [], completedAt: Date.now(), mimeType: generated.mimeType },
         ...usagePatch,
@@ -1914,24 +1735,29 @@ async function processWorker(request: Request, args: JsonRecord) {
         prompt, image_url: stored.downloadUrl, storage_path: stored.storagePath, generation_job_id: job.job_id,
         sku_matched: true, asset_role: "generated", storage_backend: stored.storageBackend,
         metadata: {
-          poseIndex: pose.pose_index, poseType: pose.pose_type, qa, qaStatus: qaUnavailable ? "unverified" : "passed",
+          poseIndex: pose.pose_index, poseType: pose.pose_type, qa, qaStatus, qaVersion: QA_VERSION,
           model: job.model, quality: job.quality,
           providerRequestId: generated.requestId, usage: generated.usage.raw, actualCostUsd: attemptCost,
         },
       }),
-      // No automatic verdict means no review to record: an unverified frame must not
-      // leave a "passed" audit trail behind it.
-      qaUnavailable ? Promise.resolve() : service.from("qa_reviews").insert({
+      // Every QA execution state is immutable audit history. An unavailable or
+      // disabled validator is recorded as unverified (never passed), so later
+      // reruns do not erase why the original frame required human QC.
+      service.from("qa_reviews").insert({
         organization_id: job.org_id, planning_request_id: job.planning_request_id, generation_job_id: job.job_id,
-        pose_index: pose.pose_index, reviewer_type: "gemini_auto", score: qa.score, passed: true,
-        issues: [], notes: qa.reason,
+        pose_index: pose.pose_index,
+        reviewer_type: job.pose_qa === false ? "qa_disabled" : qaUnavailable ? "gemini_auto_unavailable" : "gemini_auto",
+        score: qa.score, passed: !qaUnavailable && job.pose_qa !== false && qa.automaticallyVerified,
+        issues: qaUnavailable ? ["qa_unavailable"] : job.pose_qa === false ? ["qa_disabled"] : qa.failed,
+        notes: qa.reason, qa_version: QA_VERSION, outcome: qaStatus,
+        generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt, metadata: { qa, qaUnavailable },
       }),
     ]);
     const { data: allPoses, error: allPosesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
     if (allPosesError) console.error(allPosesError.message);
     const completedCount = (allPoses || []).filter((entry) => entry.status === "completed").length;
     const failedCount = (allPoses || []).filter((entry) => entry.status === "failed").length;
-    const generatedAssets = (allPoses || []).filter((entry) => entry.output_url).map((entry) => ({ poseIndex: entry.pose_index, url: entry.output_url, storagePath: entry.storage_path }));
+    const generatedAssets = (allPoses || []).filter((entry) => entry.output_url).map((entry) => ({ poseIndex: entry.pose_index, url: entry.output_url, storagePath: entry.storage_path, qaStatus: entry.qa_status }));
     await Promise.all([
       service.from("generation_jobs").update({
         completed_poses: completedCount, failed_poses: failedCount,
@@ -1949,13 +1775,13 @@ async function processWorker(request: Request, args: JsonRecord) {
       // verdict, so a set can be audited later without replaying the job.
       service.from("catalog_sessions").update({
         session_data: {
-          ...sessionData, generatedAssets, approvedAssets: generatedAssets.filter((asset) => asset.poseIndex === 1),
+          ...sessionData, generatedAssets, approvedAssets: generatedAssets.filter((asset) => asset.poseIndex === 1 && canUsePoseOneAnchor(String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), asset.qaStatus)),
           productDnaVersion: ANALYSIS_VERSION,
           validation: {
             ...(sessionData.validation && typeof sessionData.validation === "object" ? sessionData.validation as JsonRecord : {}),
             [`pose${pose.pose_index}`]: {
               productFidelity: qa.productFidelity, scores: qa.scores, weakest: qa.weakest,
-              qaStatus: qaUnavailable ? "unverified" : "passed", attempt, checkedAt: Date.now(),
+              qaStatus, qaVersion: QA_VERSION, attempt, checkedAt: Date.now(),
             },
           },
         },
@@ -2057,6 +1883,117 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
   assertSupabaseResults(regenerationResults, "Could not queue the pose re-generation");
   scheduleBackground(kickWorker());
   return { success: true };
+}
+
+async function syncCatalogAnchorQa(
+  job: JsonRecord,
+  pose: JsonRecord,
+  sessionData: JsonRecord,
+  outcome: string,
+) {
+  if (!job.batch_id || Number(pose.pose_index) !== 1) return;
+  const { data: batch, error: batchError } = await service.from("planning_batches")
+    .select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
+  if (batchError) throw new Error(batchError.message);
+  const memory = (batch?.catalog_memory || {}) as JsonRecord;
+  const ownsCurrentAnchor = String(memory.anchorJobId || "") === String(job.job_id);
+  const hasAnchor = Boolean(memory.anchorOutputUrl || memory.anchorStoragePath);
+  const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
+  const canPromote = !hasAnchor && canUsePoseOneAnchor(garmentFamily, outcome);
+  if (!ownsCurrentAnchor && !canPromote) return;
+  const patch = canPromote
+    ? {
+      anchorOutputUrl: pose.output_url,
+      anchorStoragePath: pose.storage_path,
+      anchorStorageBackend: pose.storage_backend || "firebase",
+      anchorJobId: job.job_id,
+      anchorQaStatus: outcome,
+      anchorQaVersion: QA_VERSION,
+      anchorGarmentFamily: garmentFamily,
+    }
+    : { anchorQaStatus: outcome, anchorQaVersion: QA_VERSION };
+  const { error } = await service.rpc("merge_catalog_memory", {
+    p_batch_id: job.batch_id,
+    p_patch: patch,
+    p_require_absent: canPromote ? "anchorOutputUrl" : null,
+  });
+  if (error) throw new Error(error.message);
+}
+
+async function rerunPoseQa(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request);
+  if (!workspace.isAdmin && !workspace.permissions.includes("admin.settings")) {
+    throw new Error("Only an administrator can re-run automatic QA.");
+  }
+  const generationId = String(args.poseId || args.generationId || "");
+  const { data: pose, error: poseError } = await service.from("session_generations").select("*").eq("generation_id", generationId).single();
+  if (poseError || !pose) throw new Error(poseError?.message || "Pose not found.");
+  if (!pose.output_url && !pose.storage_path) throw new Error("This pose has no preserved generated image to review.");
+  const [{ data: job, error: jobError }, { data: session, error: sessionError }] = await Promise.all([
+    service.from("generation_jobs").select("*").eq("session_id", pose.session_id).eq("org_id", workspace.organization.id).single(),
+    service.from("catalog_sessions").select("*").eq("session_id", pose.session_id).eq("organization_id", workspace.organization.id).single(),
+  ]);
+  if (jobError || !job) throw new Error(jobError?.message || "Generation job not found.");
+  if (sessionError || !session) throw new Error(sessionError?.message || "Generation session not found.");
+  const sessionData = session.session_data as JsonRecord;
+  const references = await loadAvailableReferences((Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[], workspace.organization.id);
+  const generated = await loadReference({
+    role: "generated", downloadUrl: pose.output_url, storagePath: pose.storage_path,
+    storageBackend: pose.storage_backend as CatalogStorageBackend, hash: smallHash(String(pose.output_url || pose.storage_path)),
+    filename: `pose-${pose.pose_index}.${extensionForMimeType(String((pose.generation_data as JsonRecord | undefined)?.mimeType || "image/jpeg"))}`,
+    mimeType: String((pose.generation_data as JsonRecord | undefined)?.mimeType || ""), size: 0,
+  }, workspace.organization.id);
+  const poseData = { ...((pose.generation_data || {}) as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
+  const reviewedAt = new Date().toISOString();
+  let qa: Awaited<ReturnType<typeof validatePose>>;
+  try {
+    qa = await validatePose({ generated, references, approved: [], session: sessionData, pose: poseData });
+  } catch (error) {
+    const message = errorMessage(error);
+    const unavailable = unavailableQaResult(`Automatic consistency QA could not run: ${message}`);
+    const results = await Promise.all([
+      service.from("qa_reviews").insert({
+        organization_id: workspace.organization.id, planning_request_id: job.planning_request_id,
+        generation_job_id: job.job_id, pose_index: pose.pose_index, reviewer_type: "gemini_admin_rerun",
+        score: 0, passed: false, issues: ["qa_unavailable"], notes: message,
+        qa_version: QA_VERSION, outcome: "unverified", generation_epoch: Number(pose.generation_epoch || 1),
+        attempt_number: Number(pose.attempt_count || 1), metadata: { error: message, rerunByMemberId: workspace.member.id },
+      }),
+      service.from("session_generations").update({
+        qa_status: "unverified",
+        qa_payload: { ...unavailable, qaVersion: QA_VERSION, rerunAt: reviewedAt, previousQa: pose.qa_payload || null },
+        updated_at: reviewedAt,
+      }).eq("generation_id", generationId),
+      service.from("audit_logs").insert({
+        organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
+        action: "generation.qa.rerun_unavailable", resource_type: "session_generation", resource_id: generationId,
+        metadata: { jobId: job.job_id, poseIndex: pose.pose_index, qaVersion: QA_VERSION, error: message },
+      }),
+    ]);
+    assertSupabaseResults(results, "Could not save the unavailable QA attempt");
+    await syncCatalogAnchorQa(job as JsonRecord, pose as JsonRecord, sessionData, "unverified");
+    return { success: false, outcome: "unverified", error: message, qaVersion: QA_VERSION };
+  }
+  const results = await Promise.all([
+    service.from("qa_reviews").insert({
+      organization_id: workspace.organization.id, planning_request_id: job.planning_request_id,
+      generation_job_id: job.job_id, pose_index: pose.pose_index, reviewer_type: "gemini_admin_rerun",
+      score: qa.score, passed: qa.automaticallyVerified, issues: qa.failed, notes: qa.reason,
+      qa_version: QA_VERSION, outcome: qa.outcome, generation_epoch: Number(pose.generation_epoch || 1),
+      attempt_number: Number(pose.attempt_count || 1), metadata: { qa, rerunByMemberId: workspace.member.id },
+    }),
+    service.from("session_generations").update({
+      qa_status: qa.outcome, qa_payload: { ...qa, qaVersion: QA_VERSION, rerunAt: reviewedAt }, updated_at: reviewedAt,
+    }).eq("generation_id", generationId),
+    service.from("audit_logs").insert({
+      organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
+      action: "generation.qa.rerun", resource_type: "session_generation", resource_id: generationId,
+      metadata: { jobId: job.job_id, poseIndex: pose.pose_index, qaVersion: QA_VERSION, outcome: qa.outcome },
+    }),
+  ]);
+  assertSupabaseResults(results, "Could not save the QA rerun");
+  await syncCatalogAnchorQa(job as JsonRecord, pose as JsonRecord, sessionData, qa.outcome);
+  return { success: true, outcome: qa.outcome, score: qa.score, qaVersion: QA_VERSION };
 }
 
 // Requeues every pose in a failed job that didn't complete, so one bad pose (or the cascading
@@ -2929,32 +2866,45 @@ async function setVariantReferencesOperation(request: Request, args: JsonRecord)
   const roleArgs: Array<[string, string, string]> = [
     ["frontReferenceId", "front_image_url", "front_image_path"], ["backReferenceId", "back_image_url", "back_image_path"],
     ["fabricPatternReferenceId", "", ""], ["additionalProductReferenceId", "", ""],
+    ["sareeFrontDrapeReferenceId", "front_image_url", "front_image_path"], ["sareeBackDrapeReferenceId", "back_image_url", "back_image_path"],
+    ["sareeBodyDetailReferenceId", "", ""], ["sareePalluSpreadReferenceId", "", ""],
+    ["sareeBorderTasselsReferenceId", "", ""], ["sareeBlouseFrontReferenceId", "", ""], ["sareeBlouseBackPieceReferenceId", "", ""],
   ];
+  if (args.referenceId) roleArgs.push(["referenceId", "", ""]);
   const patch: JsonRecord = { updated_at: new Date().toISOString() };
   for (const [key, urlColumn, pathColumn] of roleArgs) {
     if (!args[key]) continue;
     const { data: asset, error: assetError } = await service.from("planning_assets").select("*").eq("id", String(args[key])).eq("planning_request_id", requestId).single();
     if (assetError) throw new Error(assetError.message);
     if (!asset) throw new Error("Uploaded reference not found.");
-    if (urlColumn) patch[urlColumn] = asset.image_url;
-    if (pathColumn) patch[pathColumn] = asset.storage_path;
+    const resolvedUrlColumn = urlColumn || (asset.asset_role === "saree_front_drape" ? "front_image_url" : asset.asset_role === "saree_back_drape" ? "back_image_url" : "");
+    const resolvedPathColumn = pathColumn || (asset.asset_role === "saree_front_drape" ? "front_image_path" : asset.asset_role === "saree_back_drape" ? "back_image_path" : "");
+    if (resolvedUrlColumn) patch[resolvedUrlColumn] = asset.image_url;
+    if (resolvedPathColumn) patch[resolvedPathColumn] = asset.storage_path;
   }
   const front = String(patch.front_image_url || variant.front_image_url || "");
   const back = String(patch.back_image_url || variant.back_image_url || "");
-  patch.validation_status = front && back ? "ready" : "pending";
-  patch.validation_report = front && back ? { ready: true, reasons: [] } : { ready: false, reasons: [!front ? "Front product image is required." : "", !back ? "Back product image is required." : ""].filter(Boolean) };
-  patch.analysis_status = front && back ? "stale" : "pending";
+  const { data: referenceAssets, error: referenceAssetsError } = await service.from("planning_assets").select("asset_role,image_url,storage_path").eq("planning_request_id", requestId).in("asset_role", [...PRODUCT_REFERENCE_ROLES]);
+  if (referenceAssetsError) throw new Error(referenceAssetsError.message);
+  const inputRoles = (referenceAssets || []).map((asset) => ({
+    role: String(asset.asset_role), downloadUrl: String(asset.image_url || ""), storagePath: String(asset.storage_path || ""), hash: "", filename: "", mimeType: "", size: 0,
+  }));
+  const missingReferences = missingRequiredReferenceLabels(inputRoles, isSareeReferenceSet(inputRoles) ? "saree" : String(variant.category || ""));
+  const referencesReady = missingReferences.length === 0 && Boolean(front && back);
+  patch.validation_status = referencesReady ? "ready" : "pending";
+  patch.validation_report = referencesReady ? { ready: true, reasons: [] } : { ready: false, reasons: missingReferences.map((label) => `${label} image is required.`) };
+  patch.analysis_status = referencesReady ? "stale" : "pending";
   patch.analysis_fingerprint = "";
   const { error } = await service.from("planning_requests").update(patch).eq("id", requestId);
   if (error) throw new Error(error.message);
-  if (front && back) {
+  if (referencesReady) {
     const batchId = String(variant.batch_id || "");
     scheduleBackground(kickCatalogPreflight(batchId, requestId));
     const [{ data: batch }, { data: batchVariants }] = await Promise.all([
       service.from("planning_batches").select("scheduled_at,schedule_status").eq("id", batchId).maybeSingle(),
-      service.from("planning_requests").select("front_image_url,back_image_url").eq("batch_id", batchId),
+      service.from("planning_requests").select("validation_status").eq("batch_id", batchId),
     ]);
-    const allReady = Boolean(batchVariants?.length) && (batchVariants || []).every((entry) => entry.front_image_url && entry.back_image_url);
+    const allReady = Boolean(batchVariants?.length) && (batchVariants || []).every((entry) => entry.validation_status === "ready");
     if (batch?.scheduled_at && String(batch.schedule_status || "none") === "none" && allReady) {
       await service.from("planning_batches").update({
         schedule_status: "scheduled", queue_status: "idle", schedule_error: "", status: "active", updated_at: new Date().toISOString(),
@@ -3128,7 +3078,7 @@ async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
   const { data: assets, error: assetsError } = await service.from("planning_assets").select("*").eq("planning_request_id", variant.id).order("created_at");
   if (assetsError) console.error(assetsError.message);
   const productRefs: ReferenceInput[] = (assets || [])
-    .filter((asset) => ["front", "back", "fabric_pattern", "mannequin", "additional_product"].includes(asset.asset_role))
+    .filter((asset) => (PRODUCT_REFERENCE_ROLES as readonly string[]).includes(asset.asset_role))
     .map((asset) => ({
       id: asset.id, role: asset.asset_role, downloadUrl: asset.image_url, storagePath: asset.storage_path, storageBackend: asset.storage_backend as CatalogStorageBackend,
       hash: String((asset.metadata as JsonRecord)?.hash || asset.id), filename: String((asset.metadata as JsonRecord)?.filename || `${asset.asset_role}.jpg`),
@@ -3394,7 +3344,8 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
   const variant = (variants || []).find((entry) => !["analyzing"].includes(String(entry.analysis_status || "")));
   if (!variant) return { processed: false, reason: "no_ready_variant" };
   const { references } = await catalogReferenceInputs(batch as JsonRecord, variant as JsonRecord);
-  const authorityReady = references.some((entry) => entry.role === "front") && references.some((entry) => entry.role === "back");
+  const preflightCategory = String(((batch.generation_settings || {}) as JsonRecord).category || variant.category || "");
+  const authorityReady = missingRequiredReferenceLabels(references, preflightCategory).length === 0;
   if (!authorityReady) return { processed: false, reason: "references_incomplete" };
   const hashes = catalogAnalysisFingerprint(batch as JsonRecord, variant as JsonRecord, references);
   if (variant.analysis_status === "ready" && variant.analysis_fingerprint === hashes.fingerprint && variant.ai_analysis) {
@@ -3513,18 +3464,20 @@ async function queueCatalogVariantGeneration(
   generationSettings: JsonRecord,
 ) {
   const { productRefs, references } = await catalogReferenceInputs(batch, variant);
-  if (!references.some((entry) => entry.role === "front") || !references.some((entry) => entry.role === "back")) {
-    throw new Error("Front and back references are required.");
-  }
+  assertRequiredProductReferences(references, String((batch.generation_settings as JsonRecord | undefined)?.category || variant.category || ""));
 
   const analysisHashes = catalogAnalysisFingerprint(batch, variant, references);
   const category = String(generationSettings.category || variant.category || "ethnic/fusion");
+  const storedNormalized = variant.ai_analysis
+    ? normalizeAnalysis(variant.ai_analysis as JsonRecord, category)
+    : null;
   const hasCurrentAnalysis = variant.analysis_status === "ready"
     && variant.analysis_fingerprint === analysisHashes.fingerprint
-    && Boolean(variant.ai_analysis);
+    && Boolean(storedNormalized)
+    && sareeAnalysisIssues({ ...storedNormalized, references }).length === 0;
   const analysisStartedAt = Date.now();
   let normalized = hasCurrentAnalysis
-    ? applyCatalogMemory(batch, normalizeAnalysis(variant.ai_analysis as JsonRecord, category))
+    ? applyCatalogMemory(batch, storedNormalized!)
     : await analyzeCatalogVariant(batch, variant, references);
 
   const { data: workflowItem, error: workflowItemError } = await service.from("catalog_work_items")
@@ -3628,6 +3581,12 @@ async function queueCatalogVariantGeneration(
   if (poses.length !== 5 || poses.map((pose) => pose.id).join(",") !== "full_front,angled,back,creative,closeup") {
     throw new Error("Catalog analysis did not produce the required ordered five-pose plan.");
   }
+
+  assertSareeGenerationReady({
+    productIdentity: normalized.productIdentity,
+    posePlan: poses,
+    references,
+  });
 
   const sessionId = `session_${crypto.randomUUID()}`;
   const jobId = `job_${crypto.randomUUID()}`;
@@ -5301,6 +5260,7 @@ Deno.serve(async (request) => {
       "studio.queue": () => queueGeneration(request, args),
       "jobs.cancel": () => cancelJob(request, args),
       "jobs.regenerate": () => regeneratePose(request, args),
+      "jobs.rerunQa": () => rerunPoseQa(request, args),
       "jobs.regenerateSession": () => regenerateSession(request, args),
       "jobs.remove": () => removeJob(request, args),
       "jobs.downloadAsset": () => downloadGeneratedAsset(request, args),

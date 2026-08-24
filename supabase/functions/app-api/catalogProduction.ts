@@ -1,6 +1,7 @@
 import { type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.112.2";
 import { type JsonRecord } from "./profiles.ts";
 import { buildCatalogStageTimeline } from "./lib/catalogStageTimeline.ts";
+import { PRODUCT_REFERENCE_ROLES, isSareeReferenceSet, missingRequiredReferenceLabels } from "./lib/referencePolicy.ts";
 
 export type CatalogWorkspace = {
   organization: { id: string; name: string };
@@ -569,10 +570,10 @@ export async function reviewCatalogPose(
 
   const [{ data: item, error: itemError }, { data: version, error: versionError }] = await Promise.all([
     service.from("catalog_work_items")
-      .select("id,sku_name,request_code,generation_status,qc_status,generation_assigned_member_id,created_by_member_id")
+      .select("id,sku_name,request_code,planning_request_id,planning_batch_id,generation_job_id,generation_status,qc_status,generation_assigned_member_id,created_by_member_id")
       .eq("organization_id", workspace.organization.id).eq("id", workItemId).maybeSingle(),
     service.from("catalog_pose_asset_versions")
-      .select("id,pose_index,version_number,generation_status,approval_status,original_url,preview_url")
+      .select("id,pose_index,version_number,generation_id,generation_status,approval_status,original_url,preview_url,storage_path,storage_backend")
       .eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).eq("id", assetVersionId).maybeSingle(),
   ]);
   if (itemError || versionError) throw new Error(itemError?.message || versionError?.message || "Could not load the pose review.");
@@ -623,6 +624,62 @@ export async function reviewCatalogPose(
     updated_at: now,
   }).eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).eq("id", assetVersionId);
   if (versionResult.error) throw new Error(versionResult.error.message);
+
+  const humanOutcome = decision === "approved" ? "human_approved" : "human_rejected";
+  const humanReviewResults = await Promise.all([
+    service.from("session_generations").update({ qa_status: humanOutcome, updated_at: now }).eq("generation_id", version.generation_id),
+    service.from("qa_reviews").insert({
+      organization_id: workspace.organization.id,
+      planning_request_id: item.planning_request_id,
+      generation_job_id: text(item.generation_job_id),
+      pose_index: version.pose_index,
+      reviewer_type: "human_catalog_qc",
+      score: null,
+      passed: decision === "approved",
+      issues: decision === "approved" ? [] : ["human_rejected"],
+      notes: comments,
+      qa_version: "human-qc-v14",
+      outcome: humanOutcome,
+      metadata: { assetVersionId, reviewerMemberId: workspace.member.id, versionNumber: version.version_number },
+    }),
+  ]);
+  assertQueryResults(humanReviewResults, "Could not save the human QC audit result");
+
+  // A saree Pose 1 that needed human review must not be used while uncertain,
+  // but once approved it can become the batch continuity anchor. Conversely, a
+  // later human rejection invalidates this frame only when it is the anchor that
+  // batch memory currently owns; reviewing another SKU must not revoke a good
+  // anchor from an earlier SKU.
+  if (Number(version.pose_index) === 1 && item.planning_batch_id) {
+    const { data: batch, error: batchError } = await service.from("planning_batches")
+      .select("catalog_memory").eq("id", item.planning_batch_id).maybeSingle();
+    if (batchError) throw new Error(batchError.message);
+    const memory = asRecord(batch?.catalog_memory);
+    const ownsCurrentAnchor = text(memory.anchorJobId) === text(item.generation_job_id);
+    const hasAnchor = Boolean(memory.anchorOutputUrl || memory.anchorStoragePath);
+    const canPromote = decision === "approved" && !hasAnchor;
+    if (ownsCurrentAnchor || canPromote) {
+      const anchorPatch = canPromote
+        ? {
+          anchorOutputUrl: text(version.original_url || version.preview_url),
+          anchorStoragePath: text(version.storage_path),
+          anchorStorageBackend: text(version.storage_backend || "firebase"),
+          anchorJobId: item.generation_job_id,
+          anchorQaStatus: humanOutcome,
+          anchorQaVersion: "human-qc-v14",
+        }
+        : { anchorQaStatus: humanOutcome, anchorQaVersion: "human-qc-v14" };
+      const { error: anchorError } = await service.rpc("merge_catalog_memory", {
+        p_batch_id: item.planning_batch_id,
+        p_patch: anchorPatch,
+        p_require_absent: canPromote ? "anchorOutputUrl" : null,
+      });
+      if (anchorError) throw new Error(anchorError.message);
+      const { error: memoryUpdatedError } = await service.from("planning_batches")
+        .update({ memory_updated_at: now }).eq("id", item.planning_batch_id);
+      if (memoryUpdatedError) throw new Error(memoryUpdatedError.message);
+    }
+  }
 
   let reopenSetReview = false;
   if (decision === "approved" && item.qc_status === "rejected") {
@@ -1036,12 +1093,30 @@ export async function getCatalogWorkflowDetail(
     image_url: await signedCatalogAssetUrl(service, workspace.organization.id, asset as JsonRecord, "image_url") || asset.image_url,
   })));
   const request = requestResult.data;
-  const hasFront = Boolean(request?.front_image_url) || references.some((asset) => asset.asset_role === "front" && (asset.image_url || asset.storage_path));
-  const hasBack = Boolean(request?.back_image_url) || references.some((asset) => asset.asset_role === "back" && (asset.image_url || asset.storage_path));
+  const dependencyReferences = references.map((asset) => ({
+    role: text(asset.asset_role), downloadUrl: text(asset.image_url), storagePath: text(asset.storage_path),
+  }));
+  if (request?.front_image_url && !dependencyReferences.some((reference) => ["front", "saree_front_drape"].includes(reference.role))) {
+    dependencyReferences.push({ role: "front", downloadUrl: text(request.front_image_url), storagePath: text(request.front_image_path) });
+  }
+  if (request?.back_image_url && !dependencyReferences.some((reference) => ["back", "saree_back_drape"].includes(reference.role))) {
+    dependencyReferences.push({ role: "back", downloadUrl: text(request.back_image_url), storagePath: text(request.back_image_path) });
+  }
+  const sareeReferences = isSareeReferenceSet(dependencyReferences, text(request?.category));
+  const missingReferenceLabels = missingRequiredReferenceLabels(dependencyReferences, text(request?.category));
   const latestHandoff = handoffsResult.data?.[0] || null;
   const dependencies = [
-    { key: "front_reference", label: "Front product reference", status: hasFront ? "complete" : "missing" },
-    { key: "back_reference", label: "Back product reference", status: hasBack ? "complete" : "missing" },
+    ...(sareeReferences
+      ? [
+        ["saree_front_reference", "Full saree front"],
+        ["saree_back_reference", "Rear/back drape"],
+        ["saree_pallu_reference", "Fully spread pallu"],
+        ["saree_body_reference", "Saree body/weave detail"],
+      ].map(([key, label]) => ({ key, label, status: missingReferenceLabels.includes(label.toLowerCase()) ? "missing" : "complete" }))
+      : [
+        { key: "front_reference", label: "Front product reference", status: missingReferenceLabels.includes("front product") ? "missing" : "complete" },
+        { key: "back_reference", label: "Back product reference", status: missingReferenceLabels.includes("back product") ? "missing" : "complete" },
+      ]),
     { key: "pose_plan", label: "Five-pose plan", status: Array.isArray(request?.pose_plan) && request.pose_plan.length === 5 ? "complete" : "pending" },
     { key: "pose_outputs", label: "Five generated outputs", status: completedPoseCount === 5 ? "complete" : completedPoseCount ? "in_progress" : "pending", detail: `${completedPoseCount}/5 complete` },
     { key: "human_approval", label: "Final human approval", status: item.final_approved_at ? "complete" : item.qc_status === "rejected" ? "failed" : "pending" },
@@ -1178,7 +1253,7 @@ export async function bulkGenerateCatalogWorkItems(
       .select("planning_request_id,asset_role,image_url,storage_path")
       .eq("organization_id", workspace.organization.id)
       .in("planning_request_id", linkedRequestIds)
-      .in("asset_role", ["front", "back"])
+      .in("asset_role", [...PRODUCT_REFERENCE_ROLES])
     : { data: [], error: null };
   if (linkedAssetsError) throw new Error(linkedAssetsError.message);
 
@@ -1191,9 +1266,17 @@ export async function bulkGenerateCatalogWorkItems(
     }
     const request = requestById.get(requestId);
     const requestAssets = (linkedAssets || []).filter((asset) => String(asset.planning_request_id) === requestId);
-    const hasFront = Boolean(request?.front_image_url) || requestAssets.some((asset) => asset.asset_role === "front" && (asset.image_url || asset.storage_path));
-    const hasBack = Boolean(request?.back_image_url) || requestAssets.some((asset) => asset.asset_role === "back" && (asset.image_url || asset.storage_path));
-    if (!hasFront || !hasBack) throw new Error(`${item.sku_name} needs both front and back references before generation can start.`);
+    const availableReferences = requestAssets.map((asset) => ({
+      role: text(asset.asset_role), downloadUrl: text(asset.image_url), storagePath: text(asset.storage_path),
+    }));
+    if (request?.front_image_url && !availableReferences.some((reference) => ["front", "saree_front_drape"].includes(reference.role))) {
+      availableReferences.push({ role: "front", downloadUrl: text(request.front_image_url), storagePath: text(request.front_image_path) });
+    }
+    if (request?.back_image_url && !availableReferences.some((reference) => ["back", "saree_back_drape"].includes(reference.role))) {
+      availableReferences.push({ role: "back", downloadUrl: text(request.back_image_url), storagePath: text(request.back_image_path) });
+    }
+    const missing = missingRequiredReferenceLabels(availableReferences, text(request?.category));
+    if (missing.length) throw new Error(`${item.sku_name} is missing required product evidence: ${missing.join(", ")}.`);
   }
 
   const existingBatchIds = [...new Set((linkedRequests || []).map((request) => text(request.batch_id)).filter(Boolean))];
@@ -1295,8 +1378,8 @@ export async function bulkGenerateCatalogWorkItems(
         batchId = adHocBatchId;
       }
       const requestAssets = (linkedAssets || []).filter((asset) => String(asset.planning_request_id) === requestId);
-      const frontAsset = requestAssets.find((asset) => asset.asset_role === "front");
-      const backAsset = requestAssets.find((asset) => asset.asset_role === "back");
+      const frontAsset = requestAssets.find((asset) => ["saree_front_drape", "front"].includes(text(asset.asset_role)));
+      const backAsset = requestAssets.find((asset) => ["saree_back_drape", "back"].includes(text(asset.asset_role)));
       const referencePatch: JsonRecord = {};
       if (request && !request.front_image_url && frontAsset?.image_url) referencePatch.front_image_url = frontAsset.image_url;
       if (request && !request.back_image_url && backAsset?.image_url) referencePatch.back_image_url = backAsset.image_url;

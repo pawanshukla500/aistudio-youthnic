@@ -1,60 +1,49 @@
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assert, assertEquals } from "jsr:@std/assert@1";
 import { normalizeAnalysis } from "../lib/profiles.ts";
 import { normalizePoseQaResult } from "../lib/qa.ts";
 
-Deno.test("Garment Evidence Architecture: Unknown region side-lace invention should fail QA", () => {
-  // 1. Simulate an analysis where the hem is confirmed to have gold lace, but side is unknown.
-  const rawAnalysis = {
+const genericCritical = [
+  "garment_identity",
+  "colors",
+  "print_pattern",
+  "pattern_geometry",
+  "embroidery_geometry",
+  "detail_placement",
+  "absence_constraints",
+  "side_construction",
+  "trim_location",
+  "unknown_region_invention",
+  "print_embroidery_continuation",
+];
+
+Deno.test("unknown-region invention itself fails otherwise complete generic QA", () => {
+  const normalized = normalizeAnalysis({
     productIdentity: {
       category: "ethnic/fusion",
       garmentEvidence: [
-        {
-          region: "front hem",
-          state: "confirmed",
-          visibleDecoration: "gold lace trim",
-        },
-        {
-          region: "left side construction",
-          state: "unknown",
-          uncertainty: "Left side cannot be seen in references. Unproven.",
-        }
-      ]
-    }
-  };
-
-  const normalized = normalizeAnalysis(rawAnalysis, "ethnic/fusion");
-  const leftSideEvidence = normalized.productIdentity.garmentEvidence.find((e: any) => e.region === "left side construction");
-  
-  // Verify that the architecture preserves the "unknown" state constraint
-  assertEquals(leftSideEvidence?.state, "unknown");
-
-  // 2. Simulate QA response where the generator invented a side slit and continued the gold lace trim.
-  const rawQaResponse = {
-    pass: false,
-    score: 80,
-    checks: {
-      garment_identity: "pass",
-      colors: "pass",
-      detail_placement: "pass",
-      side_construction: "fail",
-      trim_location: "fail",
-      unknown_region_invention: "fail"
+        { region: "front hem", state: "confirmed", visibleDecoration: "gold lace trim" },
+        { region: "left side construction", state: "unknown", uncertainty: "Unproven." },
+      ],
     },
-    scores: {
-      side_construction: 50,
-      trim_location: 60,
-      unknown_region_invention: 40
-    },
-    failed: ["side_construction", "trim_location", "unknown_region_invention"],
-    reason: "Invented side slit with gold lace",
-    correction: "Remove vertical gold lace trim from the side. Keep side plain base fabric."
-  };
+  }, "ethnic/fusion");
+  assertEquals(
+    normalized.productIdentity.garmentEvidence.find((e) => e.region === "left side construction")?.state,
+    "unknown",
+  );
 
-  const qaResult = normalizePoseQaResult(rawQaResponse);
-  
-  // 3. Assert the critical checks pull the score down and successfully fail the pose
-  assertEquals(qaResult.pass, false);
-  assertEquals(qaResult.failed.includes("unknown_region_invention"), true);
-  assertEquals(qaResult.failed.includes("trim_location"), true);
-  assertEquals(qaResult.failed.includes("side_construction"), true);
+  const checks = Object.fromEntries(genericCritical.map((key) => [key, key === "unknown_region_invention" ? "fail" : "pass"]));
+  const scores = Object.fromEntries(genericCritical.map((key) => [key, key === "unknown_region_invention" ? 40 : 100]));
+  const result = normalizePoseQaResult({
+    pass: true,
+    score: 98,
+    checks,
+    scores,
+    failed: ["unknown_region_invention"],
+    reason: "A side slit and trim were invented in the unknown region.",
+    correction: "Keep the side in plain base fabric.",
+  }, { garmentFamily: "dress" });
+
+  assertEquals(result.pass, false);
+  assertEquals(result.failed, ["unknown_region_invention"]);
+  assert(result.productFidelity > 90, "The test must prove the named critical gate, not an unrelated low average.");
 });

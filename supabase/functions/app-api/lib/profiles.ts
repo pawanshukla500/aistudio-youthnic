@@ -53,12 +53,19 @@ export type SareeTruthProfile = {
   body: {
     mainFabric: string;
     weave: string;
+    weaveGeometry: string;
     texture: string;
     transparency: string;
+    shine: string;
     baseColor: string;
+    secondaryColors: string[];
     pattern: string;
+    motifInventory: string[];
     motifScale: string;
+    motifOrientation: string;
     motifRepeat: string;
+    motifDensity: string;
+    motifPlacement: string;
     embellishment: string;
     bodyOrientation: string;
   };
@@ -66,17 +73,25 @@ export type SareeTruthProfile = {
     upperBorder: string;
     lowerBorder: string;
     borderWidth: string;
+    upperBorderWidth: string;
+    lowerBorderWidth: string;
     borderColors: string;
     construction: string;
     motifGeometry: string;
     edgeTreatment: string;
     continuityRules: string;
+    tasselColor: string;
+    tasselConstruction: string;
+    tasselSpacing: string;
   };
   pallu: {
     hasDistinctPallu: boolean;
     startingRegion: string;
     baseColor: string;
-    motifInventory: string;
+    motifInventory: string[];
+    motifScale: string;
+    motifOrientation: string;
+    motifRepeat: string;
     motifDensity: string;
     borders: string;
     artwork: string;
@@ -102,6 +117,7 @@ export type SareeTruthProfile = {
     backConstruction: string;
     neckline: string;
     sleeves: string;
+    ties: string;
     closure: string;
     embroidery: string;
     border: string;
@@ -118,6 +134,7 @@ export type SareeTruthProfile = {
     creaseBehavior: string;
     expectedFall: string;
   };
+  regionEvidence: GarmentRegionEvidence[];
 };
 
 export type SareeDrapePlan = {
@@ -291,6 +308,7 @@ function stringValue(value: unknown, fallback = "Not visible in the supplied ref
 }
 
 function stringArray(value: unknown, fallback: string[] = []) {
+  if (typeof value === "string" && value.trim()) return [value.trim()];
   if (!Array.isArray(value)) return fallback;
   const entries = value.map((item) => stringValue(item, "")).filter(Boolean);
   return entries.length ? entries.slice(0, 20) : fallback;
@@ -365,9 +383,10 @@ function garmentEvidence(product: JsonRecord): GarmentRegionEvidence[] {
   if (!Array.isArray(evidence)) return [];
   return evidence.map((e: unknown) => {
     const obj = objectValue(e);
+    const state = String(obj.state || "unknown").trim().toLowerCase().replace(/[\s-]+/g, "_");
     return {
       region: stringValue(obj.region),
-      state: ["confirmed", "confirmed_absent", "unknown"].includes(String(obj.state)) ? (obj.state as "confirmed" | "confirmed_absent" | "unknown") : "unknown",
+      state: ["confirmed", "confirmed_absent", "unknown"].includes(state) ? state as "confirmed" | "confirmed_absent" | "unknown" : "unknown",
       visibleConstruction: stringValue(obj.visibleConstruction ?? obj.visible_construction),
       visibleDecoration: stringValue(obj.visibleDecoration ?? obj.visible_decoration),
       closures: stringValue(obj.closures),
@@ -377,6 +396,355 @@ function garmentEvidence(product: JsonRecord): GarmentRegionEvidence[] {
   });
 }
 
+function booleanValue(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (value.trim().toLowerCase() === "true") return true;
+    if (value.trim().toLowerCase() === "false") return false;
+  }
+  return fallback;
+}
+
+function normalizeRegionEvidence(value: unknown): GarmentRegionEvidence[] {
+  return garmentEvidence({ garmentEvidence: value });
+}
+
+export function normalizeSareeTruth(
+  raw: unknown,
+): SareeTruthProfile | undefined {
+  const truth = objectValue(raw);
+  if (!Object.keys(truth).length) return undefined;
+  const body = objectValue(truth.body);
+  const borders = objectValue(truth.borders);
+  const pallu = objectValue(truth.pallu);
+  const pleatZone = objectValue(truth.pleatZone ?? truth.pleat_zone);
+  const blouse = objectValue(truth.blouse);
+  const physics = objectValue(truth.physics);
+  return {
+    body: {
+      mainFabric: stringValue(body.mainFabric ?? body.main_fabric, ""),
+      weave: stringValue(body.weave, ""),
+      weaveGeometry: stringValue(body.weaveGeometry ?? body.weave_geometry, ""),
+      texture: stringValue(body.texture, ""),
+      transparency: stringValue(body.transparency, ""),
+      shine: stringValue(body.shine, ""),
+      baseColor: stringValue(body.baseColor ?? body.base_color, ""),
+      secondaryColors: stringArray(
+        body.secondaryColors ?? body.secondary_colors,
+      ),
+      pattern: stringValue(body.pattern, ""),
+      motifInventory: stringArray(body.motifInventory ?? body.motif_inventory),
+      motifScale: stringValue(body.motifScale ?? body.motif_scale, ""),
+      motifOrientation: stringValue(
+        body.motifOrientation ?? body.motif_orientation,
+        "",
+      ),
+      motifRepeat: stringValue(body.motifRepeat ?? body.motif_repeat, ""),
+      motifDensity: stringValue(body.motifDensity ?? body.motif_density, ""),
+      motifPlacement: stringValue(
+        body.motifPlacement ?? body.motif_placement,
+        "",
+      ),
+      embellishment: stringValue(body.embellishment, ""),
+      bodyOrientation: stringValue(
+        body.bodyOrientation ?? body.body_orientation,
+        "",
+      ),
+    },
+    borders: {
+      upperBorder: stringValue(borders.upperBorder ?? borders.upper_border, ""),
+      lowerBorder: stringValue(borders.lowerBorder ?? borders.lower_border, ""),
+      borderWidth: stringValue(borders.borderWidth ?? borders.border_width, ""),
+      upperBorderWidth: stringValue(
+        borders.upperBorderWidth ?? borders.upper_border_width,
+        "",
+      ),
+      lowerBorderWidth: stringValue(
+        borders.lowerBorderWidth ?? borders.lower_border_width,
+        "",
+      ),
+      borderColors: stringValue(
+        borders.borderColors ?? borders.border_colors,
+        "",
+      ),
+      construction: stringValue(borders.construction, ""),
+      motifGeometry: stringValue(
+        borders.motifGeometry ?? borders.motif_geometry,
+        "",
+      ),
+      edgeTreatment: stringValue(
+        borders.edgeTreatment ?? borders.edge_treatment,
+        "",
+      ),
+      continuityRules: stringValue(
+        borders.continuityRules ?? borders.continuity_rules,
+        "",
+      ),
+      tasselColor: stringValue(borders.tasselColor ?? borders.tassel_color, ""),
+      tasselConstruction: stringValue(
+        borders.tasselConstruction ?? borders.tassel_construction,
+        "",
+      ),
+      tasselSpacing: stringValue(
+        borders.tasselSpacing ?? borders.tassel_spacing,
+        "",
+      ),
+    },
+    pallu: {
+      hasDistinctPallu: booleanValue(
+        pallu.hasDistinctPallu ?? pallu.has_distinct_pallu,
+      ),
+      startingRegion: stringValue(
+        pallu.startingRegion ?? pallu.starting_region,
+        "",
+      ),
+      baseColor: stringValue(pallu.baseColor ?? pallu.base_color, ""),
+      motifInventory: stringArray(
+        pallu.motifInventory ?? pallu.motif_inventory,
+      ),
+      motifScale: stringValue(pallu.motifScale ?? pallu.motif_scale, ""),
+      motifOrientation: stringValue(
+        pallu.motifOrientation ?? pallu.motif_orientation,
+        "",
+      ),
+      motifRepeat: stringValue(pallu.motifRepeat ?? pallu.motif_repeat, ""),
+      motifDensity: stringValue(pallu.motifDensity ?? pallu.motif_density, ""),
+      borders: stringValue(pallu.borders, ""),
+      artwork: stringValue(pallu.artwork, ""),
+      zari: stringValue(pallu.zari, ""),
+      embroidery: stringValue(pallu.embroidery, ""),
+      tassels: stringValue(pallu.tassels, ""),
+      edgeTreatment: stringValue(
+        pallu.edgeTreatment ?? pallu.edge_treatment,
+        "",
+      ),
+      visualOrientation: stringValue(
+        pallu.visualOrientation ?? pallu.visual_orientation,
+        "",
+      ),
+      evidenceReferences: stringValue(
+        pallu.evidenceReferences ?? pallu.evidence_references,
+        "",
+      ),
+      uncertainty: stringValue(pallu.uncertainty, ""),
+    },
+    pleatZone: {
+      patternBehavior: stringValue(
+        pleatZone.patternBehavior ?? pleatZone.pattern_behavior,
+        "",
+      ),
+      borderBehavior: stringValue(
+        pleatZone.borderBehavior ?? pleatZone.border_behavior,
+        "",
+      ),
+      embellishmentBehavior: stringValue(
+        pleatZone.embellishmentBehavior ?? pleatZone.embellishment_behavior,
+        "",
+      ),
+      hasSpecialPanel: booleanValue(
+        pleatZone.hasSpecialPanel ?? pleatZone.has_special_panel,
+      ),
+    },
+    blouse: {
+      hasBlouse: booleanValue(blouse.hasBlouse ?? blouse.has_blouse),
+      color: stringValue(blouse.color, ""),
+      fabric: stringValue(blouse.fabric, ""),
+      frontConstruction: stringValue(
+        blouse.frontConstruction ?? blouse.front_construction,
+        "",
+      ),
+      backConstruction: stringValue(
+        blouse.backConstruction ?? blouse.back_construction,
+        "",
+      ),
+      neckline: stringValue(blouse.neckline, ""),
+      sleeves: stringValue(blouse.sleeves, ""),
+      ties: stringValue(blouse.ties, ""),
+      closure: stringValue(blouse.closure, ""),
+      embroidery: stringValue(blouse.embroidery, ""),
+      border: stringValue(blouse.border, ""),
+      pattern: stringValue(blouse.pattern, ""),
+      fit: stringValue(blouse.fit, ""),
+      isUnstitchedPiece: booleanValue(
+        blouse.isUnstitchedPiece ?? blouse.is_unstitched_piece,
+      ),
+    },
+    physics: {
+      weight: stringValue(physics.weight, ""),
+      stiffness: stringValue(physics.stiffness, ""),
+      fluidity: stringValue(physics.fluidity, ""),
+      transparency: stringValue(physics.transparency, ""),
+      shine: stringValue(physics.shine, ""),
+      creaseBehavior: stringValue(
+        physics.creaseBehavior ?? physics.crease_behavior,
+        "",
+      ),
+      expectedFall: stringValue(
+        physics.expectedFall ?? physics.expected_fall,
+        "",
+      ),
+    },
+    regionEvidence: normalizeRegionEvidence(
+      truth.regionEvidence ?? truth.region_evidence,
+    ),
+  };
+}
+
+export function normalizeSareeDrapePlan(
+  raw: unknown,
+): SareeDrapePlan | undefined {
+  const plan = objectValue(raw);
+  if (!Object.keys(plan).length) return undefined;
+  return {
+    baseDrapeFamily: stringValue(
+      plan.baseDrapeFamily ?? plan.base_drape_family,
+      "",
+    ),
+    shoulderSide: stringValue(plan.shoulderSide ?? plan.shoulder_side, ""),
+    waistTuck: stringValue(plan.waistTuck ?? plan.waist_tuck, ""),
+    frontPleatTreatment: stringValue(
+      plan.frontPleatTreatment ?? plan.front_pleat_treatment,
+      "",
+    ),
+    palluShoulderPlacement: stringValue(
+      plan.palluShoulderPlacement ?? plan.pallu_shoulder_placement,
+      "",
+    ),
+    openOrPleatedPallu: stringValue(
+      plan.openOrPleatedPallu ?? plan.open_or_pleated_pallu,
+      "",
+    ),
+    palluSpread: stringValue(plan.palluSpread ?? plan.pallu_spread, ""),
+    palluFallDirection: stringValue(
+      plan.palluFallDirection ?? plan.pallu_fall_direction,
+      "",
+    ),
+    palluVisibleLength: stringValue(
+      plan.palluVisibleLength ?? plan.pallu_visible_length,
+      "",
+    ),
+    handInteraction: stringValue(
+      plan.handInteraction ?? plan.hand_interaction,
+      "",
+    ),
+    movementAmount: stringValue(
+      plan.movementAmount ?? plan.movement_amount,
+      "",
+    ),
+    pinningBehavior: stringValue(
+      plan.pinningBehavior ?? plan.pinning_behavior,
+      "",
+    ),
+    borderVisibility: stringValue(
+      plan.borderVisibility ?? plan.border_visibility,
+      "",
+    ),
+    blouseVisibility: stringValue(
+      plan.blouseVisibility ?? plan.blouse_visibility,
+      "",
+    ),
+    coverageConstraints: stringValue(
+      plan.coverageConstraints ?? plan.coverage_constraints,
+      "",
+    ),
+    poseSpecificDrapeState: stringValue(
+      plan.poseSpecificDrapeState ?? plan.pose_specific_drape_state,
+      "",
+    ),
+  };
+}
+
+const REQUIRED_POSE_IDS = [
+  "full_front",
+  "angled",
+  "back",
+  "creative",
+  "closeup",
+] as const;
+const SAREE_ANALYSIS_ERROR =
+  "Stored saree analysis is incomplete or outdated. Reanalyse the product references before generation.";
+
+function sectionHasEvidence(section: unknown) {
+  return Object.values(objectValue(section)).some((value) => {
+    if (typeof value === "string") return value.trim().length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    return false;
+  });
+}
+
+export function sareeAnalysisIssues(session: unknown): string[] {
+  const value = objectValue(session);
+  const product = objectValue(value.productIdentity ?? value.product_identity);
+  const references = Array.isArray(value.references)
+    ? value.references.map(objectValue)
+    : [];
+  const garmentFamily = String(product.garmentFamily ?? product.garment_family).toLowerCase();
+  const category = String(value.category ?? product.category).toLowerCase();
+  const isSareeSession = garmentFamily === "saree" || category.includes("saree") ||
+    references.some((reference) => String(reference.role || "").startsWith("saree_"));
+  if (!isSareeSession) return [];
+  const truth = objectValue(product.sareeTruth ?? product.saree_truth);
+  const plan = objectValue(product.sareeDrapePlan ?? product.saree_drape_plan);
+  const poseValue = value.posePlan ?? value.pose_plan;
+  const poses: unknown[] = Array.isArray(poseValue) ? poseValue : [];
+  const issues: string[] = [];
+  if (garmentFamily !== "saree") issues.push("garment family is not saree");
+  if (!Object.keys(truth).length) issues.push("saree truth is missing");
+  for (const section of ["body", "borders", "pallu", "physics"] as const) {
+    if (!sectionHasEvidence(truth[section])) {
+      issues.push(`${section} evidence is missing`);
+    }
+  }
+  if (!Object.keys(plan).length) issues.push("saree drape plan is missing");
+  if (
+    poses.length !== REQUIRED_POSE_IDS.length ||
+    poses.map((pose) => String(objectValue(pose).id)).join(",") !==
+      REQUIRED_POSE_IDS.join(",")
+  ) {
+    issues.push("the ordered five-pose plan is incomplete");
+  }
+  const availableProductReferences = references.filter((reference) => {
+    const role = String(reference.role || "");
+    const isProduct = ![
+      "style_reference",
+      "model_identity",
+      "approved_pose",
+      "generated",
+    ].includes(role);
+    return isProduct &&
+      Boolean(
+        String(
+          reference.storagePath ?? reference.storage_path ??
+            reference.downloadUrl ?? reference.download_url ?? "",
+        ).trim(),
+      );
+  });
+  if (!availableProductReferences.length) {
+    issues.push("authoritative product references are unavailable");
+  }
+  const availableRoles = new Set(
+    availableProductReferences.map((reference) => String(reference.role || "")),
+  );
+  const requiredEvidence: Array<[string, string[]]> = [
+    ["full saree front", ["saree_front_drape", "front"]],
+    ["rear/back drape", ["saree_back_drape", "back"]],
+    ["saree body detail", ["saree_body_detail", "fabric_pattern"]],
+    ["fully spread pallu", ["saree_pallu_spread"]],
+  ];
+  for (const [label, roles] of requiredEvidence) {
+    if (!roles.some((role) => availableRoles.has(role))) {
+      issues.push(`${label} reference is missing`);
+    }
+  }
+  return issues;
+}
+
+export function assertSareeGenerationReady(session: unknown) {
+  if (sareeAnalysisIssues(session).length) {
+    throw new Error(SAREE_ANALYSIS_ERROR);
+  }
+}
+
 export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
   const product = objectValue(raw.productIdentity ?? raw.product_identity);
   const creative = objectValue(raw.creativeDirection ?? raw.creative_direction);
@@ -384,11 +752,20 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
   const rawPoseValue = raw.posePlan ?? raw.pose_plan;
   const rawPoses = Array.isArray(rawPoseValue) ? (rawPoseValue as unknown[]) : [];
   
-  const sareeTruthRaw = objectValue(product.sareeTruth ?? product.saree_truth);
-  const sareeTruth = Object.keys(sareeTruthRaw).length > 0 ? (sareeTruthRaw as unknown as SareeTruthProfile) : undefined;
-  
-  const sareeDrapePlanRaw = objectValue(raw.sareeDrapePlan ?? raw.saree_drape_plan);
-  const sareeDrapePlan = Object.keys(sareeDrapePlanRaw).length > 0 ? (sareeDrapePlanRaw as unknown as SareeDrapePlan) : undefined;
+  const sareeTruthRaw = objectValue(
+    raw.sareeTruth ??
+      raw.saree_truth ??
+      product.sareeTruth ??
+      product.saree_truth,
+  );
+  const sareeDrapePlanRaw = objectValue(
+    raw.sareeDrapePlan ??
+      raw.saree_drape_plan ??
+      product.sareeDrapePlan ??
+      product.saree_drape_plan,
+  );
+  const sareeTruth = normalizeSareeTruth(sareeTruthRaw);
+  const sareeDrapePlan = normalizeSareeDrapePlan(sareeDrapePlanRaw);
 
   const productIdentity: ProductIdentityProfile = {
     garmentFamily: stringValue(product.garmentFamily ?? product.garment_family, "unknown"),
@@ -489,12 +866,13 @@ ${manifest}
 
 REFERENCE AUTHORITY (highest to lowest):
 1. MODEL FACE REFERENCE (if supplied) - the exact, non-negotiable face and identity for the model. Overrides any face you would otherwise design.
-2. FRONT PRODUCT - authoritative front product design.
-3. BACK PRODUCT - authoritative back design; never infer the back from the front.
-4. FABRIC / PATTERN DETAIL - high-priority truth for weave, texture, print, embroidery, stitching, trims, and construction.
-5. MANNEQUIN / FLAT-LAY SHOT - on a mannequin or dress form, authoritative for worn shape, fit, proportion and drape; laid flat, authoritative for outline, construction, panel layout and length only, since flat cloth shows no worn drape.
-6. ADDITIONAL PRODUCT - another source of product truth.
-7. STYLE REFERENCE - creative direction only. Never copy its garment, product color, bottoms, logos, or accessories.
+2. Region-specific SAREE PRODUCT references (when supplied) - FULL FRONT DRAPE, REAR/BACK DRAPE, BODY/WEAVE DETAIL, FULLY SPREAD PALLU, BORDER/TASSELS and BLOUSE references are each authoritative for their named physical region. A pallu-spread image is pallu truth, never a generic fabric image.
+3. FRONT PRODUCT - legacy authoritative front product design.
+4. BACK PRODUCT - legacy authoritative back design; never infer the back from the front.
+5. FABRIC / PATTERN DETAIL - legacy high-priority truth for body weave, texture, print, embroidery, stitching, trims, and construction; it does not prove pallu artwork.
+6. MANNEQUIN / FLAT-LAY SHOT - on a mannequin or dress form, authoritative for worn shape, fit, proportion and drape; laid flat, authoritative for outline, construction, panel layout and length only, since flat cloth shows no worn drape.
+7. ADDITIONAL PRODUCT - another source of product truth.
+8. STYLE REFERENCE - creative direction only. Never copy its garment, product color, bottoms, logos, or accessories.
 
 Product references are frequently flat-lay, folded, pinned, or shot on a mannequin or dress form. Read the garment through that presentation: infer how each panel, hem, sleeve and closure behaves once it is worn on a live human body, and record that in the profile. The mannequin, dress form, hanger, clips, pins and the flat surface are photography apparatus, never part of the product - never describe them as garment features and never let them appear in the pose plan.
 
@@ -566,7 +944,7 @@ Create exactly five product-specific camera setups in one coherent commercial co
 - closeup: a genuine zoomed-in face-to-chest or face-to-waist shot (never a repeat of the full-body hero framing) pairing a beautiful, cute, Gen-Z-style face with a genuine, natural expression AND one sharp, clearly visible real product detail (embroidery, neckline, drape, print, or fabric texture).
 
 If the garmentFamily is "saree", you MUST also generate sareeTruth and sareeDrapePlan inside the JSON root.
-sareeTruth: Extract the mainFabric, weave, baseColor, pattern, embellishments, borders, pallu (hasDistinctPallu, startingRegion, motifInventory, edgeTreatment, artwork), pleat zone behavior, blouse (is it an unstitched piece? color, fabric), and fabric physics (stiffness, fluidity, expected fall).
+sareeTruth: Record exact base and secondary colours; fabric family; weave/lattice geometry; texture, shine and transparency; every peacock/floral/other motif with its scale, orientation, repeat, density and placement by body/pallu/border; separate upper/lower border widths, construction and colours; the exact region where the pallu starts plus its artwork, motif density and orientation; tassel colour, construction and spacing; blouse colour/fabric/front/back/neckline/sleeves/ties/closures; and fabric weight, stiffness, fluidity and expected fall. Add regionEvidence entries with confirmed, confirmed_absent or unknown state. Unknown must stay unknown: never mirror or extrapolate decoration into an unproven region.
 sareeDrapePlan: Choose a baseDrapeFamily (e.g., "shoulder-side/open-pallu" or "shoulder-side/pleated-pallu"), frontPleatTreatment, palluShoulderPlacement, handInteraction, borderVisibility, and poseSpecificDrapeState (e.g. how the angled pose shows the pallu fall).
 
 posePlan: Design 5 distinct poses (full_front, angled, back, creative, closeup). For each, specify the cameraAngle, framing, bodyPosition, handPlacement, expression, and write a detailed photorealistic 'prompt' that combines these elements with the product and model identity.
@@ -574,7 +952,7 @@ posePlan: Design 5 distinct poses (full_front, angled, back, creative, closeup).
 Across all five, ONLY pose, angle, framing, and expression may change. Exact product, colors, pattern, bottom wear, face, hairstyle, makeup, accessories, footwear, scene, lighting, shadows, camera/lens feel, and color treatment remain locked.
 
 Return STRICT JSON only:
-{"productIdentity":{"garmentFamily":"","category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[],"garmentEvidence":[{"region":"","state":"","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeTruth":{"body":{"mainFabric":"","weave":"","texture":"","transparency":"","baseColor":"","pattern":"","motifScale":"","motifRepeat":"","embellishment":"","bodyOrientation":""},"borders":{"upperBorder":"","lowerBorder":"","borderWidth":"","borderColors":"","construction":"","motifGeometry":"","edgeTreatment":"","continuityRules":""},"pallu":{"hasDistinctPallu":false,"startingRegion":"","baseColor":"","motifInventory":"","motifDensity":"","borders":"","artwork":"","zari":"","embroidery":"","tassels":"","edgeTreatment":"","visualOrientation":"","evidenceReferences":"","uncertainty":""},"pleatZone":{"patternBehavior":"","borderBehavior":"","embellishmentBehavior":"","hasSpecialPanel":false},"blouse":{"hasBlouse":false,"color":"","fabric":"","frontConstruction":"","backConstruction":"","neckline":"","sleeves":"","closure":"","embroidery":"","border":"","pattern":"","fit":"","isUnstitchedPiece":false},"physics":{"weight":"","stiffness":"","fluidity":"","transparency":"","shine":"","creaseBehavior":"","expectedFall":""}},"sareeDrapePlan":{"baseDrapeFamily":"","shoulderSide":"","waistTuck":"","frontPleatTreatment":"","palluShoulderPlacement":"","openOrPleatedPallu":"","palluSpread":"","palluFallDirection":"","palluVisibleLength":"","handInteraction":"","movementAmount":"","pinningBehavior":"","borderVisibility":"","blouseVisibility":"","coverageConstraints":"","poseSpecificDrapeState":""},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"angled","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"back","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"creative","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"closeup","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""}]}  `;
+{"productIdentity":{"garmentFamily":"","category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[],"garmentEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeTruth":{"body":{"mainFabric":"","weave":"","weaveGeometry":"","texture":"","transparency":"","shine":"","baseColor":"","secondaryColors":[],"pattern":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","motifPlacement":"","embellishment":"","bodyOrientation":""},"borders":{"upperBorder":"","lowerBorder":"","borderWidth":"","upperBorderWidth":"","lowerBorderWidth":"","borderColors":"","construction":"","motifGeometry":"","edgeTreatment":"","continuityRules":"","tasselColor":"","tasselConstruction":"","tasselSpacing":""},"pallu":{"hasDistinctPallu":false,"startingRegion":"","baseColor":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","borders":"","artwork":"","zari":"","embroidery":"","tassels":"","edgeTreatment":"","visualOrientation":"","evidenceReferences":"","uncertainty":""},"pleatZone":{"patternBehavior":"","borderBehavior":"","embellishmentBehavior":"","hasSpecialPanel":false},"blouse":{"hasBlouse":false,"color":"","fabric":"","frontConstruction":"","backConstruction":"","neckline":"","sleeves":"","ties":"","closure":"","embroidery":"","border":"","pattern":"","fit":"","isUnstitchedPiece":false},"physics":{"weight":"","stiffness":"","fluidity":"","transparency":"","shine":"","creaseBehavior":"","expectedFall":""},"regionEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeDrapePlan":{"baseDrapeFamily":"","shoulderSide":"","waistTuck":"","frontPleatTreatment":"","palluShoulderPlacement":"","openOrPleatedPallu":"","palluSpread":"","palluFallDirection":"","palluVisibleLength":"","handInteraction":"","movementAmount":"","pinningBehavior":"","borderVisibility":"","blouseVisibility":"","coverageConstraints":"","poseSpecificDrapeState":""},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"angled","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"back","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"creative","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"closeup","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""}]}  `;
 }
 
 export const CONSISTENCY_RULES = [
@@ -599,7 +977,7 @@ export const CONSISTENCY_RULES = [
 // Bumping this invalidates cached analyses, which is intended here: a profile
 // cached under v8 carries no pattern or embroidery geometry for the prompt locks
 // and the fidelity gate to work against.
-export const ANALYSIS_VERSION = "generation-session-v13-saree-poses";
+export const ANALYSIS_VERSION = "generation-session-v14-saree-fidelity";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

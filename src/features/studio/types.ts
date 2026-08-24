@@ -3,7 +3,19 @@ import type { Id } from "../../lib/backend";
 // the analysis contract, both features, and the editor that renders them.
 import type { StylingPlan as StylingPlanProfile } from "../../lib/stylingPlan";
 
-export type ProductReferenceRole = "front" | "back" | "fabric_pattern" | "mannequin" | "additional_product";
+export type ProductReferenceRole =
+  | "front"
+  | "back"
+  | "fabric_pattern"
+  | "mannequin"
+  | "additional_product"
+  | "saree_front_drape"
+  | "saree_back_drape"
+  | "saree_body_detail"
+  | "saree_pallu_spread"
+  | "saree_border_tassels"
+  | "saree_blouse_front"
+  | "saree_blouse_back_piece";
 // "model_identity" (not "model_reference") to match the existing planning_assets_asset_role_check
 // constraint in Supabase - that value was already reserved there; introducing a different string
 // here would fail the DB insert with a check-constraint violation.
@@ -66,12 +78,19 @@ export type SareeTruthProfile = {
   body: {
     mainFabric: string;
     weave: string;
+    weaveGeometry: string;
     texture: string;
     transparency: string;
+    shine: string;
     baseColor: string;
+    secondaryColors: string[];
     pattern: string;
+    motifInventory: string[];
     motifScale: string;
+    motifOrientation: string;
     motifRepeat: string;
+    motifDensity: string;
+    motifPlacement: string;
     embellishment: string;
     bodyOrientation: string;
   };
@@ -79,17 +98,25 @@ export type SareeTruthProfile = {
     upperBorder: string;
     lowerBorder: string;
     borderWidth: string;
+    upperBorderWidth: string;
+    lowerBorderWidth: string;
     borderColors: string;
     construction: string;
     motifGeometry: string;
     edgeTreatment: string;
     continuityRules: string;
+    tasselColor: string;
+    tasselConstruction: string;
+    tasselSpacing: string;
   };
   pallu: {
     hasDistinctPallu: boolean;
     startingRegion: string;
     baseColor: string;
-    motifInventory: string;
+    motifInventory: string[];
+    motifScale: string;
+    motifOrientation: string;
+    motifRepeat: string;
     motifDensity: string;
     borders: string;
     artwork: string;
@@ -115,6 +142,7 @@ export type SareeTruthProfile = {
     backConstruction: string;
     neckline: string;
     sleeves: string;
+    ties: string;
     closure: string;
     embroidery: string;
     border: string;
@@ -131,6 +159,15 @@ export type SareeTruthProfile = {
     creaseBehavior: string;
     expectedFall: string;
   };
+  regionEvidence: Array<{
+    region: string;
+    state: "confirmed" | "confirmed_absent" | "unknown";
+    visibleConstruction: string;
+    visibleDecoration: string;
+    closures: string;
+    explicitlyAbsent: string[];
+    uncertainty: string;
+  }>;
 };
 
 export type SareeDrapePlan = {

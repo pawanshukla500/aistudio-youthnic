@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Aperture, CheckCircle2, ChevronDown, ChevronUp, Loader2, Palette, Shirt, Sparkles } from "lucide-react";
+import { AlertTriangle, Aperture, CheckCircle2, ChevronDown, ChevronUp, Loader2, Palette, Shirt, Sparkles } from "lucide-react";
 import type { StudioAnalysis } from "../types";
+import { sareeProfilePresentation } from "../sareeProfilePresentation";
 
 const productFields: Array<[keyof StudioAnalysis["productIdentity"], string]> = [
   ["category", "Category"],
@@ -81,6 +82,10 @@ export function AnalysisProfile({
 }) {
   const [isOpen, setIsOpen] = useState(true);
   const [contextOpen, setContextOpen] = useState(false);
+  const sareeProfile = analysis ? sareeProfilePresentation(analysis.productIdentity) : null;
+  const sareeTruth = sareeProfile?.truth;
+  const sareeDrapePlan = sareeProfile?.drape;
+  const sareeProfileIncomplete = sareeProfile?.incomplete === true;
 
   return (
     <div className="w-full">
@@ -97,7 +102,7 @@ export function AnalysisProfile({
             <h2 className="text-base font-bold text-on-surface">Scene & styling</h2>
             <p className="mt-0.5 text-xs text-secondary">
               {!ready
-                ? "Upload front and back images to start Gemini Vision analysis."
+                ? "Upload the required product evidence to start Gemini Vision analysis."
                 : analyzing
                   ? "Gemini Vision is locking the product, scene, model, and five-pose plan."
                   : current
@@ -162,6 +167,13 @@ export function AnalysisProfile({
             </div>
           )}
 
+          {sareeProfileIncomplete && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
+              <span>Stored saree analysis is incomplete or outdated. Reanalyse the product references before generation.</span>
+            </div>
+          )}
+
           {analysis && (
             <div className={`rounded-xl border border-outline-variant/40 bg-surface-container-lowest overflow-hidden shadow-sm ${stale ? "opacity-60" : ""}`}>
               <button 
@@ -198,31 +210,17 @@ export function AnalysisProfile({
                     </div>
                   )}
 
-                  {analysis.productIdentity.garmentFamily === "saree" && analysis.productIdentity.sareeTruth && (
+                  {analysis.productIdentity.garmentFamily === "saree" && sareeTruth && (
                     <div>
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold"><Shirt className="h-4 w-4 text-primary" /> Saree Truth</h3>
-                      <ProfileGrid items={[
-                        ["Main Fabric", analysis.productIdentity.sareeTruth.body.mainFabric],
-                        ["Pallu Type", analysis.productIdentity.sareeTruth.pallu.hasDistinctPallu ? "Distinct Pallu" : "Continuous Body"],
-                        ["Pallu Motif", analysis.productIdentity.sareeTruth.pallu.motifInventory],
-                        ["Border", analysis.productIdentity.sareeTruth.borders.upperBorder],
-                        ["Blouse Piece", analysis.productIdentity.sareeTruth.blouse.hasBlouse ? "Included" : "None"],
-                        ["Physics", analysis.productIdentity.sareeTruth.physics.expectedFall],
-                      ]} />
+                      <ProfileGrid items={sareeProfile.truthItems} />
                     </div>
                   )}
 
-                  {analysis.productIdentity.garmentFamily === "saree" && analysis.productIdentity.sareeDrapePlan && (
+                  {analysis.productIdentity.garmentFamily === "saree" && sareeDrapePlan && (
                     <div>
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold"><Palette className="h-4 w-4 text-primary" /> Saree Drape Plan</h3>
-                      <ProfileGrid items={[
-                        ["Base Drape", analysis.productIdentity.sareeDrapePlan.baseDrapeFamily],
-                        ["Shoulder", analysis.productIdentity.sareeDrapePlan.shoulderSide],
-                        ["Pallu Placement", analysis.productIdentity.sareeDrapePlan.palluShoulderPlacement],
-                        ["Pallu Style", analysis.productIdentity.sareeDrapePlan.openOrPleatedPallu],
-                        ["Pleat Treatment", analysis.productIdentity.sareeDrapePlan.frontPleatTreatment],
-                        ["Pallu Spread", analysis.productIdentity.sareeDrapePlan.palluSpread],
-                      ]} />
+                      <ProfileGrid items={sareeProfile.drapeItems} />
                     </div>
                   )}
 
