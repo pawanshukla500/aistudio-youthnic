@@ -15,7 +15,8 @@ function StatusBadge({ value }: { value: string }) {
 export function ProductionTable({
   items,
   members,
-  canManage,
+  canAssign,
+  canGenerate,
   canReviewQc,
   canCompleteListing,
   busyKey,
@@ -29,7 +30,7 @@ export function ProductionTable({
   onToggleSelect,
   onToggleSelectAll,
 }: ProductionActionProps) {
-  const selectableItems = canManage ? items.filter(canQueueGeneration) : [];
+  const selectableItems = canGenerate ? items.filter(canQueueGeneration) : [];
   const selectedVisibleCount = selectableItems.filter((item) => selectedIds.has(item.id)).length;
   const isAllSelected = selectableItems.length > 0 && selectedVisibleCount === selectableItems.length;
   const isSomeSelected = selectedVisibleCount > 0 && selectedVisibleCount < selectableItems.length;
@@ -62,7 +63,7 @@ export function ProductionTable({
           <tbody className="divide-y divide-outline-variant/20 bg-white">
             {items.map((item) => {
               const completed = isCompleted(item);
-              const canSelect = canManage && canQueueGeneration(item);
+              const canSelect = canGenerate && canQueueGeneration(item);
               const assigningGeneration = busyKey === `assign:generation:${item.id}`;
               const assigningListing = busyKey === `assign:listing:${item.id}`;
               return (
@@ -94,7 +95,7 @@ export function ProductionTable({
                   <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={item.qc_status} /></td>
                   <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={item.listing_status} /></td>
                   <td className="px-4 py-3">
-                    {canManage ? (
+                    {canAssign ? (
                       <select
                         value={item.generation_assigned_member_id || ""}
                         disabled={assigningGeneration}
@@ -108,7 +109,7 @@ export function ProductionTable({
                     ) : <span className="text-sm text-secondary">{item.generation_assigned_member?.display_name || item.generation_assigned_member?.email || "Unassigned"}</span>}
                   </td>
                   <td className="px-4 py-3">
-                    {canManage ? (
+                    {canAssign ? (
                       <select
                         value={item.listing_assigned_member_id || ""}
                         disabled={assigningListing}
@@ -147,7 +148,7 @@ export function ProductionTable({
                           <Play className="h-3.5 w-3.5" /> Start listing
                         </button>
                       )}
-                      {canCompleteListing && (item.listing_status === "in_progress" || (item.listing_status === "pending" && !item.listing_sent_at)) && item.generation_status === "completed" && item.qc_status === "passed" && (
+                      {canCompleteListing && item.listing_status === "in_progress" && item.generation_status === "completed" && item.qc_status === "passed" && (
                         <button disabled={busyKey === `listing:${item.id}`} onClick={() => void onListingDone(item.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-bold text-white hover:bg-primary/90 disabled:opacity-50">
                           <Check className="h-3.5 w-3.5" /> Listing Done
                         </button>

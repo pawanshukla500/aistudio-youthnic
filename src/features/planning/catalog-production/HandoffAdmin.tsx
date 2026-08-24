@@ -19,6 +19,7 @@ import { supabase } from "../../../lib/supabase";
 
 type AdminData = {
   settings: Record<string, any>;
+  recipientGroups: Array<{ slug: string; name: string; description?: string }>;
   preview: { reportDate: string; recipients: string[]; rows: Array<Record<string, any>>; subject: string };
   deliveries: Array<Record<string, any> & { attempts: Array<Record<string, any>>; itemCount: number }>;
 };
@@ -50,6 +51,7 @@ export function HandoffAdmin() {
     timezone: "Asia/Kolkata",
     sendLocalTime: "10:00",
     recipientMode: "listing_team",
+    recipientRoleSlug: "listing-team",
     customRecipients: "",
     businessWeekdays: [1, 2, 3, 4, 5],
     holidayDates: "",
@@ -67,6 +69,7 @@ export function HandoffAdmin() {
         timezone: source.timezone || "Asia/Kolkata",
         sendLocalTime: String(source.send_local_time || "10:00").slice(0, 5),
         recipientMode: source.recipient_mode || "listing_team",
+        recipientRoleSlug: source.recipient_role_slug || "listing-team",
         customRecipients: Array.isArray(source.custom_recipients) ? source.custom_recipients.join(", ") : "",
         businessWeekdays: Array.isArray(source.business_weekdays) ? source.business_weekdays.map(Number) : [1, 2, 3, 4, 5],
         holidayDates: Array.isArray(source.holiday_dates) ? source.holiday_dates.join("\n") : "",
@@ -137,7 +140,8 @@ export function HandoffAdmin() {
           <label className="mt-5 flex items-center justify-between rounded-xl bg-surface-container/45 p-3 text-sm font-semibold text-on-surface"><span><span className="block">Automatic daily handoff</span><span className="mt-0.5 block text-[10px] font-normal text-secondary">Runs only on configured business days</span></span><input type="checkbox" checked={settings.enabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} className="h-4 w-4 accent-primary" /></label>
           <div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="text-xs font-bold text-secondary">Timezone<input value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} className="mt-1.5 h-10 w-full rounded-xl border border-outline-variant px-3 text-sm font-normal text-on-surface" /></label><label className="text-xs font-bold text-secondary">Send time<input type="time" value={settings.sendLocalTime} onChange={(event) => setSettings({ ...settings, sendLocalTime: event.target.value })} className="mt-1.5 h-10 w-full rounded-xl border border-outline-variant px-3 text-sm font-normal text-on-surface" /></label></div>
           <div className="mt-4"><p className="text-xs font-bold text-secondary">Business weekdays</p><div className="mt-2 flex flex-wrap gap-2">{weekdayLabels.map((label, index) => { const day = index + 1; const active = settings.businessWeekdays.includes(day); return <button key={label} type="button" onClick={() => setSettings({ ...settings, businessWeekdays: active ? settings.businessWeekdays.filter((value) => value !== day) : [...settings.businessWeekdays, day].sort() })} className={`rounded-lg px-2.5 py-1.5 text-xs font-bold ${active ? "bg-primary text-white" : "bg-surface-container text-secondary"}`}>{label}</button>; })}</div></div>
-          <label className="mt-4 block text-xs font-bold text-secondary">Recipient mode<select value={settings.recipientMode} onChange={(event) => setSettings({ ...settings, recipientMode: event.target.value })} className="mt-1.5 h-10 w-full rounded-xl border border-outline-variant px-3 text-sm font-normal text-on-surface"><option value="listing_team">Listing Team role</option><option value="custom">Custom recipients</option><option value="listing_team_and_custom">Listing Team + custom</option></select></label>
+          <label className="mt-4 block text-xs font-bold text-secondary">Recipient mode<select value={settings.recipientMode} onChange={(event) => setSettings({ ...settings, recipientMode: event.target.value })} className="mt-1.5 h-10 w-full rounded-xl border border-outline-variant px-3 text-sm font-normal text-on-surface"><option value="listing_team">Workspace group</option><option value="custom">Custom recipients</option><option value="listing_team_and_custom">Workspace group + custom</option></select></label>
+          {settings.recipientMode !== "custom" && <label className="mt-4 block text-xs font-bold text-secondary">Recipient group<select value={settings.recipientRoleSlug} onChange={(event) => setSettings({ ...settings, recipientRoleSlug: event.target.value })} className="mt-1.5 h-10 w-full rounded-xl border border-outline-variant px-3 text-sm font-normal text-on-surface">{data.recipientGroups.map((group) => <option key={group.slug} value={group.slug}>{group.name}</option>)}</select><span className="mt-1 block text-[10px] font-normal text-secondary">Active members can opt out with their catalog handoff email preference.</span></label>}
           <label className="mt-4 block text-xs font-bold text-secondary">Custom recipients<textarea rows={2} value={settings.customRecipients} onChange={(event) => setSettings({ ...settings, customRecipients: event.target.value })} placeholder="listing@example.com, manager@example.com" className="mt-1.5 w-full rounded-xl border border-outline-variant px-3 py-2 text-sm font-normal text-on-surface" /></label>
           <label className="mt-4 block text-xs font-bold text-secondary">Holiday dates <span className="font-normal">(one YYYY-MM-DD per line)</span><textarea rows={3} value={settings.holidayDates} onChange={(event) => setSettings({ ...settings, holidayDates: event.target.value })} placeholder="2026-10-20" className="mt-1.5 w-full rounded-xl border border-outline-variant px-3 py-2 font-mono text-xs font-normal text-on-surface" /></label>
           <button disabled={Boolean(busy)} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40">{busy === "settings" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save handoff settings</button>

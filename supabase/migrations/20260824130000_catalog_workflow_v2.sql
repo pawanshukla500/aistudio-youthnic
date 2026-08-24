@@ -40,6 +40,39 @@ on conflict (code) do update set
   default_next_action = excluded.default_next_action,
   terminal = excluded.terminal;
 
+-- Catalog actions are intentionally separated from the older broad
+-- planning.manage permission so Listing Team members cannot approve assets,
+-- reassign owners, or send administrative emails merely because they can list.
+insert into public.permissions (key, module, description)
+values
+  ('catalog.assign', 'catalog', 'Assign generation, review, and listing ownership.'),
+  ('catalog.handoff.manage', 'catalog', 'Configure, preview, send, retry, and inspect Listing Team handoffs.'),
+  ('catalog.listing.complete', 'catalog', 'Start and complete marketplace listing work from an approved handoff.')
+on conflict (key) do update set module = excluded.module, description = excluded.description;
+
+insert into public.role_permissions (role_id, permission_id)
+select role.id, permission.id
+from public.roles as role
+cross join public.permissions as permission
+where role.is_system
+  and (
+    (role.slug in ('planning-manager','admin') and permission.key in ('catalog.assign','catalog.handoff.manage','catalog.listing.complete'))
+    or (role.slug = 'listing-team' and permission.key = 'catalog.listing.complete')
+  )
+on conflict do nothing;
+
+delete from public.role_permissions as role_permission
+using public.roles as role, public.permissions as permission
+where role_permission.role_id = role.id
+  and role_permission.permission_id = permission.id
+  and role.is_system
+  and (
+    (role.slug = 'listing-team' and permission.key = any (array[
+      'planning.analyze','planning.approve','planning.create','planning.generate_images','planning.manage','studio.generate'
+    ]))
+    or (role.slug = 'creative-team' and permission.key = any (array['planning.approve','planning.manage']))
+  );
+
 alter table public.catalog_workflow_stage_definitions enable row level security;
 revoke all on table public.catalog_workflow_stage_definitions from anon;
 grant select on table public.catalog_workflow_stage_definitions to authenticated;
@@ -306,6 +339,7 @@ create table if not exists public.catalog_handoff_settings (
   timezone text not null default 'Asia/Kolkata',
   send_local_time time not null default '10:00',
   recipient_mode text not null default 'listing_team' check (recipient_mode in ('listing_team','custom','listing_team_and_custom')),
+  recipient_role_slug text not null default 'listing-team',
   custom_recipients text[] not null default '{}'::text[],
   business_weekdays smallint[] not null default '{1,2,3,4,5}'::smallint[],
   holiday_dates date[] not null default '{}'::date[],
@@ -411,6 +445,78 @@ begin
   end loop;
 end
 $$;
+
+-- Notification rows can be addressed to one member, one operational role/team,
+-- one email-matched member, or the whole organization. Enforce that visibility
+-- in Postgres rather than returning all tenant notifications for client filtering.
+drop policy if exists notifications_select_current_org on public.notifications;
+create policy notifications_select_current_org on public.notifications
+for select to authenticated
+using (
+  organization_id = (select private.current_organization_id())
+  and (
+    recipient_member_id = (select private.current_member_id())
+    or (
+      recipient_member_id is null
+      and recipient_team <> ''
+      and exists (
+        select 1
+        from public.member_roles as member_role
+        join public.roles as role on role.id = member_role.role_id
+        where member_role.member_id = (select private.current_member_id())
+          and role.organization_id = notifications.organization_id
+          and role.slug = notifications.recipient_team
+      )
+    )
+    or (
+      recipient_member_id is null
+      and recipient_team = ''
+      and (
+        recipient_email = ''
+        or exists (
+          select 1 from public.organization_members as member
+          where member.id = (select private.current_member_id())
+            and lower(member.email) = lower(notifications.recipient_email)
+        )
+      )
+    )
+  )
+);
+
+drop policy if exists notifications_update_current_org on public.notifications;
+create policy notifications_update_current_org on public.notifications
+for update to authenticated
+using (
+  organization_id = (select private.current_organization_id())
+  and (
+    recipient_member_id = (select private.current_member_id())
+    or (
+      recipient_member_id is null
+      and recipient_team <> ''
+      and exists (
+        select 1
+        from public.member_roles as member_role
+        join public.roles as role on role.id = member_role.role_id
+        where member_role.member_id = (select private.current_member_id())
+          and role.organization_id = notifications.organization_id
+          and role.slug = notifications.recipient_team
+      )
+    )
+    or (
+      recipient_member_id is null
+      and recipient_team = ''
+      and (
+        recipient_email = ''
+        or exists (
+          select 1 from public.organization_members as member
+          where member.id = (select private.current_member_id())
+            and lower(member.email) = lower(notifications.recipient_email)
+        )
+      )
+    )
+  )
+)
+with check (organization_id = (select private.current_organization_id()));
 
 -- A private Supabase Storage bucket and tenant-prefixed policies are provisioned
 -- for the gradual asset cutover. Existing Firebase objects are not moved here.
@@ -528,12 +634,14 @@ begin
   new.workflow_progress := coalesce(derived_progress, 0);
   new.next_action := case
     when new.blocked_reason <> '' then 'Resolve: ' || new.blocked_reason
+    when tg_op = 'INSERT' or old.workflow_stage is distinct from derived_stage then coalesce(derived_next_action, '')
     else coalesce(nullif(new.next_action, ''), derived_next_action, '')
   end;
   new.current_step := case
     when derived_stage = 'generation_in_progress' then 'Generating pose set'
     when derived_stage = 'quality_review' then 'Human five-pose review'
     when derived_stage in ('sent_to_listing_team','listing_in_progress') then 'Marketplace listing'
+    when tg_op = 'INSERT' or old.workflow_stage is distinct from derived_stage then coalesce(derived_next_action, '')
     else coalesce(nullif(new.current_step, ''), derived_next_action, '')
   end;
   new.asset_folder_key := coalesce(nullif(new.asset_folder_key, ''), new.organization_id::text || '/' || new.id::text || '/approved');
@@ -590,6 +698,7 @@ declare
   job public.generation_jobs%rowtype;
   source_epoch integer := greatest(coalesce(new.generation_epoch, 1), 1);
   target_version integer;
+  target_version_id uuid;
 begin
   if new.status <> 'completed' or coalesce(new.output_url, '') = '' then return new; end if;
 
@@ -658,7 +767,21 @@ begin
     prompt_metadata = excluded.prompt_metadata,
     generated_at = excluded.generated_at,
     regeneration_metadata = excluded.regeneration_metadata,
-    updated_at = now();
+    updated_at = now()
+  returning id into target_version_id;
+
+  if target_version = (
+    select max(version.version_number)
+    from public.catalog_pose_asset_versions as version
+    where version.work_item_id = target.id and version.pose_index = new.pose_index
+  ) then
+    update public.catalog_pose_asset_versions as previous_version
+    set approval_status = 'superseded', updated_at = now()
+    where previous_version.work_item_id = target.id
+      and previous_version.pose_index = new.pose_index
+      and previous_version.id <> target_version_id
+      and previous_version.approval_status in ('approved','rejected');
+  end if;
   return new;
 end;
 $$;
@@ -1038,6 +1161,60 @@ set listing_sent_at = coalesce(item.listing_sent_at, delivery_item.sent_at),
     workflow_progress = case when item.workflow_stage = 'listed' then 100 else 90 end
 from public.catalog_report_delivery_items as delivery_item
 where delivery_item.work_item_id = item.id;
+
+-- Fail the rollout if a tenant table is accidentally exposed without RLS, a
+-- current-organization read policy, or with direct browser mutation grants.
+-- This is an executable deployment assertion, not only a source-code check.
+do $$
+declare
+  table_name text;
+begin
+  foreach table_name in array array[
+    'catalog_creative_directions',
+    'catalog_work_item_assignments',
+    'catalog_work_item_comments',
+    'catalog_pose_asset_versions',
+    'catalog_asset_reviews',
+    'catalog_listing_handoffs',
+    'catalog_listing_handoff_assets',
+    'catalog_handoff_settings',
+    'catalog_report_delivery_attempts',
+    'catalog_report_delivery_items'
+  ]
+  loop
+    if not coalesce((
+      select class.relrowsecurity
+      from pg_class as class
+      join pg_namespace as namespace on namespace.oid = class.relnamespace
+      where namespace.nspname = 'public' and class.relname = table_name
+    ), false) then
+      raise exception 'Catalog Workflow V2 security assertion failed: %.% does not have RLS enabled', 'public', table_name;
+    end if;
+    if not exists (
+      select 1 from pg_policies as policy
+      where policy.schemaname = 'public'
+        and policy.tablename = table_name
+        and policy.cmd = 'SELECT'
+        and 'authenticated' = any(policy.roles)
+        and coalesce(policy.qual, '') like '%current_organization_id%'
+    ) then
+      raise exception 'Catalog Workflow V2 security assertion failed: %.% has no tenant read policy', 'public', table_name;
+    end if;
+    if has_table_privilege('authenticated', format('public.%I', table_name), 'INSERT')
+       or has_table_privilege('authenticated', format('public.%I', table_name), 'UPDATE')
+       or has_table_privilege('authenticated', format('public.%I', table_name), 'DELETE') then
+      raise exception 'Catalog Workflow V2 security assertion failed: authenticated can mutate %.% directly', 'public', table_name;
+    end if;
+  end loop;
+
+  if not exists (select 1 from storage.buckets where id = 'catalog-assets' and public = false) then
+    raise exception 'Catalog Workflow V2 security assertion failed: catalog-assets must be a private bucket';
+  end if;
+  if (select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname like 'catalog_assets_%_current_org') <> 4 then
+    raise exception 'Catalog Workflow V2 security assertion failed: catalog-assets needs four tenant path policies';
+  end if;
+end
+$$;
 
 -- Publish operational state for live UI updates. Low-frequency polling remains
 -- only as a recovery mechanism for disconnected clients.

@@ -13,7 +13,7 @@ const columns = [
 export function ProductionBoard({
   items,
   members,
-  canManage,
+  canAssign,
   canReviewQc,
   canCompleteListing,
   busyKey,
@@ -55,7 +55,7 @@ export function ProductionBoard({
                     </div>
 
                     <div className="mt-3 space-y-2">
-                      {canManage ? (
+                      {canAssign ? (
                         <>
                           <label className="block text-[10px] font-bold uppercase tracking-wide text-secondary">
                             AI owner
@@ -91,7 +91,7 @@ export function ProductionBoard({
                       {canCompleteListing && item.workflow_stage === "sent_to_listing_team" && (
                         <button disabled={busyKey === `listing-start:${item.id}`} onClick={() => void onListingStarted(item.id)} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-2 py-1.5 text-xs font-bold text-white disabled:opacity-50"><Play className="h-3.5 w-3.5" /> Start listing</button>
                       )}
-                      {canCompleteListing && (item.listing_status === "in_progress" || (item.listing_status === "pending" && !item.listing_sent_at)) && item.qc_status === "passed" && (
+                      {canCompleteListing && item.listing_status === "in_progress" && item.qc_status === "passed" && (
                         <button disabled={busyKey === `listing:${item.id}`} onClick={() => void onListingDone(item.id)} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-2 py-1.5 text-xs font-bold text-white disabled:opacity-50"><Check className="h-3.5 w-3.5" /> Listing Done</button>
                       )}
                       {column.id === "completed" && <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700"><Check className="h-3.5 w-3.5" /> Finished</span>}

@@ -46,6 +46,9 @@ jobs:
       - name: Verify catalog workflow contract
         run: node scripts/verify-catalog-workflow-v2.mjs
 
+      - name: Validate live acceptance harness
+        run: node --check scripts/verify-catalog-workflow-live.mjs
+
       - name: Test catalog business calendar
         run: deno test --frozen supabase/functions/app-api/lib/catalogHandoffCalendar.test.ts
 
