@@ -377,8 +377,8 @@ function catalogUiStatus(batch: Record<string, any>) {
 
 async function listCatalogs(args: Record<string, any>) {
   const [batchesResult, requestsResult, eventsResult] = await Promise.all([
-    supabase.from("planning_batches").select("*").eq("organization_id", String(args.organizationId)).order("created_at", { ascending: false }),
-    supabase.from("planning_requests").select("id,batch_id,status,generation_status,front_image_url,back_image_url,analysis_status,pose_plan").eq("organization_id", String(args.organizationId)),
+    supabase.from("planning_batches").select("*").eq("organization_id", String(args.organizationId)).is("archived_at", null).order("created_at", { ascending: false }),
+    supabase.from("planning_requests").select("id,batch_id,status,generation_status,front_image_url,back_image_url,analysis_status,pose_plan").eq("organization_id", String(args.organizationId)).is("archived_at", null),
     supabase.from("marketing_events").select("id,name").eq("organization_id", String(args.organizationId)),
   ]);
   if (batchesResult.error) throw batchesResult.error;
@@ -404,10 +404,10 @@ async function listCatalogs(args: Record<string, any>) {
 }
 
 async function getCatalog(catalogId: string) {
-  const { data: batch, error } = await supabase.from("planning_batches").select("*").eq("id", catalogId).maybeSingle();
+  const { data: batch, error } = await supabase.from("planning_batches").select("*").eq("id", catalogId).is("archived_at", null).maybeSingle();
   if (error) throw error;
   if (!batch) return null;
-  const { data: variants, error: variantsError } = await supabase.from("planning_requests").select("*").eq("batch_id", catalogId).order("queue_position");
+  const { data: variants, error: variantsError } = await supabase.from("planning_requests").select("*").eq("batch_id", catalogId).is("archived_at", null).order("queue_position");
   if (variantsError) throw variantsError;
   const requestIds = (variants || []).map((variant) => variant.id);
   const assetsResult = requestIds.length

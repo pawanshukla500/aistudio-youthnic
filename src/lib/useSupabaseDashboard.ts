@@ -118,10 +118,12 @@ async function loadSummary(): Promise<SupabaseDashboardSummary> {
   const [batchesResult, requestsResult, jobsResult, analyticsJobsResult, learningsResult, openAiUsageResult] = await Promise.all([
     supabase
       .from("planning_batches")
-      .select("id,status,queue_status,schedule_status,total_skus,generated_count,pending_count,failed_count"),
+      .select("id,status,queue_status,schedule_status,total_skus,generated_count,pending_count,failed_count")
+      .is("archived_at", null),
     supabase
       .from("planning_requests")
-      .select("id,status,generation_status,completion_status"),
+      .select("id,status,generation_status,completion_status")
+      .is("archived_at", null),
     supabase
       .from("generation_jobs")
       .select("job_id,status,sku_name,job_data,created_at,actual_cost_usd,total_tokens,batch_id")

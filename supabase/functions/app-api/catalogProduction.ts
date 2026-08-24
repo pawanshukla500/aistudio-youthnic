@@ -288,11 +288,14 @@ export async function createFromPlanningRequests(
   const requestIds = [...new Set((Array.isArray(args.requestIds) ? args.requestIds : []).map((id) => text(id)).filter(Boolean))].slice(0, 100);
   if (!requestIds.length) throw new Error("Select at least one SKU.");
   const { data: requests, error } = await service.from("planning_requests")
-    .select("id,organization_id,request_code,created_at,sku_name,color_label,photoshoot_type,generation_status,batch_id,generation_job_id,created_by_member_id,generation_started_at,generation_finished_at,queued_at,priority,assigned_member_id,expected_shoot_date,notes")
+    .select("id,organization_id,request_code,created_at,sku_name,color_label,photoshoot_type,generation_status,batch_id,generation_job_id,created_by_member_id,generation_started_at,generation_finished_at,queued_at,priority,assigned_member_id,expected_shoot_date,notes,archived_at")
     .eq("organization_id", workspace.organization.id)
     .in("id", requestIds);
   if (error) throw new Error(error.message);
   if ((requests || []).length !== requestIds.length) throw new Error("One or more selected SKUs are unavailable in this workspace.");
+  if ((requests || []).some((request) => request.archived_at)) {
+    throw new Error("One or more selected SKUs are archived. Add them again from an active Planning requirement before generating.");
+  }
 
   let created = 0;
   let alreadyTracked = 0;
