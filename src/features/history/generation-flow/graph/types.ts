@@ -39,6 +39,7 @@ export type TraceAttempt = {
   qa?: {
     pass: boolean;
     score: number;
+    outcome?: string;
     failed_checks: string[];
     reason: string;
     correction: string;

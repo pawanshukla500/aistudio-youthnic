@@ -4,7 +4,7 @@ import type { ProductReferenceRole, StudioReference } from "../types";
 
 const ACCEPTED_IMAGES = "image/png,image/jpeg,image/webp";
 
-const productSlots: Array<{
+const genericProductSlots: Array<{
   id: ProductReferenceRole;
   label: string;
   description: string;
@@ -15,6 +15,16 @@ const productSlots: Array<{
   { id: "fabric_pattern", label: "Upload Fabric / Pattern Detail", description: "Click or drop image", required: false },
   { id: "mannequin", label: "Upload Mannequin / Flat-lay Shot", description: "Dress form or flat-lay — sets worn shape and drape", required: false },
   { id: "additional_product", label: "Upload Additional Product Photo", description: "Click or drop image", required: false },
+];
+
+const sareeProductSlots: typeof genericProductSlots = [
+  { id: "saree_front_drape", label: "Full saree front", description: "Complete front drape, pleats and borders", required: true },
+  { id: "saree_back_drape", label: "Rear / back drape", description: "Full rear drape and pallu fall", required: true },
+  { id: "saree_pallu_spread", label: "Pallu spread", description: "Fully open pallu artwork and edges", required: true },
+  { id: "saree_body_detail", label: "Body fabric / pattern", description: "Close-up of weave, colour and motifs", required: true },
+  { id: "saree_border_tassels", label: "Border / tassels", description: "Widths, construction and tassel spacing", required: false },
+  { id: "saree_blouse_front", label: "Blouse front", description: "Front construction, neckline and sleeves", required: false },
+  { id: "saree_blouse_back_piece", label: "Blouse back / piece", description: "Back construction or unstitched piece", required: false },
 ];
 
 function ReferenceCard({
@@ -108,10 +118,13 @@ function ReferenceCard({
 export function ProductReferences({
   references,
   onChange,
+  saree = false,
 }: {
   references: Partial<Record<ProductReferenceRole, StudioReference>>;
   onChange: (role: ProductReferenceRole, file: File | null) => void;
+  saree?: boolean;
 }) {
+  const productSlots = saree ? sareeProductSlots : genericProductSlots;
   return (
     <div className="grid grid-cols-2 gap-3">
       {productSlots.map((slot) => (
