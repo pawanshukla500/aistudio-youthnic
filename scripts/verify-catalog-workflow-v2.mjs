@@ -58,6 +58,19 @@ assert.match(migration, /'catalog_work_items'[\s\S]*alter publication supabase_r
 assert.match(migration, /security assertion failed:[\s\S]*has_table_privilege\('authenticated'/, "Executable deployment-time RLS/grant assertions are missing");
 assert.match(migration, /notifications_select_current_org[\s\S]*recipient_team[\s\S]*member_roles/, "Role-targeted notification isolation is missing");
 assert.match(migration, /recipient_role_slug text not null default 'listing-team'/, "Configurable handoff recipient group is missing");
+for (const indexName of [
+  "catalog_asset_reviews_work_item_fk_idx",
+  "catalog_creative_directions_created_by_fk_idx",
+  "catalog_work_item_comments_work_item_fk_idx",
+  "catalog_work_item_events_actor_fk_idx",
+  "catalog_work_item_events_asset_version_fk_idx",
+  "catalog_work_item_events_stage_code_fk_idx",
+  "catalog_work_item_external_sources_work_item_fk_idx",
+  "catalog_work_items_created_by_fk_idx",
+  "catalog_work_items_generation_owner_fk_idx",
+  "catalog_work_items_listing_owner_fk_idx",
+  "catalog_work_items_planning_batch_fk_idx",
+]) assert.match(migration, new RegExp(indexName), `Missing production-advisor index ${indexName}`);
 
 for (const operation of [
   "catalogProduction.workflow.get",

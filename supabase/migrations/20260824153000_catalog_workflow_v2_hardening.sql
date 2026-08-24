@@ -36,6 +36,40 @@ where role_permission.role_id = role.id
 alter table public.catalog_handoff_settings
   add column if not exists recipient_role_slug text not null default 'listing-team';
 
+-- Cover every catalog foreign key reported by the production advisor. Several
+-- tenant-leading indexes are excellent for list queries but cannot support FK
+-- checks when the referenced column is not the leading key.
+create index if not exists catalog_asset_reviews_work_item_fk_idx
+  on public.catalog_asset_reviews (work_item_id);
+create index if not exists catalog_creative_directions_created_by_fk_idx
+  on public.catalog_creative_directions (created_by_member_id)
+  where created_by_member_id is not null;
+create index if not exists catalog_work_item_comments_work_item_fk_idx
+  on public.catalog_work_item_comments (work_item_id);
+create index if not exists catalog_work_item_events_actor_fk_idx
+  on public.catalog_work_item_events (actor_member_id)
+  where actor_member_id is not null;
+create index if not exists catalog_work_item_events_asset_version_fk_idx
+  on public.catalog_work_item_events (related_asset_version_id)
+  where related_asset_version_id is not null;
+create index if not exists catalog_work_item_events_stage_code_fk_idx
+  on public.catalog_work_item_events (stage_code)
+  where stage_code is not null;
+create index if not exists catalog_work_item_external_sources_work_item_fk_idx
+  on public.catalog_work_item_external_sources (work_item_id);
+create index if not exists catalog_work_items_created_by_fk_idx
+  on public.catalog_work_items (created_by_member_id)
+  where created_by_member_id is not null;
+create index if not exists catalog_work_items_generation_owner_fk_idx
+  on public.catalog_work_items (generation_assigned_member_id)
+  where generation_assigned_member_id is not null;
+create index if not exists catalog_work_items_listing_owner_fk_idx
+  on public.catalog_work_items (listing_assigned_member_id)
+  where listing_assigned_member_id is not null;
+create index if not exists catalog_work_items_planning_batch_fk_idx
+  on public.catalog_work_items (planning_batch_id)
+  where planning_batch_id is not null;
+
 -- Notification rows can be addressed to one member, one operational role/team,
 -- one email-matched member, or the whole organization. Enforce that visibility
 -- in Postgres rather than returning all tenant notifications for client filtering.

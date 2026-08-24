@@ -128,7 +128,7 @@ The implementation was verified locally on 24 August 2026 with:
 - A workflow contract test covering all thirteen stage records, tenant-scoped tables, RLS/storage declarations, Realtime publication, latest-version/five-pose approval gates, immutable delivered revisions, implemented UI actions, idempotent retry reservations, pre-send approval revalidation, and the no-empty-email rule.
 - Five Deno tests for weekday, weekend, configured holiday, year-boundary, and invalid-business-calendar behavior.
 - Deno type checking for the complete `app-api` Edge Function.
-- SQL parsing for all 109 statements in the immutable base migration plus all 15 statements in the additive hardening migration, using bounded top-level chunks so the verifier remains reliable as PL/pgSQL grows.
+- SQL parsing for all 109 statements in the immutable base migration plus all 26 statements in the additive hardening migration, including the production-advisor FK indexes and using bounded top-level chunks so the verifier remains reliable as PL/pgSQL grows.
 - TypeScript compilation and a production Vite build.
 - Desktop and mobile browser QA of the live-data Flow interface, including Flow, assets, activity, brief editing, responsive stage navigation, loading, and pending-asset behavior.
 
