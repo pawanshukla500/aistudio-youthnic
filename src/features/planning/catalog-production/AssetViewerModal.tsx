@@ -56,34 +56,6 @@ function safeFilename(value: string) {
   return value.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "catalog";
 }
 
-const referenceLabels: Record<string, string> = {
-  saree_front_drape: "Full saree front",
-  saree_back_drape: "Rear / back drape",
-  saree_body_detail: "Saree body / weave detail",
-  saree_pallu_spread: "Fully spread pallu",
-  saree_border_tassels: "Border / tassels",
-  saree_blouse_front: "Blouse front",
-  saree_blouse_back_piece: "Blouse back / unstitched piece",
-};
-
-function qaLabel(status: string) {
-  return ({
-    automatically_verified: "Automatically verified",
-    requires_human_review: "Requires human review",
-    unverified: "QA unavailable · unverified",
-    rejected_by_qa: "Rejected by QA",
-    human_approved: "Human approved",
-    human_rejected: "Human rejected",
-    passed: "Automatically verified (legacy)",
-  } as Record<string, string>)[status] || status.replaceAll("_", " ");
-}
-
-function qaTone(status: string) {
-  if (["automatically_verified", "human_approved", "passed", "pass"].includes(status)) return "bg-emerald-50 text-emerald-700";
-  if (["rejected_by_qa", "human_rejected", "failed"].includes(status)) return "bg-red-50 text-red-700";
-  return "bg-amber-50 text-amber-700";
-}
-
 export function AssetViewerModal({ item, onClose }: { item: CatalogWorkItem; onClose: () => void }) {
   const [poses, setPoses] = useState<PoseAsset[]>([]);
   const [references, setReferences] = useState<ReferenceAsset[]>([]);
@@ -226,7 +198,7 @@ export function AssetViewerModal({ item, onClose }: { item: CatalogWorkItem; onC
                         <div className="flex min-w-0 flex-1 flex-col p-3">
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0"><p className="text-xs font-bold uppercase tracking-wide text-primary">Pose {pose.pose_index}</p><p className="mt-0.5 truncate text-sm font-bold text-on-surface">{pose.title || pose.pose_type || `Pose ${pose.pose_index}`}</p></div>
-                            <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${qaTone(pose.qa_status || pose.status)}`}>{qaLabel(pose.qa_status || pose.status)}</span>
+                            <span className={`rounded-full px-2 py-1 text-[10px] font-bold capitalize ${pose.qa_status === "passed" || pose.qa_status === "pass" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{pose.qa_status || pose.status}</span>
                           </div>
                           <p className="mt-2 line-clamp-4 text-[11px] leading-4 text-secondary">{pose.full_prompt || pose.instructions || "Prompt was not recorded for this pose."}</p>
                           <div className="mt-auto flex gap-2 pt-3">
@@ -249,7 +221,7 @@ export function AssetViewerModal({ item, onClose }: { item: CatalogWorkItem; onC
                       return (
                         <div key={`${reference.role || "reference"}:${reference.storagePath || index}`} className="flex items-center gap-3 rounded-lg bg-surface-container/55 p-3">
                           <FileText className="h-4 w-4 shrink-0 text-primary" />
-                          <div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-on-surface">{referenceLabels[reference.role || ""] || (reference.role || "reference").replaceAll("_", " ")}</p><p className="mt-0.5 truncate text-[11px] text-secondary">{reference.filename || reference.storagePath || "Stored reference"}</p></div>
+                          <div className="min-w-0 flex-1"><p className="truncate text-xs font-bold capitalize text-on-surface">{(reference.role || "reference").replaceAll("_", " ")}</p><p className="mt-0.5 truncate text-[11px] text-secondary">{reference.filename || reference.storagePath || "Stored reference"}</p></div>
                           {url && <a href={url} target="_blank" rel="noreferrer" aria-label="Open reference" className="rounded-md p-1.5 text-primary hover:bg-primary/10"><ExternalLink className="h-3.5 w-3.5" /></a>}
                         </div>
                       );

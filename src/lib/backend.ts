@@ -9,7 +9,7 @@ export const api = {
   analysis: { analyzeReferences: "analysis.analyzeReferences" },
   files: { saveReference: "files.saveReference" },
   generation: { queueSku: "generation.queueSku", regeneratePose: "generation.regeneratePose" },
-  jobs: { list: "jobs.list", get: "jobs.get", getQueuePosition: "jobs.getQueuePosition", cancel: "jobs.cancel", remove: "jobs.remove", regenerateSession: "jobs.regenerateSession", rerunQa: "jobs.rerunQa" },
+  jobs: { list: "jobs.list", get: "jobs.get", getQueuePosition: "jobs.getQueuePosition", cancel: "jobs.cancel", remove: "jobs.remove", regenerateSession: "jobs.regenerateSession" },
   notifications: { list: "notifications.list", markRead: "notifications.markRead", markAllRead: "notifications.markAllRead" },
   catalog: {
     list: "catalog.list", get: "catalog.get", createCatalog: "catalog.createCatalog", bulkAddVariants: "catalog.bulkAddVariants",
@@ -119,7 +119,7 @@ function jobSummary(row: Record<string, any>, members: Record<string, any>[] = [
     inputTokens: Number(row.input_tokens || 0),
     outputTokens: Number(row.output_tokens || 0),
     totalTokens: Number(row.total_tokens || 0),
-    thumbnailUrl: generatedThumbnailUrl || references.find((entry: Record<string, any>) => entry.role === "saree_front_drape")?.downloadUrl || references.find((entry: Record<string, any>) => entry.role === "front")?.downloadUrl || references[0]?.downloadUrl || null,
+    thumbnailUrl: generatedThumbnailUrl || references.find((entry: Record<string, any>) => entry.role === "front")?.downloadUrl || references[0]?.downloadUrl || null,
     productDetails: String(jobData.productDetails || ""),
     creatorName: member?.display_name || (row.user_id === "catalog-worker" ? "Automatic catalog" : row.user_email || "Workspace member"),
     creatorEmail: row.user_email || member?.email || "",
@@ -179,15 +179,13 @@ async function getJob(jobId: string) {
   const { data: job, error } = await supabase.from("generation_jobs").select("*").eq("job_id", jobId).maybeSingle();
   if (error) throw error;
   if (!job) return null;
-  const [posesResult, sessionResult, assetsResult, qaReviewsResult] = await Promise.all([
+  const [posesResult, sessionResult, assetsResult] = await Promise.all([
     supabase.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index"),
     supabase.from("catalog_sessions").select("*").eq("session_id", job.session_id).maybeSingle(),
     supabase.from("planning_assets").select("*").eq("generation_job_id", jobId).eq("asset_role", "generated").order("created_at"),
-    supabase.from("qa_reviews").select("*").eq("generation_job_id", jobId).order("created_at", { ascending: false }),
   ]);
   if (posesResult.error) throw posesResult.error;
   if (assetsResult.error) throw assetsResult.error;
-  if (qaReviewsResult.error) throw qaReviewsResult.error;
   const resolvedJob = await resolveJobAssetReferences(job);
   const summary = jobSummary(resolvedJob);
   const generatedAssets = await Promise.all((assetsResult.data || []).map((entry) => resolveAssetRow(entry)));
@@ -240,7 +238,6 @@ async function getJob(jobId: string) {
       fidelityWeakest: (Array.isArray(record(pose.qa_payload).weakest) ? record(pose.qa_payload).weakest : []) as string[],
       fidelityReviewRecommended: record(pose.qa_payload).reviewRecommended === true,
       qaReason: String(record(pose.qa_payload).reason || ""),
-      qaHistory: (qaReviewsResult.data || []).filter((review) => Number(review.pose_index) === Number(pose.pose_index)),
     };
   });
   const knownPoseNumbers = new Set(mappedPoses.map((pose) => pose.poseNumber));
@@ -277,7 +274,6 @@ async function getJob(jobId: string) {
       fidelityWeakest: (Array.isArray(record(metadata.qa).weakest) ? record(metadata.qa).weakest : []) as string[],
       fidelityReviewRecommended: record(metadata.qa).reviewRecommended === true,
       qaReason: String(record(metadata.qa).reason || ""),
-      qaHistory: (qaReviewsResult.data || []).filter((review) => Number(review.pose_index) === poseNumber),
     });
   }
   mappedPoses.sort((left, right) => left.poseNumber - right.poseNumber);
@@ -301,13 +297,6 @@ const REFERENCE_ROLE_LABELS: Record<string, string> = {
   fabric_pattern: "Fabric / pattern detail",
   mannequin: "Mannequin / flat-lay",
   additional_product: "Additional product",
-  saree_front_drape: "Full saree front",
-  saree_back_drape: "Rear / back drape",
-  saree_body_detail: "Saree body / weave detail",
-  saree_pallu_spread: "Fully spread pallu",
-  saree_border_tassels: "Border / tassels",
-  saree_blouse_front: "Blouse front",
-  saree_blouse_back_piece: "Blouse back / unstitched piece",
   style_reference: "Style reference",
 };
 
@@ -464,13 +453,6 @@ async function getCatalog(catalogId: string) {
       backUrl: latest("back")?.image_url || variant.back_image_url || null,
       fabricPatternUrl: latest("fabric_pattern")?.image_url || null,
       additionalProductUrl: latest("additional_product")?.image_url || null,
-      sareeFrontDrapeUrl: latest("saree_front_drape")?.image_url || null,
-      sareeBackDrapeUrl: latest("saree_back_drape")?.image_url || null,
-      sareeBodyDetailUrl: latest("saree_body_detail")?.image_url || null,
-      sareePalluSpreadUrl: latest("saree_pallu_spread")?.image_url || null,
-      sareeBorderTasselsUrl: latest("saree_border_tassels")?.image_url || null,
-      sareeBlouseFrontUrl: latest("saree_blouse_front")?.image_url || null,
-      sareeBlouseBackPieceUrl: latest("saree_blouse_back_piece")?.image_url || null,
       jobId: job?.job_id || null,
       jobStatus: job?.status || null,
       jobCurrentPose: Number(job?.current_pose || 0),
@@ -636,8 +618,6 @@ async function mutateBackend(endpoint: BackendEndpoint, args: Record<string, any
       return invokeAppApi("jobs.remove", args);
     case api.jobs.regenerateSession:
       return invokeAppApi("jobs.regenerateSession", args);
-    case api.jobs.rerunQa:
-      return invokeAppApi("jobs.rerunQa", args);
     case api.files.saveReference:
       return invokeAppApi("files.saveReference", args);
     case api.catalog.createCatalog:

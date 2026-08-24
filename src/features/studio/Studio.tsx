@@ -10,7 +10,6 @@ import { AnalysisProfile } from "./components/AnalysisProfile";
 import { OutputSettings } from "./components/OutputSettings";
 import { PosePlan } from "./components/PosePlan";
 import { ModelFaceReference, ProductReferences, StyleReferences } from "./components/ProductReferences";
-import { sareeProfilePresentation } from "./sareeProfilePresentation";
 import { StylingPlanEditor } from "../../components/ui/StylingPlanEditor";
 import { normalizePlan, type StylingPlan } from "../../lib/stylingPlan";
 import type {
@@ -102,11 +101,8 @@ export function Studio() {
     () => [...Object.values(productReferences).filter(Boolean), ...(modelReference ? [modelReference] : []), ...styleReferences] as StudioReference[],
     [modelReference, productReferences, styleReferences],
   );
-  const isSareeCategory = category === "saree";
-  const requiredReady = isSareeCategory
-    ? Boolean(productReferences.saree_front_drape && productReferences.saree_back_drape && productReferences.saree_pallu_spread && productReferences.saree_body_detail)
-    : Boolean(productReferences.front && productReferences.back);
-  const effectiveSkuId = skuId.trim() || `studio-${(productReferences.saree_front_drape || productReferences.front)?.id.slice(0, 8) || "draft"}`;
+  const requiredReady = Boolean(productReferences.front && productReferences.back);
+  const effectiveSkuId = skuId.trim() || `studio-${productReferences.front?.id.slice(0, 8) || "draft"}`;
   const effectiveSkuName = skuName.trim() || skuId.trim() || "Untitled studio product";
   // What AnalysisProfile actually shows: the member's own edit if they've made one, else the AI's
   // derived read-out of the last analysis. Kept here (not inside AnalysisProfile) so the same
@@ -164,8 +160,7 @@ export function Studio() {
   const analysisIsCurrent = Boolean(analysis && analysisSourceKey === analysisInputKey);
   const analysisIsStale = Boolean(analysis && !analysisIsCurrent);
   const enabledPoseCount = useMemo(() => poses.filter((pose) => pose.enabled && pose.prompt.trim()).length, [poses]);
-  const sareeAnalysisReady = !analysis || !sareeProfilePresentation(analysis.productIdentity).incomplete;
-  const generationReady = requiredReady && analysisIsCurrent && !analyzing && enabledPoseCount === REQUIRED_POSE_COUNT && sareeAnalysisReady;
+  const generationReady = requiredReady && analysisIsCurrent && !analyzing && enabledPoseCount === REQUIRED_POSE_COUNT;
 
   const markAnalysisStale = () => {
     analysisRequestRef.current += 1;
@@ -290,7 +285,7 @@ export function Studio() {
 
   const runAnalysis = async (sourceKey: string, automatic: boolean, forceRefresh = false) => {
     if (!requiredReady) {
-      if (!automatic) setNotice({ tone: "error", text: isSareeCategory ? "Upload the required full front, rear drape, pallu spread, and body-detail saree references first." : "Upload the required front and back product images first." });
+      if (!automatic) setNotice({ tone: "error", text: "Upload the required front and back product images first." });
       return;
     }
     const requestId = ++analysisRequestRef.current;
@@ -453,7 +448,7 @@ export function Studio() {
 
         <div className="flex items-center gap-3">
           <Button variant="secondary" className="bg-surface-container-low hover:bg-surface-container" onClick={() => document.getElementById("product-reference-section")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
-            {isSareeCategory ? "Add saree evidence" : "Add front + back photos"}
+            Add front + back photos
           </Button>
           <Link to="/history" className="inline-flex h-10 items-center justify-center rounded-lg px-4 text-sm font-semibold text-tertiary transition-colors hover:bg-tertiary-container hover:text-on-tertiary-container">
             <Images className="mr-2 h-4 w-4" /> History
@@ -533,12 +528,10 @@ export function Studio() {
             <div className="mb-4">
               <h2 className="text-base font-bold text-on-surface">Product photos</h2>
               <p className="mt-1 text-xs leading-relaxed text-secondary">
-                {isSareeCategory
-                  ? "Required: full saree front, rear/back drape, fully spread pallu, and body fabric/pattern detail. Border/tassel and blouse references are strongly recommended."
-                  : "Front and back are required. Fabric / pattern detail and an additional product photo are optional — all four are treated as the same product. Style reference only guides scene, mood, and lighting."}
+                Front and back are required. Fabric / pattern detail and an additional product photo are optional — all four are treated as the same product. Style reference only guides scene, mood, and lighting.
               </p>
             </div>
-            <ProductReferences references={productReferences} onChange={changeProductReference} saree={isSareeCategory} />
+            <ProductReferences references={productReferences} onChange={changeProductReference} />
             <div className="mt-4 border-t border-outline-variant/30 pt-4">
               <h3 className="mb-2 text-sm font-bold text-on-surface">Model face lock</h3>
               <ModelFaceReference reference={modelReference || undefined} onFile={changeModelReference} onRemove={() => changeModelReference(null)} />
@@ -572,7 +565,6 @@ export function Studio() {
                 Category
                 <select value={category} onChange={(event) => updateText(setCategory, event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant bg-white px-3 text-sm text-on-surface outline-none focus:border-primary">
                   <option value="ethnic/fusion">Ethnic / fusion</option>
-                  <option value="saree">Saree</option>
                   <option value="western/casual">Western / casual</option>
                   <option value="dress">Dress</option>
                   <option value="formal">Formal</option>
