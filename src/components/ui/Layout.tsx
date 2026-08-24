@@ -67,7 +67,6 @@ export function Layout() {
     { to: "/studio", icon: Wand2, label: "Studio", show: can("studio.view") },
     { to: "/planning", icon: CalendarDays, label: "Planning", show: can("planning.view") },
     { to: "/events", icon: CalendarIcon, label: "Events", show: can("planning.view") },
-    { to: "/notifications", icon: Bell, label: "Notifications", show: true, badge: unread },
     { to: "/history", icon: History, label: "History", show: can("studio.view") },
   ];
 
@@ -156,9 +155,15 @@ export function Layout() {
             <ChevronRight className="h-3.5 w-3.5" />
             <span className="font-semibold text-on-surface">Production workspace</span>
           </div>
-          <div className="hidden text-right sm:block">
-            <p className="text-xs font-semibold text-on-surface">{user.displayName}</p>
-            <p className="text-[10px] text-secondary">{user.email}</p>
+          <div className="flex items-center gap-3">
+            <NavLink to="/notifications" title="Notifications" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`} className="relative rounded-xl p-2 text-secondary transition hover:bg-surface-container hover:text-primary">
+              <Bell className="h-5 w-5" />
+              {unread > 0 && <span className="absolute right-1 top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[9px] font-bold leading-4 text-white">{unread > 99 ? "99+" : unread}</span>}
+            </NavLink>
+            <div className="hidden text-right sm:block">
+              <p className="text-xs font-semibold text-on-surface">{user.displayName}</p>
+              <p className="text-[10px] text-secondary">{user.email}</p>
+            </div>
           </div>
         </header>
         <div className="flex-1 p-3 sm:p-5 lg:p-8">
