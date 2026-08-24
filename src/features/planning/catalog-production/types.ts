@@ -14,11 +14,27 @@ export type CatalogWorkItem = {
   color_label?: string | null;
   priority: string;
   theme?: string | null;
+  portal?: string | null;
+  marketplace_brand?: string | null;
+  remarks?: string | null;
   work_type: string;
   status: string;
   generation_status: string;
   qc_status: string;
   listing_status: string;
+  workflow_stage?: string;
+  workflow_progress?: number;
+  current_step?: string;
+  next_action?: string;
+  stage_started_at?: string | null;
+  deadline_at?: string | null;
+  marketplaces?: string[];
+  special_instructions?: string;
+  campaign_season?: string | null;
+  blocked_reason?: string;
+  failure_code?: string;
+  final_approved_at?: string | null;
+  listing_sent_at?: string | null;
   generation_assigned_member_id?: string | null;
   listing_assigned_member_id?: string | null;
   generation_assigned_member?: CatalogMember | null;
@@ -32,6 +48,7 @@ export type CatalogWorkItem = {
   generation_job_id?: string | null;
   catalog_session_id?: string | null;
   reference_image_url?: string | null;
+  back_reference_image_url?: string | null;
   legacy_external_link?: string | null;
   external_link?: string | null;
 };
@@ -59,15 +76,19 @@ export type ProductionActionProps = {
   onAssign: (id: string, assignment: "generation" | "listing", memberId: string) => void | Promise<void>;
   onQc: (id: string, decision: "passed" | "rejected") => void | Promise<void>;
   onListingDone: (id: string) => void | Promise<void>;
+  onListingStarted: (id: string) => void | Promise<void>;
   onViewAssets: (item: CatalogWorkItem) => void;
+  onViewWorkflow: (item: CatalogWorkItem) => void;
 };
 
 export function isCompleted(item: CatalogWorkItem) {
-  return item.status === "completed" || item.listing_status === "completed";
+  return item.workflow_stage === "listed" || item.status === "completed" || item.listing_status === "completed";
 }
 
 export function canQueueGeneration(item: CatalogWorkItem) {
-  if (isCompleted(item) || item.generation_status === "completed") return false;
+  if (isCompleted(item)) return false;
+  if (!item.planning_request_id && (!item.reference_image_url || !item.back_reference_image_url)) return false;
+  if (item.generation_status === "completed" && item.qc_status !== "rejected" && item.workflow_stage !== "regeneration_required") return false;
   return !["queued", "generating", "processing"].includes(item.generation_status);
 }
 
@@ -98,9 +119,9 @@ export function formatDuration(startedAt?: string | null, completedAt?: string |
 
 export function productionStage(item: CatalogWorkItem) {
   if (isCompleted(item)) return "completed";
-  if (item.status === "blocked" || item.generation_status === "failed" || item.qc_status === "rejected") return "blocked";
+  if (["blocked_failed", "regeneration_required"].includes(item.workflow_stage || "") || item.status === "blocked" || item.generation_status === "failed" || item.qc_status === "rejected") return "blocked";
   if (item.generation_status === "completed" && item.qc_status !== "passed") return "qc";
-  if (item.qc_status === "passed" || ["pending", "ready"].includes(item.listing_status)) return "listing";
+  if (["ready_for_listing", "sent_to_listing_team", "listing_in_progress"].includes(item.workflow_stage || "") || item.qc_status === "passed" || ["pending", "ready", "in_progress"].includes(item.listing_status)) return "listing";
   if (["ready", "queued", "generating", "processing"].includes(item.generation_status)) return "generation";
   return "requested";
 }

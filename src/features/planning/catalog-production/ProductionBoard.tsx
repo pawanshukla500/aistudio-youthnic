@@ -1,4 +1,4 @@
-import { Check, Eye, ShieldCheck, X } from "lucide-react";
+import { Check, Eye, Play, ShieldCheck, Workflow, X } from "lucide-react";
 import { formatDuration, productionStage, type ProductionActionProps } from "./types";
 
 const columns = [
@@ -20,7 +20,9 @@ export function ProductionBoard({
   onAssign,
   onQc,
   onListingDone,
+  onListingStarted,
   onViewAssets,
+  onViewWorkflow,
 }: ProductionActionProps) {
   return (
     <div className="flex h-full min-h-[580px] min-w-0 flex-col">
@@ -76,6 +78,7 @@ export function ProductionBoard({
                     </div>
 
                     <div className="mt-3 flex flex-wrap gap-2 border-t border-outline-variant/20 pt-3">
+                      <button onClick={() => onViewWorkflow(item)} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-outline-variant px-2 py-1.5 text-xs font-bold text-secondary hover:border-primary hover:text-primary"><Workflow className="h-3.5 w-3.5" /> Live flow</button>
                       {item.catalog_session_id && item.generation_status === "completed" && (
                         <button onClick={() => onViewAssets(item)} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-primary px-2 py-1.5 text-xs font-bold text-primary hover:bg-primary/5"><Eye className="h-3.5 w-3.5" /> Assets</button>
                       )}
@@ -85,7 +88,10 @@ export function ProductionBoard({
                           <button disabled={busyKey === `qc:${item.id}`} onClick={() => void onQc(item.id, "rejected")} className="inline-flex items-center justify-center rounded-lg border border-red-300 px-2 py-1.5 text-red-700 disabled:opacity-50" aria-label="Reject QC"><X className="h-3.5 w-3.5" /></button>
                         </>
                       )}
-                      {canCompleteListing && item.listing_status === "pending" && item.qc_status === "passed" && (
+                      {canCompleteListing && item.workflow_stage === "sent_to_listing_team" && (
+                        <button disabled={busyKey === `listing-start:${item.id}`} onClick={() => void onListingStarted(item.id)} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-2 py-1.5 text-xs font-bold text-white disabled:opacity-50"><Play className="h-3.5 w-3.5" /> Start listing</button>
+                      )}
+                      {canCompleteListing && (item.listing_status === "in_progress" || (item.listing_status === "pending" && !item.listing_sent_at)) && item.qc_status === "passed" && (
                         <button disabled={busyKey === `listing:${item.id}`} onClick={() => void onListingDone(item.id)} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-2 py-1.5 text-xs font-bold text-white disabled:opacity-50"><Check className="h-3.5 w-3.5" /> Listing Done</button>
                       )}
                       {column.id === "completed" && <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700"><Check className="h-3.5 w-3.5" /> Finished</span>}

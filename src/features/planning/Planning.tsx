@@ -27,6 +27,7 @@ import { firebaseStorage } from "../../lib/firebase";
 import { getErrorMessage } from "../../lib/errors";
 import { StylingPlanEditor } from "../../components/ui/StylingPlanEditor";
 import { normalizePlan, type StylingPlan } from "../../lib/stylingPlan";
+import { supabase } from "../../lib/supabase";
 
 const CATEGORIES = ["ethnic/fusion", "western/casual", "dress", "formal", "streetwear", "activewear"];
 const ASPECTS = ["3:4", "4:5", "2:3", "9:16", "1:1", "16:9"];
@@ -52,6 +53,18 @@ const emptyCreate = {
   campaign: "",
   eventId: "",
   skusText: "",
+  priority: "normal",
+  generationAssignedMemberId: "",
+  listingAssignedMemberId: "",
+  deadlineAt: "",
+  marketplaces: "",
+  specialInstructions: "",
+  lookAndMood: "",
+  stylingRequirements: "",
+  poseDirection: "Full product, professional side angle, accurate back view, creative pose, close-up face and product detail",
+  lighting: "",
+  composition: "",
+  marketplaceRequirements: "",
 };
 
 function statusLabel(status: string) {
@@ -140,10 +153,19 @@ export function Planning() {
 
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(emptyCreate);
+  const [catalogMembers, setCatalogMembers] = useState<Array<{ id: string; display_name: string; email: string }>>([]);
   const [addText, setAddText] = useState("");
   const [scheduleAt, setScheduleAt] = useState("");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void supabase.from("organization_members").select("id,display_name,email")
+      .eq("organization_id", organization._id).eq("status", "active").order("display_name")
+      .then(({ data }) => { if (active) setCatalogMembers(data || []); });
+    return () => { active = false; };
+  }, [organization._id]);
 
   const upcoming = useMemo(
     () => (roadmap?.events || []).filter((event) => event.daysUntil >= 0).slice(0, 6),
@@ -241,9 +263,28 @@ export function Planning() {
         campaign: form.campaign.trim() || undefined,
         eventId: form.eventId ? (form.eventId as Id<"events">) : undefined,
         preferredGenerationAt: scheduleAt ? new Date(scheduleAt).getTime() : undefined,
+        priority: form.priority,
+        generationAssignedMemberId: form.generationAssignedMemberId || undefined,
+        listingAssignedMemberId: form.listingAssignedMemberId || undefined,
+        deadlineAt: form.deadlineAt ? new Date(form.deadlineAt).toISOString() : undefined,
+        marketplaces: form.marketplaces.split(/[,\n]/).map((value) => value.trim()).filter(Boolean),
+        specialInstructions: form.specialInstructions.trim(),
+        lookAndMood: form.lookAndMood.trim(),
+        stylingRequirements: form.stylingRequirements.trim(),
+        poseDirection: form.poseDirection.trim(),
+        lighting: form.lighting.trim(),
+        composition: form.composition.trim(),
+        marketplaceRequirements: form.marketplaceRequirements.trim(),
       });
       const variants = parseVariants(form.skusText);
-      if (variants.length) await bulkAddVariants({ catalogId, variants });
+      if (variants.length) await bulkAddVariants({
+        catalogId,
+        variants,
+        priority: form.priority,
+        generationAssignedMemberId: form.generationAssignedMemberId || undefined,
+        deadlineAt: form.deadlineAt ? new Date(form.deadlineAt).toISOString() : undefined,
+        specialInstructions: form.specialInstructions.trim(),
+      });
       setShowCreate(false);
       setForm(emptyCreate);
       setSelectedId(catalogId);
@@ -909,21 +950,33 @@ export function Planning() {
 
       {showCreate && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-navy-soft/45 p-4">
-          <form onSubmit={submitCreate} className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-auto rounded-2xl bg-white p-6 shadow-2xl">
+          <form onSubmit={submitCreate} className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-auto rounded-2xl bg-white p-6 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
               <div><p className="text-[11px] font-bold uppercase tracking-widest text-primary">New catalog</p><h3 className="font-syne text-xl font-bold">Colourway batch &amp; shared look</h3></div>
               <button type="button" onClick={() => setShowCreate(false)} className="rounded-md p-2 text-secondary hover:bg-surface-container"><X className="h-5 w-5" /></button>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <label className="text-sm font-semibold text-secondary sm:col-span-2">Catalog name<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. T45-Bubbly" className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface outline-none focus:border-primary" /></label>
               <label className="text-sm font-semibold text-secondary sm:col-span-2">Campaign / season<input value={form.campaign} onChange={(e) => setForm({ ...form, campaign: e.target.value })} placeholder="e.g. Diwali 2026" className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface outline-none focus:border-primary" /></label>
-              <label className="text-sm font-semibold text-secondary sm:col-span-2">Model direction (same across every colour)<input value={form.modelDirection} onChange={(e) => setForm({ ...form, modelDirection: e.target.value })} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface outline-none focus:border-primary" /></label>
+              <label className="text-sm font-semibold text-secondary">Priority<select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface"><option value="urgent">Urgent</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select></label>
+              <label className="text-sm font-semibold text-secondary">Listing deadline<input type="datetime-local" value={form.deadlineAt} onChange={(e) => setForm({ ...form, deadlineAt: e.target.value })} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface outline-none focus:border-primary" /></label>
+              <label className="text-sm font-semibold text-secondary">Generation owner<select value={form.generationAssignedMemberId} onChange={(e) => setForm({ ...form, generationAssignedMemberId: e.target.value })} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface"><option value="">Assign later</option>{catalogMembers.map((member) => <option key={member.id} value={member.id}>{member.display_name || member.email}</option>)}</select></label>
+              <label className="text-sm font-semibold text-secondary">Listing owner<select value={form.listingAssignedMemberId} onChange={(e) => setForm({ ...form, listingAssignedMemberId: e.target.value })} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface"><option value="">Assign later</option>{catalogMembers.map((member) => <option key={member.id} value={member.id}>{member.display_name || member.email}</option>)}</select></label>
+              <label className="text-sm font-semibold text-secondary sm:col-span-2">Marketplaces <span className="font-normal">(comma-separated)</span><input value={form.marketplaces} onChange={(e) => setForm({ ...form, marketplaces: e.target.value })} placeholder="Myntra, Amazon, Flipkart" className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface outline-none focus:border-primary" /></label>
+              <label className="text-sm font-semibold text-secondary sm:col-span-2">Look and mood<input value={form.lookAndMood} onChange={(e) => setForm({ ...form, lookAndMood: e.target.value })} placeholder="Premium festive, energetic, youthful" className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface outline-none focus:border-primary" /></label>
+              <label className="text-sm font-semibold text-secondary sm:col-span-2">Model direction (same across every colour)<textarea rows={2} value={form.modelDirection} onChange={(e) => setForm({ ...form, modelDirection: e.target.value })} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" /></label>
+              <label className="text-sm font-semibold text-secondary sm:col-span-2">Styling requirements<textarea rows={2} value={form.stylingRequirements} onChange={(e) => setForm({ ...form, stylingRequirements: e.target.value })} placeholder="Accessories, footwear, drape, hair and makeup" className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" /></label>
               <label className="text-sm font-semibold text-secondary sm:col-span-2">Backdrop / scene direction<textarea rows={2} value={form.sceneDirection} onChange={(e) => setForm({ ...form, sceneDirection: e.target.value })} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" /></label>
+              <label className="text-sm font-semibold text-secondary sm:col-span-2">Five-pose direction<textarea rows={2} value={form.poseDirection} onChange={(e) => setForm({ ...form, poseDirection: e.target.value })} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" /></label>
+              <label className="text-sm font-semibold text-secondary sm:col-span-2">Lighting<input value={form.lighting} onChange={(e) => setForm({ ...form, lighting: e.target.value })} placeholder="Soft directional daylight, clean skin tones" className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface outline-none focus:border-primary" /></label>
+              <label className="text-sm font-semibold text-secondary sm:col-span-2">Composition<input value={form.composition} onChange={(e) => setForm({ ...form, composition: e.target.value })} placeholder="Marketplace-safe crop, product unobstructed" className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface outline-none focus:border-primary" /></label>
+              <label className="text-sm font-semibold text-secondary sm:col-span-2">Marketplace / campaign requirements<textarea rows={2} value={form.marketplaceRequirements} onChange={(e) => setForm({ ...form, marketplaceRequirements: e.target.value })} placeholder="Background, ratio, crop, policy or campaign constraints" className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" /></label>
+              <label className="text-sm font-semibold text-secondary sm:col-span-2">Special instructions / important remarks<textarea rows={2} value={form.specialInstructions} onChange={(e) => setForm({ ...form, specialInstructions: e.target.value })} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" /></label>
               <label className="text-sm font-semibold text-secondary">Category<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface">{CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
               <label className="text-sm font-semibold text-secondary">Aspect ratio<select value={form.aspectRatio} onChange={(e) => setForm({ ...form, aspectRatio: e.target.value })} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface">{ASPECTS.map((a) => <option key={a} value={a}>{a}</option>)}</select></label>
               <label className="text-sm font-semibold text-secondary sm:col-span-2">Preferred generation date and time <span className="font-normal">(schedule after references are ready)</span><input type="datetime-local" value={scheduleAt} min={toDateTimeInput(Date.now())} onChange={(event) => setScheduleAt(event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface outline-none focus:border-primary" /><span className="mt-1 block text-[10px] font-normal text-secondary">Asia/Kolkata timezone</span></label>
-              <label className="text-sm font-semibold text-secondary sm:col-span-2">Colourway SKUs (one per line — <span className="font-normal">SKU, colour label</span>)<textarea rows={4} value={form.skusText} onChange={(e) => setForm({ ...form, skusText: e.target.value })} placeholder={"T45-Bubbly-Pink, Pink\nT45-Bubbly-Green, Green\nT45-Bubbly-Red, Red"} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 font-mono text-[13px] text-on-surface outline-none focus:border-primary" /></label>
-              <label className="flex items-center gap-2 text-sm font-semibold text-secondary sm:col-span-2"><input type="checkbox" checked={form.poseQa} onChange={(e) => setForm({ ...form, poseQa: e.target.checked })} className="accent-primary" /> Run Gemini consistency QA on every pose (recommended)</label>
+              <label className="text-sm font-semibold text-secondary sm:col-span-2 lg:col-span-4">Colourway SKUs (one per line — <span className="font-normal">SKU, colour label</span>)<textarea rows={4} value={form.skusText} onChange={(e) => setForm({ ...form, skusText: e.target.value })} placeholder={"T45-Bubbly-Pink, Pink\nT45-Bubbly-Green, Green\nT45-Bubbly-Red, Red"} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 font-mono text-[13px] text-on-surface outline-none focus:border-primary" /></label>
+              <label className="flex items-center gap-2 text-sm font-semibold text-secondary sm:col-span-2 lg:col-span-4"><input type="checkbox" checked={form.poseQa} onChange={(e) => setForm({ ...form, poseQa: e.target.checked })} className="accent-primary" /> Run Gemini consistency QA on every pose (recommended)</label>
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button type="button" onClick={() => setShowCreate(false)} className="rounded-lg border border-outline-variant px-4 py-2 text-sm font-semibold">Cancel</button>

@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { invokeAppApi } from '../../../lib/backend';
 import { GenerationFlowCanvas } from './GenerationFlowCanvas';
 import { FlowNodeDetailDrawer } from './FlowNodeDetailDrawer';
 import { parseTrace } from './graph/buildGenerationGraph';
 import { ArrowLeft } from 'lucide-react';
+import { supabase } from '../../../lib/supabase';
+import { OperationalWorkflowView } from './OperationalWorkflowView';
 
 export function GenerationFlowPage() {
   const { jobId } = useParams<{ jobId: string }>();
@@ -15,19 +17,37 @@ export function GenerationFlowPage() {
   const [selectedNode, setSelectedNode] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchFlow = useCallback(async (silent = false) => {
+    if (!jobId) return;
+    if (!silent) setIsLoadingTrace(true);
+    setError(null);
+    try {
+      const data = await invokeAppApi<any>('history.generationFlow.get', { jobId });
+      if (data) {
+        if (data.is_workflow_v2 || data.is_v2) {
+          setSelectedGraphData(data);
+        } else {
+          const trace = parseTrace(data);
+          setSelectedGraphData({ is_v2: false, trace });
+        }
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      if (!silent) setIsLoadingTrace(false);
+    }
+  }, [jobId]);
+
   useEffect(() => {
     if (!jobId) return;
-    
     let ignore = false;
-
-    const fetchFlow = async () => {
-      setIsLoadingTrace(true);
+    const load = async () => {
       setError(null);
       try {
         const data = await invokeAppApi<any>('history.generationFlow.get', { jobId });
         if (!ignore) {
           if (data) {
-            if (data.is_v2) {
+            if (data.is_workflow_v2 || data.is_v2) {
               setSelectedGraphData(data);
             } else {
               const trace = parseTrace(data);
@@ -46,12 +66,35 @@ export function GenerationFlowPage() {
       }
     };
     
-    fetchFlow();
+    void load();
 
     return () => {
       ignore = true;
     };
   }, [jobId]);
+
+  useEffect(() => {
+    const workItemId = selectedGraphData?.is_workflow_v2 ? selectedGraphData.item?.id : '';
+    if (!workItemId) return;
+    let timer = 0;
+    const refreshSoon = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void fetchFlow(true), 300);
+    };
+    const channel = supabase.channel(`catalog-workflow:${workItemId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'catalog_work_items', filter: `id=eq.${workItemId}` }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'catalog_work_item_events', filter: `work_item_id=eq.${workItemId}` }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'catalog_work_item_comments', filter: `work_item_id=eq.${workItemId}` }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'catalog_pose_asset_versions', filter: `work_item_id=eq.${workItemId}` }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'catalog_listing_handoffs', filter: `work_item_id=eq.${workItemId}` }, refreshSoon)
+      .subscribe();
+    const recoveryPoll = window.setInterval(() => void fetchFlow(true), 60_000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(recoveryPoll);
+      void supabase.removeChannel(channel);
+    };
+  }, [fetchFlow, selectedGraphData?.is_workflow_v2, selectedGraphData?.item?.id]);
 
   if (error) {
     return (
@@ -79,6 +122,10 @@ export function GenerationFlowPage() {
         <p className="font-medium text-sm">Loading flow visualization...</p>
       </div>
     );
+  }
+
+  if (selectedGraphData.is_workflow_v2) {
+    return <OperationalWorkflowView data={selectedGraphData} onRefresh={() => fetchFlow(true)} />;
   }
 
   const summarySku = selectedGraphData.is_v2 

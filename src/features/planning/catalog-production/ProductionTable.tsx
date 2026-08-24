@@ -1,4 +1,4 @@
-import { Check, Eye, ShieldCheck, X } from "lucide-react";
+import { Check, Eye, Play, ShieldCheck, Workflow, X } from "lucide-react";
 import { canQueueGeneration, formatDuration, isCompleted, type ProductionActionProps } from "./types";
 
 function statusTone(status: string) {
@@ -22,14 +22,17 @@ export function ProductionTable({
   onAssign,
   onQc,
   onListingDone,
+  onListingStarted,
   onViewAssets,
+  onViewWorkflow,
   selectedIds,
   onToggleSelect,
   onToggleSelectAll,
 }: ProductionActionProps) {
   const selectableItems = canManage ? items.filter(canQueueGeneration) : [];
-  const isAllSelected = selectableItems.length > 0 && selectedIds.size === selectableItems.length;
-  const isSomeSelected = selectedIds.size > 0 && selectedIds.size < selectableItems.length;
+  const selectedVisibleCount = selectableItems.filter((item) => selectedIds.has(item.id)).length;
+  const isAllSelected = selectableItems.length > 0 && selectedVisibleCount === selectableItems.length;
+  const isSomeSelected = selectedVisibleCount > 0 && selectedVisibleCount < selectableItems.length;
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-outline-variant/40 bg-white shadow-sm">
@@ -49,7 +52,7 @@ export function ProductionTable({
                 />
               </th>
               {[
-                "Request", "Date", "SKU", "Priority", "Generation", "Generation time", "QC", "Listing",
+                "Request", "Date", "SKU", "Priority", "Stage", "Generation", "Generation time", "QC", "Listing",
                 "AI owner", "Listing owner", "Theme", "Actions",
               ].map((header) => (
                 <th key={header} className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-secondary">{header}</th>
@@ -82,6 +85,7 @@ export function ProductionTable({
                     {item.color_label && <p className="mt-0.5 truncate text-xs text-secondary">{item.color_label}</p>}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={item.priority} /></td>
+                  <td className="min-w-48 px-4 py-3"><div className="flex items-center justify-between gap-3 text-xs"><span className="font-bold capitalize text-on-surface">{(item.workflow_stage || "requirement_created").replaceAll("_", " ")}</span><span className="text-secondary">{item.workflow_progress || 0}%</span></div><div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-container"><div className="h-full rounded-full bg-primary" style={{ width: `${item.workflow_progress || 0}%` }} /></div></td>
                   <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={item.generation_status} /></td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <p className="text-sm font-semibold text-on-surface">{formatDuration(item.generation_started_at, item.generation_completed_at)}</p>
@@ -120,6 +124,9 @@ export function ProductionTable({
                   <td className="max-w-[160px] px-4 py-3 text-sm text-secondary"><p className="truncate">{item.theme || "—"}</p></td>
                   <td className="px-4 py-3">
                     <div className="flex min-w-[250px] flex-wrap items-center gap-2">
+                      <button onClick={() => onViewWorkflow(item)} className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant px-2.5 py-1.5 text-xs font-bold text-secondary hover:border-primary hover:text-primary">
+                        <Workflow className="h-3.5 w-3.5" /> Live flow
+                      </button>
                       {item.catalog_session_id && item.generation_status === "completed" && (
                         <button onClick={() => onViewAssets(item)} className="inline-flex items-center gap-1.5 rounded-lg border border-primary px-2.5 py-1.5 text-xs font-bold text-primary hover:bg-primary/5">
                           <Eye className="h-3.5 w-3.5" /> Assets
@@ -135,7 +142,12 @@ export function ProductionTable({
                           </button>
                         </>
                       )}
-                      {canCompleteListing && item.listing_status === "pending" && item.generation_status === "completed" && item.qc_status === "passed" && (
+                      {canCompleteListing && item.workflow_stage === "sent_to_listing_team" && (
+                        <button disabled={busyKey === `listing-start:${item.id}`} onClick={() => void onListingStarted(item.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-bold text-white hover:bg-primary/90 disabled:opacity-50">
+                          <Play className="h-3.5 w-3.5" /> Start listing
+                        </button>
+                      )}
+                      {canCompleteListing && (item.listing_status === "in_progress" || (item.listing_status === "pending" && !item.listing_sent_at)) && item.generation_status === "completed" && item.qc_status === "passed" && (
                         <button disabled={busyKey === `listing:${item.id}`} onClick={() => void onListingDone(item.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-bold text-white hover:bg-primary/90 disabled:opacity-50">
                           <Check className="h-3.5 w-3.5" /> Listing Done
                         </button>
@@ -148,7 +160,7 @@ export function ProductionTable({
               );
             })}
             {!items.length && (
-              <tr><td colSpan={12} className="px-4 py-16 text-center text-sm text-secondary">No catalog work items yet. Select SKUs from Planning or upload the Excel template.</td></tr>
+              <tr><td colSpan={14} className="px-4 py-16 text-center text-sm text-secondary">No catalog work items match the current filters.</td></tr>
             )}
           </tbody>
         </table>
