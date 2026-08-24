@@ -579,7 +579,9 @@ export function History() {
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
+  // Keep the archive useful during daily operations. Historical rows remain
+  // queryable through All statuses; they are never deleted just to reduce noise.
+  const [status, setStatus] = useState("active");
   const [sourceType, setSourceType] = useState("");
   const [expanded, setExpanded] = useState<Id<"generationJobs"> | null>(null);
   const [error, setError] = useState("");
@@ -671,6 +673,7 @@ export function History() {
                onChange={(event) => { setStatus(event.target.value); setPage(1); setExpanded(null); }} 
                className="h-10 rounded-xl border border-outline-variant bg-white px-4 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20 shadow-sm cursor-pointer"
             >
+               <option value="active">Active generations</option>
                <option value="">All statuses</option>
                <option value="queued">Queued</option>
                <option value="processing">Processing</option>

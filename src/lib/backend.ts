@@ -138,7 +138,8 @@ async function listJobs(args: Record<string, any>) {
     .from("generation_jobs")
     .select("*", { count: "exact" })
     .eq("org_id", String(args.organizationId));
-  if (status) jobsQuery = jobsQuery.eq("status", status);
+  if (status === "active") jobsQuery = jobsQuery.in("status", ["queued", "processing", "cancelling"]);
+  else if (status) jobsQuery = jobsQuery.eq("status", status);
   if (sourceType === "catalog") jobsQuery = jobsQuery.eq("source_type", "catalog");
   if (sourceType === "studio") jobsQuery = jobsQuery.eq("source_type", "studio");
   if (search) jobsQuery = jobsQuery.ilike("history_search", `%${search}%`);

@@ -1132,7 +1132,7 @@ async function deferPoseRetry(args: {
 
 async function finalizeCancelledJob(job: JsonRecord, message = "Generation cancelled by the user.") {
   const now = new Date().toISOString();
-  await Promise.all([
+  const results = await Promise.all([
     service.from("generation_jobs").update({
       status: "cancelled", completed_at: now, locked_at: null, lock_expires_at: null,
       error_code: "cancelled", error_message: message, updated_at: now,
@@ -1145,7 +1145,12 @@ async function finalizeCancelledJob(job: JsonRecord, message = "Generation cance
       status: "failed", generation_status: "failed", completion_status: "failed",
       error_message: message, generation_finished_at: now, updated_at: now,
     }).eq("id", job.planning_request_id),
+    service.from("catalog_work_items").update({
+      generation_status: "failed", generation_completed_at: now,
+      qc_status: "needs_review", listing_status: "not_required", updated_at: now,
+    }).eq("planning_request_id", job.planning_request_id).in("generation_status", ["queued", "processing", "generating"]),
   ]);
+  assertSupabaseResults(results, "Could not finalize the cancelled generation");
   if (job.batch_id) {
     const batchId = String(job.batch_id);
     const { data: variants, error: variantsError } = await service.from("planning_requests").select("generation_status").eq("batch_id", batchId);
