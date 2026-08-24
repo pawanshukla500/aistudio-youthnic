@@ -66,12 +66,19 @@ export type SareeTruthProfile = {
   body: {
     mainFabric: string;
     weave: string;
+    weaveGeometry: string;
     texture: string;
     transparency: string;
+    shine: string;
     baseColor: string;
+    secondaryColors: string[];
     pattern: string;
+    motifInventory: string[];
     motifScale: string;
+    motifOrientation: string;
     motifRepeat: string;
+    motifDensity: string;
+    motifPlacement: string;
     embellishment: string;
     bodyOrientation: string;
   };
@@ -79,17 +86,25 @@ export type SareeTruthProfile = {
     upperBorder: string;
     lowerBorder: string;
     borderWidth: string;
+    upperBorderWidth: string;
+    lowerBorderWidth: string;
     borderColors: string;
     construction: string;
     motifGeometry: string;
     edgeTreatment: string;
     continuityRules: string;
+    tasselColor: string;
+    tasselConstruction: string;
+    tasselSpacing: string;
   };
   pallu: {
     hasDistinctPallu: boolean;
     startingRegion: string;
     baseColor: string;
     motifInventory: string;
+    motifScale: string;
+    motifOrientation: string;
+    motifRepeat: string;
     motifDensity: string;
     borders: string;
     artwork: string;
@@ -115,6 +130,7 @@ export type SareeTruthProfile = {
     backConstruction: string;
     neckline: string;
     sleeves: string;
+    ties: string;
     closure: string;
     embroidery: string;
     border: string;
@@ -131,6 +147,15 @@ export type SareeTruthProfile = {
     creaseBehavior: string;
     expectedFall: string;
   };
+  regionEvidence: Array<{
+    region: string;
+    state: "confirmed" | "confirmed_absent" | "unknown";
+    visibleConstruction: string;
+    visibleDecoration: string;
+    closures: string;
+    explicitlyAbsent: string[];
+    uncertainty: string;
+  }>;
 };
 
 export type SareeDrapePlan = {

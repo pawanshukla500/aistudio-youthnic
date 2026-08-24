@@ -1,4 +1,4 @@
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assertEquals } from "jsr:@std/assert@1";
 import { normalizePoseQaResult } from "../lib/qa.ts";
 
 Deno.test("Saree QA Architecture: body_pallu_boundary failure should fail the pose", () => {

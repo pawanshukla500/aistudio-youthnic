@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Aperture, CheckCircle2, ChevronDown, ChevronUp, Loader2, Palette, Shirt, Sparkles } from "lucide-react";
+import { AlertTriangle, Aperture, CheckCircle2, ChevronDown, ChevronUp, Loader2, Palette, Shirt, Sparkles } from "lucide-react";
 import type { StudioAnalysis } from "../types";
 
 const productFields: Array<[keyof StudioAnalysis["productIdentity"], string]> = [
@@ -81,6 +81,11 @@ export function AnalysisProfile({
 }) {
   const [isOpen, setIsOpen] = useState(true);
   const [contextOpen, setContextOpen] = useState(false);
+  const sareeTruth = analysis?.productIdentity.sareeTruth;
+  const sareeDrapePlan = analysis?.productIdentity.sareeDrapePlan;
+  const sareeProfileIncomplete = analysis?.productIdentity.garmentFamily === "saree" && (
+    !sareeTruth?.body || !sareeTruth?.borders || !sareeTruth?.pallu || !sareeTruth?.physics || !sareeDrapePlan
+  );
 
   return (
     <div className="w-full">
@@ -162,6 +167,13 @@ export function AnalysisProfile({
             </div>
           )}
 
+          {sareeProfileIncomplete && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
+              <span>Stored saree analysis is incomplete or outdated. Reanalyse the product references before generation.</span>
+            </div>
+          )}
+
           {analysis && (
             <div className={`rounded-xl border border-outline-variant/40 bg-surface-container-lowest overflow-hidden shadow-sm ${stale ? "opacity-60" : ""}`}>
               <button 
@@ -198,30 +210,30 @@ export function AnalysisProfile({
                     </div>
                   )}
 
-                  {analysis.productIdentity.garmentFamily === "saree" && analysis.productIdentity.sareeTruth && (
+                  {analysis.productIdentity.garmentFamily === "saree" && sareeTruth && (
                     <div>
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold"><Shirt className="h-4 w-4 text-primary" /> Saree Truth</h3>
                       <ProfileGrid items={[
-                        ["Main Fabric", analysis.productIdentity.sareeTruth.body.mainFabric],
-                        ["Pallu Type", analysis.productIdentity.sareeTruth.pallu.hasDistinctPallu ? "Distinct Pallu" : "Continuous Body"],
-                        ["Pallu Motif", analysis.productIdentity.sareeTruth.pallu.motifInventory],
-                        ["Border", analysis.productIdentity.sareeTruth.borders.upperBorder],
-                        ["Blouse Piece", analysis.productIdentity.sareeTruth.blouse.hasBlouse ? "Included" : "None"],
-                        ["Physics", analysis.productIdentity.sareeTruth.physics.expectedFall],
+                        ["Main Fabric", sareeTruth.body?.mainFabric],
+                        ["Pallu Type", sareeTruth.pallu ? (sareeTruth.pallu.hasDistinctPallu ? "Distinct Pallu" : "Continuous Body") : "Not visible"],
+                        ["Pallu Motif", sareeTruth.pallu?.motifInventory],
+                        ["Border", sareeTruth.borders?.upperBorder],
+                        ["Blouse Piece", sareeTruth.blouse ? (sareeTruth.blouse.hasBlouse ? "Included" : "None") : "Not visible"],
+                        ["Physics", sareeTruth.physics?.expectedFall],
                       ]} />
                     </div>
                   )}
 
-                  {analysis.productIdentity.garmentFamily === "saree" && analysis.productIdentity.sareeDrapePlan && (
+                  {analysis.productIdentity.garmentFamily === "saree" && sareeDrapePlan && (
                     <div>
                       <h3 className="mb-3 flex items-center gap-2 text-xs font-bold"><Palette className="h-4 w-4 text-primary" /> Saree Drape Plan</h3>
                       <ProfileGrid items={[
-                        ["Base Drape", analysis.productIdentity.sareeDrapePlan.baseDrapeFamily],
-                        ["Shoulder", analysis.productIdentity.sareeDrapePlan.shoulderSide],
-                        ["Pallu Placement", analysis.productIdentity.sareeDrapePlan.palluShoulderPlacement],
-                        ["Pallu Style", analysis.productIdentity.sareeDrapePlan.openOrPleatedPallu],
-                        ["Pleat Treatment", analysis.productIdentity.sareeDrapePlan.frontPleatTreatment],
-                        ["Pallu Spread", analysis.productIdentity.sareeDrapePlan.palluSpread],
+                        ["Base Drape", sareeDrapePlan.baseDrapeFamily],
+                        ["Shoulder", sareeDrapePlan.shoulderSide],
+                        ["Pallu Placement", sareeDrapePlan.palluShoulderPlacement],
+                        ["Pallu Style", sareeDrapePlan.openOrPleatedPallu],
+                        ["Pleat Treatment", sareeDrapePlan.frontPleatTreatment],
+                        ["Pallu Spread", sareeDrapePlan.palluSpread],
                       ]} />
                     </div>
                   )}

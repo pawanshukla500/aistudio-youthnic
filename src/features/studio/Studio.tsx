@@ -160,7 +160,14 @@ export function Studio() {
   const analysisIsCurrent = Boolean(analysis && analysisSourceKey === analysisInputKey);
   const analysisIsStale = Boolean(analysis && !analysisIsCurrent);
   const enabledPoseCount = useMemo(() => poses.filter((pose) => pose.enabled && pose.prompt.trim()).length, [poses]);
-  const generationReady = requiredReady && analysisIsCurrent && !analyzing && enabledPoseCount === REQUIRED_POSE_COUNT;
+  const sareeAnalysisReady = analysis?.productIdentity.garmentFamily !== "saree" || Boolean(
+    analysis.productIdentity.sareeTruth?.body &&
+    analysis.productIdentity.sareeTruth?.borders &&
+    analysis.productIdentity.sareeTruth?.pallu &&
+    analysis.productIdentity.sareeTruth?.physics &&
+    analysis.productIdentity.sareeDrapePlan
+  );
+  const generationReady = requiredReady && analysisIsCurrent && !analyzing && enabledPoseCount === REQUIRED_POSE_COUNT && sareeAnalysisReady;
 
   const markAnalysisStale = () => {
     analysisRequestRef.current += 1;
@@ -565,6 +572,7 @@ export function Studio() {
                 Category
                 <select value={category} onChange={(event) => updateText(setCategory, event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant bg-white px-3 text-sm text-on-surface outline-none focus:border-primary">
                   <option value="ethnic/fusion">Ethnic / fusion</option>
+                  <option value="saree">Saree</option>
                   <option value="western/casual">Western / casual</option>
                   <option value="dress">Dress</option>
                   <option value="formal">Formal</option>
