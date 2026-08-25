@@ -64,6 +64,14 @@ function assertQueryResults(results: unknown[], context: string) {
   if (failure) throw new Error(`${context}: ${failure.message || "database operation failed"}`);
 }
 
+// This is intentionally independent of the UI. A caller can invoke the bulk
+// API directly, so linked Planning work must have completed its category-aware
+// evidence validation before any request is allowed into the generation queue.
+export function assertCatalogRequestEvidenceReady(request: JsonRecord | undefined, skuName: string) {
+  if (request?.validation_status === "ready") return;
+  throw new Error(`${skuName} is awaiting validated product evidence. Complete its reference requirements before generation can start.`);
+}
+
 async function existingExternalRequests(service: SupabaseClient, orgId: string, requestIds: string[]) {
   if (!requestIds.length) return new Set<string>();
   const { data, error } = await service
@@ -1268,6 +1276,7 @@ export async function bulkGenerateCatalogWorkItems(
       continue;
     }
     const request = requestById.get(requestId);
+    assertCatalogRequestEvidenceReady(request, text(item.sku_name));
     const requestAssets = (linkedAssets || []).filter((asset) => String(asset.planning_request_id) === requestId);
     const availableReferences = requestAssets.map((asset) => ({
       role: text(asset.asset_role), downloadUrl: text(asset.image_url), storagePath: text(asset.storage_path),
