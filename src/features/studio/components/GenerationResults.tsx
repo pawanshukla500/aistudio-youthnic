@@ -1,6 +1,7 @@
 import { CheckCircle2, Clock3, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 import type { Id } from "../../../lib/backend";
 import { Button } from "../../../components/ui/Button";
+import { generationDeliveryProgress } from "../../../lib/generationProgress";
 
 export function GenerationResults({
   job,
@@ -11,9 +12,7 @@ export function GenerationResults({
   regeneratingPose: Id<"generationPoses"> | null;
   onRegenerate: (poseId: Id<"generationPoses">) => void;
 }) {
-  const progress = job?.totalPoses
-    ? Math.round(((job.completedPoses + job.failedPoses) / job.totalPoses) * 100)
-    : 0;
+  const delivery = generationDeliveryProgress(job || {});
 
   return (
     <div className="space-y-5">
@@ -29,8 +28,8 @@ export function GenerationResults({
 
       {!["completed", "failed", "cancelled"].includes(job.status) && (
         <div>
-          <div className="mb-1.5 flex justify-between text-xs text-secondary"><span>Generating and validating the photoshoot</span><span>{progress}%</span></div>
-          <div className="h-2 overflow-hidden rounded-full bg-surface-container"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progress}%` }} /></div>
+          <div className="mb-1.5 flex justify-between text-xs text-secondary"><span>{delivery.imagesStored}/{delivery.totalPoses} images stored{delivery.failedPoses ? ` · ${delivery.failedPoses} failed` : ""}</span><span>{delivery.deliveredPercent}% delivered</span></div>
+          <div className="h-2 overflow-hidden rounded-full bg-surface-container"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${delivery.deliveredPercent}%` }} /></div>
         </div>
       )}
 

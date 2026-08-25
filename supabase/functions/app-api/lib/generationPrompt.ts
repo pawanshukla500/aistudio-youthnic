@@ -8,6 +8,109 @@ import { roleLabel } from "./referencePolicy.ts";
 
 export type PromptReference = { role: string };
 
+// OpenAI rejects image-edit prompts at 32,000 characters. Keep a meaningful
+// UTF-16-safe margin because PostgreSQL character counts and the provider's
+// request validation can differ for non-BMP characters.
+export const IMAGE_PROMPT_SAFE_CHARS = 30_000;
+
+export class GenerationPromptBudgetError extends Error {
+  readonly code = "prompt_budget_exceeded";
+
+  constructor(section: string, chars: number, limit: number) {
+    super(`${section} is too large for a safe image-generation prompt (${chars} characters; limit ${limit}). Reanalyse the product references before generation.`);
+    this.name = "GenerationPromptBudgetError";
+  }
+}
+
+function objectValue(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
+function boundedText(value: unknown, maxChars: number) {
+  const text = String(value ?? "").trim();
+  if (text.length <= maxChars) return text;
+  const suffix = " [truncated]";
+  return `${text.slice(0, Math.max(0, maxChars - suffix.length)).trimEnd()}${suffix}`;
+}
+
+function boundedStrings(value: unknown, maxItems = 16, maxChars = 360) {
+  return (Array.isArray(value) ? value : []).slice(0, maxItems).map((entry) => boundedText(entry, maxChars));
+}
+
+function compactJson(value: unknown, options: { maxString?: number; maxItems?: number; maxKeys?: number; maxDepth?: number } = {}) {
+  const maxString = options.maxString ?? 480;
+  const maxItems = options.maxItems ?? 16;
+  const maxKeys = options.maxKeys ?? 40;
+  const maxDepth = options.maxDepth ?? 5;
+  const compact = (input: unknown, depth = 0): unknown => {
+    if (typeof input === "string") return boundedText(input, maxString);
+    if (Array.isArray(input)) return input.slice(0, maxItems).map((entry) => compact(entry, depth + 1));
+    if (input && typeof input === "object") {
+      if (depth >= maxDepth) return "[nested detail omitted]";
+      return Object.fromEntries(
+        Object.entries(input as JsonRecord).slice(0, maxKeys).map(([key, entry]) => [key, compact(entry, depth + 1)]),
+      );
+    }
+    return input;
+  };
+  return JSON.stringify(compact(value)) ?? "";
+}
+
+function knownFields(value: unknown, fields: string[]) {
+  const source = objectValue(value);
+  return Object.fromEntries(fields.map((field) => [field, source[field]]));
+}
+
+function canonicalSareeTruth(value: unknown) {
+  const truth = objectValue(value);
+  const regionEvidence = Array.isArray(truth.regionEvidence) ? truth.regionEvidence : [];
+  return {
+    body: knownFields(truth.body, [
+      "mainFabric", "weave", "weaveGeometry", "texture", "transparency", "shine", "baseColor", "secondaryColors", "pattern", "motifInventory", "motifScale", "motifOrientation", "motifRepeat", "motifDensity", "motifPlacement", "embellishment", "bodyOrientation",
+    ]),
+    borders: knownFields(truth.borders, [
+      "upperBorder", "lowerBorder", "borderWidth", "upperBorderWidth", "lowerBorderWidth", "borderColors", "construction", "motifGeometry", "edgeTreatment", "continuityRules", "tasselColor", "tasselConstruction", "tasselSpacing",
+    ]),
+    pallu: knownFields(truth.pallu, [
+      "hasDistinctPallu", "startingRegion", "baseColor", "motifInventory", "motifScale", "motifOrientation", "motifRepeat", "motifDensity", "borders", "artwork", "zari", "embroidery", "tassels", "edgeTreatment", "visualOrientation", "evidenceReferences", "uncertainty",
+    ]),
+    pleatZone: knownFields(truth.pleatZone, ["patternBehavior", "borderBehavior", "embellishmentBehavior", "hasSpecialPanel"]),
+    blouse: knownFields(truth.blouse, [
+      "hasBlouse", "color", "fabric", "frontConstruction", "backConstruction", "neckline", "sleeves", "ties", "closure", "embroidery", "border", "pattern", "fit", "isUnstitchedPiece",
+    ]),
+    physics: knownFields(truth.physics, ["weight", "stiffness", "fluidity", "transparency", "shine", "creaseBehavior", "expectedFall"]),
+    regionEvidence: regionEvidence.map((entry) => knownFields(entry, ["region", "state", "visibleConstruction", "visibleDecoration", "closures", "explicitlyAbsent", "uncertainty"])),
+  };
+}
+
+function canonicalSareeDrapePlan(value: unknown) {
+  return knownFields(value, [
+    "baseDrapeFamily", "shoulderSide", "waistTuck", "frontPleatTreatment", "palluShoulderPlacement", "openOrPleatedPallu", "palluSpread", "palluFallDirection", "palluVisibleLength", "handInteraction", "movementAmount", "pinningBehavior", "borderVisibility", "blouseVisibility", "coverageConstraints", "poseSpecificDrapeState",
+  ]);
+}
+
+function productCore(value: JsonRecord) {
+  // These fields have dedicated evidence/geometry/saree sections below. Keeping
+  // them out of the generic snapshot prevents the same Product Truth from being
+  // sent two or three times while preserving every authoritative fact once.
+  return knownFields(value, [
+    "garmentFamily", "category", "mainColor", "secondaryColors", "fabric", "pattern", "print", "texture", "neckline", "sleeveType", "length", "fit", "silhouette", "frontConstruction", "backConstruction", "buttons", "zippers", "pockets", "embroidery", "logos", "accessoriesIncluded", "bottomWearDetails", "footwearDetails", "invariantDetails", "uncertaintyNotes",
+  ]);
+}
+
+function requiredJsonSection(section: string, value: unknown, maxChars: number) {
+  const json = JSON.stringify(value) ?? "{}";
+  if (json.length > maxChars) throw new GenerationPromptBudgetError(section, json.length, maxChars);
+  return json;
+}
+
+export function assertGenerationPromptWithinLimit(prompt: string) {
+  if (prompt.length > IMAGE_PROMPT_SAFE_CHARS) {
+    throw new GenerationPromptBudgetError("Compiled generation prompt", prompt.length, IMAGE_PROMPT_SAFE_CHARS);
+  }
+  return prompt;
+}
+
 // Analyses cached before the geometry profiles existed still flow through here,
 // so both readers fall back to the flat legacy fields instead of emitting null.
 function patternGeometryOf(product: JsonRecord) {
@@ -24,43 +127,63 @@ export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
   session: JsonRecord; references: PromptReference[]; correction?: string; learnings?: string;
 }) {
-  const product = args.session.productIdentity as JsonRecord;
-  const creative = args.session.creativeDirection as JsonRecord;
-  const model = args.session.modelIdentity as JsonRecord;
+  const product = objectValue(args.session.productIdentity);
+  const creative = objectValue(args.session.creativeDirection);
+  const model = objectValue(args.session.modelIdentity);
   // Null for sessions analysed before v10. They keep the old accessory line
   // instead of being handed generated defaults dressed up as stylist decisions.
   const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
-  const rules = Array.isArray(args.session.consistencyRules) ? args.session.consistencyRules.map(String) : CONSISTENCY_RULES;
-  const placement = Array.isArray(product?.detailPlacementMap) ? product.detailPlacementMap.map(String) : [];
-  const absent = Array.isArray(product?.absenceConstraints) ? product.absenceConstraints.map(String) : [];
+  const rules = boundedStrings(Array.isArray(args.session.consistencyRules) ? args.session.consistencyRules : CONSISTENCY_RULES, 16, 420);
+  const placement = boundedStrings(product.detailPlacementMap, 16, 420);
+  const absent = boundedStrings(product.absenceConstraints, 16, 420);
   const evidence = Array.isArray(product?.garmentEvidence) ? product.garmentEvidence as JsonRecord[] : [];
   
   const isSaree = product?.garmentFamily === "saree";
   if (isSaree && (!product.sareeTruth || typeof product.sareeTruth !== "object" || !product.sareeDrapePlan || typeof product.sareeDrapePlan !== "object")) {
     throw new Error("Stored saree analysis is incomplete or outdated. Reanalyse the product references before generation.");
   }
-  const sareeTruth = isSaree ? product.sareeTruth as JsonRecord : undefined;
-  const sareeDrapePlan = isSaree ? product.sareeDrapePlan as JsonRecord : undefined;
+  const sareeTruth = isSaree ? canonicalSareeTruth(product.sareeTruth) : undefined;
+  const sareeDrapePlan = isSaree ? canonicalSareeDrapePlan(product.sareeDrapePlan) : undefined;
+  const productCoreJson = compactJson(productCore(product), { maxString: 360, maxItems: 16, maxKeys: 32 });
+  const modelJson = compactJson(model, { maxString: 500, maxItems: 16, maxKeys: 32 });
+  const creativeJson = compactJson(creative, { maxString: 500, maxItems: 16, maxKeys: 32 });
+  const sareeTruthJson = isSaree ? requiredJsonSection("Canonical saree truth", sareeTruth, 10_000) : "";
+  const sareeDrapePlanJson = isSaree ? requiredJsonSection("Canonical saree drape plan", sareeDrapePlan, 4_000) : "";
+  const patternGeometryJson = compactJson(patternGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
+  const embroideryGeometryJson = compactJson(embroideryGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
   const manifest = args.references.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
   const hasApprovedAnchor = args.references.some((reference) => reference.role === "approved_pose");
   const hasModelReference = args.references.some((reference) => reference.role === "model_identity");
   const faceVisible = args.pose.id !== "back";
   const allowedDelta = [
-    `pose/body position: ${args.pose.bodyPosition}`,
-    `camera angle: ${args.pose.cameraAngle}`,
-    `framing: ${args.pose.framing}`,
-    `expression: ${args.pose.expression}`,
+    `pose/body position: ${boundedText(args.pose.bodyPosition, 360)}`,
+    `camera angle: ${boundedText(args.pose.cameraAngle, 360)}`,
+    `framing: ${boundedText(args.pose.framing, 360)}`,
+    `expression: ${boundedText(args.pose.expression, 360)}`,
   ];
-  return `Create ONE premium photorealistic fashion e-commerce photograph for ${args.skuName}.
+  const correction = boundedText(args.correction, 1_200);
+  const learnings = boundedText(args.learnings, 900);
+  const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).join(", ");
+  const visibilityRules = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
+  const evidenceLines = evidence.slice(0, 16).map((entry) => {
+    const row = objectValue(entry);
+    return `- Region ${boundedText(row.region, 120).toUpperCase() || "UNKNOWN"}: [State: ${boundedText(row.state, 80)}]
+  Construction: ${boundedText(row.visibleConstruction, 360) || "None explicitly proven"}
+  Decoration/Trim: ${boundedText(row.visibleDecoration, 360) || "None explicitly proven"}
+  Closures: ${boundedText(row.closures, 240) || "None"}
+  Absent: ${boundedStrings(row.explicitlyAbsent, 12, 180).join(", ") || "None"}
+  Uncertainty: ${boundedText(row.uncertainty, 260) || "None"}`;
+  }).join("\n");
+  const prompt = `Create ONE premium photorealistic fashion e-commerce photograph for ${boundedText(args.skuName, 160) || "this product"}.
 
 REFERENCE MANIFEST IN UPLOAD ORDER:
 ${manifest}
 
 EDIT GOAL:
-Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${args.pose.title}. The finished image must look like the same real professional photoshoot as the other four images.
+Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${boundedText(args.pose.title, 160)}. The finished image must look like the same real professional photoshoot as the other four images.
 
 LOCKED SUBJECT - MUST NOT CHANGE:
-${JSON.stringify(model)}
+${modelJson}
 - Same recognizable face, skin tone, body proportions, hairstyle, hair length/color, makeup, accessories and footwear across the complete set.
 - Pose 1 is only the subject/scene anchor for later poses. It never overrides original product references.
 
@@ -75,23 +198,18 @@ ${faceVisible
     : "The face is turned away and is not the subject of this pose - keep hair color/style, skin tone, and body proportions consistent with the identity anchor."}
 
 LOCKED PRODUCT - MUST NOT CHANGE:
-${JSON.stringify(product)}
+${productCoreJson}
 ${isSaree ? `SAREE TRUTH - CRITICAL:
-${JSON.stringify(sareeTruth)}
+${sareeTruthJson}
 SAREE DRAPE PLAN:
-${JSON.stringify(sareeDrapePlan)}` : ""}
-User notes: ${args.productDetails}
+${sareeDrapePlanJson}` : ""}
+User notes: ${boundedText(args.productDetails, 1_200)}
 Reference authority: original product images always outrank generated anchors and style references. FRONT controls front construction; BACK solely controls rear construction; FABRIC/PATTERN resolves material and small construction; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion and drape, while a FLAT-LAY resolves outline, construction, panel layout and length only; ADDITIONAL supports product truth; STYLE controls art direction only.${isSaree ? " For sarees, FULL SAREE FRONT and REAR/BACK DRAPE control their complete worn regions; SAREE BODY/WEAVE controls body colour, weave and motif geometry; FULLY SPREAD PALLU alone controls the pallu boundary and artwork; BORDER/TASSELS controls edge geometry and tassel construction; BLOUSE FRONT/BACK controls only the matching blouse region. Never classify or treat the pallu spread as generic body fabric." : ""}
 - Product references may be flat-lay, folded, pinned or shot on a mannequin or dress form. Rebuild the garment as it falls on a live human body, and never render a mannequin, dress form, hanger, clip, pin, prop stand, or the flat background surface in the output.
 ${isSaree ? `- SAREE SPECIFIC RULES: Pallu artwork stays on the pallu, never bleed the border into the main body, do not duplicate the pallu into multiple loose cloth panels, border width stays identical, follow the drape plan explicitly.` : ""}
 
 GARMENT TRUTH CONTRACT (EVIDENCE BY REGION):
-${evidence.length ? evidence.map((e) => `- Region ${String(e.region).toUpperCase() || "UNKNOWN"}: [State: ${String(e.state)}]
-  Construction: ${e.visibleConstruction || "None explicitly proven"}
-  Decoration/Trim: ${e.visibleDecoration || "None explicitly proven"}
-  Closures: ${e.closures || "None"}
-  Absent: ${(Array.isArray(e.explicitlyAbsent) ? e.explicitlyAbsent : []).join(", ") || "None"}
-  Uncertainty: ${e.uncertainty || "None"}`).join("\n") : ""}
+${evidenceLines}
 ${placement.length ? `Detail placement hard locks:\n${placement.map((rule) => `- ${rule}`).join("\n")}` : "- Preserve every visible detail only in the exact region shown by the authoritative image."}
 ${absent.length ? `Negative-evidence hard locks:\n${absent.map((rule) => `- ${rule}`).join("\n")}` : "- Add no button, closure, tassel/latkan, trim, embroidery, pocket, logo, jewelry or hardware unless the authoritative product image proves it exists at that location."}
 
@@ -101,8 +219,8 @@ CRITICAL EVIDENCE RULES:
 - Do NOT extrapolate decoration. If trim is confirmed at the front hem but the side seam is unknown, do not extend the trim up the side.
 
 PRINT AND EMBROIDERY GEOMETRY LOCK - the difference between photographing THIS garment and inventing a similar one:
-Pattern geometry: ${JSON.stringify(patternGeometryOf(product))}
-Embroidery geometry: ${JSON.stringify(embroideryGeometryOf(product))}
+Pattern geometry: ${patternGeometryJson}
+Embroidery geometry: ${embroideryGeometryJson}
 - The FABRIC / PATTERN DETAIL image is the pixel-level authority for motif shape, motif scale, spacing, orientation and embroidery construction. Read the geometry off that image rather than reproducing a generic version of the same craft or style.
 - Reproduce motifs at the stated physical scale relative to the body. Do not enlarge, simplify, stylize, redraw or "clean up" a motif, and do not reduce a dense print to fewer, larger shapes.
 - Keep the print's orientation, repeat interval and density identical, including where panels differ - body, sleeves, yoke, bottom wear and dupatta each keep their own stated treatment.
@@ -111,47 +229,47 @@ Embroidery geometry: ${JSON.stringify(embroideryGeometryOf(product))}
 - If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".
 
 LOCKED ART DIRECTION - MUST NOT CHANGE BETWEEN POSES:
-${JSON.stringify(creative)}
+${creativeJson}
 - Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, camera height and distance, depth of field and colour grade. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
 
 ${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in all five frames:
-- Footwear: ${styling.footwear}
-- Jewellery: ${styling.jewellery}
-- Ornaments and accessories: ${styling.ornaments}
-- Makeup: ${styling.makeup}
-- Hair: ${styling.hair}
-${styling.stylingNotes ? `- Stylist notes: ${styling.stylingNotes}` : ""}
-${styling.themeInterpretation ? `- Theme being served: ${styling.themeInterpretation}` : ""}
+- Footwear: ${boundedText(styling.footwear, 360)}
+- Jewellery: ${boundedText(styling.jewellery, 360)}
+- Ornaments and accessories: ${boundedText(styling.ornaments, 360)}
+- Makeup: ${boundedText(styling.makeup, 360)}
+- Hair: ${boundedText(styling.hair, 360)}
+${styling.stylingNotes ? `- Stylist notes: ${boundedText(styling.stylingNotes, 600)}` : ""}
+${styling.themeInterpretation ? `- Theme being served: ${boundedText(styling.themeInterpretation, 600)}` : ""}
 - Style the model with exactly these pieces - the same metal, the same count, the same placement in every frame. Do not add a necklace, bangle, ring, belt, bag, hair ornament or any other accessory this plan does not list, and do not drop one it does.
 - This is styling only. It never becomes part of the garment, never hides or replaces a garment detail, bottom wear or footwear shown in the product references, and never contradicts the placement or absence locks above.
-${creative?.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${creative.suggestedAccessories}` : ""}`
+${creative?.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${boundedText(creative.suggestedAccessories, 420)}` : ""}`
   : `STYLING ADDITION (optional, locked once chosen):
-${creative?.suggestedAccessories ? `The stylist has proposed adding: ${creative.suggestedAccessories}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}`}
+${creative?.suggestedAccessories ? `The stylist has proposed adding: ${boundedText(creative.suggestedAccessories, 420)}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}`}
 
 ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
 ${allowedDelta.map((value) => `- ${value}`).join("\n")}
-- Hand placement: ${args.pose.handPlacement}
+- Hand placement: ${boundedText(args.pose.handPlacement, 360)}
 - Everything not named here stays locked.
 
 POSE REQUIREMENT:
-Description: ${args.pose.description}
-Details to highlight: ${args.pose.highlightedDetails.join(", ")}
-Visibility rules: ${args.pose.productVisibilityRules.join("; ")}
-Purpose: ${args.pose.purpose}
-Consistency notes: ${args.pose.consistencyNotes}
-${args.correction ? `
+Description: ${boundedText(args.pose.description, 600)}
+Details to highlight: ${highlightedDetails}
+Visibility rules: ${visibilityRules}
+Purpose: ${boundedText(args.pose.purpose, 420)}
+Consistency notes: ${boundedText(args.pose.consistencyNotes, 600)}
+${correction ? `
 CORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:
-${args.correction}
+${correction}
 - Address this correction completely and literally. Do not change anything else that was working.` : ""}
-${args.learnings ? `
+${learnings ? `
 CONTINUOUS LEARNING ADVISORY (PAST QA FEEDBACK FOR THIS CATEGORY):
-${args.learnings}
+${learnings}
 - These are historical corrections from other products. They are ADVISORY only.
 - You MUST validate these learnings against the current product's GARMENT TRUTH CONTRACT. If a past correction contradicts the current authoritative product references or evidence, ignore the learning. The current product references ALWAYS override past learnings.
 ` : ""}
 
 PROMPT:
-${args.pose.prompt}
+${boundedText(args.pose.prompt, 1_200)}
 
 REALISTIC INTEGRATION:
 - Treat this as frame ${args.pose.poseNumber} from one photographed contact sheet, not a new image concept. Reuse the same physical set coordinates, time of day, camera family, focal-length character, camera height, exposure, white balance, light direction, shadow density, and color grade established by Pose 1.
@@ -169,7 +287,8 @@ ${rules.map((rule) => `- ${rule}`).join("\n")}
 - Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
 ${args.pose.id === "back" ? "- TRUE BACK HARD RULE: shoulders and hips fully face away. Reproduce uploaded BACK exactly; never infer the rear from FRONT." : ""}
 ${args.pose.id === "closeup" ? "- POSE 5 HARD RULE: this is a genuine ZOOMED-IN face-to-chest or face-to-waist shot - visibly tighter in scale than the full-body hero pose, never a repeat of that wide framing. The face must be sharp, beautiful, and carry a natural Gen-Z expression, and one real product detail (embroidery, neckline, drape, print, or fabric texture) must also be sharp and clearly visible in the same frame." : ""}
-${args.correction ? `\nEARLIER ATTEMPTS OF THIS EXACT POSE FAILED CONSISTENCY QA. Fix every issue listed below in one image while preserving every lock, and never reintroduce a defect an earlier attempt already corrected:\n${args.correction}` : ""}
 
 Product accuracy is more important than style matching. Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
+
+  return assertGenerationPromptWithinLimit(prompt);
 }

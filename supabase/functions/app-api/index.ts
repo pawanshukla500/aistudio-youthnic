@@ -16,7 +16,7 @@ import {
   type StylingPlanProfile,
 } from "./profiles.ts";
 import { appendRejectedAttemptHistory, buildPoseQaPrompt, parseQaResponse, qaStorageDisposition, unavailableQaResult } from "./qa.ts";
-import { composeGenerationPrompt } from "./lib/generationPrompt.ts";
+import { assertGenerationPromptWithinLimit, composeGenerationPrompt } from "./lib/generationPrompt.ts";
 import {
   MAX_IMAGE_REFERENCES,
   PRODUCT_REFERENCE_ROLES,
@@ -749,6 +749,9 @@ function normalizeImageSize(aspectRatio: string, imageSize: string, model: strin
 }
 
 async function generateImage(args: { prompt: string; model: string; size: string; quality: string; references: LoadedReference[] }) {
+  // composeGenerationPrompt enforces this too. Keep the provider boundary guarded
+  // so future callers cannot send an oversized prompt and trigger a paid-job retry.
+  assertGenerationPromptWithinLimit(args.prompt);
   const body = new FormData();
   body.append("model", args.model);
   body.append("prompt", args.prompt);
@@ -807,7 +810,16 @@ async function generateImage(args: { prompt: string; model: string; size: string
 function permanentProviderError(error: unknown) {
   const code = String((error as { code?: string })?.code || "").toLowerCase();
   const status = Number((error as { status?: number })?.status || 0);
-  return ["moderation_blocked", "invalid_api_key", "image_generation_user_error", "same_defect_repeated"].includes(code) || [400, 401, 403, 404].includes(status);
+  return ["moderation_blocked", "invalid_api_key", "image_generation_user_error", "same_defect_repeated", "prompt_budget_exceeded"].includes(code) || [400, 401, 403, 404].includes(status);
+}
+
+function generationFailureCode(error: unknown, message: string) {
+  const code = String((error as { code?: string })?.code || "").toLowerCase();
+  if (code === "prompt_budget_exceeded" || /invalid 'prompt': string too long|safe image-generation prompt/i.test(message)) {
+    return "prompt_budget_exceeded";
+  }
+  const status = Number((error as { status?: number })?.status || 0);
+  return status === 400 ? "provider_request_invalid" : "pose_consistency_failed";
 }
 
 async function validatePose(args: {
@@ -973,17 +985,27 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   const status = failed ? "failed" : "completed";
   const now = new Date().toISOString();
   const sessionData = session.session_data as JsonRecord;
+  const firstFailure = poses.find((pose) => pose.status === "failed");
+  const firstFailureMessage = String(firstFailure?.error || job.error_message || "");
+  const promptBudgetFailure = String(job.error_code || "") === "prompt_budget_exceeded" || /invalid 'prompt': string too long|safe image-generation prompt/i.test(firstFailureMessage);
+  const failureCode = promptBudgetFailure ? "prompt_budget_exceeded" : String(job.error_code || "pose_consistency_failed");
+  const failureSummary = promptBudgetFailure
+    ? `Pose ${Number(firstFailure?.pose_index || 1)} was blocked before image generation: ${firstFailureMessage}`.slice(0, 1000)
+    : `${failed} of ${poses.length} pose(s) exhausted automatic generation/QA retries${completed ? `; ${completed} pose(s) passed and can be downloaded or regenerated individually` : ""}.`;
+  const readinessReason = promptBudgetFailure
+    ? "A prompt compilation safeguard blocked the provider request before image generation."
+    : `${failed} pose(s) failed consistency validation.`;
   await Promise.all([
     service.from("generation_jobs").update({
-      status, readiness_status: failed ? "needs_review" : "completed", readiness_reasons: failed ? [`${failed} pose(s) failed consistency validation.`] : [], completed_poses: completed, failed_poses: failed, completed_at: now,
+      status, readiness_status: failed ? "needs_review" : "completed", readiness_reasons: failed ? [readinessReason] : [], completed_poses: completed, failed_poses: failed, completed_at: now,
       locked_at: null, lock_expires_at: null, updated_at: now,
-      ...(failed ? { error_code: "pose_consistency_failed", error_message: `${failed} of ${poses.length} pose(s) exhausted automatic generation/QA retries${completed ? `; ${completed} pose(s) passed and can be downloaded or regenerated individually` : ""}.` } : {}),
+      ...(failed ? { error_code: failureCode, error_message: failureSummary } : {}),
     }).eq("job_id", job.job_id),
     service.from("catalog_sessions").update({ status: failed ? "needs_review" : "completed", updated_at: now }).eq("session_id", job.session_id),
     service.from("planning_requests").update({
       status, generation_status: status, completion_status: failed ? "needs_review" : "completed",
       generation_finished_at: now, generation_cost_usd: Number(job.actual_cost_usd || 0), updated_at: now,
-      ...(failed ? { error_message: `${failed} pose(s) failed consistency validation.` } : {}),
+      ...(failed ? { error_message: failureSummary } : {}),
     }).eq("id", job.planning_request_id),
     service.from("catalog_work_items").update({
       generation_status: status,
@@ -1054,7 +1076,7 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   scheduleBackground(kickWorker());
 }
 
-async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRecord, message: string) {
+async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRecord, message: string, failureCode = "pose_consistency_failed") {
   const now = new Date().toISOString();
   await service.from("session_generations").update({ status: "failed", qa_status: "failed", error: message.slice(0, 1000), updated_at: now }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
   const { data: poses, error: posesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
@@ -1068,8 +1090,8 @@ async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRe
       service.from("generation_jobs").update({
         status: "queued", available_at: now, locked_at: null, lock_expires_at: null,
         failed_poses: (poses || []).filter((entry) => entry.status === "failed").length,
-        error_code: "pose_consistency_failed", error_message: message.slice(0, 1000), updated_at: now,
-        job_data: { ...((job.job_data as JsonRecord) || {}), detailedStatus: `Pose ${pose.pose_index} QA failed. Moving to next pose.` },
+        error_code: failureCode, error_message: message.slice(0, 1000), updated_at: now,
+        job_data: { ...((job.job_data as JsonRecord) || {}), detailedStatus: `Pose ${pose.pose_index} failed. Moving to next pose.` },
       }).eq("job_id", job.job_id),
       service.from("planning_requests").update({ generation_status: "queued", error_message: message.slice(0, 1000), updated_at: now }).eq("id", job.planning_request_id),
     ]);
@@ -1081,7 +1103,7 @@ async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRe
   }
   const { data: finalPoses, error: finalPosesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
   if (finalPosesError) console.error(finalPosesError.message);
-  await finalizeJob({ ...job, actual_cost_usd: Number(job.actual_cost_usd || 0) }, session, (finalPoses || []) as JsonRecord[]);
+  await finalizeJob({ ...job, actual_cost_usd: Number(job.actual_cost_usd || 0), error_code: failureCode, error_message: message }, session, (finalPoses || []) as JsonRecord[]);
 }
 
 // The image behind a QA rejection is already paid for, so it is archived instead of
@@ -1617,6 +1639,7 @@ async function processWorker(request: Request, args: JsonRecord) {
   ].filter(Boolean).join("\n");
   let rejectedAttempts = Array.isArray(storedPoseData.rejectedAttempts) ? storedPoseData.rejectedAttempts as JsonRecord[] : [];
   let lastError = "Generation did not complete.";
+  let terminalFailureCode = "pose_consistency_failed";
   let attemptCost = 0;
   let attemptUsage: ProviderUsage | undefined;
   let providerRequestId = "";
@@ -1824,6 +1847,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "completed" };
   } catch (error) {
     lastError = errorMessage(error);
+    terminalFailureCode = generationFailureCode(error, lastError);
     if (!permanentProviderError(error) && attempt < MAX_GENERATION_ATTEMPTS) {
       return deferPoseRetry({ job, pose, attempt, message: lastError, corrections: qaCorrections, rejectedAttempts, attemptCost, usage: attemptUsage, providerRequestId, error });
     }
@@ -1852,7 +1876,7 @@ async function processWorker(request: Request, args: JsonRecord) {
       }).eq("job_id", job.job_id),
     ]);
   }
-  await failPoseAndJob({ ...job, actual_cost_usd: Number(job.actual_cost_usd || 0) + attemptCost }, session, pose, lastError);
+  await failPoseAndJob({ ...job, actual_cost_usd: Number(job.actual_cost_usd || 0) + attemptCost }, session, pose, lastError, terminalFailureCode);
   return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed", error: lastError };
 }
 

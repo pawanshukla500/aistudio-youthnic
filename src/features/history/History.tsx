@@ -6,6 +6,7 @@ import { useWorkspace } from "../../lib/WorkspaceContext";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import { ActionDialog } from "../../components/ui/ActionDialog";
+import { generationDeliveryProgress } from "../../lib/generationProgress";
 
 type PendingHistoryAction = {
   type: "stop" | "delete" | "regenerate";
@@ -256,6 +257,11 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     return <div className="p-10 text-center text-sm text-secondary">Job not found.</div>;
   }
 
+  const promptBudgetPose = job.poses.find((pose: any) => /invalid 'prompt': string too long|safe image-generation prompt/i.test(String(pose.error || "")));
+  const visibleError = promptBudgetPose
+    ? `Pose ${promptBudgetPose.poseNumber || 1} was blocked before image generation: ${promptBudgetPose.error}`
+    : job.errorMessage;
+
   return (
     <div className="border-t border-outline-variant/30 bg-surface-container-lowest/50 p-6">
       <div className="mb-6 flex flex-wrap gap-4 text-xs text-secondary bg-white rounded-xl p-4 border border-outline-variant/40 shadow-sm">
@@ -269,10 +275,10 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         <span className="w-px h-4 bg-outline-variant/50 hidden sm:block"></span>
         <span className="flex items-center gap-1.5"><b className="text-on-surface">Actual so far:</b> ${Number(job.actualCost || 0).toFixed(4)}</span>
         
-        {job.errorMessage && (
+        {visibleError && (
           <>
              <span className="w-px h-4 bg-outline-variant/50 hidden sm:block"></span>
-             <span className="text-danger flex items-center gap-1.5 bg-danger/5 px-2 py-0.5 rounded text-danger"><AlertCircle className="h-3 w-3" /> <b className="font-bold">Error:</b> {job.errorMessage}</span>
+             <span className="text-danger flex items-center gap-1.5 bg-danger/5 px-2 py-0.5 rounded text-danger"><AlertCircle className="h-3 w-3" /> <b className="font-bold">Error:</b> {visibleError}</span>
           </>
         )}
         
@@ -706,9 +712,8 @@ export function History() {
         
         {(jobs || []).map((job: any) => { 
            const open = expanded === job._id; 
-           const finished = job.completedPoses + job.failedPoses; 
-           const inFlightCredit = job.status === "processing" && finished < job.totalPoses ? 0.5 : 0;
-           const progress = Math.min(100, Math.round(((finished + inFlightCredit) / Math.max(1, job.totalPoses)) * 100));
+           const delivery = generationDeliveryProgress(job);
+           const progress = delivery.deliveredPercent;
            
            return (
              <article key={job._id} className="group relative border-b border-outline-variant/30 bg-white last:border-b-0 transition-colors duration-200 hover:bg-surface-container-lowest">
@@ -742,7 +747,7 @@ export function History() {
                  {/* COL 2: Progress */}
                  <div className="hidden lg:block">
                     <div className="mb-1 flex items-center justify-between text-xs font-medium text-secondary">
-                      <span>{job.status === "processing" ? `Pose ${Math.max(1, job.currentPose || finished + 1)} · ` : ""}{finished} / {job.totalPoses} stored</span>
+                      <span>{job.status === "processing" ? `Pose ${Math.max(1, job.currentPose || delivery.resolvedPoses + 1)} · ` : ""}{delivery.imagesStored} / {delivery.totalPoses} images stored{delivery.failedPoses ? ` · ${delivery.failedPoses} failed` : ""}</span>
                       <span>{progress}%</span>
                     </div>
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-container-highest shadow-inner">

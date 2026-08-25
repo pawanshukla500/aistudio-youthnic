@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Activity, AlertTriangle, CalendarClock, CalendarRange, CheckCircle, Clock3, History, Image as ImageIcon, Loader2, XCircle } from "lucide-react";
 import { useSupabaseDashboardSummary } from "../../lib/useSupabaseDashboard";
+import { generationDeliveryProgress } from "../../lib/generationProgress";
 
 function relativeTime(timestamp: number) {
   const seconds = Math.max(1, Math.round((Date.now() - timestamp) / 1000));
@@ -46,7 +47,7 @@ export function Dashboard() {
   if (error) return <div className="grid min-h-[50vh] place-items-center px-6 text-center text-sm font-semibold text-danger">{error}</div>;
   if (!summary) return <div className="grid min-h-[50vh] place-items-center text-sm font-semibold text-secondary">Loading live operations…</div>;
   const current = summary.jobs.current;
-  const progress = current ? Math.round((((current.completedPoses ?? 0) + (current.failedPoses ?? 0)) / Math.max(1, current.totalPoses ?? 0)) * 100) : 0;
+  const delivery = generationDeliveryProgress(current || {});
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-8">
@@ -77,7 +78,7 @@ export function Dashboard() {
             <div><span className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-info">Generating now</span><h3 className="font-mono text-lg font-medium text-on-surface">{current?.skuId || "Queue is clear"}</h3></div>
             <Activity className="h-6 w-6 text-secondary" />
           </div>
-          {current ? <><div className="mb-2 flex items-end justify-between"><span className="text-[13px] font-semibold text-secondary">Pose generation</span><span className="text-[15px] font-bold text-on-surface">{(current.completedPoses ?? 0) + (current.failedPoses ?? 0)} of {current.totalPoses ?? 0}</span></div><div className="h-1.5 w-full rounded-full bg-surface-container-high"><div className="h-1.5 rounded-full bg-info transition-all" style={{ width: `${progress}%` }} /></div></> : <p className="text-sm text-secondary">New Studio jobs will appear here in real time.</p>}
+          {current ? <><div className="mb-2 flex items-end justify-between"><span className="text-[13px] font-semibold text-secondary">Images stored{delivery.failedPoses ? ` · ${delivery.failedPoses} failed` : ""}</span><span className="text-[15px] font-bold text-on-surface">{delivery.imagesStored} of {delivery.totalPoses}</span></div><div className="h-1.5 w-full rounded-full bg-surface-container-high"><div className="h-1.5 rounded-full bg-info transition-all" style={{ width: `${delivery.deliveredPercent}%` }} /></div></> : <p className="text-sm text-secondary">New Studio jobs will appear here in real time.</p>}
         </div>
         <div className={`rounded-xl border p-6 ${summary.planning.active ? "border-info/20 bg-info-surface" : "border-success/20 bg-success-surface"}`}>
           <div className="flex gap-4"><div className="grid h-10 w-10 place-items-center rounded-full bg-white/60"><AlertTriangle className={`h-5 w-5 ${summary.planning.active ? "text-info" : "text-success"}`} /></div><div><h3 className="font-syne text-lg font-bold text-on-surface">{summary.planning.active ? `${summary.planning.active} catalog${summary.planning.active === 1 ? "" : "s"} generating` : "No catalogs generating"}</h3><p className="mt-1 text-sm text-secondary">{summary.planning.active ? "Colourways are generating in the background." : `${summary.planning.drafts} draft${summary.planning.drafts === 1 ? "" : "s"} waiting to schedule.`}</p></div></div>
