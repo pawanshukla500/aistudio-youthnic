@@ -90,6 +90,11 @@ export function isCompleted(item: CatalogWorkItem) {
 
 export function canQueueGeneration(item: CatalogWorkItem) {
   if (isCompleted(item)) return false;
+  // Catalog work items mirror Planning's live workflow stage. Do not expose a
+  // bulk-generation checkbox for work that is still collecting evidence or
+  // awaiting analysis; otherwise one incomplete saree can fail an entire
+  // Auto-Start selection after the user confirms it.
+  if (["requirement_created", "reference_assets_pending", "planning"].includes(item.workflow_stage || "")) return false;
   if (!item.planning_request_id && (!item.reference_image_url || !item.back_reference_image_url)) return false;
   if (item.generation_status === "completed" && item.qc_status !== "rejected" && item.workflow_stage !== "regeneration_required") return false;
   return !["queued", "generating", "processing"].includes(item.generation_status);
