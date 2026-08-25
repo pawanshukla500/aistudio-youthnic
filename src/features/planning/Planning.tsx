@@ -293,7 +293,7 @@ export function Planning() {
       setShowCreate(false);
       setForm(emptyCreate);
       setSelectedId(catalogId);
-      notify("success", `Catalog created with ${variants.length} colourway${variants.length === 1 ? "" : "s"}. Upload front/back for every colourway; Gemini preflight and the preferred automatic run will arm themselves.`);
+      notify("success", `Catalog created with ${variants.length} colourway${variants.length === 1 ? "" : "s"}. ${form.category === "saree" ? "Upload full front, rear drape, pallu spread, and body detail for every colourway." : "Upload front and back for every colourway."} Gemini preflight and the preferred automatic run will arm themselves.`);
     } catch (reason) {
       notify("error", getErrorMessage(reason, "Could not create catalog."));
     } finally {
@@ -487,6 +487,11 @@ export function Planning() {
 
   const linkedEvent = selected?.eventId ? (roadmap?.events || []).find((entry) => entry._id === selected.eventId) : null;
   const focusVariant = (selected?.variants || []).find((variant) => variant._id === focusSku) || null;
+  const focusIsSaree = Boolean(focusVariant && (
+    String(selected?.category || "").toLowerCase() === "saree" ||
+    String(focusVariant.category || "").toLowerCase() === "saree" ||
+    String(focusVariant.garmentFamily || focusVariant.garmentAnalysis?.productIdentity?.garmentFamily || "").toLowerCase() === "saree"
+  ));
   const readyCount = (selected?.variants || []).filter((variant) => variant.readinessStatus === "ready").length;
   const preflightReadyCount = (selected?.variants || []).filter((variant) => variant.readinessStatus === "ready" && variant.analysisStatus === "ready").length;
   const activeVariant = (selected?.variants || []).find((variant) => ["queued", "processing", "cancelling"].includes(variant.jobStatus))
@@ -810,7 +815,7 @@ export function Planning() {
                       </div>
                       {canEditReferences && (
                         <div className="mt-3 grid grid-cols-2 gap-2">
-                          {(selected.category === "saree" ? [
+                          {(focusIsSaree ? [
                             ["saree_front_drape", "Full saree front *", focusVariant.sareeFrontDrapeUrl],
                             ["saree_back_drape", "Rear / back drape *", focusVariant.sareeBackDrapeUrl],
                             ["saree_pallu_spread", "Pallu spread *", focusVariant.sareePalluSpreadUrl],
@@ -884,7 +889,7 @@ export function Planning() {
                       ))}
                     </div>
                     <div className={`mt-4 rounded-xl px-4 py-3 text-xs ${readyCount ? "bg-success-surface text-success" : "bg-warning-surface text-warning"}`}>
-                      {readyCount ? `${readyCount} ready colourway${readyCount === 1 ? "" : "s"} will be included.${incompleteCount ? ` ${incompleteCount} incomplete colourway${incompleteCount === 1 ? " is" : "s are"} excluded until front and back are uploaded.` : ""}` : "Upload front and back product images for at least one colourway before scheduling."}
+                      {readyCount ? `${readyCount} ready colourway${readyCount === 1 ? "" : "s"} will be included.${incompleteCount ? ` ${incompleteCount} incomplete colourway${incompleteCount === 1 ? " is" : "s are"} excluded until required product evidence is uploaded.` : ""}` : "Upload the required product evidence for at least one colourway before scheduling."}
                     </div>
                   </div>
 

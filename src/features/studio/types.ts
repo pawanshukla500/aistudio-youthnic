@@ -255,6 +255,11 @@ export type StudioAnalysis = {
   stylingPlan?: StylingPlanProfile;
   posePlan: StudioPose[];
   cacheHit: boolean;
+  // Returned when Gemini discovers a saree from a broad category. The analysis is
+  // intentionally not queueable until the member maps the authoritative pallu
+  // evidence and reruns it under the saree reference policy.
+  requiresSareeEvidence?: boolean;
+  sareeEvidenceIssues?: string[];
 };
 
 export type { StylingPlanProfile };

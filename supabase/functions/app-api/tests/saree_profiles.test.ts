@@ -150,6 +150,29 @@ Deno.test("complete normalized saree session passes shared Studio and Catalog pr
   assertSareeGenerationReady(session);
 });
 
+Deno.test("a legacy detected saree has one specific blocker until the pallu is explicitly mapped", () => {
+  const normalized = normalizeAnalysis({
+    productIdentity: { garmentFamily: "saree" },
+    sareeTruth: rawTruth,
+    sareeDrapePlan: rawDrapePlan,
+    posePlan,
+  }, "ethnic/fusion");
+  const legacyReferences = [
+    { role: "front", storagePath: "org/front.jpg" },
+    { role: "back", storagePath: "org/back.jpg" },
+    { role: "fabric_pattern", storagePath: "org/body.jpg" },
+  ];
+
+  assertEquals(
+    sareeAnalysisIssues({ ...normalized, references: legacyReferences }),
+    ["fully spread pallu reference is missing"],
+  );
+  assertEquals(
+    sareeAnalysisIssues({ ...normalized, references: [...legacyReferences, { role: "saree_pallu_spread", storagePath: "org/pallu.jpg" }] }),
+    [],
+  );
+});
+
 Deno.test("saree generation is blocked before paid work when truth is incomplete", () => {
   const session = {
     productIdentity: {

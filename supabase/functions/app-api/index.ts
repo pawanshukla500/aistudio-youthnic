@@ -668,10 +668,36 @@ async function analyze(request: Request, args: JsonRecord) {
     });
   }
 
+  // Gemini can correctly identify a saree even when a user starts in the broad
+  // "Ethnic / fusion" category. Do not create a queueable generic session in
+  // that case: the user must explicitly supply or map the pallu evidence first.
+  // This prevents the old loop where a valid saree truth profile was stored with
+  // legacy roles and was later rejected by the paid-generation preflight.
+  const detectedGarmentFamily = String(normalized.productIdentity.garmentFamily || "").trim().toLowerCase();
+  const analysisCategory = detectedGarmentFamily === "saree"
+    ? "saree"
+    : String(args.category || "ethnic/fusion");
+  const missingDetectedSareeEvidence = detectedGarmentFamily === "saree"
+    ? missingRequiredReferenceLabels(references, "saree")
+    : [];
+  if (missingDetectedSareeEvidence.length) {
+    return {
+      sessionId: "",
+      referenceIds: [],
+      analysisFingerprint: fingerprint,
+      productHash: pHash,
+      referenceHash: rHash,
+      ...normalized,
+      cacheHit,
+      requiresSareeEvidence: true,
+      sareeEvidenceIssues: missingDetectedSareeEvidence,
+    };
+  }
+
   const requestCode = `STUDIO-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
   const { data: planningRequest, error: planningError } = await service.from("planning_requests").insert({
     organization_id: orgId, created_by_member_id: workspace.member.id, sku_name: String(args.skuName || "Untitled studio product"),
-    product_description: String(args.productDetails || ""), photoshoot_type: "ai_catalog_5_pose", category: String(args.category || "ethnic/fusion"),
+    product_description: String(args.productDetails || ""), photoshoot_type: "ai_catalog_5_pose", category: analysisCategory,
     status: "analyzed", request_code: requestCode, generation_status: "ready", completion_status: "pending",
     garment_analysis: normalized, ai_analysis: normalized, validation_status: "ready",
   }).select("id").single();
@@ -687,14 +713,14 @@ async function analyze(request: Request, args: JsonRecord) {
   const sessionId = `session_${crypto.randomUUID()}`;
   const sessionData = {
     skuId: String(args.skuId || requestCode), skuName: String(args.skuName || "Untitled studio product"),
-    productDetails: String(args.productDetails || ""), category: String(args.category || "ethnic/fusion"),
+    productDetails: String(args.productDetails || ""), category: analysisCategory,
     referenceIds: (assets || []).map((asset) => asset.id), references: (assets || []).map((asset) => ({
       id: asset.id, role: asset.asset_role, downloadUrl: asset.image_url, storagePath: asset.storage_path, storageBackend: asset.storage_backend as CatalogStorageBackend,
       hash: String((asset.metadata as JsonRecord)?.hash || ""), filename: String((asset.metadata as JsonRecord)?.filename || `${asset.asset_role}.jpg`),
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     })), productIdentity: normalized.productIdentity, creativeDirection: normalized.creativeDirection,
     modelIdentity: normalized.modelIdentity, stylingPlan: normalized.stylingPlan, posePlan: normalized.posePlan, consistencyRules: CONSISTENCY_RULES,
-    analysisModel: resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: String(args.category || "") }).model, analysisVersion: ANALYSIS_VERSION,
+    analysisModel: resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: analysisCategory }).model, analysisVersion: ANALYSIS_VERSION,
     generatedAssets: [], approvedAssets: [],
   };
   const { error: sessionError } = await service.from("catalog_sessions").insert({
@@ -2984,10 +3010,10 @@ async function scheduleCatalogOperation(request: Request, args: JsonRecord) {
   const batchId = String(args.catalogId || "");
   await catalogBatch(workspace, batchId);
   const scheduledAt = new Date(Number(args.scheduledAt || Date.now())).toISOString();
-  const { data: variants, error: variantsError } = await service.from("planning_requests").select("id,front_image_url,back_image_url").eq("batch_id", batchId);
+  const { data: variants, error: variantsError } = await service.from("planning_requests").select("id,validation_status").eq("batch_id", batchId);
   if (variantsError) console.error(variantsError.message);
-  const readyCount = (variants || []).filter((variant) => variant.front_image_url && variant.back_image_url).length;
-  if (!readyCount) throw new Error("Upload front and back images for at least one colourway before scheduling.");
+  const readyCount = (variants || []).filter((variant) => variant.validation_status === "ready").length;
+  if (!readyCount) throw new Error("Upload the required product evidence for at least one colourway before scheduling.");
   await service.from("planning_batches").update({
     scheduled_at: scheduledAt, schedule_status: "scheduled", queue_status: "idle", schedule_error: "", status: "active", updated_at: new Date().toISOString(),
   }).eq("id", batchId);
@@ -3059,9 +3085,28 @@ async function retryVariantOperation(request: Request, args: JsonRecord) {
   return { success: true };
 }
 
+function catalogVariantCategory(batch: JsonRecord, variant: JsonRecord) {
+  const storedAnalysis = (variant.ai_analysis || variant.garment_analysis || {}) as JsonRecord;
+  const storedProduct = (storedAnalysis.productIdentity || storedAnalysis.product_identity || {}) as JsonRecord;
+  const detectedFamily = String(storedProduct.garmentFamily || storedProduct.garment_family || "").trim().toLowerCase();
+  // A product analysis is stronger evidence than a broad batch default. This is
+  // especially important for a mixed "Ethnic / fusion" catalog that contains a
+  // saree: its reference requirements must immediately become saree-specific.
+  if (detectedFamily === "saree") return "saree";
+  const variantCategory = String(variant.category || "").trim();
+  if (variantCategory) return variantCategory;
+  const settings = (batch.generation_settings || {}) as JsonRecord;
+  return String(settings.category || "ethnic/fusion");
+}
+
+function sareeReferenceRequirementMessage(missing: string[]) {
+  return `Saree detected. Add or map: ${missing.join(", ")}. A full pallu-spread image is required before generation.`;
+}
+
 async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, references: ReferenceInput[]) {
   const loaded = await loadAvailableReferences(references, String(batch.organization_id));
   const settings = (batch.generation_settings || {}) as JsonRecord;
+  const category = catalogVariantCategory(batch, variant);
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
   loaded.forEach((reference, index) => {
@@ -3069,13 +3114,13 @@ async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, ref
     parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
   });
   parts.push({ text: buildCombinedAnalysisPrompt({
-    skuName: String(variant.sku_name), productDetails: String(variant.product_description || ""), category: String(settings.category || variant.category || "ethnic/fusion"),
+    skuName: String(variant.sku_name), productDetails: String(variant.product_description || ""), category,
     modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
-    housePreferences: await stylingPreferenceBrief(String(batch.organization_id), String(settings.category || variant.category || "ethnic/fusion")),
+    housePreferences: await stylingPreferenceBrief(String(batch.organization_id), category),
   }) });
-  const policy = resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: String(settings.category || variant.category || "ethnic/fusion") });
+  const policy = resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: category });
   const result = await geminiJson(policy, parts);
-  const normalized = normalizeAnalysis(result.json, String(settings.category || variant.category || "ethnic/fusion"));
+  const normalized = normalizeAnalysis(result.json, category);
   return applyCatalogMemory(batch, normalized);
 }
 
@@ -3123,7 +3168,7 @@ async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
 function catalogAnalysisFingerprint(batch: JsonRecord, variant: JsonRecord, references: ReferenceInput[]) {
   const settings = (batch.generation_settings || {}) as JsonRecord;
   const pHash = smallHash([
-    variant.sku_name, variant.product_description, settings.category, settings.modelDirection, settings.sceneDirection,
+    variant.sku_name, variant.product_description, catalogVariantCategory(batch, variant), settings.modelDirection, settings.sceneDirection,
   ].map((value) => String(value || "")).join("|"));
   const rHash = referenceHash(references);
   return { pHash, rHash, fingerprint: smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}`) };
@@ -3333,7 +3378,7 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
   if (!batchId) {
     const { data: candidate, error: candidateError } = await service.from("planning_requests").select("id,batch_id")
       .in("analysis_status", ["pending", "stale", "failed"]).not("batch_id", "is", null)
-      .not("front_image_url", "is", null).not("back_image_url", "is", null).order("updated_at").limit(1).maybeSingle();
+      .eq("validation_status", "ready").not("front_image_url", "is", null).not("back_image_url", "is", null).order("updated_at").limit(1).maybeSingle();
     if (candidateError) throw new Error(candidateError.message);
     if (!candidate?.batch_id) return { processed: false, reason: "no_pending_preflight" };
     batchId = String(candidate.batch_id);
@@ -3342,16 +3387,28 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
   const { data: batch, error: batchError } = await service.from("planning_batches").select("*").eq("id", batchId).maybeSingle();
   if (batchError) throw new Error(batchError.message);
   if (!batch) return { processed: false, reason: "catalog_missing" };
-  let variantsQuery = service.from("planning_requests").select("*").eq("batch_id", batchId).not("front_image_url", "is", null).not("back_image_url", "is", null).order("queue_position");
+  let variantsQuery = service.from("planning_requests").select("*").eq("batch_id", batchId).eq("validation_status", "ready").not("front_image_url", "is", null).not("back_image_url", "is", null).order("queue_position");
   if (requestedId) variantsQuery = variantsQuery.eq("id", requestedId);
   else variantsQuery = variantsQuery.in("analysis_status", ["pending", "stale", "failed"]);
   const { data: variants } = await variantsQuery;
   const variant = (variants || []).find((entry) => !["analyzing"].includes(String(entry.analysis_status || "")));
   if (!variant) return { processed: false, reason: "no_ready_variant" };
   const { references } = await catalogReferenceInputs(batch as JsonRecord, variant as JsonRecord);
-  const preflightCategory = String(((batch.generation_settings || {}) as JsonRecord).category || variant.category || "");
+  const preflightCategory = catalogVariantCategory(batch as JsonRecord, variant as JsonRecord);
   const authorityReady = missingRequiredReferenceLabels(references, preflightCategory).length === 0;
-  if (!authorityReady) return { processed: false, reason: "references_incomplete" };
+  if (!authorityReady) {
+    const missing = missingRequiredReferenceLabels(references, preflightCategory);
+    if (preflightCategory === "saree") {
+      await service.from("planning_requests").update({
+        validation_status: "pending",
+        validation_report: { ready: false, reasons: [sareeReferenceRequirementMessage(missing)] },
+        analysis_status: "pending",
+        error_message: sareeReferenceRequirementMessage(missing),
+        updated_at: new Date().toISOString(),
+      }).eq("id", variant.id);
+    }
+    return { processed: false, reason: "references_incomplete", requestId: variant.id, missing };
+  }
   const hashes = catalogAnalysisFingerprint(batch as JsonRecord, variant as JsonRecord, references);
   if (variant.analysis_status === "ready" && variant.analysis_fingerprint === hashes.fingerprint && variant.ai_analysis) {
     return { processed: false, reason: "analysis_current", requestId: variant.id };
@@ -3361,6 +3418,35 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
   try {
     const normalized = await analyzeCatalogVariant(batch as JsonRecord, variant as JsonRecord, references);
     const now = new Date().toISOString();
+    const detectedSaree = String(normalized.productIdentity.garmentFamily || "").trim().toLowerCase() === "saree";
+    const missingDetectedSareeEvidence = detectedSaree ? missingRequiredReferenceLabels(references, "saree") : [];
+    if (missingDetectedSareeEvidence.length) {
+      const message = sareeReferenceRequirementMessage(missingDetectedSareeEvidence);
+      await Promise.all([
+        service.from("planning_requests").update({
+          category: "saree",
+          analysis_status: "pending",
+          analysis_fingerprint: "",
+          analysis_updated_at: now,
+          garment_analysis: normalized,
+          ai_analysis: normalized,
+          pose_plan: normalized.posePlan,
+          validation_status: "pending",
+          validation_report: { ready: false, reasons: [message] },
+          error_message: message,
+          updated_at: now,
+        }).eq("id", variant.id),
+        recordAiRun({
+          organization_id: batch.organization_id, planning_request_id: variant.id, batch_id: batchId,
+          job_id: "", run_kind: "catalog_product_preflight", model: resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: "saree" }).model,
+          provider: "gemini", input_fingerprint: hashes.fingerprint,
+          input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role) },
+          output_json: normalized, status: "completed", latency_ms: Date.now() - started,
+          cost_usd: 0, cost_source: "provider_cost_not_available",
+        }),
+      ]);
+      return { processed: false, reason: "saree_references_incomplete", requestId: variant.id, missing: missingDetectedSareeEvidence };
+    }
     await Promise.all([
       service.from("planning_requests").update({
         analysis_status: "ready", analysis_fingerprint: hashes.fingerprint, analysis_updated_at: now,
@@ -3469,10 +3555,10 @@ async function queueCatalogVariantGeneration(
   generationSettings: JsonRecord,
 ) {
   const { productRefs, references } = await catalogReferenceInputs(batch, variant);
-  assertRequiredProductReferences(references, String((batch.generation_settings as JsonRecord | undefined)?.category || variant.category || ""));
+  const category = catalogVariantCategory(batch, variant);
+  assertRequiredProductReferences(references, category);
 
   const analysisHashes = catalogAnalysisFingerprint(batch, variant, references);
-  const category = String(generationSettings.category || variant.category || "ethnic/fusion");
   const storedNormalized = variant.ai_analysis
     ? normalizeAnalysis(variant.ai_analysis as JsonRecord, category)
     : null;
@@ -3776,7 +3862,12 @@ async function processCatalog(request: Request, args: JsonRecord) {
       row.generation_job_id = null;
     }
   }
-  const variant = targetVariants.find((row) => row.front_image_url && row.back_image_url && !["completed", "queued", "processing", "failed"].includes(String(row.generation_status)));
+  const variant = targetVariants.find((row) =>
+    row.validation_status === "ready" &&
+    row.front_image_url &&
+    row.back_image_url &&
+    !["completed", "queued", "processing", "failed"].includes(String(row.generation_status)),
+  );
   if (!variant) {
     const completed = (variants || []).filter((row) => row.generation_status === "completed").length;
     const failed = (variants || []).filter((row) => row.generation_status === "failed").length;
