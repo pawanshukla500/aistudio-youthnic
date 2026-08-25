@@ -41,6 +41,9 @@ export type StylingPlanProfile = {
 
 export type GarmentRegionEvidence = {
   region: string;
+  // The exact reference role that proved this region. Keeping the source with
+  // the observation prevents a front-only trim from becoming a rear hard lock.
+  sourceRole: string;
   state: "confirmed" | "confirmed_absent" | "unknown";
   visibleConstruction: string;
   visibleDecoration: string;
@@ -386,6 +389,9 @@ function garmentEvidence(product: JsonRecord): GarmentRegionEvidence[] {
     const state = String(obj.state || "unknown").trim().toLowerCase().replace(/[\s-]+/g, "_");
     return {
       region: stringValue(obj.region),
+      sourceRole: normalizeReferenceRole(
+        obj.sourceRole ?? obj.source_role ?? obj.evidenceRole ?? obj.evidence_role ?? obj.referenceRole ?? obj.reference_role,
+      ),
       state: ["confirmed", "confirmed_absent", "unknown"].includes(state) ? state as "confirmed" | "confirmed_absent" | "unknown" : "unknown",
       visibleConstruction: stringValue(obj.visibleConstruction ?? obj.visible_construction),
       visibleDecoration: stringValue(obj.visibleDecoration ?? obj.visible_decoration),
@@ -393,6 +399,85 @@ function garmentEvidence(product: JsonRecord): GarmentRegionEvidence[] {
       explicitlyAbsent: stringArray(obj.explicitlyAbsent ?? obj.explicitly_absent),
       uncertainty: stringValue(obj.uncertainty),
     };
+  });
+}
+
+function normalizeReferenceRole(value: unknown) {
+  return stringValue(value, "").toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function isRearRegion(value: string) {
+  return /(?:^|\b)(?:back|rear|centre[_\s-]?back|center[_\s-]?back)(?:\b|$)/i.test(value);
+}
+
+const REAR_SOURCE_ROLES = new Set([
+  "back",
+  "saree_back_drape",
+  "saree_blouse_back",
+  "saree_blouse_back_piece",
+]);
+
+const REAR_DETAIL_TERMS = [
+  "lace",
+  "trim",
+  "piping",
+  "fringe",
+  "tassel",
+  "latkan",
+  "embroidery",
+  "border",
+  "ribbon",
+  "sequin",
+  "bead",
+  "button",
+  "zipper",
+  "zip",
+  "tie",
+  "closure",
+  "keyhole",
+];
+
+function rearRegionMatches(claim: string, evidence: GarmentRegionEvidence) {
+  const claimLocation = claim.split(":", 1)[0].toLowerCase();
+  const evidenceLocation = evidence.region.toLowerCase();
+  if (!isRearRegion(claimLocation) || !isRearRegion(evidenceLocation)) return false;
+  const areaTerms = ["neck", "hem", "body", "blouse", "waist", "sleeve", "bottom", "pallu", "border", "tassel"];
+  const requiredAreas = areaTerms.filter((term) => claimLocation.includes(term));
+  return requiredAreas.every((term) => evidenceLocation.includes(term));
+}
+
+function rearDetailIsProven(claim: string, evidence: GarmentRegionEvidence) {
+  const claimText = claim.toLowerCase();
+  const sourceText = [evidence.visibleConstruction, evidence.visibleDecoration, evidence.closures].join("\n").toLowerCase();
+  const absentText = evidence.explicitlyAbsent.join(" ").toLowerCase();
+  return REAR_DETAIL_TERMS
+    .filter((term) => claimText.includes(term))
+    .every((term) => {
+      const negated = new RegExp(`\\b(?:no|without|absent|lacks?|does not have|doesn't have|not)\\b.*\\b${term}\\b`, "i");
+      const directlyDenied = sourceText.split(/[.\n;]/).some((statement) => negated.test(statement));
+      return sourceText.includes(term) && !absentText.includes(term) && !directlyDenied;
+    });
+}
+
+/**
+ * A placement map is useful only where it remains tied to physical evidence.
+ * In particular, never let a front-only lace/trim claim leak into a back pose
+ * through a free-text "back hem" placement. Legacy analyses without source
+ * provenance remain readable, but their rear placement claims are deliberately
+ * treated as unproven until a fresh analysis records the direct back source.
+ */
+export function sanitizeDetailPlacementMap(value: unknown, evidenceValue: unknown): string[] {
+  const evidence = Array.isArray(evidenceValue)
+    ? garmentEvidence({ garmentEvidence: evidenceValue })
+    : garmentEvidence(objectValue(evidenceValue));
+  return stringArray(value).filter((claim) => {
+    if (!isRearRegion(claim)) return true;
+    return evidence.some((entry) =>
+      entry.state === "confirmed" &&
+      REAR_SOURCE_ROLES.has(entry.sourceRole) &&
+      rearRegionMatches(claim, entry) &&
+      rearDetailIsProven(claim, entry)
+    );
   });
 }
 
@@ -766,6 +851,7 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
   );
   const sareeTruth = normalizeSareeTruth(sareeTruthRaw);
   const sareeDrapePlan = normalizeSareeDrapePlan(sareeDrapePlanRaw);
+  const normalizedGarmentEvidence = garmentEvidence(product);
 
   const productIdentity: ProductIdentityProfile = {
     garmentFamily: stringValue(product.garmentFamily ?? product.garment_family, "unknown"),
@@ -785,11 +871,11 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
     accessoriesIncluded: stringValue(product.accessoriesIncluded ?? product.accessories_included),
     bottomWearDetails: stringValue(product.bottomWearDetails ?? product.bottom_wear_details),
     footwearDetails: stringValue(product.footwearDetails ?? product.footwear_details),
-    detailPlacementMap: stringArray(product.detailPlacementMap ?? product.detail_placement_map),
+    detailPlacementMap: sanitizeDetailPlacementMap(product.detailPlacementMap ?? product.detail_placement_map, normalizedGarmentEvidence),
     absenceConstraints: stringArray(product.absenceConstraints ?? product.absence_constraints),
     invariantDetails: stringArray(product.invariantDetails ?? product.invariant_details),
     uncertaintyNotes: stringArray(product.uncertaintyNotes ?? product.uncertainty_notes),
-    garmentEvidence: garmentEvidence(product),
+    garmentEvidence: normalizedGarmentEvidence,
     sareeTruth,
     sareeDrapePlan,
   };
@@ -897,9 +983,10 @@ PRINT AND EMBROIDERY GEOMETRY - the part that decides whether the output is this
 Anything you genuinely cannot measure goes in uncertaintyNotes - never guess a geometry.
 
 Build a precise Product Identity Profile. Perform a rigorous geographic evidence audit for construction, closures and decoration placement. Break the garment into specific physical regions. For stitched garments use (e.g. front neckline, front chest/yoke, front body, front hem, center back, back neckline, back body, back hem, left side construction, right side construction, left sleeve/armhole, right sleeve/armhole, waist, bottom wear front, bottom wear back). For sarees use (e.g. inner pallu, outer pallu, pallu border, body upper border, body lower border, chest drape, front pleats, waist tuck, unstitched blouse piece).
-For each region, record its evidence in garmentEvidence:
-- region: the physical location.
-- state: "confirmed" (clearly visible in an authoritative reference), "confirmed_absent" (clearly proven to not exist there), or "unknown" (not visually proven either way).
+  For each region, record its evidence in garmentEvidence:
+  - region: the physical location.
+  - sourceRole: the exact role from the manifest that proves this observation (for example "front", "back", "saree_back_drape", "fabric_pattern", or "saree_pallu_spread"). Never leave it blank for a confirmed observation.
+  - state: "confirmed" (clearly visible in an authoritative reference), "confirmed_absent" (clearly proven to not exist there), or "unknown" (not visually proven either way).
 - visibleConstruction: explicitly what construction (seams, slits, folds) is proven there.
 - visibleDecoration: explicitly what trim, lace, embroidery, or print is proven there.
 - closures: any buttons, ties, zippers.
@@ -907,10 +994,12 @@ For each region, record its evidence in garmentEvidence:
 - uncertainty: what cannot be seen or is ambiguous.
 
 Crucial Evidence Rules:
-- UNKNOWN DOES NOT MEAN INFER. If left/right side construction cannot be established, record state as "unknown" and state explicitly in uncertainty that it is unproven.
-- Do not use words like "probably", "likely", "usually", "typically", "symmetrical", or "same as the other side". If it is not proven, it is unknown.
-- Do not extrapolate decoration. If gold lace is confirmed at the front hem, but the side seam is unknown, do not assume the lace continues. Record the side seam as unknown.
-Fill detailPlacementMap with region-specific hard locks and absenceConstraints with negative product facts as well for backward compatibility.
+  - UNKNOWN DOES NOT MEAN INFER. If left/right side construction cannot be established, record state as "unknown" and state explicitly in uncertainty that it is unproven.
+  - Do not use words like "probably", "likely", "usually", "typically", "symmetrical", or "same as the other side". If it is not proven, it is unknown.
+  - Do not extrapolate decoration. If gold lace is confirmed at the front hem, but the side seam is unknown, do not assume the lace continues. Record the side seam as unknown.
+  - When a BACK PRODUCT or REAR/BACK DRAPE reference is supplied, include separate back neckline, back body, and back hem entries sourced from that direct back role. If a rear region is hidden or unresolved, record it as unknown with that sourceRole; do not fill it from the front image.
+  - A rear/back entry in detailPlacementMap is allowed only when the matching rear region is "confirmed" and the named decoration/construction is explicitly visible in a direct BACK PRODUCT, REAR/BACK DRAPE, or matching BLOUSE BACK reference. Do not copy front lace, trim, borders, closures, or motifs into a rear placement lock.
+  Fill detailPlacementMap with only source-supported region-specific hard locks and absenceConstraints with negative product facts as well for backward compatibility.
 
 SCENE AUTHORITY: when a STYLE REFERENCE image is supplied, that image defines the shoot. Describe what it actually shows - wall colour and finish, floor or ground surface, every prop and its placement, plant or furniture presence, light direction and quality, camera height and distance, depth of field, colour grade - concretely enough to rebuild that set from the description alone. Never replace it with a generic "clean premium studio backdrop": a plain seamless-paper description when the reference shows a styled set is a failure of this analysis. A requested scene direction refines mood, styling and props on top of the referenced set; it does not replace the referenced backdrop. Only when no style reference is supplied does the requested scene direction define the scene by itself.
 
@@ -944,7 +1033,7 @@ Create exactly five product-specific camera setups in one coherent commercial co
 - closeup: a genuine zoomed-in face-to-chest or face-to-waist shot (never a repeat of the full-body hero framing) pairing a beautiful, cute, Gen-Z-style face with a genuine, natural expression AND one sharp, clearly visible real product detail (embroidery, neckline, drape, print, or fabric texture).
 
 If the garmentFamily is "saree", you MUST also generate sareeTruth and sareeDrapePlan inside the JSON root.
-sareeTruth: Record exact base and secondary colours; fabric family; weave/lattice geometry; texture, shine and transparency; every peacock/floral/other motif with its scale, orientation, repeat, density and placement by body/pallu/border; separate upper/lower border widths, construction and colours; the exact region where the pallu starts plus its artwork, motif density and orientation; tassel colour, construction and spacing; blouse colour/fabric/front/back/neckline/sleeves/ties/closures; and fabric weight, stiffness, fluidity and expected fall. Add regionEvidence entries with confirmed, confirmed_absent or unknown state. Unknown must stay unknown: never mirror or extrapolate decoration into an unproven region.
+sareeTruth: Record exact base and secondary colours; fabric family; weave/lattice geometry; texture, shine and transparency; every peacock/floral/other motif with its scale, orientation, repeat, density and placement by body/pallu/border; separate upper/lower border widths, construction and colours; the exact region where the pallu starts plus its artwork, motif density and orientation; tassel colour, construction and spacing; blouse colour/fabric/front/back/neckline/sleeves/ties/closures; and fabric weight, stiffness, fluidity and expected fall. Add regionEvidence entries with region, sourceRole, confirmed/confirmed_absent/unknown state and the same evidence fields as garmentEvidence. Unknown must stay unknown: never mirror or extrapolate decoration into an unproven region.
 sareeDrapePlan: Choose a baseDrapeFamily (e.g., "shoulder-side/open-pallu" or "shoulder-side/pleated-pallu"), frontPleatTreatment, palluShoulderPlacement, handInteraction, borderVisibility, and poseSpecificDrapeState (e.g. how the angled pose shows the pallu fall).
 
 posePlan: Design 5 distinct poses (full_front, angled, back, creative, closeup). For each, specify the cameraAngle, framing, bodyPosition, handPlacement, expression, and write a detailed photorealistic 'prompt' that combines these elements with the product and model identity.
@@ -974,10 +1063,10 @@ export const CONSISTENCY_RULES = [
 // pose plan, the accessory-suggestion field, the face/photorealism locks, the
 // model-face-reference support, and the corrected zoomed-IN pose 5) take effect on the
 // next analysis run instead of quietly reusing a pre-change cache hit.
-// Bumping this invalidates cached analyses, which is intended here: a profile
-// cached under v8 carries no pattern or embroidery geometry for the prompt locks
-// and the fidelity gate to work against.
-export const ANALYSIS_VERSION = "generation-session-v14-saree-fidelity";
+// v15 adds source-role provenance to regional evidence. Analyses made before it
+// can say that a rear detail exists without proving that the back image showed
+// it, so cache reuse would reintroduce front-to-back hallucinations.
+export const ANALYSIS_VERSION = "generation-session-v15-back-evidence-memory";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

@@ -109,6 +109,7 @@ PRODUCT FIDELITY - the failure mode that matters most here is a garment that rea
 - trim_location: verify that trim (lace, border, piping) only appears exactly where proven. Fail if, for example, hem trim extends vertically up a side seam.
 - unknown_region_invention: fail if any explicitly "unknown" or unproven region contains invented product-defining construction or decoration. UNKNOWN DOES NOT MEAN INFER. Unknown means plain base fabric without unproven decoration.
 - print_embroidery_continuation: fail if embroidery or print is mirrored or extended into unproven regions (e.g. extending front neckline embroidery down the back, or mirroring it).
+- front_back_design: for a back pose, treat the uploaded BACK/REAR product reference as a veto. Fail if a front-only lace, border, closure, neckline detail, print, embroidery or hem treatment appears on the rear without direct confirmed back evidence, even when the rest of the image is visually convincing.
 - body_pallu_boundary: for sarees, fail if pallu motifs bleed into the saree body, or vice versa.
 - duplicate_pallu: for sarees, fail if multiple loose cloth panels are invented (a saree has exactly one pallu).
 - drape_physics: for sarees, fail if heavy fabric floats like weightless chiffon, or if the drape does not behave like the specified fabric.

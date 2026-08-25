@@ -64,6 +64,74 @@ function assertQueryResults(results: unknown[], context: string) {
   if (failure) throw new Error(`${context}: ${failure.message || "database operation failed"}`);
 }
 
+const POSE_IDS = ["full_front", "angled", "back", "creative", "closeup"] as const;
+
+export function humanProductLearningGuidance(comments: string) {
+  // The full human comment remains in qa_reviews, catalog_asset_reviews and
+  // audit_logs. The reusable prompt guard has a deliberately smaller schema
+  // limit, so truncate only its derived copy at Unicode character boundaries.
+  return Array.from(`Human QC for this exact product reference set: ${comments.trim()}`).slice(0, 1_200).join("");
+}
+
+// A human rejection can safely leave one product-specific, reference-bound
+// guard for a re-generation of the *same* source product. It is deliberately
+// not promoted to a category rule: a note such as "no lace on the rear" is
+// evidence for one SKU, not a general fact about ethnic/fusion products.
+async function recordHumanProductLearningRule(args: {
+  service: SupabaseClient;
+  workspace: CatalogWorkspace;
+  planningRequestId: string;
+  assetVersionId: string;
+  sourceQaReviewId: string;
+  poseIndex: number;
+  comments: string;
+  now: string;
+}) {
+  // This record is a convenience guard for a later re-generation, never a
+  // prerequisite for recording the human decision itself. During a rolling
+  // deployment the table can be unavailable briefly; leave the core QC/audit
+  // operation successful and log the non-critical learning write instead.
+  try {
+    const { data: session, error: sessionError } = await args.service.from("catalog_sessions")
+      .select("session_id,reference_hash,session_data")
+      .eq("organization_id", args.workspace.organization.id)
+      .eq("planning_request_id", args.planningRequestId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (sessionError) {
+      console.error(`Could not load the reviewed product reference fingerprint: ${sessionError.message}`);
+      return;
+    }
+    if (!session || !text(session.reference_hash)) return;
+    const sessionData = asRecord(session.session_data);
+    const productIdentity = asRecord(sessionData.productIdentity);
+    const garmentFamily = text(productIdentity.garmentFamily);
+    const productCategory = text(sessionData.category);
+    const poseId = POSE_IDS[Math.max(0, Math.min(POSE_IDS.length - 1, args.poseIndex - 1))];
+    if (!garmentFamily || !productCategory || !poseId) return;
+    const { error } = await args.service.from("generation_learning_rules").insert({
+      organization_id: args.workspace.organization.id,
+      source_qa_review_id: args.sourceQaReviewId || null,
+      garment_family: garmentFamily,
+      product_category: productCategory,
+      pose_id: poseId,
+      scope: "product",
+      rule_kind: "reference_guard",
+      reference_fingerprint: text(session.reference_hash),
+      guidance: humanProductLearningGuidance(args.comments),
+      status: "approved",
+      created_by_member_id: args.workspace.member.id,
+      approved_by_member_id: args.workspace.member.id,
+      approved_at: args.now,
+      review_note: `Created from rejected asset version ${args.assetVersionId}`,
+    });
+    if (error) console.error(`Could not save the reviewed product correction: ${error.message}`);
+  } catch (error) {
+    console.error("Could not save the reviewed product correction", error);
+  }
+}
+
 // This is intentionally independent of the UI. A caller can invoke the bulk
 // API directly, so linked Planning work must have completed its category-aware
 // evidence validation before any request is allowed into the generation queue.
@@ -652,10 +720,9 @@ export async function reviewCatalogPose(
       qa_version: "human-qc-v14",
       outcome: humanOutcome,
       metadata: { assetVersionId, reviewerMemberId: workspace.member.id, versionNumber: version.version_number },
-    }),
+    }).select("id").single(),
   ]);
   assertQueryResults(humanReviewResults, "Could not save the human QC audit result");
-
   // A saree Pose 1 that needed human review must not be used while uncertain,
   // but once approved it can become the batch continuity anchor. Conversely, a
   // later human rejection invalidates this frame only when it is the anchor that
@@ -776,6 +843,18 @@ export async function reviewCatalogPose(
     }).eq("organization_id", workspace.organization.id).eq("id", workItemId));
   }
   assertQueryResults(await Promise.all(operations), "Could not finish the pose review audit trail");
+  if (decision === "rejected") {
+    await recordHumanProductLearningRule({
+      service,
+      workspace,
+      planningRequestId: text(item.planning_request_id),
+      assetVersionId,
+      sourceQaReviewId: text((humanReviewResults[1] as { data?: { id?: string } }).data?.id),
+      poseIndex: Number(version.pose_index),
+      comments,
+      now,
+    });
+  }
   return { success: true, decision, poseIndex: version.pose_index, versionNumber: version.version_number };
 }
 

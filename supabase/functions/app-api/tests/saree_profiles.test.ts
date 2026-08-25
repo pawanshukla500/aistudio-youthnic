@@ -53,8 +53,8 @@ const references = [
   { role: "saree_pallu_spread", storagePath: "org/pallu.jpg" },
 ];
 
-Deno.test("v14 analysis version invalidates pre-fix Studio and catalog caches", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v14-saree-fidelity");
+Deno.test("v15 analysis version invalidates cached analyses without rear evidence provenance", () => {
+  assertEquals(ANALYSIS_VERSION, "generation-session-v15-back-evidence-memory");
 });
 
 Deno.test("root-level sareeTruth and sareeDrapePlan survive canonical normalization", () => {
@@ -135,6 +135,63 @@ Deno.test("partial saree truth is field-normalized without throwing", () => {
   assertEquals(normalized.productIdentity.sareeTruth?.blouse.hasBlouse, true);
   assertEquals(normalized.productIdentity.sareeTruth?.regionEvidence[0]?.state, "confirmed_absent");
   assertEquals(normalized.productIdentity.sareeDrapePlan?.palluSpread, "");
+});
+
+Deno.test("rear placement locks require direct rear evidence with provenance", () => {
+  const unsupported = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "dress",
+      detailPlacementMap: [
+        "Front hem: gold lace trim",
+        "Back hem: gold lace trim",
+      ],
+      garmentEvidence: [
+        {
+          region: "front hem",
+          sourceRole: "front",
+          state: "confirmed",
+          visibleDecoration: "gold lace trim",
+        },
+        {
+          region: "back hem",
+          source_role: "back",
+          state: "unknown",
+          visibleDecoration: "",
+        },
+      ],
+    },
+  }, "dress");
+
+  assertEquals(unsupported.productIdentity.garmentEvidence[1]?.sourceRole, "back");
+  assertEquals(unsupported.productIdentity.detailPlacementMap, ["Front hem: gold lace trim"]);
+
+  const proven = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "dress",
+      detailPlacementMap: ["Back hem: gold lace trim"],
+      garmentEvidence: [{
+        region: "back hem",
+        sourceRole: "back",
+        state: "confirmed",
+        visibleDecoration: "gold lace trim",
+      }],
+    },
+  }, "dress");
+  assertEquals(proven.productIdentity.detailPlacementMap, ["Back hem: gold lace trim"]);
+
+  const explicitlyAbsent = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "dress",
+      detailPlacementMap: ["Back hem: gold lace trim"],
+      garmentEvidence: [{
+        region: "back hem",
+        sourceRole: "back",
+        state: "confirmed",
+        visibleDecoration: "no lace or trim is visible on the back hem",
+      }],
+    },
+  }, "dress");
+  assertEquals(explicitlyAbsent.productIdentity.detailPlacementMap, []);
 });
 
 Deno.test("complete normalized saree session passes shared Studio and Catalog preflight", () => {

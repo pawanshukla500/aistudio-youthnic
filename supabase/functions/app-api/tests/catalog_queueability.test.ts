@@ -1,6 +1,6 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
 import { canQueueGeneration, type CatalogWorkItem } from "../../../../src/features/planning/catalog-production/types.ts";
-import { assertCatalogRequestEvidenceReady } from "../catalogProduction.ts";
+import { assertCatalogRequestEvidenceReady, humanProductLearningGuidance } from "../catalogProduction.ts";
 
 function workItem(overrides: Partial<CatalogWorkItem> = {}): CatalogWorkItem {
   return {
@@ -38,4 +38,10 @@ Deno.test("Catalog bulk API rejects a linked request that has not passed evidenc
     "awaiting validated product evidence",
   );
   assertCatalogRequestEvidenceReady({ validation_status: "ready" }, "Olive saree");
+});
+
+Deno.test("product learning guards are bounded without truncating the permanent human audit", () => {
+  const guidance = humanProductLearningGuidance("x".repeat(4_000));
+  assertEquals(Array.from(guidance).length, 1_200);
+  assertEquals(guidance.startsWith("Human QC for this exact product reference set:"), true);
 });

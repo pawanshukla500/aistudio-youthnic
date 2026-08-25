@@ -3,6 +3,7 @@ import {
   normalizeStylingPlan,
   type JsonRecord,
   type StudioPose,
+  sanitizeDetailPlacementMap,
 } from "./profiles.ts";
 import { roleLabel } from "./referencePolicy.ts";
 
@@ -11,7 +12,7 @@ export type PromptReference = { role: string };
 // OpenAI rejects image-edit prompts at 32,000 characters. Keep a meaningful
 // UTF-16-safe margin because PostgreSQL character counts and the provider's
 // request validation can differ for non-BMP characters.
-export const IMAGE_PROMPT_SAFE_CHARS = 30_000;
+export const IMAGE_PROMPT_SAFE_CHARS = 31_500;
 
 export class GenerationPromptBudgetError extends Error {
   readonly code = "prompt_budget_exceeded";
@@ -79,7 +80,13 @@ function canonicalSareeTruth(value: unknown) {
       "hasBlouse", "color", "fabric", "frontConstruction", "backConstruction", "neckline", "sleeves", "ties", "closure", "embroidery", "border", "pattern", "fit", "isUnstitchedPiece",
     ]),
     physics: knownFields(truth.physics, ["weight", "stiffness", "fluidity", "transparency", "shine", "creaseBehavior", "expectedFall"]),
-    regionEvidence: regionEvidence.map((entry) => knownFields(entry, ["region", "state", "visibleConstruction", "visibleDecoration", "closures", "explicitlyAbsent", "uncertainty"])),
+    regionEvidence: regionEvidence.map((entry) => {
+      const record = objectValue(entry);
+      return {
+        ...knownFields(record, ["region", "state", "visibleConstruction", "visibleDecoration", "closures", "explicitlyAbsent", "uncertainty"]),
+        sourceRole: record.sourceRole ?? record.source_role ?? "",
+      };
+    }),
   };
 }
 
@@ -111,6 +118,59 @@ export function assertGenerationPromptWithinLimit(prompt: string) {
   return prompt;
 }
 
+function compactPromptBlock(prompt: string, startMarker: string, endMarkers: string[], maxChars: number) {
+  const start = prompt.indexOf(startMarker);
+  if (start < 0) return prompt;
+  const contentStart = start + startMarker.length;
+  const ends = endMarkers
+    .map((marker) => prompt.indexOf(marker, contentStart))
+    .filter((index) => index >= 0);
+  const contentEnd = ends.length ? Math.min(...ends) : prompt.length;
+  const content = prompt.slice(contentStart, contentEnd);
+  return `${prompt.slice(0, contentStart)}${boundedText(content, maxChars)}${prompt.slice(contentEnd)}`;
+}
+
+/**
+ * Provider prompts have a hard 32k limit. Keep all product-truth blocks
+ * intact, then compact only advisory/user/styling prose in a fixed order. This
+ * avoids a paid generation failing just above the former 30k local guard while
+ * never silently trimming the canonical SKU evidence.
+ */
+function compactOptionalPromptContent(prompt: string) {
+  let compacted = compactPromptBlock(
+    prompt,
+    "\nCONTINUOUS LEARNING ADVISORY (APPROVED, REFERENCE-SCOPED GUIDANCE):",
+    ["\n\nPROMPT:"],
+    800,
+  );
+  compacted = compactPromptBlock(compacted, "User notes: ", ["\nReference authority:"], 400);
+  compacted = compactPromptBlock(
+    compacted,
+    "\nAPPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in all five frames:\n",
+    ["\n\nALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:"],
+    1_200,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nSTYLING ADDITION (optional, locked once chosen):\n",
+    ["\n\nALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:"],
+    700,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nPOSE REQUIREMENT:\n",
+    ["\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:", "\n\nPROMPT:"],
+    1_400,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:\n",
+    ["\n\nPROMPT:"],
+    600,
+  );
+  return compacted;
+}
+
 // Analyses cached before the geometry profiles existed still flow through here,
 // so both readers fall back to the flat legacy fields instead of emitting null.
 function patternGeometryOf(product: JsonRecord) {
@@ -133,10 +193,12 @@ export function composeGenerationPrompt(args: {
   // Null for sessions analysed before v10. They keep the old accessory line
   // instead of being handed generated defaults dressed up as stylist decisions.
   const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
-  const rules = boundedStrings(Array.isArray(args.session.consistencyRules) ? args.session.consistencyRules : CONSISTENCY_RULES, 16, 420);
-  const placement = boundedStrings(product.detailPlacementMap, 16, 420);
-  const absent = boundedStrings(product.absenceConstraints, 16, 420);
   const evidence = Array.isArray(product?.garmentEvidence) ? product.garmentEvidence as JsonRecord[] : [];
+  const rules = boundedStrings(Array.isArray(args.session.consistencyRules) ? args.session.consistencyRules : CONSISTENCY_RULES, 16, 420);
+  // Existing sessions can bypass normalizeAnalysis, so reapply rear-evidence
+  // validation immediately before prompt construction as a final safety gate.
+  const placement = sanitizeDetailPlacementMap(product.detailPlacementMap, evidence).map((entry) => boundedText(entry, 420));
+  const absent = boundedStrings(product.absenceConstraints, 16, 420);
   
   const isSaree = product?.garmentFamily === "saree";
   if (isSaree && (!product.sareeTruth || typeof product.sareeTruth !== "object" || !product.sareeDrapePlan || typeof product.sareeDrapePlan !== "object")) {
@@ -151,9 +213,15 @@ export function composeGenerationPrompt(args: {
   const sareeDrapePlanJson = isSaree ? requiredJsonSection("Canonical saree drape plan", sareeDrapePlan, 4_000) : "";
   const patternGeometryJson = compactJson(patternGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
   const embroideryGeometryJson = compactJson(embroideryGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
-  const manifest = args.references.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
-  const hasApprovedAnchor = args.references.some((reference) => reference.role === "approved_pose");
-  const hasModelReference = args.references.some((reference) => reference.role === "model_identity");
+  // Defense in depth: processWorker selection already omits it, but callers of
+  // this helper must never accidentally mention an approved front anchor in a
+  // true-back prompt.
+  const promptReferences = args.pose.id === "back"
+    ? args.references.filter((reference) => reference.role !== "approved_pose")
+    : args.references;
+  const manifest = promptReferences.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
+  const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
+  const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
   const faceVisible = args.pose.id !== "back";
   const allowedDelta = [
     `pose/body position: ${boundedText(args.pose.bodyPosition, 360)}`,
@@ -168,6 +236,7 @@ export function composeGenerationPrompt(args: {
   const evidenceLines = evidence.slice(0, 16).map((entry) => {
     const row = objectValue(entry);
     return `- Region ${boundedText(row.region, 120).toUpperCase() || "UNKNOWN"}: [State: ${boundedText(row.state, 80)}]
+  Source: ${boundedText(row.sourceRole ?? row.source_role, 80) || "UNRECORDED"}
   Construction: ${boundedText(row.visibleConstruction, 360) || "None explicitly proven"}
   Decoration/Trim: ${boundedText(row.visibleDecoration, 360) || "None explicitly proven"}
   Closures: ${boundedText(row.closures, 240) || "None"}
@@ -217,6 +286,7 @@ CRITICAL EVIDENCE RULES:
 - If a region's state is "confirmed_absent", do not render the decoration, trim, closure, or specialized construction represented by that region.
 - If a region's state is "unknown", it MUST be rendered in plain base fabric without any unproven decoration, trim, or specialized construction. UNKNOWN DOES NOT MEAN INFER.
 - Do NOT extrapolate decoration. If trim is confirmed at the front hem but the side seam is unknown, do not extend the trim up the side.
+${args.pose.id === "back" ? "- BACK-POSE EVIDENCE VETO: only a confirmed rear region whose Source is BACK PRODUCT, SAREE REAR / BACK DRAPE, or SAREE BLOUSE BACK may place rear construction or decoration. A front-, fabric-, mannequin-, style-, or unrecorded source cannot prove a rear lace, trim, border, closure, or motif. If the direct rear evidence does not explicitly prove it, render plain base fabric in that rear region." : ""}
 
 PRINT AND EMBROIDERY GEOMETRY LOCK - the difference between photographing THIS garment and inventing a similar one:
 Pattern geometry: ${patternGeometryJson}
@@ -262,10 +332,10 @@ CORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:
 ${correction}
 - Address this correction completely and literally. Do not change anything else that was working.` : ""}
 ${learnings ? `
-CONTINUOUS LEARNING ADVISORY (PAST QA FEEDBACK FOR THIS CATEGORY):
+CONTINUOUS LEARNING ADVISORY (APPROVED, REFERENCE-SCOPED GUIDANCE):
 ${learnings}
-- These are historical corrections from other products. They are ADVISORY only.
-- You MUST validate these learnings against the current product's GARMENT TRUTH CONTRACT. If a past correction contradicts the current authoritative product references or evidence, ignore the learning. The current product references ALWAYS override past learnings.
+- These are explicitly approved guards only. Product-scoped guidance is valid only for this exact source-reference fingerprint.
+- You MUST validate these guards against the current product's GARMENT TRUTH CONTRACT. If a guard contradicts the current authoritative product references or evidence, ignore it. The current product references ALWAYS override learning guidance.
 ` : ""}
 
 PROMPT:
@@ -290,5 +360,7 @@ ${args.pose.id === "closeup" ? "- POSE 5 HARD RULE: this is a genuine ZOOMED-IN 
 
 Product accuracy is more important than style matching. Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
 
-  return assertGenerationPromptWithinLimit(prompt);
+  return assertGenerationPromptWithinLimit(
+    prompt.length > IMAGE_PROMPT_SAFE_CHARS ? compactOptionalPromptContent(prompt) : prompt,
+  );
 }

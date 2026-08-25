@@ -6,6 +6,7 @@ import {
 import {
   GenerationPromptBudgetError,
   IMAGE_PROMPT_SAFE_CHARS,
+  assertGenerationPromptWithinLimit,
   composeGenerationPrompt,
 } from "../lib/generationPrompt.ts";
 import { normalizeAnalysis } from "../lib/profiles.ts";
@@ -107,6 +108,45 @@ Deno.test("Garment Truth Contract: Generic placement and absence safeguards are 
     prompt,
     "- Add no button, closure, tassel/latkan, trim, embroidery, pocket, logo, jewelry or hardware unless the authoritative product image proves it exists at that location.",
   );
+});
+
+Deno.test("a back prompt vetoes a front-only lace claim and never advertises a Pose 1 anchor", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "BACK-EVIDENCE-SKU",
+    productDetails: "Preserve the exact garment.",
+    pose: {
+      id: "back",
+      title: "True back",
+      poseNumber: 3,
+      description: "Show the true rear.",
+      cameraAngle: "straight back",
+      framing: "full body",
+      bodyPosition: "facing away",
+      handPlacement: "clear",
+      expression: "not visible",
+      highlightedDetails: [],
+      productVisibilityRules: [],
+      purpose: "document rear",
+      consistencyNotes: "rear only",
+      prompt: "Render the real rear construction.",
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "dress",
+        detailPlacementMap: ["Front hem: gold lace trim", "Back hem: gold lace trim"],
+        garmentEvidence: [
+          { region: "front hem", sourceRole: "front", state: "confirmed", visibleDecoration: "gold lace trim" },
+          { region: "back hem", sourceRole: "back", state: "unknown", visibleDecoration: "" },
+        ],
+      },
+    },
+    references: [{ role: "front" }, { role: "back" }, { role: "approved_pose" }],
+  });
+
+  assertStringIncludes(prompt, "- Front hem: gold lace trim");
+  assertEquals(prompt.includes("- Back hem: gold lace trim"), false);
+  assertStringIncludes(prompt, "BACK-POSE EVIDENCE VETO");
+  assertEquals(prompt.includes("IMAGE 3: APPROVED POSE 1"), false);
 });
 
 Deno.test("Saree generation prompt contains canonical normalized truth and never serializes undefined or null", () => {
@@ -252,6 +292,7 @@ Deno.test("saree prompt projects truth once, protects every critical section, an
   });
 
   assertEquals(prompt.length <= IMAGE_PROMPT_SAFE_CHARS, true);
+  assertEquals(IMAGE_PROMPT_SAFE_CHARS, 31_500);
   for (const marker of [
     "olive-body-color-marker", "diamond-lattice-weave-marker", "body-peacock-marker", "pallu-artwork-marker",
     "upper-border-marker", "tassel-color-marker", "blouse-front-construction-marker", "expected-fall-marker",
@@ -275,6 +316,15 @@ Deno.test("emoji-heavy optional text is capped by JavaScript prompt length", () 
   });
 
   assertEquals(prompt.length <= IMAGE_PROMPT_SAFE_CHARS, true);
+});
+
+Deno.test("the former 30,282-character false preflight block is accepted below the provider-safe budget", () => {
+  const prompt = "x".repeat(30_282);
+  assertEquals(assertGenerationPromptWithinLimit(prompt), prompt);
+  assertThrows(
+    () => assertGenerationPromptWithinLimit("x".repeat(31_501)),
+    GenerationPromptBudgetError,
+  );
 });
 
 Deno.test("oversized canonical saree truth is blocked locally before a provider request", () => {

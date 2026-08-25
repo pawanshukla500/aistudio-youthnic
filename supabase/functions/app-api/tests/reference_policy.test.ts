@@ -44,8 +44,42 @@ Deno.test("legacy saree aliases remain valid and pallu has a distinct authority 
     { role: "saree_pallu_spread" },
   ], [], "back", "saree");
 
-  assertEquals(selected.map((reference) => reference.role).sort(), ["back", "fabric_pattern", "front", "saree_pallu_spread"].sort());
+  assertEquals(selected.map((reference) => reference.role).sort(), ["back", "fabric_pattern", "saree_pallu_spread"].sort());
   assertStringIncludes(roleLabel("saree_pallu_spread"), "FULLY SPREAD PALLU");
+});
+
+Deno.test("true back poses put the direct back source first and exclude a generated anchor", () => {
+  const generic = selectReferences(
+    [
+      { role: "model_identity", hash: "model" },
+      { role: "front", hash: "front" },
+      { role: "back", hash: "back" },
+      { role: "fabric_pattern", hash: "fabric" },
+    ],
+    [{ role: "approved_pose", hash: "front-anchor" }],
+    "back",
+    "dress",
+  );
+  assertEquals(generic[0]?.role, "back");
+  assertEquals(generic.some((reference) => reference.role === "front"), false);
+  assertEquals(generic.some((reference) => reference.role === "approved_pose"), false);
+
+  const saree = selectReferences(
+    [
+      { role: "model_identity", hash: "model" },
+      { role: "saree_front_drape", hash: "front" },
+      { role: "saree_back_drape", hash: "rear" },
+      { role: "saree_body_detail", hash: "body" },
+      { role: "saree_pallu_spread", hash: "pallu" },
+      { role: "saree_border_tassels", hash: "border" },
+    ],
+    [{ role: "approved_pose", hash: "front-anchor" }],
+    "back",
+    "saree",
+  );
+  assertEquals(saree[0]?.role, "saree_back_drape");
+  assertEquals(saree.some((reference) => reference.role === "saree_front_drape"), false);
+  assertEquals(saree.some((reference) => reference.role === "approved_pose"), false);
 });
 
 Deno.test("Pose 1 cannot become a saree anchor before strict verification", () => {
