@@ -14,6 +14,7 @@ import { sareeProfilePresentation } from "./sareeProfilePresentation";
 import { promoteLegacySareeReference, remapDetectedSareeReferences } from "./sareeReferenceHandoff";
 import { StylingPlanEditor } from "../../components/ui/StylingPlanEditor";
 import { normalizePlan, type StylingPlan } from "../../lib/stylingPlan";
+import { generationDeliveryProgress } from "../../lib/generationProgress";
 import type {
   OutputOptions,
   ProductReferenceRole,
@@ -546,10 +547,8 @@ export function Studio() {
           {submittedJob && (
             <div className="mt-4">
               {(() => {
-                const finished = submittedJob.completedPoses + submittedJob.failedPoses;
-                const credit = submittedJob.status === "processing" && finished < submittedJob.totalPoses ? 0.5 : 0;
-                const percent = Math.min(100, Math.round(((finished + credit) / Math.max(1, submittedJob.totalPoses)) * 100));
-                return <><div className="mb-1.5 flex justify-between text-[11px] font-semibold text-secondary"><span>{submittedJob.status === "processing" ? `Pose ${Math.max(1, submittedJob.currentPose || finished + 1)} is generating` : `${finished}/${submittedJob.totalPoses} poses stored`}</span><span>{percent}%</span></div><div className="h-2 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${percent}%` }} /></div></>;
+                const delivery = generationDeliveryProgress(submittedJob);
+                return <><div className="mb-1.5 flex justify-between text-[11px] font-semibold text-secondary"><span>{submittedJob.status === "processing" ? `Pose ${Math.max(1, submittedJob.currentPose || delivery.resolvedPoses + 1)} is generating · ` : ""}{delivery.imagesStored}/{delivery.totalPoses} images stored{delivery.failedPoses ? ` · ${delivery.failedPoses} failed` : ""}</span><span>{delivery.deliveredPercent}% delivered</span></div><div className="h-2 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${delivery.deliveredPercent}%` }} /></div></>;
               })()}
               {submittedJob.poses?.length > 0 && <div className="mt-3 grid grid-cols-5 gap-2">{submittedJob.poses.map((pose: any) => <div key={pose._id} className="relative aspect-[3/4] overflow-hidden rounded-lg border border-outline-variant/40 bg-white">{pose.outputUrl ? <img src={pose.outputUrl} alt={pose.title} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">{pose.status === "processing" ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <Images className="h-4 w-4 text-outline" />}</div>}<span className="absolute inset-x-1 bottom-1 truncate rounded bg-navy-soft/70 px-1 py-0.5 text-center text-[8px] font-semibold text-white">{pose.poseNumber}. {pose.status}</span></div>)}</div>}
             </div>

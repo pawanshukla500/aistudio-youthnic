@@ -1,8 +1,13 @@
 import {
   assertEquals,
   assertStringIncludes,
+  assertThrows,
 } from "jsr:@std/assert@1";
-import { composeGenerationPrompt } from "../lib/generationPrompt.ts";
+import {
+  GenerationPromptBudgetError,
+  IMAGE_PROMPT_SAFE_CHARS,
+  composeGenerationPrompt,
+} from "../lib/generationPrompt.ts";
 import { normalizeAnalysis } from "../lib/profiles.ts";
 
 Deno.test("Garment Truth Contract: Legacy placement and absence locks are preserved when garmentEvidence is populated", () => {
@@ -162,4 +167,128 @@ Deno.test("Saree generation prompt contains canonical normalized truth and never
   assertStringIncludes(prompt, "SAREE DRAPE PLAN:");
   assertEquals(prompt.includes("SAREE TRUTH - CRITICAL:\nundefined"), false);
   assertEquals(prompt.includes("SAREE TRUTH - CRITICAL:\nnull"), false);
+});
+
+function sareePose() {
+  return {
+    id: "full_front",
+    title: "Full front hero",
+    poseNumber: 1,
+    description: "Show the complete product without hiding any product-critical detail.",
+    cameraAngle: "eye-level front",
+    framing: "full body",
+    bodyPosition: "front-facing",
+    handPlacement: "hands clear of the pallu and borders",
+    expression: "natural",
+    highlightedDetails: ["body weave", "pallu", "upper and lower borders"],
+    productVisibilityRules: ["show the body field", "keep the pallu edge visible"],
+    primaryReference: "saree_full_front",
+    purpose: "listing hero",
+    consistencyNotes: "Keep the exact same saree, model, scene and lighting across the set.",
+    prompt: "Create the primary front listing image for this exact saree.",
+    enabled: true,
+  };
+}
+
+function fidelitySareeSession() {
+  const fill = (label: string, size = 320) => `${label}: ${"detail ".repeat(size / 7)}`;
+  return {
+    productIdentity: {
+      garmentFamily: "saree",
+      category: "ethnic/fusion",
+      mainColor: "olive-product-core-marker",
+      fabric: "silk blend",
+      patternGeometry: { type: "diamond lattice", placement: fill("geometry", 1000) },
+      embroideryGeometry: { geometry: "peacock floral embroidery", placement: fill("embroidery", 600) },
+      garmentEvidence: [
+        { region: "pallu", state: "confirmed", visibleConstruction: fill("pallu evidence", 800), visibleDecoration: "pallu-evidence-marker", closures: "", explicitlyAbsent: [], uncertainty: "" },
+        { region: "rear blouse", state: "unknown", visibleConstruction: "", visibleDecoration: "", closures: "", explicitlyAbsent: ["unproven tassels"], uncertainty: "rear-blouse-unknown-marker" },
+        { region: "lower border", state: "confirmed_absent", visibleConstruction: "", visibleDecoration: "", closures: "", explicitlyAbsent: ["lower-border-absent-marker"], uncertainty: "" },
+      ],
+      detailPlacementMap: ["placement-marker: peacocks remain on the body field"],
+      absenceConstraints: ["absence-marker: do not invent rear blouse embroidery"],
+      sareeTruth: {
+        body: {
+          mainFabric: "silk-body-fabric-marker", weave: "diamond-lattice-weave-marker", weaveGeometry: "diagonal diamond lattice", texture: "fine woven texture", transparency: "semi-sheer", shine: "soft sheen", baseColor: "olive-body-color-marker", secondaryColors: ["antique gold", "coral"], pattern: "peacock and floral", motifInventory: ["body-peacock-marker", "body-floral-marker"], motifScale: "small", motifOrientation: "upright", motifRepeat: "regular", motifDensity: "dense", motifPlacement: "body field", embellishment: "zari accents", bodyOrientation: "upright",
+        },
+        borders: {
+          upperBorder: "upper-border-marker", lowerBorder: "lower-border-marker", borderWidth: "narrow", upperBorderWidth: "2 cm", lowerBorderWidth: "5 cm", borderColors: "antique-gold-border-color-marker", construction: "woven border", motifGeometry: "linear floral", edgeTreatment: "finished", continuityRules: "continuous edge", tasselColor: "tassel-color-marker", tasselConstruction: "hand-knotted-tassel-marker", tasselSpacing: "evenly spaced",
+        },
+        pallu: {
+          hasDistinctPallu: true, startingRegion: "pallu-start-marker", baseColor: "olive", motifInventory: ["pallu-peacock-marker", "pallu-floral-marker"], motifScale: "medium", motifOrientation: "upright", motifRepeat: "dense", motifDensity: "dense", borders: "gold edge", artwork: "pallu-artwork-marker", zari: "fine zari", embroidery: "floral embroidery", tassels: "tassel edge", edgeTreatment: "finished", visualOrientation: "vertical", evidenceReferences: "fully spread pallu", uncertainty: "",
+        },
+        pleatZone: { patternBehavior: "body lattice remains continuous", borderBehavior: "lower border stays visible", embellishmentBehavior: "no extra embellishment", hasSpecialPanel: false },
+        blouse: { hasBlouse: true, color: "blouse-color-marker", fabric: "blouse-fabric-marker", frontConstruction: "blouse-front-construction-marker", backConstruction: "blouse-back-construction-marker", neckline: "v-neck", sleeves: "short", ties: "back ties", closure: "hook", embroidery: "matching", border: "none", pattern: "solid", fit: "fitted", isUnstitchedPiece: false },
+        physics: { weight: "medium", stiffness: "soft", fluidity: "fluidity-marker", transparency: "semi-sheer", shine: "soft", creaseBehavior: "soft folds", expectedFall: "expected-fall-marker" },
+        regionEvidence: [
+          { region: "body", state: "confirmed", visibleConstruction: "woven body", visibleDecoration: "body motif", closures: "", explicitlyAbsent: [], uncertainty: "" },
+          { region: "rear blouse", state: "unknown", visibleConstruction: "", visibleDecoration: "", closures: "", explicitlyAbsent: ["unproven decoration"], uncertainty: "unknown-rear-marker" },
+        ],
+      },
+      sareeDrapePlan: {
+        baseDrapeFamily: "nivi-drape-marker", shoulderSide: "left", waistTuck: "secure", frontPleatTreatment: "even", palluShoulderPlacement: "left shoulder", openOrPleatedPallu: "open", palluSpread: "pallu-spread-marker", palluFallDirection: "downward", palluVisibleLength: "full", handInteraction: "clear", movementAmount: "minimal", pinningBehavior: "pinned", borderVisibility: "visible", blouseVisibility: "front visible", coverageConstraints: "do not hide motifs", poseSpecificDrapeState: "front hero",
+      },
+      // These duplicate keys mimic a verbose normalized production session. The
+      // projected product core must omit them because their dedicated blocks keep
+      // the same facts exactly once.
+      legacyVerboseCopy: fill("non-authoritative", 12000),
+    },
+    creativeDirection: { backgroundStyle: fill("scene", 1200), lighting: fill("lighting", 800), colorTreatment: "neutral" },
+    modelIdentity: { face: fill("model", 900), hair: "locked" },
+    stylingPlan: { footwear: "sandals", jewellery: "earrings", ornaments: "none", makeup: "natural", hair: "low bun", stylingNotes: fill("styling", 600), themeInterpretation: "catalog" },
+    consistencyRules: Array.from({ length: 20 }, (_, index) => fill(`rule-${index}`, 700)),
+  };
+}
+
+Deno.test("saree prompt projects truth once, protects every critical section, and stays below the provider budget", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "OLIVE-FIDELITY-01",
+    productDetails: `notes-marker ${"note ".repeat(12_000)}`,
+    pose: sareePose() as any,
+    session: fidelitySareeSession() as any,
+    references: [{ role: "saree_full_front" }, { role: "saree_pallu_spread" }],
+    correction: `correction-marker ${"retry ".repeat(12_000)}`,
+    learnings: `learning-marker ${"history ".repeat(12_000)}`,
+  });
+
+  assertEquals(prompt.length <= IMAGE_PROMPT_SAFE_CHARS, true);
+  for (const marker of [
+    "olive-body-color-marker", "diamond-lattice-weave-marker", "body-peacock-marker", "pallu-artwork-marker",
+    "upper-border-marker", "tassel-color-marker", "blouse-front-construction-marker", "expected-fall-marker",
+    "nivi-drape-marker", "confirmed_absent", "unknown-rear-marker",
+  ]) assertStringIncludes(prompt, marker);
+  assertEquals(prompt.split("olive-body-color-marker").length - 1, 1);
+  assertEquals(prompt.split("nivi-drape-marker").length - 1, 1);
+  assertEquals(prompt.split("correction-marker").length - 1, 1);
+  assertEquals(prompt.includes("legacyVerboseCopy"), false);
+});
+
+Deno.test("emoji-heavy optional text is capped by JavaScript prompt length", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: `EMOJI-${"🦚".repeat(20_000)}`,
+    productDetails: "🦚".repeat(20_000),
+    pose: { ...sareePose(), prompt: "🦚".repeat(20_000) } as any,
+    session: fidelitySareeSession() as any,
+    references: [],
+    correction: "🦚".repeat(20_000),
+    learnings: "🦚".repeat(20_000),
+  });
+
+  assertEquals(prompt.length <= IMAGE_PROMPT_SAFE_CHARS, true);
+});
+
+Deno.test("oversized canonical saree truth is blocked locally before a provider request", () => {
+  const session = fidelitySareeSession() as any;
+  session.productIdentity.sareeTruth.body.baseColor = `olive ${"detail ".repeat(2_000)}`;
+  const error = assertThrows(
+    () => composeGenerationPrompt({
+      skuName: "OVERSIZED-SAREE",
+      productDetails: "",
+      pose: sareePose() as any,
+      session,
+      references: [],
+    }),
+    GenerationPromptBudgetError,
+  );
+  assertEquals(error.code, "prompt_budget_exceeded");
 });
