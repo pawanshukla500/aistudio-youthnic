@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./supabase";
 import { resolveCatalogAssetUrl } from "./catalogStorage";
+import { visibleGenerationDetailedStatus } from "./generationStatus";
 
 export type Id<_Table extends string> = string;
 export type BackendEndpoint = string;
@@ -114,7 +115,7 @@ function jobSummary(row: Record<string, any>, members: Record<string, any>[] = [
     // but it must not override a terminal status in History. Otherwise a completed
     // job can keep rendering its last message (for example, "Pose 5 generating")
     // and appear to run forever.
-    detailedStatus: ["queued", "processing"].includes(status) ? String(jobData.detailedStatus || "") : "",
+    detailedStatus: visibleGenerationDetailedStatus(status, jobData.detailedStatus),
     createdAt: milliseconds(row.created_at),
     totalPoses: Number(row.total_poses || 5),
     completedPoses: Number(row.completed_poses || 0),
