@@ -172,7 +172,14 @@ async function listJobs(args: Record<string, any>) {
     items: rows.map((row) => {
       const jobThumbnails = thumbnails.filter((entry) => entry.generation_job_id === row.job_id);
       const poseOne = jobThumbnails.find((entry) => Number(record(entry.metadata).poseIndex) === 1);
-      return jobSummary(row, membersResult.data || [], poseOne?.image_url || jobThumbnails[0]?.image_url || "");
+      const storedPoseCount = new Set(jobThumbnails.map((entry) => Number(record(entry.metadata).poseIndex)).filter(Boolean)).size;
+      return {
+        ...jobSummary(row, membersResult.data || [], poseOne?.image_url || jobThumbnails[0]?.image_url || ""),
+        // The current pose row can be reset during a regeneration while its paid
+        // prior output remains in the immutable asset archive. Keep the list's
+        // "images stored" metric truthful without claiming the retry completed.
+        storedPoseCount,
+      };
     }),
     page,
     pageSize,
@@ -200,6 +207,21 @@ async function getJob(jobId: string) {
   const poseRows = await Promise.all((posesResult.data || []).map(async (entry) => {
     const resolved = await resolveAssetRow(entry, "output_url");
     const generationData = record(resolved.generation_data);
+    const regenerationHistory = Array.isArray(resolved.regeneration_history) ? resolved.regeneration_history as Record<string, any>[] : [];
+    // A regeneration preserves the paid prior output while the replacement is
+    // in flight. Resolve history as well so older jobs that did clear the active
+    // pointer still display the retained version rather than a blank card.
+    const priorVersion = [...regenerationHistory].reverse().find((attempt) =>
+      Boolean(attempt?.previousStoragePath || attempt?.previousOutputUrl),
+    );
+    const retainedPreviousOutput = priorVersion
+      ? await resolveReferenceEntry({
+        ...priorVersion,
+        storagePath: priorVersion.previousStoragePath || priorVersion.storagePath,
+        storageBackend: priorVersion.previousStorageBackend || priorVersion.storageBackend || resolved.storage_backend,
+        downloadUrl: priorVersion.previousOutputUrl || priorVersion.downloadUrl,
+      })
+      : null;
     const rejectedAttempts = Array.isArray(generationData.rejectedAttempts)
       ? await Promise.all(generationData.rejectedAttempts.map((attempt: Record<string, any>) => resolveReferenceEntry({
         ...attempt,
@@ -207,7 +229,18 @@ async function getJob(jobId: string) {
         storageBackend: attempt.storageBackend || resolved.storage_backend,
       })))
       : [];
-    return { ...resolved, generation_data: { ...generationData, rejectedAttempts: rejectedAttempts.map((attempt) => ({ ...attempt, url: attempt.downloadUrl })) } };
+    return {
+      ...resolved,
+      retained_previous_output: retainedPreviousOutput
+        ? {
+          outputUrl: retainedPreviousOutput.downloadUrl || "",
+          storagePath: priorVersion?.previousStoragePath || priorVersion?.storagePath || "",
+          storageBackend: retainedPreviousOutput.storageBackend || "",
+          requestedAt: priorVersion?.requestedAt || "",
+        }
+        : null,
+      generation_data: { ...generationData, rejectedAttempts: rejectedAttempts.map((attempt) => ({ ...attempt, url: attempt.downloadUrl })) },
+    };
   }));
   const defaultTitles = [
     "Full Front Product View",
@@ -217,11 +250,18 @@ async function getJob(jobId: string) {
     "Zoomed-In Face & Product Highlight",
   ];
   const mappedPoses = poseRows.map((pose) => {
-    const asset = generatedAssets.find((entry) => Number(record(entry.metadata).poseIndex) === Number(pose.pose_index));
+    const assetsForPose = generatedAssets.filter((entry) => Number(record(entry.metadata).poseIndex) === Number(pose.pose_index));
+    const asset = assetsForPose.at(-1);
     const assetMetadata = record(asset?.metadata);
     const assetUsage = record(assetMetadata.usage);
     const assetUsageDetails = record(assetUsage.input_tokens_details);
     const outputUrl = pose.status === "completed" ? (pose.output_url || asset?.image_url || null) : (pose.output_url || null);
+    const poseGenerationData = record(pose.generation_data);
+    const retainedPrevious = record(pose.retained_previous_output);
+    const priorWasRetained = poseGenerationData.previousOutputRetained === true || Boolean(retainedPrevious.outputUrl || retainedPrevious.storagePath);
+    const hasRetainedPreviousOutput = pose.status === "failed" && priorWasRetained && Boolean(outputUrl || retainedPrevious.outputUrl || asset?.image_url);
+    const retainedOutputUrl = hasRetainedPreviousOutput ? String(outputUrl || retainedPrevious.outputUrl || asset?.image_url || "") : "";
+    const retainedStoragePath = hasRetainedPreviousOutput ? String(pose.storage_path || retainedPrevious.storagePath || asset?.storage_path || "") : "";
     return {
       _id: pose.generation_id,
       poseNumber: Number(pose.pose_index),
@@ -229,7 +269,11 @@ async function getJob(jobId: string) {
       status: pose.status || (outputUrl ? "completed" : "queued"),
       qaStatus: pose.qa_status,
       outputUrl,
-      storagePath: pose.storage_path || asset?.storage_path || "",
+      storagePath: pose.storage_path || asset?.storage_path || retainedStoragePath,
+      hasRetainedPreviousOutput,
+      retainedOutputUrl,
+      retainedStoragePath,
+      retainedQaStatus: hasRetainedPreviousOutput ? String(assetMetadata.qaStatus || "") || "unverified" : "",
       error: pose.error || null,
       completedAt: milliseconds(pose.updated_at || asset?.created_at),
       providerRequestId: pose.provider_request_id || assetMetadata.providerRequestId || "",
@@ -267,6 +311,10 @@ async function getJob(jobId: string) {
       qaStatus: String(metadata.qaStatus || "") || (record(metadata.qa).pass === true ? "passed" : record(metadata.qa).pass === false ? "failed" : "unverified"),
       outputUrl: asset.image_url,
       storagePath: asset.storage_path || "",
+      hasRetainedPreviousOutput: false,
+      retainedOutputUrl: "",
+      retainedStoragePath: "",
+      retainedQaStatus: "",
       error: null,
       completedAt: milliseconds(asset.created_at),
       providerRequestId: metadata.providerRequestId || "",

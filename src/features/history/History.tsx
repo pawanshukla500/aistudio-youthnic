@@ -86,6 +86,26 @@ function statusClass(status: string) {
   return "bg-surface-container text-secondary ring-1 ring-inset ring-outline-variant/50";
 }
 
+function hasRetainedPreviousVersion(pose: any) {
+  return Boolean(pose?.hasRetainedPreviousOutput && pose?.retainedOutputUrl);
+}
+
+function visiblePoseOutputUrl(pose: any) {
+  return String(pose?.outputUrl || (hasRetainedPreviousVersion(pose) ? pose.retainedOutputUrl : ""));
+}
+
+function visiblePoseStoragePath(pose: any) {
+  return String(pose?.storagePath || (hasRetainedPreviousVersion(pose) ? pose.retainedStoragePath : ""));
+}
+
+function visibleQaStatus(pose: any) {
+  return hasRetainedPreviousVersion(pose) ? String(pose.retainedQaStatus || "unverified") : String(pose?.qaStatus || "");
+}
+
+function visiblePoseAsset(pose: any) {
+  return { ...pose, outputUrl: visiblePoseOutputUrl(pose), storagePath: visiblePoseStoragePath(pose) };
+}
+
 function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const { data: job, error: _jobError } = useQuery(api.jobs.get, { jobId });
   const workspace = useWorkspace();
@@ -175,13 +195,15 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   };
 
   const downloadPose = async (pose: any) => {
-    if (!pose?.outputUrl) return;
+    const asset = visiblePoseAsset(pose);
+    if (!asset.outputUrl) return;
     setDownloadError("");
     setDownloadingPoseId(pose._id);
     try {
-      const blob = await fetchPoseImageBlob(jobId, pose);
+      const blob = await fetchPoseImageBlob(jobId, asset);
       const extension = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
-      saveAs(blob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}.${extension}`);
+      const version = hasRetainedPreviousVersion(pose) ? "_prior-retained-version" : "";
+      saveAs(blob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}${version}.${extension}`);
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : "Could not download this image.");
     } finally {
@@ -195,8 +217,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       setIsZipping(true);
       const zip = new JSZip();
 
-      const completedPoses = job.poses.filter((p: any) => p.status === "completed" && p.outputUrl);
-      if (completedPoses.length === 0) return;
+      const storedPoses = job.poses.filter((pose: any) => Boolean(visiblePoseOutputUrl(pose)));
+      if (storedPoses.length === 0) return;
 
       const folder = zip.folder(`Youthnic_${job.skuId || "Generation"}`);
       if (!folder) return;
@@ -206,7 +228,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       // image — that per-image round-tripping was what made "Download ZIP" slow. Anything missing
       // from the batch (a storagePath-less legacy pose, or a partial batch failure) still falls
       // back to the single-image path below.
-      const storagePaths = [...new Set(completedPoses.map((p: any) => p.storagePath).filter(Boolean))];
+      const storagePaths = [...new Set(storedPoses.map((pose: any) => visiblePoseStoragePath(pose)).filter(Boolean))];
       const blobByStoragePath = new Map<string, Blob>();
       if (storagePaths.length) {
         try {
@@ -222,9 +244,10 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         }
       }
 
-      const promises = completedPoses.map(async (pose: any, i: number) => {
+      const promises = storedPoses.map(async (pose: any, i: number) => {
         try {
-          const blob = blobByStoragePath.get(pose.storagePath) ?? await fetchPoseImageBlob(jobId, pose);
+          const asset = visiblePoseAsset(pose);
+          const blob = blobByStoragePath.get(asset.storagePath) ?? await fetchPoseImageBlob(jobId, asset);
 
           // Determine extension from content type or fallback to jpg
           let ext = "jpg";
@@ -261,6 +284,9 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const visibleError = promptBudgetPose
     ? `Pose ${promptBudgetPose.poseNumber || 1} was blocked before image generation: ${promptBudgetPose.error}`
     : job.errorMessage;
+  const selectedOutputUrl = selectedPose ? visiblePoseOutputUrl(selectedPose) : "";
+  const selectedRetainedPrevious = selectedPose ? hasRetainedPreviousVersion(selectedPose) : false;
+  const selectedQaStatus = selectedPose ? visibleQaStatus(selectedPose) : "";
 
   return (
     <div className="border-t border-outline-variant/30 bg-surface-container-lowest/50 p-6">
@@ -293,7 +319,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           </button>
           <button
             onClick={downloadZip}
-            disabled={isZipping || !job.poses.some((p: any) => p.status === "completed" && p.outputUrl)}
+            disabled={isZipping || !job.poses.some((pose: any) => Boolean(visiblePoseOutputUrl(pose)))}
             className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
           >
             {isZipping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -330,88 +356,100 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       )}
 
       <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-5">
-        {job.poses.map((pose: any) => (
-          <div key={pose._id} className={`group ${pose.outputUrl || latestRejected(pose) ? "cursor-zoom-in" : "cursor-default"}`} onClick={() => (pose.outputUrl || latestRejected(pose)) && setSelectedPose(pose)}>
-            <div className="relative aspect-[3/4] overflow-hidden rounded-xl border border-outline-variant/40 bg-white shadow-sm transition-all duration-300 hover:shadow-md hover:border-primary/40 group-hover:-translate-y-1">
-              {pose.outputUrl ? (
-                <img src={pose.outputUrl} alt={pose.title} loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
-              ) : latestRejected(pose) ? (
-                <>
-                  <img src={latestRejected(pose).url} alt={`${pose.title} — rejected attempt`} loading="lazy" decoding="async" className="h-full w-full object-cover opacity-70 grayscale transition-transform duration-500 group-hover:scale-105" />
-                  <span className="absolute inset-x-0 bottom-0 bg-danger/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white">
-                    QA rejected · attempt {latestRejected(pose).attempt}
+        {job.poses.map((pose: any) => {
+          const outputUrl = visiblePoseOutputUrl(pose);
+          const retainedPrevious = hasRetainedPreviousVersion(pose);
+          const qaStatus = visibleQaStatus(pose);
+          return (
+            <div key={pose._id} className={`group ${outputUrl || latestRejected(pose) ? "cursor-zoom-in" : "cursor-default"}`} onClick={() => (outputUrl || latestRejected(pose)) && setSelectedPose(pose)}>
+              <div className="relative aspect-[3/4] overflow-hidden rounded-xl border border-outline-variant/40 bg-white shadow-sm transition-all duration-300 hover:shadow-md hover:border-primary/40 group-hover:-translate-y-1">
+                {outputUrl ? (
+                  <img src={outputUrl} alt={retainedPrevious ? `${pose.title} — retained prior version` : pose.title} loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                ) : latestRejected(pose) ? (
+                  <>
+                    <img src={latestRejected(pose).url} alt={`${pose.title} — rejected attempt`} loading="lazy" decoding="async" className="h-full w-full object-cover opacity-70 grayscale transition-transform duration-500 group-hover:scale-105" />
+                    <span className="absolute inset-x-0 bottom-0 bg-danger/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white">
+                      QA rejected · attempt {latestRejected(pose).attempt}
+                    </span>
+                  </>
+                ) : (
+                  <div className="grid h-full place-items-center bg-surface-container-lowest">
+                    {pose.status === "processing" ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                        <span className="text-[10px] text-primary font-medium tracking-wide uppercase">Generating</span>
+                      </div>
+                    ) : (
+                      <ImageIcon className="h-8 w-8 text-outline-variant/50" />
+                    )}
+                  </div>
+                )}
+                <span className={`absolute left-2.5 top-2.5 rounded-md px-2 py-1 text-[9px] font-bold uppercase shadow-sm backdrop-blur-md ${statusClass(pose.status)}`}>
+                  {retainedPrevious ? "Retry failed" : pose.status}
+                </span>
+                {retainedPrevious ? (
+                  <span className="absolute inset-x-0 bottom-0 bg-slate-800/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white">
+                    Prior version retained · {qaStatusLabel(qaStatus)}
                   </span>
-                </>
-              ) : (
-                <div className="grid h-full place-items-center bg-surface-container-lowest">
-                  {pose.status === "processing" ? (
-                    <div className="flex flex-col items-center gap-2">
-                       <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                       <span className="text-[10px] text-primary font-medium tracking-wide uppercase">Generating</span>
-                    </div>
-                  ) : (
-                    <ImageIcon className="h-8 w-8 text-outline-variant/50" />
-                  )}
+                ) : (
+                  /* Delivered without an automatic verdict — it must never be mistaken
+                     for a consistency-approved frame. */
+                  ["unverified", "requires_human_review", "rejected_by_qa", "human_approved", "human_rejected"].includes(qaStatus) && outputUrl && (
+                    <span className={`absolute inset-x-0 bottom-0 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider ${qaStatusBanner(qaStatus)}`}>
+                      {qaStatusLabel(qaStatus)}
+                    </span>
+                  )
+                )}
+                {/* A pose rejected by QA never produced an image, so it must stay
+                    retryable from here — otherwise a failed shoot is a dead end. */}
+                {(pose.status === "failed" || (pose.status === "completed" && outputUrl)) && pose.completedAt && Date.now() - pose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRegenerateError("");
+                      setExtraInstructions("");
+                      setRegenerateTarget(pose);
+                    }}
+                    disabled={regeneratingId === pose._id}
+                    title="Regenerate this pose — available for 24 hours after generation"
+                    className={`absolute right-2.5 top-2.5 z-10 flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-bold text-primary shadow-sm backdrop-blur transition-opacity hover:bg-white disabled:opacity-100 ${outputUrl ? "opacity-0 group-hover:opacity-100" : "opacity-100"}`}
+                  >
+                    {regeneratingId === pose._id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCcw className="h-3 w-3" />}
+                    Regenerate
+                  </button>
+                )}
+                {outputUrl && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void downloadPose(pose);
+                    }}
+                    disabled={downloadingPoseId === pose._id}
+                    title={retainedPrevious ? "Download retained prior version" : "Download this image"}
+                    className="absolute right-2.5 bottom-2.5 z-10 flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-bold text-primary opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 hover:bg-white disabled:opacity-100"
+                  >
+                    {downloadingPoseId === pose._id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                    Download
+                  </button>
+                )}
+              </div>
+              <h4 className="mt-3 text-xs font-semibold text-on-surface">{pose.poseNumber}. {pose.title}</h4>
+              {retainedPrevious && <p className="mt-1 text-[10px] font-bold text-secondary">Current regeneration failed before replacement; prior paid output remains available.</p>}
+              {!retainedPrevious && outputUrl && pose.productFidelity > 0 && (
+                <p className={`mt-1 text-[10px] font-bold ${fidelityTone(pose.productFidelity)}`}>
+                  AI QA estimate {pose.productFidelity}% · {qaStatusLabel(qaStatus)}
+                </p>
+              )}
+              {outputUrl && (
+                <div className="mt-1.5 space-y-0.5 text-[10px] text-secondary">
+                  <p>{pose.usageReported ? `${pose.inputTokens.toLocaleString()} input · ${pose.outputTokens.toLocaleString()} output tokens` : "Provider token usage not returned"}</p>
+                  <p className="font-semibold text-on-surface">${Number(pose.actualCost || 0).toFixed(4)} actual</p>
                 </div>
               )}
-              <span className={`absolute left-2.5 top-2.5 rounded-md px-2 py-1 text-[9px] font-bold uppercase shadow-sm backdrop-blur-md ${statusClass(pose.status)}`}>
-                {pose.status}
-              </span>
-              {/* Delivered without an automatic verdict — it must never be mistaken
-                  for a consistency-approved frame. */}
-              {["unverified", "requires_human_review", "rejected_by_qa", "human_approved", "human_rejected"].includes(pose.qaStatus) && pose.outputUrl && (
-                <span className={`absolute inset-x-0 bottom-0 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider ${qaStatusBanner(pose.qaStatus)}`}>
-                  {qaStatusLabel(pose.qaStatus)}
-                </span>
-              )}
-              {/* A pose rejected by QA never produced an image, so it must stay
-                  retryable from here — otherwise a failed shoot is a dead end. */}
-              {(pose.status === "failed" || (pose.status === "completed" && pose.outputUrl)) && pose.completedAt && Date.now() - pose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setRegenerateError("");
-                    setExtraInstructions("");
-                    setRegenerateTarget(pose);
-                  }}
-                  disabled={regeneratingId === pose._id}
-                  title="Regenerate this pose — available for 24 hours after generation"
-                  className={`absolute right-2.5 top-2.5 z-10 flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-bold text-primary shadow-sm backdrop-blur transition-opacity hover:bg-white disabled:opacity-100 ${pose.outputUrl ? "opacity-0 group-hover:opacity-100" : "opacity-100"}`}
-                >
-                  {regeneratingId === pose._id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCcw className="h-3 w-3" />}
-                  Regenerate
-                </button>
-              )}
-              {pose.outputUrl && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void downloadPose(pose);
-                  }}
-                  disabled={downloadingPoseId === pose._id}
-                  title="Download this image"
-                  className="absolute right-2.5 bottom-2.5 z-10 flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-bold text-primary opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 hover:bg-white disabled:opacity-100"
-                >
-                  {downloadingPoseId === pose._id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
-                  Download
-                </button>
-              )}
+              {pose.error && <p className="mt-1.5 line-clamp-2 text-[10px] text-danger bg-danger/10 border border-danger/20 p-2 rounded-md">{pose.error}</p>}
             </div>
-            <h4 className="mt-3 text-xs font-semibold text-on-surface">{pose.poseNumber}. {pose.title}</h4>
-            {pose.outputUrl && pose.productFidelity > 0 && (
-              <p className={`mt-1 text-[10px] font-bold ${fidelityTone(pose.productFidelity)}`}>
-                AI QA estimate {pose.productFidelity}% · {qaStatusLabel(pose.qaStatus)}
-              </p>
-            )}
-            {pose.outputUrl && (
-              <div className="mt-1.5 space-y-0.5 text-[10px] text-secondary">
-                <p>{pose.usageReported ? `${pose.inputTokens.toLocaleString()} input · ${pose.outputTokens.toLocaleString()} output tokens` : "Provider token usage not returned"}</p>
-                <p className="font-semibold text-on-surface">${Number(pose.actualCost || 0).toFixed(4)} actual</p>
-              </div>
-            )}
-            {pose.error && <p className="mt-1.5 line-clamp-2 text-[10px] text-danger bg-danger/10 border border-danger/20 p-2 rounded-md">{pose.error}</p>}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {selectedPose && (
@@ -421,28 +459,35 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
               <div><p className="text-[10px] font-bold uppercase tracking-widest text-primary">Pose {selectedPose.poseNumber}</p><h3 className="font-syne text-lg font-bold text-on-surface">{selectedPose.title}</h3></div>
               <button onClick={() => setSelectedPose(null)} className="rounded-lg p-2 text-secondary hover:bg-surface-container"><X className="h-5 w-5" /></button>
             </div>
-            <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_300px]">
-              <div className="grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-4"><img src={selectedPose.outputUrl || latestRejected(selectedPose)?.url} alt={selectedPose.title} decoding="async" className="max-h-[76vh] max-w-full object-contain" /></div>
-              <aside className="space-y-4 overflow-auto p-5 text-sm">
-                {!selectedPose.outputUrl && latestRejected(selectedPose) && (
-                  <div className="rounded-xl border border-danger/20 bg-danger-surface p-4">
+              <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_300px]">
+                <div className="grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-4"><img src={selectedOutputUrl || latestRejected(selectedPose)?.url} alt={selectedPose.title} decoding="async" className="max-h-[76vh] max-w-full object-contain" /></div>
+                <aside className="space-y-4 overflow-auto p-5 text-sm">
+                  {selectedRetainedPrevious && (
+                    <div className="rounded-xl border border-warning/30 bg-warning/5 p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-warning-dark">Prior version retained</p>
+                      <p className="mt-1.5 text-[11px] leading-4 text-secondary">The current regeneration failed before a replacement was delivered. This is the earlier paid output, kept for review and download; it is not a successful retry.</p>
+                      <p className="mt-2 text-[10px] font-bold text-on-surface">Previous QA state: {qaStatusLabel(selectedQaStatus)}</p>
+                    </div>
+                  )}
+                  {!selectedRetainedPrevious && !selectedPose.outputUrl && latestRejected(selectedPose) && (
+                    <div className="rounded-xl border border-danger/20 bg-danger-surface p-4">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-danger">Not delivered</p>
                     <p className="mt-1.5 text-[11px] leading-4 text-secondary">Consistency QA rejected this frame, so it was never added to the set. It is kept here because it was already generated and paid for — check it against the product before using it.</p>
                   </div>
                 )}
-                {(selectedPose.qaStatus || selectedPose.productFidelity > 0 || Object.keys(selectedPose.fidelityScores || {}).length > 0) && (
+                  {(selectedQaStatus || selectedPose.productFidelity > 0 || Object.keys(selectedPose.fidelityScores || {}).length > 0) && (
                   <div className="rounded-xl bg-surface-container-lowest p-4">
                     <div className="flex items-baseline justify-between">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">AI QA estimate</p>
                       <p className={`font-syne text-lg font-bold ${fidelityTone(selectedPose.productFidelity)}`}>{selectedPose.productFidelity}%</p>
                     </div>
-                    {selectedPose.qaStatus === "human_approved" ? (
+                    {selectedQaStatus === "human_approved" ? (
                       <p className="mt-1 text-[10px] leading-4 text-success">Human approved. The percentage remains the recorded AI estimate; the approval is the verified decision.</p>
-                    ) : selectedPose.qaStatus === "unverified" ? (
+                    ) : selectedQaStatus === "unverified" ? (
                       <p className="mt-1 text-[10px] leading-4 text-warning">Automatic QA could not run for this frame, so it was delivered unverified. Check it against the product references yourself.</p>
-                    ) : selectedPose.qaStatus === "requires_human_review" || selectedPose.fidelityReviewRecommended ? (
+                    ) : selectedQaStatus === "requires_human_review" || selectedPose.fidelityReviewRecommended ? (
                       <p className="mt-1 text-[10px] leading-4 text-warning">This estimate is 90–94 or otherwise uncertain. It requires human review and is not verified.</p>
-                    ) : selectedPose.qaStatus === "rejected_by_qa" || selectedPose.qaStatus === "failed" ? (
+                    ) : selectedQaStatus === "rejected_by_qa" || selectedQaStatus === "failed" ? (
                       <p className="mt-1 text-[10px] leading-4 text-danger">Automatic QA rejected this frame. The paid output remains available for review.</p>
                     ) : null}
                     {Object.keys(selectedPose.fidelityScores || {}).length > 0 && (
@@ -491,10 +536,10 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   {!selectedPose.usageReported && <p className="mt-3 text-[10px] leading-4 text-warning">This provider response did not include token usage, so no token cost was invented.</p>}
                 </div>
                 {selectedPose.completedAt && Date.now() - selectedPose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && <button onClick={() => { setRegenerateError(""); setExtraInstructions(""); setRegenerateTarget(selectedPose); }} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-soft-blush px-4 py-3 font-semibold text-primary hover:bg-primary/15"><RefreshCcw className="h-4 w-4" /> Regenerate with instructions</button>}
-                {selectedPose.outputUrl && (
+                {selectedOutputUrl && (
                   <button onClick={() => void downloadPose(selectedPose)} disabled={downloadingPoseId === selectedPose._id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
                     {downloadingPoseId === selectedPose._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                    {downloadingPoseId === selectedPose._id ? "Downloading…" : "Download image"}
+                    {downloadingPoseId === selectedPose._id ? "Downloading…" : selectedRetainedPrevious ? "Download retained prior version" : "Download image"}
                   </button>
                 )}
                 {workspace.isAdmin && selectedPose.outputUrl && (
@@ -712,7 +757,10 @@ export function History() {
         
         {(jobs || []).map((job: any) => { 
            const open = expanded === job._id; 
-           const delivery = generationDeliveryProgress(job);
+            const delivery = generationDeliveryProgress({
+              ...job,
+              completedPoses: Math.max(Number(job.completedPoses || 0), Number(job.storedPoseCount || 0)),
+            });
            const progress = delivery.deliveredPercent;
            
            return (

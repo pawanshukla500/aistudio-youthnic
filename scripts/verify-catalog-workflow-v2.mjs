@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 const migration = [
   await readFile("supabase/migrations/20260824130000_catalog_workflow_v2.sql", "utf8"),
   await readFile("supabase/migrations/20260824153000_catalog_workflow_v2_hardening.sql", "utf8"),
+  await readFile("supabase/migrations/20260825115104_add_generation_learning_rules.sql", "utf8"),
+  await readFile("supabase/migrations/20260825122000_enforce_planning_asset_tenant_relationship.sql", "utf8"),
 ].join("\n");
 const edge = await readFile("supabase/functions/app-api/index.ts", "utf8");
 const catalogApi = await readFile("supabase/functions/app-api/catalogProduction.ts", "utf8");
@@ -20,6 +22,7 @@ const history = await readFile("src/features/history/History.tsx", "utf8");
 const actionDialog = await readFile("src/components/ui/ActionDialog.tsx", "utf8");
 const layout = await readFile("src/components/ui/Layout.tsx", "utf8");
 const catalogStorage = await readFile("src/lib/catalogStorage.ts", "utf8");
+const catalogStoragePaths = await readFile("supabase/functions/app-api/lib/catalogStoragePaths.ts", "utf8");
 const liveVerifier = await readFile("scripts/verify-catalog-workflow-live.mjs", "utf8");
 const stageTimeline = await readFile("supabase/functions/app-api/lib/catalogStageTimeline.ts", "utf8");
 
@@ -66,7 +69,10 @@ assert.match(migration, /storage\.foldername\(name\)\)\[1\].*current_organizatio
 assert.match(catalogStorage, /storage\.from\(CATALOG_ASSET_BUCKET\)\.upload|const bucket = supabase\.storage\.from\(CATALOG_ASSET_BUCKET\)/, "Browser reference uploads do not use Supabase Storage");
 assert.match(edge, /CATALOG_ASSET_STORAGE_BACKEND[\s\S]*\|\| "supabase"/, "Generated catalog assets do not default to Supabase Storage");
 assert.match(edge, /uploadCatalogObject[\s\S]*storage_backend: stored\.storageBackend/, "Generated asset metadata does not preserve its Storage backend");
-assert.match(edge, /assertCatalogReferenceOwnership[\s\S]*outside the current organization/, "Service-role reference loading does not enforce the tenant path prefix");
+assert.match(edge, /assertCatalogReferenceOwnership[\s\S]*firebaseCatalogPath\(orgId, storagePath\)/, "Service-role reference loading does not enforce the tenant path prefix");
+assert.match(catalogStoragePaths, /firebaseCatalogPath[\s\S]*outside the current organization/, "Firebase legacy reference paths do not enforce their exact tenant layouts");
+assert.match(migration, /generation_learning_rules_select_current_org[\s\S]*current_organization_id/, "Reusable generation guidance is not tenant-isolated");
+assert.match(migration, /enforce_planning_asset_tenant_relationship[\s\S]*planning_assets_tenant_relationship_check/, "Planning assets can still cross-link to another organization's request");
 assert.match(edge, /signCatalogObject[\s\S]*supabaseCatalogPath\(orgId, storagePath\)/, "Service-role signed URLs do not validate the active tenant prefix");
 assert.match(edge, /downloadCatalogObject[\s\S]*supabaseCatalogPath\(orgId, storagePath\)/, "Service-role Storage downloads do not validate the active tenant prefix");
 assert.match(edge, /deleteCatalogObject[\s\S]*supabaseCatalogPath\(orgId, storagePath\)/, "Service-role Storage deletion does not validate the active tenant prefix");

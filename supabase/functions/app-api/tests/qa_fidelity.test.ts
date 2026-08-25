@@ -1,6 +1,6 @@
-import { assert, assertEquals } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { normalizeAnalysis } from "../lib/profiles.ts";
-import { normalizePoseQaResult } from "../lib/qa.ts";
+import { buildPoseQaPrompt, normalizePoseQaResult } from "../lib/qa.ts";
 
 const genericCritical = [
   "garment_identity",
@@ -46,4 +46,23 @@ Deno.test("unknown-region invention itself fails otherwise complete generic QA",
   assertEquals(result.pass, false);
   assertEquals(result.failed, ["unknown_region_invention"]);
   assert(result.productFidelity > 90, "The test must prove the named critical gate, not an unrelated low average.");
+});
+
+Deno.test("back-pose QA treats the direct rear reference as a veto for front-only lace", () => {
+  const prompt = buildPoseQaPrompt({
+    poseNumber: 3,
+    poseType: "back",
+    poseTitle: "True back",
+    poseDirection: { id: "back", title: "True back" },
+    productIdentity: {},
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "ethnic/fusion",
+    consistencyRules: [],
+    hasApprovedAnchor: false,
+    hasModelReference: false,
+    referenceManifest: ["IMAGE 1: Back product"],
+  });
+  assertStringIncludes(prompt, "uploaded BACK/REAR product reference as a veto");
+  assertStringIncludes(prompt, "front-only lace");
 });

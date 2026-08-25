@@ -17,6 +17,8 @@ import {
 } from "./profiles.ts";
 import { appendRejectedAttemptHistory, buildPoseQaPrompt, parseQaResponse, qaStorageDisposition, unavailableQaResult } from "./qa.ts";
 import { assertGenerationPromptWithinLimit, composeGenerationPrompt } from "./lib/generationPrompt.ts";
+import { selectReusableLearningRules } from "./lib/learningRules.ts";
+import { firebaseCatalogPath, supabaseCatalogPath } from "./lib/catalogStoragePaths.ts";
 import {
   MAX_IMAGE_REFERENCES,
   PRODUCT_REFERENCE_ROLES,
@@ -77,14 +79,6 @@ function configuredCatalogStorageBackend(): CatalogStorageBackend {
   return "supabase";
 }
 
-function supabaseCatalogPath(orgId: string, requestedPath: string) {
-  const normalized = requestedPath.replace(/^\/+/, "");
-  const legacyPrefix = `organizations/${orgId}/`;
-  const path = normalized.startsWith(legacyPrefix) ? `${orgId}/${normalized.slice(legacyPrefix.length)}` : normalized;
-  if (!path.startsWith(`${orgId}/`) || path.includes("../")) throw new Error("Catalog Storage path is outside the organization prefix.");
-  return path;
-}
-
 async function signCatalogObject(orgId: string, storagePath: string, storageBackend: unknown, fallbackUrl = "") {
   if (String(storageBackend || "firebase") !== "supabase" || !storagePath) return fallbackUrl;
   const tenantPath = supabaseCatalogPath(orgId, storagePath);
@@ -96,7 +90,8 @@ async function signCatalogObject(orgId: string, storagePath: string, storageBack
 async function uploadCatalogObject(args: { orgId: string; storagePath: string; blob: Blob; mimeType: string }) {
   const backend = configuredCatalogStorageBackend();
   if (backend === "firebase") {
-    const stored = await uploadFirebaseObject({ storagePath: args.storagePath, blob: args.blob, mimeType: args.mimeType });
+    const storagePath = firebaseCatalogPath(args.orgId, args.storagePath);
+    const stored = await uploadFirebaseObject({ storagePath, blob: args.blob, mimeType: args.mimeType });
     return { ...stored, storageBackend: "firebase" as const };
   }
   if (backend === "external") throw new Error("External catalog asset storage is read-only.");
@@ -165,10 +160,7 @@ function assertCatalogReferenceOwnership(orgId: string, reference: ReferenceInpu
     return;
   }
   if (backend === "firebase" && storagePath) {
-    const normalized = storagePath.replace(/^\/+/, "");
-    if (!normalized.includes(`organizations/${orgId}/`) && !normalized.startsWith(`${orgId}/`)) {
-      throw new Error("The Firebase reference path is outside the current organization.");
-    }
+    firebaseCatalogPath(orgId, storagePath);
     return;
   }
   if (!/^https:\/\//i.test(downloadUrl)) throw new Error("Reference links must use HTTPS.");
@@ -493,9 +485,14 @@ function assertRequiredProductReferences(references: ReferenceInput[], garmentFa
   if (missing.length) throw new Error(`Required product references are missing: ${missing.join(", ")}.`);
 }
 
-async function loadAvailableReferences(references: ReferenceInput[], orgId: string): Promise<LoadedReference[]> {
+async function loadAvailableReferences(references: ReferenceInput[], orgId: string, garmentFamily = ""): Promise<LoadedReference[]> {
   const loaded: LoadedReference[] = [];
-  const requiredRoles = isSareeReferenceSet(references)
+  // Analysis can identify a saree even when the UI category began as the broad
+  // "ethnic/fusion" choice. Keep the availability check aligned with the
+  // Product Truth gate so an unavailable pallu/back image never becomes an
+  // optional omission in the real worker path.
+  const requiresSareeEvidence = garmentFamily.trim().toLowerCase() === "saree" || isSareeReferenceSet(references);
+  const requiredRoles = requiresSareeEvidence
     ? new Set(["saree_front_drape", "saree_back_drape", "saree_pallu_spread", "saree_body_detail"])
     : new Set(["front", "back"]);
   for (const reference of references) {
@@ -512,7 +509,7 @@ async function loadAvailableReferences(references: ReferenceInput[], orgId: stri
       );
     }
   }
-  assertRequiredProductReferences(loaded);
+  assertRequiredProductReferences(loaded, garmentFamily);
   return loaded;
 }
 
@@ -630,7 +627,7 @@ async function analyze(request: Request, args: JsonRecord) {
   }
   const started = Date.now();
   if (!normalized) {
-    const loaded = await loadAvailableReferences(references, orgId);
+    const loaded = await loadAvailableReferences(references, orgId, String(args.category || ""));
     const manifest: Array<{ number: number; role: string }> = [];
     const parts: JsonRecord[] = [];
     loaded.forEach((reference, index) => {
@@ -982,6 +979,18 @@ async function nextJob(args: JsonRecord) {
 async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonRecord[]) {
   const completed = poses.filter((pose) => pose.status === "completed").length;
   const failed = poses.filter((pose) => pose.status === "failed").length;
+  // A complete five-pose delivery is an operational result, not fidelity
+  // evidence. In particular, Gemini outages intentionally leave paid images
+  // unverified. Keep that distinction in the immutable observation ledger so
+  // it can never later be mistaken for high-quality training data.
+  const verifiedQualityScores = poses
+    .filter((pose) => ["automatically_verified", "human_approved"].includes(String(pose.qa_status || "")))
+    .map((pose) => Number(((pose.qa_payload || {}) as JsonRecord).productFidelity ?? ((pose.qa_payload || {}) as JsonRecord).score))
+    .filter((score) => Number.isFinite(score) && score >= 0 && score <= 100);
+  const verifiedQualityScore = verifiedQualityScores.length
+    ? Math.round((verifiedQualityScores.reduce((total, score) => total + score, 0) / verifiedQualityScores.length) * 100) / 100
+    : null;
+  const unverifiedCompleted = poses.filter((pose) => pose.status === "completed" && !["automatically_verified", "human_approved"].includes(String(pose.qa_status || ""))).length;
   const status = failed ? "failed" : "completed";
   const now = new Date().toISOString();
   const sessionData = session.session_data as JsonRecord;
@@ -1024,13 +1033,21 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     body: `${job.sku_name} finished with ${completed} passed and ${failed} failed poses.`, status: "sent", sent_at: now,
     payload: { jobId: job.job_id, sessionId: job.session_id },
   });
-  await service.from("generation_learnings").insert({
+  // generation_learnings is now an observation/audit ledger only. It is never
+  // read by prompt compilation; reusable guidance must be explicitly curated
+  // in generation_learning_rules with an organization and reference scope.
+  const { error: learningObservationError } = await service.from("generation_learnings").insert({
     organization_id: job.org_id, job_id: job.job_id, session_id: job.session_id,
     sku_name: job.sku_name || "", product_category: String(sessionData.category || ""), model: job.model,
     provider: job.provider || "openai", status, pose_count: completed, retry_count: poses.reduce((sum, pose) => sum + Math.max(0, Number(pose.attempt_count || 0) - 1), 0),
     processing_time_ms: job.started_at ? Date.now() - new Date(String(job.started_at)).getTime() : 0,
-    actual_cost_usd: Number(job.actual_cost_usd || 0), quality_score: completed ? (completed / 5) * 100 : 0,
-    success_signals: { completedPoses: completed },
+    actual_cost_usd: Number(job.actual_cost_usd || 0), quality_score: verifiedQualityScore,
+    success_signals: {
+      completedPoses: completed,
+      verifiedPoses: verifiedQualityScores.length,
+      unverifiedCompletedPoses: unverifiedCompleted,
+      qualityEvidence: verifiedQualityScores.length ? "verified_pose_qa" : "none",
+    },
     failure_signals: {
       garmentFamily: String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""),
       failedPoses: failed,
@@ -1045,6 +1062,7 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     background_style: String((sessionData.creativeDirection as JsonRecord | undefined)?.backgroundStyle || ""),
     showcase_framing: "3:4", cost_source: "estimated_from_generation_attempts",
   });
+  if (learningObservationError) console.error(`Could not record generation observation: ${learningObservationError.message}`);
   if (job.batch_id) {
     const batchId = String(job.batch_id);
     const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
@@ -1222,7 +1240,7 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
   const { data: batch, error: batchError } = await service.from("planning_batches").select("*").eq("id", inputs.batchId).maybeSingle();
   if (batchError) throw new Error(batchError.message);
   if (!batch) throw new Error("Catalog batch not found for visual analysis.");
-  const loaded = await loadAvailableReferences(references, String(batch.organization_id));
+  const loaded = await loadAvailableReferences(references, String(batch.organization_id), String(inputs.category || ""));
   
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
@@ -1492,19 +1510,26 @@ async function processNode(request: Request, args: JsonRecord) {
 
 async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, pose: JsonRecord) {
   const sourceInputs = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
-  const loadedReferences = await loadAvailableReferences(sourceInputs, String(job.org_id));
-  let { data: anchorPose } = Number(pose.pose_index) > 1
+  const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
+  const loadedReferences = await loadAvailableReferences(sourceInputs, String(job.org_id), garmentFamily);
+  const storedPoseData = (pose.generation_data || {}) as JsonRecord;
+  const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
+  // A direct rear product reference is authoritative for the back pose. A
+  // generated front anchor adds no trustworthy rear evidence and can carry a
+  // prior hallucination into the new frame, so do not load it at all here.
+  const canUseAnchorForPose = poseData.id !== "back";
+  let { data: anchorPose } = Number(pose.pose_index) > 1 && canUseAnchorForPose
     ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title,qa_status").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
     : { data: null };
-  if (!anchorPose?.output_url && !anchorPose?.storage_path && job.batch_id) {
-    const { data: batchRow } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
+  if (canUseAnchorForPose && !anchorPose?.output_url && !anchorPose?.storage_path && job.batch_id) {
+    const { data: batchRow, error: batchRowError } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
+    if (batchRowError) throw new Error(batchRowError.message);
     const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
-    const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
     if ((memory.anchorOutputUrl || memory.anchorStoragePath) && canUsePoseOneAnchor(garmentFamily, memory.anchorQaStatus)) {
       anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor", qa_status: String(memory.anchorQaStatus || "") };
     }
   }
-  if (anchorPose && !canUsePoseOneAnchor(String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), anchorPose.qa_status)) anchorPose = null;
+  if (anchorPose && !canUsePoseOneAnchor(garmentFamily, anchorPose.qa_status)) anchorPose = null;
   const approved: LoadedReference[] = [];
   if (anchorPose?.output_url || anchorPose?.storage_path) {
     const loaded = await loadReference({
@@ -1514,52 +1539,64 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
     loaded.filename = `approved-pose-1.${extensionForMimeType(loaded.mimeType)}`;
     approved.push(loaded);
   }
-  const storedPoseData = (pose.generation_data || {}) as JsonRecord;
-  const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
-  const selected = selectReferences(loadedReferences, approved, poseData.id, String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), MAX_REFERENCES);
+  const selected = selectReferences(loadedReferences, approved, poseData.id, garmentFamily, MAX_REFERENCES);
   return { loadedReferences, approved, poseData, selected, storedPoseData };
 }
 
-async function compilePosePrompt(job: JsonRecord, sessionData: JsonRecord, pose: JsonRecord, poseData: any, selected: any[], storedPoseData: JsonRecord) {
+async function compilePosePrompt(
+  job: JsonRecord,
+  session: JsonRecord,
+  sessionData: JsonRecord,
+  pose: JsonRecord,
+  poseData: StudioPose & { poseNumber: number },
+  selected: LoadedReference[],
+  storedPoseData: JsonRecord,
+) {
   const requestedCorrection = String(pose.regeneration_instructions || "").trim();
   let qaCorrections = (Array.isArray(storedPoseData.corrections)
     ? storedPoseData.corrections.map(String)
     : [String(storedPoseData.correction || "")]).map((entry) => entry.trim()).filter(Boolean);
+  // Keep retry context bounded. Earlier attempts remain in rejectedAttempts
+  // audit history, rather than consuming prompt space for a fresh image.
+  if (qaCorrections.length > 1) qaCorrections = [qaCorrections[qaCorrections.length - 1]];
   const promptCorrection = () => [
     ...qaCorrections,
     requestedCorrection ? `USER REGENERATION INSTRUCTION (apply only if compatible with original product truth): ${requestedCorrection}` : "",
   ].filter(Boolean).join("\n");
 
-  const { data: pastLearnings, error: pastLearningsError } = await service.from("generation_learnings")
-    .select("failure_signals")
-    .eq("organization_id", job.org_id)
-    .eq("product_category", String(sessionData.category || ""))
-    .order("created_at", { ascending: false })
-    .limit(20);
-  if (pastLearningsError) throw new Error(pastLearningsError.message);
-  
-  const learningsArr: string[] = [];
   const currentGarmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
-  for (const l of pastLearnings || []) {
-    const fs = (l.failure_signals as JsonRecord) || {};
-    const savedFamily = String(fs.garmentFamily || "");
-    if (currentGarmentFamily === "saree" && savedFamily !== "saree") continue;
-    if (currentGarmentFamily !== "saree" && savedFamily === "saree") continue;
-    const fb = (fs.feedback as any[]) || [];
-    for (const f of fb) {
-      if (f.poseTitle === poseData.title && Array.isArray(f.corrections)) {
-        learningsArr.push(...f.corrections.map(String));
-      }
-    }
+  // Legacy generation_learnings intentionally never enters this query. It is
+  // an observation ledger containing failed and unavailable-QA jobs. Only a
+  // reviewed rule may be advisory, and product-specific guidance additionally
+  // requires the exact current reference fingerprint.
+  let learningRows: JsonRecord[] = [];
+  const { data, error: learningRulesError } = await service.from("generation_learning_rules")
+    .select("id,organization_id,garment_family,product_category,pose_id,scope,rule_kind,reference_fingerprint,guidance,status,approved_by_member_id,approved_at")
+    .eq("organization_id", String(job.org_id))
+    .eq("status", "approved")
+    .eq("garment_family", currentGarmentFamily)
+    .eq("product_category", String(sessionData.category || ""))
+    .order("updated_at", { ascending: false })
+    .limit(30);
+  if (learningRulesError) {
+    // Learning is optional advice. A migration rollout or read outage must not
+    // block a paid job; source references remain sufficient to generate.
+    console.error(`Could not load approved generation learning rules: ${learningRulesError.message}`);
+  } else {
+    learningRows = (data || []) as JsonRecord[];
   }
-  const learningsStr = learningsArr.slice(0, 3).map((c) => `- Past correction: ${c}`).join("\n");
+  const learningSelection = selectReusableLearningRules(learningRows, {
+    organizationId: String(job.org_id), garmentFamily: currentGarmentFamily,
+    productCategory: String(sessionData.category || ""), poseType: poseData.id,
+    referenceFingerprint: String(session.reference_hash || ""),
+  });
 
   const prompt = composeGenerationPrompt({
     skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || "Untitled product"),
     productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
-    references: selected, correction: promptCorrection(), learnings: learningsStr,
+    references: selected, correction: promptCorrection(), learnings: learningSelection.guidance,
   });
-  return { prompt, qaCorrections, promptCorrectionStr: promptCorrection() };
+  return { prompt, qaCorrections, learningRuleIds: learningSelection.ruleIds };
 }
 
 
@@ -1591,52 +1628,15 @@ async function processWorker(request: Request, args: JsonRecord) {
     service.from("generation_jobs").update({ current_pose: pose.pose_index, lock_expires_at: new Date(Date.now() + WORKER_LEASE_MS).toISOString(), updated_at: now, job_data: { ...((job.job_data as JsonRecord) || {}), detailedStatus: `Pose ${pose.pose_index} generating (Attempt ${Number(pose.attempt_count || 0) + 1})` } }).eq("job_id", job.job_id),
     service.from("planning_requests").update({ generation_status: "processing", generation_started_at: job.started_at || now, updated_at: now }).eq("id", job.planning_request_id),
   ]);
-  const sourceInputs = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
-  const loadedReferences = await loadAvailableReferences(sourceInputs, String(job.org_id));
-  let { data: anchorPose } = Number(pose.pose_index) > 1
-    ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title,qa_status").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
-    : { data: null };
-  // A bulk catalog has to look like one shoot day across every colourway, but each
-  // SKU is its own session, so pose 1 of SKU 2 had no anchor at all - only text
-  // memory, which drifts. The batch keeps the first approved frame precisely so
-  // later SKUs can be pinned to that same set and model.
-  if (!anchorPose?.output_url && !anchorPose?.storage_path && job.batch_id) {
-    const { data: batchRow, error: batchRowError } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
-    if (batchRowError) throw new Error(batchRowError.message);
-    const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
-    const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
-    if ((memory.anchorOutputUrl || memory.anchorStoragePath) && canUsePoseOneAnchor(garmentFamily, memory.anchorQaStatus)) {
-      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor", qa_status: String(memory.anchorQaStatus || "") };
-    }
-  }
-  if (anchorPose && !canUsePoseOneAnchor(String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), anchorPose.qa_status)) anchorPose = null;
-  const approved: LoadedReference[] = [];
-  if (anchorPose?.output_url || anchorPose?.storage_path) {
-    // Load the reference first to determine the actual MIME type from the blob,
-    // then set the filename extension to match. No mimeType hint here on purpose:
-    // loadReference() falls back to the fetched blob's actual Content-Type.
-    // Pose 1 is now stored as JPEG, but could be PNG or WebP for legacy data.
-    const loaded = await loadReference({
-      role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path, storageBackend: anchorPose.storage_backend as CatalogStorageBackend,
-      hash: smallHash(String(anchorPose.output_url || anchorPose.storage_path)), filename: "approved-pose-1", mimeType: "", size: 0,
-    }, String(job.org_id));
-    // Update filename to include the correct extension based on resolved MIME type
-    loaded.filename = `approved-pose-1.${extensionForMimeType(loaded.mimeType)}`;
-    approved.push(loaded);
-  }
-  const storedPoseData = (pose.generation_data || {}) as JsonRecord;
-  const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
-  const requestedCorrection = String(pose.regeneration_instructions || "").trim();
+  // The worker is the production path. Keep reference loading and prompt
+  // compilation in the shared helpers so Studio and Bulk/Catalog cannot drift
+  // into two different product-fidelity policies.
+  const { loadedReferences, approved, poseData, selected, storedPoseData } = await resolvePoseReferences(job, sessionData, pose);
   let qaCorrections = (Array.isArray(storedPoseData.corrections)
     ? storedPoseData.corrections.map(String)
     : [String(storedPoseData.correction || "")]).map((entry) => entry.trim()).filter(Boolean);
-  // Keep only the most recent QA correction to avoid context bloat with resolved errors
   if (qaCorrections.length > 1) qaCorrections = [qaCorrections[qaCorrections.length - 1]];
-  
-  const promptCorrection = () => [
-    ...qaCorrections,
-    requestedCorrection ? `USER REGENERATION INSTRUCTION (apply only if compatible with original product truth): ${requestedCorrection}` : "",
-  ].filter(Boolean).join("\n");
+  let learningRuleIds: string[] = [];
   let rejectedAttempts = Array.isArray(storedPoseData.rejectedAttempts) ? storedPoseData.rejectedAttempts as JsonRecord[] : [];
   let lastError = "Generation did not complete.";
   let terminalFailureCode = "pose_consistency_failed";
@@ -1649,37 +1649,20 @@ async function processWorker(request: Request, args: JsonRecord) {
     return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed" };
   }
   try {
-    const { data: pastLearnings, error: pastLearningsError } = await service.from("generation_learnings")
-      .select("failure_signals")
-      .eq("organization_id", job.org_id)
-      .eq("product_category", String(sessionData.category || ""))
-      .order("created_at", { ascending: false })
-      .limit(20);
-    if (pastLearningsError) throw new Error(pastLearningsError.message);
-    const learningsArr: string[] = [];
-    const currentGarmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
-    for (const l of pastLearnings || []) {
-      const fs = (l.failure_signals as JsonRecord) || {};
-      const savedFamily = String(fs.garmentFamily || "");
-      if (currentGarmentFamily === "saree" && savedFamily !== "saree") continue;
-      if (currentGarmentFamily !== "saree" && savedFamily === "saree") continue;
-      
-      const fb = (fs.feedback as any[]) || [];
-      for (const f of fb) {
-        if (f.poseTitle === poseData.title && Array.isArray(f.corrections)) {
-          learningsArr.push(...f.corrections.map(String));
-        }
-      }
-    }
-    const learningsStr = learningsArr.slice(0, 3).map((c) => `- Past correction: ${c}`).join("\n");
-
-    const selected = selectReferences(loadedReferences, approved, poseData.id, String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), MAX_REFERENCES);
-    const prompt = composeGenerationPrompt({
-      skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || "Untitled product"),
-      productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
-      references: selected, correction: promptCorrection(), learnings: learningsStr,
+    const compiled = await compilePosePrompt(job, session, sessionData, pose, poseData, selected, storedPoseData);
+    const prompt = compiled.prompt;
+    qaCorrections = compiled.qaCorrections;
+    learningRuleIds = compiled.learningRuleIds;
+    Object.assign(storedPoseData, {
+      appliedLearningRuleIds: learningRuleIds,
+      appliedLearningAt: new Date().toISOString(),
     });
-    await service.from("session_generations").update({ full_prompt: prompt, attempt_count: attempt, updated_at: new Date().toISOString() }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
+    await service.from("session_generations").update({
+      full_prompt: prompt,
+      attempt_count: attempt,
+      generation_data: storedPoseData,
+      updated_at: new Date().toISOString(),
+    }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
     const generatedStarted = Date.now();
     const generated = await generateImage({
       prompt, model: String(job.model || OPENAI_MODEL), size: normalizeImageSize(String(job.aspect_ratio || "3:4"), String(job.image_size || "2K"), String(job.model || OPENAI_MODEL)),
@@ -1709,7 +1692,13 @@ async function processWorker(request: Request, args: JsonRecord) {
     await recordAiRun({
       organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
       job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "image_generation", model: job.model, provider: "openai",
-      input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt, referenceRoles: selected.map((reference) => reference.role) },
+      input_fingerprint: smallHash(prompt),
+      input_summary: {
+        pose: pose.pose_index,
+        attempt,
+        referenceRoles: selected.map((reference) => reference.role),
+        appliedLearningRuleIds: learningRuleIds,
+      },
       output_json: { generated: true }, status: "completed", latency_ms: Date.now() - generatedStarted,
       provider_request_id: providerRequestId,
       input_tokens: generated.usage.inputTokens, input_text_tokens: generated.usage.inputTextTokens,
@@ -1781,7 +1770,15 @@ async function processWorker(request: Request, args: JsonRecord) {
         status: "completed", output_url: stored.downloadUrl, storage_path: stored.storagePath, storage_backend: stored.storageBackend,
         qa_status: qaStatus, qa_payload: { ...qa, qaUnavailable, qaVersion: QA_VERSION },
         error: qaUnavailable ? `Delivered without automatic consistency QA: ${qaUnavailable}`.slice(0, 1000) : "", updated_at: completedAt,
-        generation_data: { ...storedPoseData, correction: "", corrections: [], completedAt: Date.now(), mimeType: generated.mimeType },
+        generation_data: {
+          ...storedPoseData,
+          correction: "",
+          corrections: [],
+          completedAt: Date.now(),
+          mimeType: generated.mimeType,
+          previousOutputRetained: false,
+          regeneratedFromPriorOutput: Boolean((pose.generation_data as JsonRecord | undefined)?.previousOutputRetained),
+        },
         ...usagePatch,
       }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id),
       service.from("planning_assets").insert({
@@ -1912,23 +1909,41 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
   const extraInstructions = String(args.extraInstructions || "").trim();
   if (extraInstructions.length > 1000) throw new Error("Regeneration instructions must be 1,000 characters or fewer.");
   const history = Array.isArray(pose.regeneration_history) ? pose.regeneration_history as JsonRecord[] : [];
+  const previousOutputRetained = Boolean(pose.output_url || pose.storage_path);
+  const poseGenerationData = (pose.generation_data || {}) as JsonRecord;
+  const regenerationRequestedAt = new Date().toISOString();
   const regenerationResults = await Promise.all([
     service.from("session_generations").update({
       status: "queued", attempt_count: 0, qa_status: "pending", error: "",
-      output_url: "", storage_path: "",
+      // Never clear paid output before the replacement has actually been
+      // generated and stored. A failed preflight must leave the prior version
+      // visible and downloadable for human review.
       generation_epoch: Math.max(1, Number(pose.generation_epoch || 1)) + 1,
       regeneration_instructions: extraInstructions,
-      regeneration_history: [...history, { instructions: extraInstructions, previousOutputUrl: pose.output_url || "", previousStoragePath: pose.storage_path || "", requestedAt: new Date().toISOString(), requestedByMemberId: workspace.member.id }].slice(-20),
-      updated_at: new Date().toISOString(),
+      regeneration_history: [...history, {
+        instructions: extraInstructions,
+        previousOutputUrl: pose.output_url || "",
+        previousStoragePath: pose.storage_path || "",
+        previousStorageBackend: pose.storage_backend || "firebase",
+        requestedAt: regenerationRequestedAt,
+        requestedByMemberId: workspace.member.id,
+        previousOutputRetained,
+      }].slice(-20),
+      generation_data: {
+        ...poseGenerationData,
+        previousOutputRetained,
+        regenerationQueuedAt: regenerationRequestedAt,
+      },
+      updated_at: regenerationRequestedAt,
     }).eq("generation_id", generationId),
     service.from("generation_jobs").update({
       status: "queued", readiness_status: "ready", readiness_reasons: [], attempt_count: 0,
       completed_poses: Math.max(0, Number(job.completed_poses || 0) - (pose.status === "completed" ? 1 : 0)),
       failed_poses: Math.max(0, Number(job.failed_poses || 0) - (pose.status === "failed" ? 1 : 0)),
-      current_pose: null, available_at: new Date().toISOString(), error_code: "", error_message: "", completed_at: null,
-      lock_expires_at: null, locked_at: null, updated_at: new Date().toISOString(),
+      current_pose: null, available_at: regenerationRequestedAt, error_code: "", error_message: "", completed_at: null,
+      lock_expires_at: null, locked_at: null, updated_at: regenerationRequestedAt,
     }).eq("job_id", job.job_id),
-    service.from("catalog_sessions").update({ status: "generating", updated_at: new Date().toISOString() }).eq("session_id", pose.session_id),
+    service.from("catalog_sessions").update({ status: "generating", updated_at: regenerationRequestedAt }).eq("session_id", pose.session_id),
     service.from("audit_logs").insert({
       organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
       action: "generation.pose.regenerated", resource_type: "session_generation", resource_id: generationId,
@@ -1991,7 +2006,11 @@ async function rerunPoseQa(request: Request, args: JsonRecord) {
   if (jobError || !job) throw new Error(jobError?.message || "Generation job not found.");
   if (sessionError || !session) throw new Error(sessionError?.message || "Generation session not found.");
   const sessionData = session.session_data as JsonRecord;
-  const references = await loadAvailableReferences((Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[], workspace.organization.id);
+  const references = await loadAvailableReferences(
+    (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[],
+    workspace.organization.id,
+    String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""),
+  );
   const generated = await loadReference({
     role: "generated", downloadUrl: pose.output_url, storagePath: pose.storage_path,
     storageBackend: pose.storage_backend as CatalogStorageBackend, hash: smallHash(String(pose.output_url || pose.storage_path)),
@@ -2929,7 +2948,11 @@ async function setVariantReferencesOperation(request: Request, args: JsonRecord)
   const patch: JsonRecord = { updated_at: new Date().toISOString() };
   for (const [key, urlColumn, pathColumn] of roleArgs) {
     if (!args[key]) continue;
-    const { data: asset, error: assetError } = await service.from("planning_assets").select("*").eq("id", String(args[key])).eq("planning_request_id", requestId).single();
+    const { data: asset, error: assetError } = await service.from("planning_assets").select("*")
+      .eq("id", String(args[key]))
+      .eq("planning_request_id", requestId)
+      .eq("organization_id", workspace.organization.id)
+      .single();
     if (assetError) throw new Error(assetError.message);
     if (!asset) throw new Error("Uploaded reference not found.");
     const resolvedUrlColumn = urlColumn || (asset.asset_role === "saree_front_drape" ? "front_image_url" : asset.asset_role === "saree_back_drape" ? "back_image_url" : "");
@@ -2939,7 +2962,10 @@ async function setVariantReferencesOperation(request: Request, args: JsonRecord)
   }
   const front = String(patch.front_image_url || variant.front_image_url || "");
   const back = String(patch.back_image_url || variant.back_image_url || "");
-  const { data: referenceAssets, error: referenceAssetsError } = await service.from("planning_assets").select("asset_role,image_url,storage_path").eq("planning_request_id", requestId).in("asset_role", [...PRODUCT_REFERENCE_ROLES]);
+  const { data: referenceAssets, error: referenceAssetsError } = await service.from("planning_assets").select("asset_role,image_url,storage_path")
+    .eq("planning_request_id", requestId)
+    .eq("organization_id", workspace.organization.id)
+    .in("asset_role", [...PRODUCT_REFERENCE_ROLES]);
   if (referenceAssetsError) throw new Error(referenceAssetsError.message);
   const inputRoles = (referenceAssets || []).map((asset) => ({
     role: String(asset.asset_role), downloadUrl: String(asset.image_url || ""), storagePath: String(asset.storage_path || ""), hash: "", filename: "", mimeType: "", size: 0,
@@ -3128,9 +3154,9 @@ function sareeReferenceRequirementMessage(missing: string[]) {
 }
 
 async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, references: ReferenceInput[]) {
-  const loaded = await loadAvailableReferences(references, String(batch.organization_id));
   const settings = (batch.generation_settings || {}) as JsonRecord;
   const category = catalogVariantCategory(batch, variant);
+  const loaded = await loadAvailableReferences(references, String(batch.organization_id), category);
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
   loaded.forEach((reference, index) => {
@@ -3149,8 +3175,13 @@ async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, ref
 }
 
 async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
-  const { data: assets, error: assetsError } = await service.from("planning_assets").select("*").eq("planning_request_id", variant.id).order("created_at");
-  if (assetsError) console.error(assetsError.message);
+  const organizationId = String(batch.organization_id || variant.organization_id || "");
+  if (!organizationId) throw new Error("Catalog reference lookup is missing tenant context.");
+  const { data: assets, error: assetsError } = await service.from("planning_assets").select("*")
+    .eq("planning_request_id", variant.id)
+    .eq("organization_id", organizationId)
+    .order("created_at");
+  if (assetsError) throw new Error(`Could not load catalog references: ${assetsError.message}`);
   const productRefs: ReferenceInput[] = (assets || [])
     .filter((asset) => (PRODUCT_REFERENCE_ROLES as readonly string[]).includes(asset.asset_role))
     .map((asset) => ({

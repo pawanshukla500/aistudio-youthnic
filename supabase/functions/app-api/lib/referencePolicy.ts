@@ -95,11 +95,18 @@ export function canonicalReferences<T extends ReferenceLike>(references: T[]): T
 
 function preferredProductOrder(poseType: string, garmentFamily: string) {
   if (garmentFamily === "saree") {
-    if (poseType === "back") return ["saree_back_drape", "back", "saree_pallu_spread", "saree_front_drape", "front", "saree_blouse_back_piece", "saree_body_detail", "fabric_pattern", "saree_border_tassels", "saree_blouse_front", "mannequin", "additional_product"];
+    // A true back image must not use a front drape/blouse as visual evidence:
+    // a visible front trim can otherwise be copied onto an unproven rear. The
+    // back drape, pallu, body detail, borders and blouse-back piece cover the
+    // relevant SKU truth without inventing rear decoration.
+    if (poseType === "back") return ["saree_back_drape", "back", "saree_pallu_spread", "saree_body_detail", "fabric_pattern", "saree_border_tassels", "saree_blouse_back_piece", "mannequin", "additional_product"];
     if (poseType === "closeup") return ["saree_body_detail", "fabric_pattern", "saree_border_tassels", "saree_blouse_front", "saree_pallu_spread", "saree_front_drape", "front", "saree_back_drape", "back", "saree_blouse_back_piece", "mannequin", "additional_product"];
     return ["saree_front_drape", "front", "saree_body_detail", "fabric_pattern", "saree_pallu_spread", "saree_border_tassels", "saree_back_drape", "back", "saree_blouse_front", "saree_blouse_back_piece", "mannequin", "additional_product"];
   }
-  if (poseType === "back") return ["back", "front", "mannequin", "fabric_pattern", "additional_product"];
+  // Do not provide a front-product frame to a true-back generation. Its visual
+  // details may be valid for the front only (for example front-hem lace), and
+  // the regional evidence contract cannot reliably undo a conflicting image.
+  if (poseType === "back") return ["back", "fabric_pattern", "mannequin", "additional_product"];
   if (poseType === "closeup") return ["fabric_pattern", "front", "back", "mannequin", "additional_product"];
   return ["front", "back", "mannequin", "fabric_pattern", "additional_product"];
 }
@@ -111,7 +118,8 @@ export function selectReferences<T extends ReferenceLike>(
   garmentFamily: string,
   maxReferences = MAX_IMAGE_REFERENCES,
 ): T[] {
-  const order = preferredProductOrder(poseType, garmentFamily);
+  const normalizedFamily = garmentFamily.toLowerCase();
+  const order = preferredProductOrder(poseType, normalizedFamily);
   const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
   const style = references.filter((reference) => reference.role === "style_reference");
   const product = order.flatMap((role) => references.filter((reference) => reference.role === role));
@@ -131,16 +139,30 @@ export function selectReferences<T extends ReferenceLike>(
     ["saree_blouse_back_piece"],
   ];
   const protectedProduct: T[] = [];
-  if (garmentFamily.toLowerCase() === "saree") {
+  if (normalizedFamily === "saree") {
     for (const roles of protectedSareeGroups) {
-      const match = roles.flatMap((role) => references.filter((reference) => reference.role === role))[0];
+      // Choose the representative according to this pose's authority order,
+      // rather than the generic group order. For a true back pose this makes
+      // the direct rear/back source the first product image sent to the model.
+      const match = order.flatMap((role) => roles.includes(role)
+        ? references.filter((reference) => reference.role === role)
+        : []).at(0);
       if (match) protectedProduct.push(match);
     }
+    const roleRank = new Map(order.map((role, index) => [role, index]));
+    protectedProduct.sort((left, right) => (roleRank.get(left.role) ?? 99) - (roleRank.get(right.role) ?? 99));
   }
   const protectedSet = new Set(protectedProduct);
   const remainingProduct = product.filter((reference) => !protectedSet.has(reference));
-  const anchor = approved.slice(0, 1);
-  const priority = [...model, ...protectedProduct, ...remainingProduct, ...anchor];
+  const productPriority = normalizedFamily === "saree"
+    ? [...protectedProduct, ...remainingProduct]
+    : product;
+  // A generated Pose 1 can preserve a wrong garment detail. It is not a safe
+  // reference for a true back view, so do not include it at all for that pose.
+  const anchor = poseType === "back" ? [] : approved.slice(0, 1);
+  const priority = poseType === "back"
+    ? [...productPriority, ...model, ...anchor]
+    : [...model, ...productPriority, ...anchor];
   const selected = priority.slice(0, maxReferences);
   const remaining = Math.max(0, maxReferences - selected.length);
   return [...selected, ...style.slice(0, remaining)];
