@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./supabase";
+import { visibleGenerationDetailedStatus } from "./generationStatus";
 
 type JsonObject = Record<string, unknown>;
 
@@ -87,7 +88,7 @@ function mapGenerationJob(row: GenerationJobRow): DashboardJob {
   return {
     _id: row.job_id,
     status: row.status,
-    detailedStatus: String(data.detailedStatus || ""),
+    detailedStatus: visibleGenerationDetailedStatus(row.status, data.detailedStatus),
     skuId: row.sku_name || row.job_id,
     skuName: row.sku_name,
     completedPoses: numberFrom(data.completedPoses),
