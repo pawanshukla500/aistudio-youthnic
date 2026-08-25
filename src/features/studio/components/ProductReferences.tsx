@@ -119,25 +119,53 @@ export function ProductReferences({
   references,
   onChange,
   saree = false,
+  onPromoteLegacyReference,
 }: {
   references: Partial<Record<ProductReferenceRole, StudioReference>>;
   onChange: (role: ProductReferenceRole, file: File | null) => void;
   saree?: boolean;
+  onPromoteLegacyReference?: (sourceRole: ProductReferenceRole, targetRole: "saree_pallu_spread" | "saree_body_detail") => void;
 }) {
   const productSlots = saree ? sareeProductSlots : genericProductSlots;
+  const legacyCandidates = saree
+    ? (["saree_front_drape", "saree_back_drape", "fabric_pattern", "mannequin", "additional_product"] as ProductReferenceRole[])
+      .flatMap((role) => references[role] ? [{ role, reference: references[role]! }] : [])
+    : [];
   return (
-    <div className="grid grid-cols-2 gap-3">
-      {productSlots.map((slot) => (
-        <ReferenceCard
-          key={slot.id}
-          reference={references[slot.id]}
-          label={slot.label}
-          description={slot.description}
-          required={slot.required}
-          onFile={(file) => onChange(slot.id, file)}
-          onRemove={references[slot.id] ? () => onChange(slot.id, null) : undefined}
-        />
-      ))}
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        {productSlots.map((slot) => (
+          <ReferenceCard
+            key={slot.id}
+            reference={references[slot.id]}
+            label={slot.label}
+            description={slot.description}
+            required={slot.required}
+            onFile={(file) => onChange(slot.id, file)}
+            onRemove={references[slot.id] ? () => onChange(slot.id, null) : undefined}
+          />
+        ))}
+      </div>
+      {legacyCandidates.length > 0 && onPromoteLegacyReference && (
+        <section className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+          <p className="text-xs font-bold text-amber-900">Map available product evidence carefully</p>
+          <p className="mt-1 text-[11px] leading-4 text-amber-800">Reuse one only when it visibly proves the named region. A generic upload is reclassified to the region you choose; a pallu image must show the pallu opened out, not only a fabric close-up.</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            {legacyCandidates.map(({ role, reference }) => (
+              <div key={role} className="overflow-hidden rounded-lg border border-amber-200 bg-white">
+                <img src={reference.previewUrl} alt={`${role.replaceAll("_", " ")} evidence`} className="aspect-[4/3] w-full object-cover" />
+                <div className="p-2">
+                  <p className="truncate text-[10px] font-bold uppercase tracking-wide text-amber-900">{role.replaceAll("_", " ")}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {!references.saree_pallu_spread && <button type="button" onClick={() => onPromoteLegacyReference(role, "saree_pallu_spread")} className="rounded-md bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-900 hover:bg-amber-200">Use as pallu</button>}
+                    {!references.saree_body_detail && <button type="button" onClick={() => onPromoteLegacyReference(role, "saree_body_detail")} className="rounded-md bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-900 hover:bg-amber-200">Use as body detail</button>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

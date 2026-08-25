@@ -715,7 +715,7 @@ export function CatalogProduction() {
           </div>}
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-outline-variant/40 p-3">
             <input type="checkbox" checked={importDialog.autoStart} onChange={(event) => setImportDialog({ ...importDialog, autoStart: event.target.checked })} className="mt-0.5 h-4 w-4 accent-primary" />
-            <span><span className="block text-sm font-bold text-on-surface">Start queue-ready SKUs after import</span><span className="mt-1 block text-xs leading-5 text-secondary">Only rows with complete front and back references are queued. Rejected or blocked work is not restarted automatically.</span></span>
+            <span><span className="block text-sm font-bold text-on-surface">Start queue-ready SKUs after import</span><span className="mt-1 block text-xs leading-5 text-secondary">Only rows with complete required product evidence are queued. Sarees need full front, rear drape, pallu spread, and body-detail evidence. Rejected or blocked work is not restarted automatically.</span></span>
           </label>
         </div>}
       </ActionDialog>

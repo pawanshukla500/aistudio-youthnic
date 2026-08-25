@@ -11,6 +11,7 @@ import { OutputSettings } from "./components/OutputSettings";
 import { PosePlan } from "./components/PosePlan";
 import { ModelFaceReference, ProductReferences, StyleReferences } from "./components/ProductReferences";
 import { sareeProfilePresentation } from "./sareeProfilePresentation";
+import { promoteLegacySareeReference, remapDetectedSareeReferences } from "./sareeReferenceHandoff";
 import { StylingPlanEditor } from "../../components/ui/StylingPlanEditor";
 import { normalizePlan, type StylingPlan } from "../../lib/stylingPlan";
 import type {
@@ -104,7 +105,12 @@ export function Studio() {
   );
   const isSareeCategory = category === "saree";
   const requiredReady = isSareeCategory
-    ? Boolean(productReferences.saree_front_drape && productReferences.saree_back_drape && productReferences.saree_pallu_spread && productReferences.saree_body_detail)
+    ? Boolean(
+      (productReferences.saree_front_drape || productReferences.front) &&
+      (productReferences.saree_back_drape || productReferences.back) &&
+      productReferences.saree_pallu_spread &&
+      (productReferences.saree_body_detail || productReferences.fabric_pattern),
+    )
     : Boolean(productReferences.front && productReferences.back);
   const effectiveSkuId = skuId.trim() || `studio-${(productReferences.saree_front_drape || productReferences.front)?.id.slice(0, 8) || "draft"}`;
   const effectiveSkuName = skuName.trim() || skuId.trim() || "Untitled studio product";
@@ -205,6 +211,23 @@ export function Studio() {
     });
     markAnalysisStale();
     setNotice(null);
+  };
+
+  const promoteLegacyReference = (
+    sourceRole: ProductReferenceRole,
+    targetRole: "saree_pallu_spread" | "saree_body_detail",
+  ) => {
+    setProductReferences((current) => {
+      // This is an explicit member decision, not an AI inference. Generic evidence
+      // is reclassified to one proven region; it is not silently used as both.
+      return promoteLegacySareeReference(current, sourceRole, targetRole, crypto.randomUUID());
+    });
+    markAnalysisStale();
+    setNotice({ tone: "success", text: targetRole === "saree_pallu_spread" ? "Pallu evidence mapped. Gemini will reanalyse the complete saree reference set." : "Body-detail evidence mapped. Gemini will reanalyse the complete saree reference set." });
+  };
+
+  const promoteDetectedSareeReferences = () => {
+    setProductReferences(remapDetectedSareeReferences);
   };
 
   const changeModelReference = (file: File | null) => {
@@ -333,8 +356,17 @@ export function Studio() {
       if (analysisRequestRef.current !== requestId || latestAnalysisKeyRef.current !== sourceKey) return;
       setAnalysis(result);
       setPoses(result.posePlan);
-      setAnalysisSourceKey(sourceKey);
-      setNotice({ tone: "success", text: "Product identity, creative direction, and the five-pose shoot plan are ready." });
+      const detectedSaree = result.productIdentity.garmentFamily?.trim().toLowerCase() === "saree";
+      if (detectedSaree && !isSareeCategory) {
+        promoteDetectedSareeReferences();
+        setCategory("saree");
+        setAnalysisSourceKey(null);
+        const missingEvidence = result.sareeEvidenceIssues?.join(", ") || "fully spread pallu";
+        setNotice({ tone: "success", text: `Saree detected. Front and rear references were preserved; now confirm or upload: ${missingEvidence}. Gemini will reanalyse before generation.` });
+      } else {
+        setAnalysisSourceKey(sourceKey);
+        setNotice({ tone: "success", text: "Product identity, creative direction, and the five-pose shoot plan are ready." });
+      }
     } catch (error) {
       if (analysisRequestRef.current === requestId) {
         setAnalysisSourceKey(null);
@@ -538,7 +570,12 @@ export function Studio() {
                   : "Front and back are required. Fabric / pattern detail and an additional product photo are optional — all four are treated as the same product. Style reference only guides scene, mood, and lighting."}
               </p>
             </div>
-            <ProductReferences references={productReferences} onChange={changeProductReference} saree={isSareeCategory} />
+            <ProductReferences
+              references={productReferences}
+              onChange={changeProductReference}
+              saree={isSareeCategory}
+              onPromoteLegacyReference={isSareeCategory ? promoteLegacyReference : undefined}
+            />
             <div className="mt-4 border-t border-outline-variant/30 pt-4">
               <h3 className="mb-2 text-sm font-bold text-on-surface">Model face lock</h3>
               <ModelFaceReference reference={modelReference || undefined} onFile={changeModelReference} onRemove={() => changeModelReference(null)} />
