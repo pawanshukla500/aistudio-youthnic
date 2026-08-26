@@ -110,7 +110,7 @@ Deno.test("Garment Truth Contract: Generic placement and absence safeguards are 
   );
 });
 
-Deno.test("a back prompt vetoes a front-only lace claim and never advertises a Pose 1 anchor", () => {
+Deno.test("a true-back prompt uses only the direct rear image and never leaks a front-only lace claim", () => {
   const prompt = composeGenerationPrompt({
     skuName: "BACK-EVIDENCE-SKU",
     productDetails: "Preserve the exact garment.",
@@ -133,20 +133,61 @@ Deno.test("a back prompt vetoes a front-only lace claim and never advertises a P
     session: {
       productIdentity: {
         garmentFamily: "dress",
-        detailPlacementMap: ["Front hem: gold lace trim", "Back hem: gold lace trim"],
+        frontConstruction: "front-lace-construction-marker",
+        embroidery: "front-lace-embroidery-marker",
+        detailPlacementMap: ["Front hem: front-only-lace-marker", "Back hem: rear-only-hem-marker"],
         garmentEvidence: [
-          { region: "front hem", sourceRole: "front", state: "confirmed", visibleDecoration: "gold lace trim" },
-          { region: "back hem", sourceRole: "back", state: "unknown", visibleDecoration: "" },
+          { region: "front hem", sourceRole: "front", state: "confirmed", visibleDecoration: "front-only-lace-marker" },
+          { region: "back hem", sourceRole: "back", state: "confirmed_absent", visibleDecoration: "rear-plain-marker", explicitlyAbsent: ["rear-lace-absent-marker"] },
         ],
       },
     },
-    references: [{ role: "front" }, { role: "back" }, { role: "approved_pose" }],
+    references: [{ role: "front" }, { role: "back" }, { role: "fabric_pattern" }, { role: "style_reference" }, { role: "approved_pose" }],
   });
 
-  assertStringIncludes(prompt, "- Front hem: gold lace trim");
-  assertEquals(prompt.includes("- Back hem: gold lace trim"), false);
+  assertStringIncludes(prompt, "IMAGE 1: BACK PRODUCT");
+  assertEquals(prompt.includes("IMAGE 2:"), false);
+  assertStringIncludes(prompt, "rear-plain-marker");
+  assertEquals(prompt.includes("front-only-lace-marker"), false);
+  assertEquals(prompt.includes("front-lace-construction-marker"), false);
+  assertEquals(prompt.includes("front-lace-embroidery-marker"), false);
   assertStringIncludes(prompt, "BACK-POSE EVIDENCE VETO");
-  assertEquals(prompt.includes("IMAGE 3: APPROVED POSE 1"), false);
+  assertStringIncludes(prompt, "REAR PRODUCT GEOMETRY LOCK");
+  assertEquals(prompt.includes("IMAGE 2: APPROVED POSE 1"), false);
+});
+
+Deno.test("a saree true-back prompt cannot carry a hallucinated front-derived blouse or border into the rear", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "REAR-ONLY-SAREE",
+    productDetails: "front note says lace-marker but it is not a rear authority",
+    pose: {
+      id: "back", title: "True back", poseNumber: 3, description: "rear", cameraAngle: "back", framing: "full body", bodyPosition: "away",
+      handPlacement: "clear", expression: "not visible", highlightedDetails: [], productVisibilityRules: [], purpose: "rear", consistencyNotes: "rear", prompt: "show the rear", enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "saree",
+        frontConstruction: "front-construction-marker",
+        sareeTruth: {
+          borders: { lowerBorder: "hallucinated-border-marker" },
+          blouse: { backConstruction: "hallucinated-lace-marker" },
+        },
+        sareeDrapePlan: { frontPleatTreatment: "front-pleat-marker" },
+        garmentEvidence: [
+          { region: "front blouse", sourceRole: "saree_front_drape", state: "confirmed", visibleDecoration: "front-lace-marker" },
+          { region: "rear blouse", sourceRole: "saree_back_drape", state: "confirmed_absent", visibleDecoration: "rear-plain-marker", explicitlyAbsent: ["lace"] },
+        ],
+      },
+    },
+    references: [{ role: "saree_front_drape" }, { role: "saree_back_drape" }, { role: "saree_pallu_spread" }, { role: "saree_border_tassels" }, { role: "saree_blouse_back_piece" }],
+  });
+
+  assertStringIncludes(prompt, "SAREE REAR TRUTH - DIRECT EVIDENCE ONLY");
+  assertStringIncludes(prompt, "IMAGE 1: SAREE REAR / BACK DRAPE");
+  assertStringIncludes(prompt, "rear-plain-marker");
+  for (const marker of ["hallucinated-border-marker", "hallucinated-lace-marker", "front-pleat-marker", "front-construction-marker", "front-lace-marker"]) {
+    assertEquals(prompt.includes(marker), false, `${marker} must not enter a true-back prompt.`);
+  }
 });
 
 Deno.test("Saree generation prompt contains canonical normalized truth and never serializes undefined or null", () => {

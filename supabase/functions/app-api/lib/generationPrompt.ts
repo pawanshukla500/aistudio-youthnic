@@ -5,7 +5,7 @@ import {
   type StudioPose,
   sanitizeDetailPlacementMap,
 } from "./profiles.ts";
-import { roleLabel } from "./referencePolicy.ts";
+import { isDirectBackProductRole, roleLabel } from "./referencePolicy.ts";
 
 export type PromptReference = { role: string };
 
@@ -118,6 +118,40 @@ export function assertGenerationPromptWithinLimit(prompt: string) {
   return prompt;
 }
 
+function isDirectRearEvidence(entry: JsonRecord) {
+  return isDirectBackProductRole(String(entry.sourceRole ?? entry.source_role ?? "").trim().toLowerCase());
+}
+
+function rearEvidenceOnly(evidence: JsonRecord[]) {
+  return evidence.filter((entry) => isDirectRearEvidence(objectValue(entry))).map((entry) => {
+    const record = objectValue(entry);
+    return {
+      ...knownFields(record, ["region", "state", "visibleConstruction", "visibleDecoration", "closures", "explicitlyAbsent", "uncertainty"]),
+      sourceRole: String(record.sourceRole ?? record.source_role ?? ""),
+    };
+  });
+}
+
+function rearOnlyProductCore(product: JsonRecord) {
+  // Do not pass global profile fields into a true-back frame. Older analyses can
+  // contain a legitimate front detail (for example lace at the front hem) that
+  // lacks field-level rear provenance. The direct rear image must decide every
+  // rear product detail, including the absence of decoration.
+  return {
+    garmentFamily: String(product.garmentFamily || ""),
+    rearVisualAuthority: "Only the direct uploaded BACK / SAREE REAR-BACK DRAPE image in this request.",
+    unprovenRearRule: "Render every rear construction, motif, border, tassel, closure, trim, and blouse-back detail as plain base fabric unless it is visible in that direct rear image.",
+  };
+}
+
+function rearOnlySareeTruth(evidence: JsonRecord[]) {
+  return {
+    source: "Direct uploaded SAREE REAR / BACK DRAPE image only.",
+    confirmedRearEvidence: rearEvidenceOnly(evidence),
+    unprovenRearRule: "Do not copy body, pallu, border, tassel, or blouse details from a front, pallu, body-close-up, border, model, style, or generated image. If the rear image does not show a detail, render that rear region as plain base fabric.",
+  };
+}
+
 function compactPromptBlock(prompt: string, startMarker: string, endMarkers: string[], maxChars: number) {
   const start = prompt.indexOf(startMarker);
   if (start < 0) return prompt;
@@ -195,34 +229,43 @@ export function composeGenerationPrompt(args: {
   const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
   const evidence = Array.isArray(product?.garmentEvidence) ? product.garmentEvidence as JsonRecord[] : [];
   const rules = boundedStrings(Array.isArray(args.session.consistencyRules) ? args.session.consistencyRules : CONSISTENCY_RULES, 16, 420);
+  const isTrueBack = args.pose.id === "back";
   // Existing sessions can bypass normalizeAnalysis, so reapply rear-evidence
   // validation immediately before prompt construction as a final safety gate.
-  const placement = sanitizeDetailPlacementMap(product.detailPlacementMap, evidence).map((entry) => boundedText(entry, 420));
-  const absent = boundedStrings(product.absenceConstraints, 16, 420);
+  const promptEvidence = isTrueBack ? rearEvidenceOnly(evidence) : evidence;
+  const placement = isTrueBack
+    ? []
+    : sanitizeDetailPlacementMap(product.detailPlacementMap, evidence).map((entry) => boundedText(entry, 420));
+  const absent = isTrueBack ? [] : boundedStrings(product.absenceConstraints, 16, 420);
   
   const isSaree = product?.garmentFamily === "saree";
   if (isSaree && (!product.sareeTruth || typeof product.sareeTruth !== "object" || !product.sareeDrapePlan || typeof product.sareeDrapePlan !== "object")) {
     throw new Error("Stored saree analysis is incomplete or outdated. Reanalyse the product references before generation.");
   }
-  const sareeTruth = isSaree ? canonicalSareeTruth(product.sareeTruth) : undefined;
-  const sareeDrapePlan = isSaree ? canonicalSareeDrapePlan(product.sareeDrapePlan) : undefined;
-  const productCoreJson = compactJson(productCore(product), { maxString: 360, maxItems: 16, maxKeys: 32 });
+  const sareeTruth = isSaree
+    ? (isTrueBack ? rearOnlySareeTruth(evidence) : canonicalSareeTruth(product.sareeTruth))
+    : undefined;
+  const sareeDrapePlan = isSaree && !isTrueBack ? canonicalSareeDrapePlan(product.sareeDrapePlan) : undefined;
+  const productCoreJson = compactJson(isTrueBack ? rearOnlyProductCore(product) : productCore(product), { maxString: 360, maxItems: 16, maxKeys: 32 });
   const modelJson = compactJson(model, { maxString: 500, maxItems: 16, maxKeys: 32 });
   const creativeJson = compactJson(creative, { maxString: 500, maxItems: 16, maxKeys: 32 });
-  const sareeTruthJson = isSaree ? requiredJsonSection("Canonical saree truth", sareeTruth, 10_000) : "";
-  const sareeDrapePlanJson = isSaree ? requiredJsonSection("Canonical saree drape plan", sareeDrapePlan, 4_000) : "";
+  const sareeTruthJson = isSaree ? requiredJsonSection(isTrueBack ? "Direct rear saree truth" : "Canonical saree truth", sareeTruth, 10_000) : "";
+  const sareeDrapePlanJson = isSaree && !isTrueBack ? requiredJsonSection("Canonical saree drape plan", sareeDrapePlan, 4_000) : "";
   const patternGeometryJson = compactJson(patternGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
   const embroideryGeometryJson = compactJson(embroideryGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
   // Defense in depth: processWorker selection already omits it, but callers of
   // this helper must never accidentally mention an approved front anchor in a
   // true-back prompt.
-  const promptReferences = args.pose.id === "back"
-    ? args.references.filter((reference) => reference.role !== "approved_pose")
+  const promptReferences = isTrueBack
+    ? args.references.filter((reference) => isDirectBackProductRole(reference.role)).slice(0, 1)
     : args.references;
+  if (isTrueBack && promptReferences.length !== 1) {
+    throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
+  }
   const manifest = promptReferences.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
   const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
-  const faceVisible = args.pose.id !== "back";
+  const faceVisible = !isTrueBack;
   const allowedDelta = [
     `pose/body position: ${boundedText(args.pose.bodyPosition, 360)}`,
     `camera angle: ${boundedText(args.pose.cameraAngle, 360)}`,
@@ -233,7 +276,7 @@ export function composeGenerationPrompt(args: {
   const learnings = boundedText(args.learnings, 900);
   const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).join(", ");
   const visibilityRules = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
-  const evidenceLines = evidence.slice(0, 16).map((entry) => {
+  const evidenceLines = promptEvidence.slice(0, 16).map((entry) => {
     const row = objectValue(entry);
     return `- Region ${boundedText(row.region, 120).toUpperCase() || "UNKNOWN"}: [State: ${boundedText(row.state, 80)}]
   Source: ${boundedText(row.sourceRole ?? row.source_role, 80) || "UNRECORDED"}
@@ -268,14 +311,21 @@ ${faceVisible
 
 LOCKED PRODUCT - MUST NOT CHANGE:
 ${productCoreJson}
-${isSaree ? `SAREE TRUTH - CRITICAL:
+${isSaree ? (isTrueBack ? `SAREE REAR TRUTH - DIRECT EVIDENCE ONLY:
+${sareeTruthJson}
+SAREE REAR DRAPE AUTHORITY:
+The direct uploaded rear image in the manifest is the only visual authority for this back pose. Do not use a global drape plan to add a pallu, border, tassel, motif, or blouse-back detail that the rear image does not visibly prove.` : `SAREE TRUTH - CRITICAL:
 ${sareeTruthJson}
 SAREE DRAPE PLAN:
-${sareeDrapePlanJson}` : ""}
-User notes: ${boundedText(args.productDetails, 1_200)}
-Reference authority: original product images always outrank generated anchors and style references. FRONT controls front construction; BACK solely controls rear construction; FABRIC/PATTERN resolves material and small construction; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion and drape, while a FLAT-LAY resolves outline, construction, panel layout and length only; ADDITIONAL supports product truth; STYLE controls art direction only.${isSaree ? " For sarees, FULL SAREE FRONT and REAR/BACK DRAPE control their complete worn regions; SAREE BODY/WEAVE controls body colour, weave and motif geometry; FULLY SPREAD PALLU alone controls the pallu boundary and artwork; BORDER/TASSELS controls edge geometry and tassel construction; BLOUSE FRONT/BACK controls only the matching blouse region. Never classify or treat the pallu spread as generic body fabric." : ""}
+${sareeDrapePlanJson}`) : ""}
+User notes: ${isTrueBack ? "Non-authoritative for rear construction. The direct uploaded back product image remains the sole product source." : boundedText(args.productDetails, 1_200)}
+Reference authority: ${isTrueBack
+    ? "The one direct uploaded BACK / SAREE REAR-BACK DRAPE image in the manifest is the sole visual product authority. Do not derive rear construction from a front, pallu, body detail, border, blouse, mannequin, model, style, or generated image."
+    : `original product images always outrank generated anchors and style references. FRONT controls front construction; BACK solely controls rear construction; FABRIC/PATTERN resolves material and small construction; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion and drape, while a FLAT-LAY resolves outline, construction, panel layout and length only; ADDITIONAL supports product truth; STYLE controls art direction only.${isSaree ? " For sarees, FULL SAREE FRONT and REAR/BACK DRAPE control their complete worn regions; SAREE BODY/WEAVE controls body colour, weave and motif geometry; FULLY SPREAD PALLU alone controls the pallu boundary and artwork; BORDER/TASSELS controls edge geometry and tassel construction; BLOUSE FRONT/BACK controls only the matching blouse region. Never classify or treat the pallu spread as generic body fabric." : ""}`}
 - Product references may be flat-lay, folded, pinned or shot on a mannequin or dress form. Rebuild the garment as it falls on a live human body, and never render a mannequin, dress form, hanger, clip, pin, prop stand, or the flat background surface in the output.
-${isSaree ? `- SAREE SPECIFIC RULES: Pallu artwork stays on the pallu, never bleed the border into the main body, do not duplicate the pallu into multiple loose cloth panels, border width stays identical, follow the drape plan explicitly.` : ""}
+${isSaree ? (isTrueBack
+    ? "- SAREE REAR RULE: read the visible pallu fall, border, tassels, weave and blouse-back only from the direct rear image. Never mirror or extend a front-only design into the back."
+    : "- SAREE SPECIFIC RULES: Pallu artwork stays on the pallu, never bleed the border into the main body, do not duplicate the pallu into multiple loose cloth panels, border width stays identical, follow the drape plan explicitly.") : ""}
 
 GARMENT TRUTH CONTRACT (EVIDENCE BY REGION):
 ${evidenceLines}
@@ -286,9 +336,12 @@ CRITICAL EVIDENCE RULES:
 - If a region's state is "confirmed_absent", do not render the decoration, trim, closure, or specialized construction represented by that region.
 - If a region's state is "unknown", it MUST be rendered in plain base fabric without any unproven decoration, trim, or specialized construction. UNKNOWN DOES NOT MEAN INFER.
 - Do NOT extrapolate decoration. If trim is confirmed at the front hem but the side seam is unknown, do not extend the trim up the side.
-${args.pose.id === "back" ? "- BACK-POSE EVIDENCE VETO: only a confirmed rear region whose Source is BACK PRODUCT, SAREE REAR / BACK DRAPE, or SAREE BLOUSE BACK may place rear construction or decoration. A front-, fabric-, mannequin-, style-, or unrecorded source cannot prove a rear lace, trim, border, closure, or motif. If the direct rear evidence does not explicitly prove it, render plain base fabric in that rear region." : ""}
+${isTrueBack ? "- BACK-POSE EVIDENCE VETO: only a confirmed rear region whose Source is BACK PRODUCT or SAREE REAR / BACK DRAPE may place rear construction or decoration. A front-, fabric-, pallu-, border-, blouse-, mannequin-, model-, style-, generated-, or unrecorded source cannot prove a rear lace, trim, border, closure, or motif. If the direct rear evidence does not explicitly prove it, render plain base fabric in that rear region." : ""}
 
-PRINT AND EMBROIDERY GEOMETRY LOCK - the difference between photographing THIS garment and inventing a similar one:
+${isTrueBack ? `REAR PRODUCT GEOMETRY LOCK:
+- The direct rear product image is the only visual geometry source for this frame. Reproduce only the rear-facing motif shape, scale, spacing, orientation, repeat, density, weave, border, tassel, blouse-back, and embroidery actually visible there.
+- Do not use a fabric close-up, front frame, pallu spread, border image, blouse piece, or generated image to complete unseen rear geometry.
+- If the rear image does not clearly resolve a region, render it as plain base fabric with no inferred decoration, trim, closure, motif, border, tassel, or embroidery.` : `PRINT AND EMBROIDERY GEOMETRY LOCK - the difference between photographing THIS garment and inventing a similar one:
 Pattern geometry: ${patternGeometryJson}
 Embroidery geometry: ${embroideryGeometryJson}
 - The FABRIC / PATTERN DETAIL image is the pixel-level authority for motif shape, motif scale, spacing, orientation and embroidery construction. Read the geometry off that image rather than reproducing a generic version of the same craft or style.
@@ -296,7 +349,7 @@ Embroidery geometry: ${embroideryGeometryJson}
 - Keep the print's orientation, repeat interval and density identical, including where panels differ - body, sleeves, yoke, bottom wear and dupatta each keep their own stated treatment.
 - Keep every accent colour inside the print. Small secondary-colour details within a motif field are part of this product's identity, not noise to average away.
 - Reproduce embroidery as the same internal geometry: same lattice or motif structure, same count and rhythm of repeated units, same borders, same coverage area, and the same relationship to the neckline, tie, drawstring and tassel.
-- If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".
+- If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".`}
 
 LOCKED ART DIRECTION - MUST NOT CHANGE BETWEEN POSES:
 ${creativeJson}

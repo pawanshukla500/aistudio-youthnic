@@ -1,4 +1,5 @@
 import { parseJsonResponse, type JsonRecord } from "./profiles.ts";
+import { isDirectBackProductRole } from "./referencePolicy.ts";
 
 const GENERIC_CHECK_KEYS = [
   "model_face", "face_realism", "garment_identity", "colors", "fabric_texture", "print_pattern",
@@ -32,11 +33,50 @@ const AUTO_PASS_FLOOR = 95;
 const RETRY_FLOOR = 90;
 const SEVERE_SCORE_FLOOR = 60;
 
-function qaKeys(garmentFamily = "") {
+function record(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
+function rearOnlyQaProductIdentity(value: unknown) {
+  const product = record(value);
+  const evidence = Array.isArray(product.garmentEvidence) ? product.garmentEvidence : [];
+  const rearEvidence = evidence.filter((entry) => {
+    const row = record(entry);
+    return isDirectBackProductRole(String(row.sourceRole ?? row.source_role ?? "").trim().toLowerCase());
+  }).map((entry) => {
+    const row = record(entry);
+    return {
+      region: row.region ?? "",
+      state: row.state ?? "unknown",
+      visibleConstruction: row.visibleConstruction ?? "",
+      visibleDecoration: row.visibleDecoration ?? "",
+      closures: row.closures ?? "",
+      explicitlyAbsent: Array.isArray(row.explicitlyAbsent) ? row.explicitlyAbsent : [],
+      uncertainty: row.uncertainty ?? "",
+      sourceRole: row.sourceRole ?? row.source_role ?? "",
+    };
+  });
+  return {
+    garmentFamily: product.garmentFamily ?? "",
+    category: product.category ?? "",
+    rearVisualAuthority: "Only the direct uploaded BACK / SAREE REAR-BACK DRAPE image in the manifest.",
+    garmentEvidence: rearEvidence,
+    unprovenRearRule: "No rear lace, trim, closure, border, motif, tassel, or blouse-back construction is valid unless the direct rear product image proves it.",
+  };
+}
+
+function qaKeys(garmentFamily = "", poseType = "") {
   const isSaree = garmentFamily.toLowerCase() === "saree";
+  // A front/back score matters for every pose, but it becomes an SKU-critical
+  // gate only when the output claims to be the true rear. This avoids making
+  // legacy/front-only QA responses fail for an attribute that is not visible,
+  // while preventing an 86-88 rear mismatch from averaging through.
+  const genericCriticalChecks = poseType === "back"
+    ? [...GENERIC_CRITICAL_CHECKS, "front_back_design"]
+    : [...GENERIC_CRITICAL_CHECKS];
   return {
     checkKeys: isSaree ? [...GENERIC_CHECK_KEYS, ...SAREE_CHECK_KEYS] : [...GENERIC_CHECK_KEYS],
-    criticalChecks: isSaree ? [...GENERIC_CRITICAL_CHECKS, ...SAREE_CRITICAL_CHECKS] : [...GENERIC_CRITICAL_CHECKS],
+    criticalChecks: isSaree ? [...genericCriticalChecks, ...SAREE_CRITICAL_CHECKS] : genericCriticalChecks,
     isSaree,
   };
 }
@@ -76,7 +116,8 @@ export function buildPoseQaPrompt(args: {
   productIdentity: unknown; creativeDirection: unknown; modelIdentity: unknown;
   garmentFamily: string; consistencyRules: string[]; hasApprovedAnchor: boolean; hasModelReference: boolean; referenceManifest: string[];
 }) {
-  const { checkKeys, isSaree } = qaKeys(args.garmentFamily);
+  const { checkKeys, isSaree } = qaKeys(args.garmentFamily, args.poseType);
+  const qaProductIdentity = args.poseType === "back" ? rearOnlyQaProductIdentity(args.productIdentity) : args.productIdentity;
   const exampleChecks = Object.fromEntries(checkKeys.map((key) => [key, "pass"]));
   const exampleScores = Object.fromEntries(checkKeys.map((key) => [key, 100]));
   return `You are a strict fashion e-commerce consistency validator.
@@ -86,7 +127,7 @@ SOURCE PRIORITY: original region-labeled product references are authoritative fo
 
 Pose ${args.poseNumber}: ${args.poseTitle} (${args.poseType})
 Approved pose requirement: ${JSON.stringify(args.poseDirection)}
-Product Identity Profile: ${JSON.stringify(args.productIdentity)}
+Product Identity Profile: ${JSON.stringify(qaProductIdentity)}
 Creative Direction Profile: ${JSON.stringify(args.creativeDirection)}
 Model Identity Lock: ${JSON.stringify(args.modelIdentity)}
 Session rules:
@@ -143,8 +184,8 @@ Return STRICT JSON only:
 ${JSON.stringify({ pass: true, score: 100, checks: exampleChecks, scores: exampleScores, failed: [], reason: "short evidence-based verdict", correction: "specific correction for every failed field" })}`;
 }
 
-export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?: string } = {}) {
-  const { checkKeys, criticalChecks } = qaKeys(options.garmentFamily);
+export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?: string; poseType?: string } = {}) {
+  const { checkKeys, criticalChecks } = qaKeys(options.garmentFamily, options.poseType);
   const checks = raw.checks && typeof raw.checks === "object" ? raw.checks as JsonRecord : {};
   const rawScores = raw.scores && typeof raw.scores === "object" ? raw.scores as JsonRecord : {};
   const failed = new Set<string>();
@@ -241,7 +282,7 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
   };
 }
 
-export function parseQaResponse(text: string, options: { garmentFamily?: string } = {}) {
+export function parseQaResponse(text: string, options: { garmentFamily?: string; poseType?: string } = {}) {
   return normalizePoseQaResult(parseJsonResponse(text), options);
 }
 

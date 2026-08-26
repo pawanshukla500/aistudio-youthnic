@@ -17,6 +17,19 @@ import {
 } from "./profiles.ts";
 import { appendRejectedAttemptHistory, buildPoseQaPrompt, parseQaResponse, qaStorageDisposition, unavailableQaResult } from "./qa.ts";
 import { assertGenerationPromptWithinLimit, composeGenerationPrompt } from "./lib/generationPrompt.ts";
+import {
+  AI_MODEL_REGISTRY,
+  AI_PROVIDERS,
+  allowedThinkingLevels,
+  assertAllowedAiModelRoute,
+  classifyVisionProviderFailure,
+  providerSecretName,
+  type AiModelPurpose,
+  type AiProvider,
+  type AiThinkingLevel,
+  type NormalizedAiModelRoute,
+  type VisionProviderFailure,
+} from "./lib/aiModelPolicy.ts";
 import { selectReusableLearningRules } from "./lib/learningRules.ts";
 import { firebaseCatalogPath, supabaseCatalogPath } from "./lib/catalogStoragePaths.ts";
 import {
@@ -24,9 +37,11 @@ import {
   PRODUCT_REFERENCE_ROLES,
   canUsePoseOneAnchor,
   canonicalReferences,
+  isDirectBackProductRole,
   isSareeReferenceSet,
   missingRequiredReferenceLabels,
   roleLabel,
+  selectCurrentCatalogProductReferences,
   selectReferences,
 } from "./lib/referencePolicy.ts";
 export { composeGenerationPrompt };
@@ -245,6 +260,164 @@ function resolveGeminiPolicy(args: { purpose: GeminiPurpose; garmentFamily?: str
   if (args.purpose === "qa_escalation") return { purpose: args.purpose, model: QA_ESCALATION_MODEL, thinkingLevel: QA_ESCALATION_THINKING };
 
   return { purpose: args.purpose, model: "gemini-3.6-flash", thinkingLevel: "high" };
+}
+
+type VisionPurpose = Extract<AiModelPurpose, "product_truth" | "qa" | "qa_escalation">;
+
+type VisionPolicy = NormalizedAiModelRoute & {
+  purpose: VisionPurpose;
+  fallback?: NormalizedAiModelRoute;
+  revision: number;
+  source: "default" | "organization";
+};
+
+type VisionAttempt = {
+  provider: AiProvider;
+  model: string;
+  thinkingLevel: AiThinkingLevel;
+  outcome: "completed" | "failed";
+  failureCode?: string;
+};
+
+type VisionResult = {
+  raw: JsonRecord;
+  text: string;
+  json: JsonRecord;
+  policy: VisionPolicy;
+  attempts: VisionAttempt[];
+};
+
+class VisionProviderError extends Error {
+  provider: AiProvider;
+  model: string;
+  thinkingLevel: AiThinkingLevel;
+  failure: VisionProviderFailure;
+  attempts: VisionAttempt[];
+
+  constructor(args: {
+    provider: AiProvider;
+    model: string;
+    thinkingLevel: AiThinkingLevel;
+    failure: VisionProviderFailure;
+    attempts?: VisionAttempt[];
+  }) {
+    super(args.failure.message);
+    this.name = "VisionProviderError";
+    this.provider = args.provider;
+    this.model = args.model;
+    this.thinkingLevel = args.thinkingLevel;
+    this.failure = args.failure;
+    this.attempts = args.attempts || [];
+  }
+}
+
+function defaultVisionRoute(args: {
+  purpose: VisionPurpose;
+  garmentFamily?: string;
+  uncertainty?: boolean;
+  referenceCount?: number;
+}): NormalizedAiModelRoute {
+  const geminiPurpose: GeminiPurpose = args.purpose === "qa_escalation" ? "qa_escalation" : args.purpose;
+  const current = resolveGeminiPolicy({
+    purpose: geminiPurpose,
+    garmentFamily: args.garmentFamily,
+    uncertainty: args.uncertainty,
+    referenceCount: args.referenceCount,
+  });
+  return assertAllowedAiModelRoute({ provider: "gemini", model: current.model, thinkingLevel: current.thinkingLevel }, args.purpose, { strictJson: true });
+}
+
+function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiModelRoute {
+  return assertAllowedAiModelRoute({
+    provider: "openai",
+    model: "gpt-5.6-terra",
+    thinkingLevel: args.purpose === "qa" ? "medium" : "high",
+  }, args.purpose, { strictJson: true });
+}
+
+function visionPolicyFingerprint(policy: VisionPolicy) {
+  return smallHash(JSON.stringify({
+    purpose: policy.purpose,
+    provider: policy.provider,
+    model: policy.model,
+    thinkingLevel: policy.thinkingLevel,
+    fallback: policy.fallback || null,
+    revision: policy.revision,
+  }));
+}
+
+function visionPolicySnapshot(policy: VisionPolicy, attempts: VisionAttempt[] = []) {
+  return {
+    purpose: policy.purpose,
+    requested: {
+      provider: policy.provider,
+      model: policy.model,
+      thinkingLevel: policy.thinkingLevel,
+      fallback: policy.fallback || null,
+      revision: policy.revision,
+      source: policy.source,
+    },
+    attempts,
+  };
+}
+
+async function resolveVisionPolicy(orgId: string, args: {
+  purpose: VisionPurpose;
+  garmentFamily?: string;
+  uncertainty?: boolean;
+  referenceCount?: number;
+}): Promise<VisionPolicy> {
+  const defaultRoute = defaultVisionRoute(args);
+  const defaultFallback = defaultVisionFallback(args);
+  // `qa_escalation` deliberately inherits the administrator's QA route when a
+  // separate escalation override has not been saved. That keeps one QA switch
+  // authoritative while preserving the existing complex-garment recheck path.
+  let row: JsonRecord | null = null;
+  const configuredPurposes = args.purpose === "qa_escalation" ? ["qa_escalation", "qa"] : [args.purpose];
+  for (const purpose of configuredPurposes) {
+    const { data, error } = await service.from("organization_ai_model_policies")
+      .select("purpose,primary_provider,primary_model,primary_reasoning,fallback_enabled,fallback_provider,fallback_model,fallback_reasoning,revision")
+      .eq("organization_id", orgId)
+      .eq("purpose", purpose)
+      .maybeSingle();
+    // Deployments apply the migration before the function. This fallback only
+    // keeps an older local checkout or staged function from becoming unusable
+    // during a rolling deploy; it never writes or trusts an unvalidated route.
+    if (error?.code === "42P01") break;
+    if (error) throw new Error(`Could not load the organization AI policy: ${error.message}`);
+    if (data) {
+      row = data as JsonRecord;
+      break;
+    }
+  }
+  if (!row) {
+    return {
+      ...defaultRoute,
+      purpose: args.purpose,
+      fallback: defaultFallback,
+      revision: 0,
+      source: "default",
+    };
+  }
+  const primary = assertAllowedAiModelRoute({
+    provider: String(row.primary_provider || ""),
+    model: String(row.primary_model || ""),
+    thinkingLevel: String(row.primary_reasoning || ""),
+  }, args.purpose, { strictJson: true });
+  const fallback = row.fallback_enabled === true
+    ? assertAllowedAiModelRoute({
+      provider: String(row.fallback_provider || ""),
+      model: String(row.fallback_model || ""),
+      thinkingLevel: String(row.fallback_reasoning || ""),
+    }, args.purpose, { strictJson: true })
+    : undefined;
+  return {
+    ...primary,
+    purpose: args.purpose,
+    fallback,
+    revision: Math.max(1, Number(row.revision || 1)),
+    source: "organization",
+  };
 }
 
 function requiredEnv(name: string) {
@@ -485,6 +658,13 @@ function assertRequiredProductReferences(references: ReferenceInput[], garmentFa
   if (missing.length) throw new Error(`Required product references are missing: ${missing.join(", ")}.`);
 }
 
+function assertTrueBackReferenceAvailable(references: ReferenceInput[], garmentFamily = "") {
+  const directRear = selectReferences(references, [], "back", garmentFamily, 1);
+  if (directRear.length !== 1 || !isDirectBackProductRole(directRear[0].role)) {
+    throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
+  }
+}
+
 async function loadAvailableReferences(references: ReferenceInput[], orgId: string, garmentFamily = ""): Promise<LoadedReference[]> {
   const loaded: LoadedReference[] = [];
   // Analysis can identify a saree even when the UI category began as the broad
@@ -565,11 +745,33 @@ const GEMINI_SAFETY_SETTINGS = [
   { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
 ];
 
-// A single flaky/rate-limited/momentarily-over-cautious Gemini call used to burn an entire
-// $0.05-0.07 OpenAI image generation attempt via the outer per-pose retry loop, since QA runs
-// after the (expensive) image already exists. Retry the (cheap, no-image-cost) Gemini call a
-// few times first so a transient hiccup doesn't waste that budget or fail poses needlessly.
-async function geminiJson(policy: GeminiPolicy, parts: JsonRecord[], attempt = 1): Promise<{ raw: JsonRecord; text: string; json: JsonRecord; policy: GeminiPolicy }> {
+function unavailableVisionFailure(provider: AiProvider, message: string): VisionProviderFailure {
+  return {
+    provider,
+    code: "provider_unavailable",
+    status: null,
+    retryable: false,
+    fallbackEligible: true,
+    message,
+  };
+}
+
+function visionProviderError(
+  route: NormalizedAiModelRoute,
+  input: { status?: number; message?: string; code?: string },
+) {
+  return new VisionProviderError({
+    provider: route.provider,
+    model: route.model,
+    thinkingLevel: route.thinkingLevel,
+    failure: classifyVisionProviderFailure(route.provider, input),
+  });
+}
+
+// A provider call is deliberately a single attempt. `visionJson` below owns retries
+// and fallbacks so a monthly spend cap never becomes three identical Gemini calls,
+// and so Studio and Catalog take exactly the same route when a provider is unavailable.
+async function geminiJson(policy: GeminiPolicy, parts: JsonRecord[]): Promise<{ raw: JsonRecord; text: string; json: JsonRecord; policy: GeminiPolicy }> {
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(policy.model)}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": requiredEnv("GEMINI_API_KEY") },
@@ -583,18 +785,214 @@ async function geminiJson(policy: GeminiPolicy, parts: JsonRecord[], attempt = 1
     }),
   });
   const data = await response.json().catch(() => ({})) as JsonRecord;
-  const retryableStatus = !response.ok && [408, 429, 500, 502, 503, 504].includes(response.status);
   const text = response.ok ? extractGeminiText(data) : "";
-  if ((retryableStatus || (response.ok && !text)) && attempt < 3) {
-    await sleep(500 * attempt);
-    return geminiJson(policy, parts, attempt + 1);
+  const route = assertAllowedAiModelRoute({ provider: "gemini", model: policy.model, thinkingLevel: policy.thinkingLevel }, policy.purpose === "shoot_planning" ? "product_truth" : policy.purpose, { strictJson: true });
+  if (!response.ok) {
+    const providerError = data.error as JsonRecord | undefined;
+    throw visionProviderError(route, {
+      status: response.status,
+      message: String(providerError?.message || `Gemini failed (${response.status}).`),
+      code: String(providerError?.status || providerError?.code || ""),
+    });
   }
-  if (!response.ok) throw new Error(String((data.error as JsonRecord | undefined)?.message || `Gemini failed (${response.status}).`));
   if (!text) {
     const reason = geminiBlockReason(data);
-    throw new Error(`Gemini returned no structured response${reason ? ` (${reason})` : ""}.`);
+    throw visionProviderError(route, {
+      status: 422,
+      message: `Gemini returned no structured response${reason ? ` (${reason})` : ""}.`,
+      code: reason,
+    });
   }
   return { raw: data, text, json: parseJsonResponse(text), policy };
+}
+
+function responseContentFromParts(parts: JsonRecord[]) {
+  const content: JsonRecord[] = [];
+  for (const part of parts) {
+    if (typeof part.text === "string" && part.text.trim()) {
+      content.push({ type: "input_text", text: part.text });
+      continue;
+    }
+    const inline = part.inlineData && typeof part.inlineData === "object" ? part.inlineData as JsonRecord : null;
+    const mimeType = String(inline?.mimeType || "").trim();
+    const data = String(inline?.data || "").trim();
+    if (mimeType && data) content.push({ type: "input_image", image_url: `data:${mimeType};base64,${data}` });
+  }
+  return content;
+}
+
+function chatContentFromParts(parts: JsonRecord[]) {
+  return responseContentFromParts(parts).map((part) => part.type === "input_image"
+    ? { type: "image_url", image_url: { url: part.image_url } }
+    : { type: "text", text: part.text });
+}
+
+function extractResponseApiText(data: JsonRecord) {
+  const direct = String(data.output_text || "").trim();
+  if (direct) return direct;
+  const output = Array.isArray(data.output) ? data.output as JsonRecord[] : [];
+  return output.flatMap((item) => Array.isArray(item.content) ? item.content as JsonRecord[] : [])
+    .map((content) => String(content.text || content.output_text || "").trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function extractChatCompletionText(data: JsonRecord) {
+  const choices = Array.isArray(data.choices) ? data.choices as JsonRecord[] : [];
+  const message = choices[0]?.message as JsonRecord | undefined;
+  return String(message?.content || "").trim();
+}
+
+const OPEN_RESPONSE_JSON_FORMAT = {
+  type: "json_schema",
+  name: "fashion_product_identity",
+  strict: false,
+  schema: { type: "object", additionalProperties: true },
+};
+
+function assertVisionProviderConfigured(route: NormalizedAiModelRoute) {
+  const secretName = providerSecretName(route.provider);
+  if (Deno.env.get(secretName)?.trim()) return;
+  throw new VisionProviderError({
+    provider: route.provider,
+    model: route.model,
+    thinkingLevel: route.thinkingLevel,
+    failure: unavailableVisionFailure(
+      route.provider,
+      `${route.provider === "qwen" ? "Qwen" : route.provider === "meta" ? "Meta Muse Spark" : route.provider === "openai" ? "OpenAI" : "Gemini"} is selected for vision work but ${secretName} is not configured in Supabase Edge Function secrets.`,
+    ),
+  });
+}
+
+async function openAiCompatibleVisionJson(route: NormalizedAiModelRoute, parts: JsonRecord[], provider: "openai" | "meta") {
+  assertVisionProviderConfigured(route);
+  const endpoint = provider === "openai" ? "https://api.openai.com/v1/responses" : "https://api.meta.ai/v1/responses";
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${requiredEnv(providerSecretName(provider))}`,
+    },
+    body: JSON.stringify({
+      model: route.model,
+      store: false,
+      input: [{ role: "user", content: responseContentFromParts(parts) }],
+      text: { format: OPEN_RESPONSE_JSON_FORMAT },
+      ...(provider === "meta"
+        ? { reasoning: { effort: route.thinkingLevel } }
+        : route.thinkingLevel !== "none" ? { reasoning: { effort: route.thinkingLevel } } : {}),
+    }),
+  });
+  const data = await response.json().catch(() => ({})) as JsonRecord;
+  if (!response.ok) {
+    const providerError = data.error as JsonRecord | undefined;
+    throw visionProviderError(route, {
+      status: response.status,
+      message: String(providerError?.message || data.message || `${provider} vision request failed (${response.status}).`),
+      code: String(providerError?.code || providerError?.type || ""),
+    });
+  }
+  const text = extractResponseApiText(data);
+  if (!text) throw visionProviderError(route, { status: 422, message: `${provider} returned no structured visual response.` });
+  return { raw: data, text, json: parseJsonResponse(text) };
+}
+
+async function qwenVisionJson(route: NormalizedAiModelRoute, parts: JsonRecord[]) {
+  assertVisionProviderConfigured(route);
+  const response = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${requiredEnv("QWEN_API_KEY")}`,
+    },
+    body: JSON.stringify({
+      model: route.model,
+      messages: [{ role: "user", content: chatContentFromParts(parts) }],
+      response_format: { type: "json_object" },
+      // Qwen documents that thinking must be disabled for reliable structured
+      // multimodal JSON. The policy layer rejects any other value before this.
+      enable_thinking: false,
+    }),
+  });
+  const data = await response.json().catch(() => ({})) as JsonRecord;
+  if (!response.ok) {
+    const providerError = data.error as JsonRecord | undefined;
+    throw visionProviderError(route, {
+      status: response.status,
+      message: String(providerError?.message || data.message || `Qwen vision request failed (${response.status}).`),
+      code: String(providerError?.code || providerError?.type || ""),
+    });
+  }
+  const text = extractChatCompletionText(data);
+  if (!text) throw visionProviderError(route, { status: 422, message: "Qwen returned no structured visual response." });
+  return { raw: data, text, json: parseJsonResponse(text) };
+}
+
+async function invokeVisionRoute(policy: VisionPolicy, route: NormalizedAiModelRoute, parts: JsonRecord[]) {
+  if (route.provider === "gemini") {
+    const gemini = await geminiJson({
+      purpose: policy.purpose,
+      model: route.model,
+      thinkingLevel: route.thinkingLevel as "medium" | "high",
+    }, parts);
+    return { raw: gemini.raw, text: gemini.text, json: gemini.json };
+  }
+  if (route.provider === "openai" || route.provider === "meta") return openAiCompatibleVisionJson(route, parts, route.provider);
+  return qwenVisionJson(route, parts);
+}
+
+function asVisionProviderError(error: unknown, route: NormalizedAiModelRoute) {
+  if (error instanceof VisionProviderError) return error;
+  return new VisionProviderError({
+    provider: route.provider,
+    model: route.model,
+    thinkingLevel: route.thinkingLevel,
+    failure: classifyVisionProviderFailure(route.provider, { message: errorMessage(error) }),
+  });
+}
+
+async function visionJson(policy: VisionPolicy, parts: JsonRecord[]): Promise<VisionResult> {
+  const routes = [
+    { route: { provider: policy.provider, model: policy.model, thinkingLevel: policy.thinkingLevel }, fallback: false },
+    ...(policy.fallback ? [{ route: policy.fallback, fallback: true }] : []),
+  ];
+  const attempts: VisionAttempt[] = [];
+  let lastError: VisionProviderError | null = null;
+  for (const candidate of routes) {
+    const route = candidate.route;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const result = await invokeVisionRoute(policy, route, parts);
+        attempts.push({ provider: route.provider, model: route.model, thinkingLevel: route.thinkingLevel, outcome: "completed" });
+        return { ...result, policy: { ...policy, ...route }, attempts };
+      } catch (error) {
+        const providerError = asVisionProviderError(error, route);
+        lastError = providerError;
+        if (providerError.failure.retryable && attempt < 2) {
+          await sleep(500 * attempt);
+          continue;
+        }
+        attempts.push({
+          provider: route.provider,
+          model: route.model,
+          thinkingLevel: route.thinkingLevel,
+          outcome: "failed",
+          failureCode: providerError.failure.code,
+        });
+        if (!providerError.failure.fallbackEligible || !policy.fallback || candidate.fallback) {
+          providerError.attempts = attempts;
+          throw providerError;
+        }
+        break;
+      }
+    }
+  }
+  if (lastError) {
+    lastError.attempts = attempts;
+    throw lastError;
+  }
+  throw new Error("No approved vision provider route is available.");
 }
 
 async function analyze(request: Request, args: JsonRecord) {
@@ -605,15 +1003,16 @@ async function analyze(request: Request, args: JsonRecord) {
   assertRequiredProductReferences(references, String(args.category || ""));
   const pHash = productHash(args);
   const rHash = referenceHash(references);
-  const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}`);
   // House preference is an analysis input, so it belongs in the cache identity:
   // otherwise a cached plan keeps proposing the styling a stylist corrected, for
   // up to the cache's thirty days. It stays out of the fingerprint on purpose -
   // that is queue-time validation of the references, and saving a plan writes a
   // decision, which would change the fingerprint and reject its own session.
   const housePreferences = await stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion"));
-  const policy = resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: String(args.category || "") });
-  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${policy.model}:${smallHash(housePreferences)}`;
+  const policy = await resolveVisionPolicy(orgId, { purpose: "product_truth", garmentFamily: String(args.category || "") });
+  const policyFingerprint = visionPolicyFingerprint(policy);
+  const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}|${policyFingerprint}`);
+  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${policyFingerprint}:${smallHash(housePreferences)}`;
   let cacheHit = false;
   let normalized: ReturnType<typeof normalizeAnalysis> | null = null;
   const forceRefresh = args.forceRefresh === true;
@@ -641,7 +1040,33 @@ async function analyze(request: Request, args: JsonRecord) {
       sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences,
     }) });
 
-    const result = await geminiJson(policy, parts);
+    let result: VisionResult;
+    try {
+      result = await visionJson(policy, parts);
+    } catch (error) {
+      const providerError = error instanceof VisionProviderError ? error : null;
+      await recordAiRun({
+        organization_id: orgId,
+        job_id: "",
+        run_kind: "product_reference_analysis",
+        model: providerError?.model || policy.model,
+        provider: providerError?.provider || policy.provider,
+        purpose: policy.purpose,
+        thinking_level: providerError?.thinkingLevel || policy.thinkingLevel,
+        input_fingerprint: fingerprint,
+        input_summary: {
+          referenceCount: references.length,
+          roles: references.map((reference) => reference.role),
+          policy: visionPolicySnapshot(policy, providerError?.attempts || []),
+        },
+        output_json: { errorCode: providerError?.failure.code || "vision_request_failed" },
+        status: "failed",
+        latency_ms: Date.now() - started,
+        cost_usd: 0,
+        cost_source: "provider_cost_not_available",
+      });
+      throw error;
+    }
     normalized = normalizeAnalysis(result.json, String(args.category || "ethnic/fusion"));
     await service.from("analysis_cache").upsert({
       organization_id: orgId, org_key: orgId, cache_kind: "studio_product_analysis", cache_key: cacheKey,
@@ -651,17 +1076,24 @@ async function analyze(request: Request, args: JsonRecord) {
     const usage = result.raw.usageMetadata as any || {};
     const inTok = Number(usage.promptTokenCount || 0);
     const outTok = Number(usage.candidatesTokenCount || 0);
-    const pricing = GEMINI_PRICING[policy.model] || GEMINI_PRICING["gemini-3.6-flash"];
-    const estCost = (inTok * pricing.input + outTok * pricing.output) / 1000000;
+    const pricing = result.policy.provider === "gemini"
+      ? GEMINI_PRICING[result.policy.model] || GEMINI_PRICING["gemini-3.6-flash"]
+      : null;
+    const estCost = pricing ? (inTok * pricing.input + outTok * pricing.output) / 1000000 : 0;
     
     await recordAiRun({
-      organization_id: orgId, job_id: "", run_kind: "product_reference_analysis", model: policy.model, provider: "gemini",
-      purpose: policy.purpose, thinking_level: policy.thinkingLevel,
-      input_fingerprint: fingerprint, input_summary: { referenceCount: references.length, roles: references.map((reference) => reference.role), policy },
-      output_json: normalized, status: "completed", latency_ms: Date.now() - started, cost_usd: estCost, cost_source: `estimated_public_rates_${pricing.version}`,
+      organization_id: orgId, job_id: "", run_kind: "product_reference_analysis", model: result.policy.model, provider: result.policy.provider,
+      purpose: policy.purpose, thinking_level: result.policy.thinkingLevel,
+      input_fingerprint: fingerprint, input_summary: {
+        referenceCount: references.length,
+        roles: references.map((reference) => reference.role),
+        policy: visionPolicySnapshot(policy, result.attempts),
+      },
+      output_json: normalized, status: "completed", latency_ms: Date.now() - started, cost_usd: estCost,
+      cost_source: pricing ? `estimated_public_rates_${pricing.version}` : "provider_cost_not_available",
       input_tokens: inTok, input_text_tokens: inTok, input_image_tokens: 0, output_tokens: outTok,
       total_tokens: Number(usage.totalTokenCount || 0), thoughts_token_count: Number(usage.thoughtsTokenCount || 0),
-      usage_payload: { geminiAnalysis: usage },
+      usage_payload: { providerAnalysis: result.raw.usageMetadata || result.raw.usage || {}, attempts: result.attempts },
     });
   }
 
@@ -717,7 +1149,10 @@ async function analyze(request: Request, args: JsonRecord) {
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     })), productIdentity: normalized.productIdentity, creativeDirection: normalized.creativeDirection,
     modelIdentity: normalized.modelIdentity, stylingPlan: normalized.stylingPlan, posePlan: normalized.posePlan, consistencyRules: CONSISTENCY_RULES,
-    analysisModel: resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: analysisCategory }).model, analysisVersion: ANALYSIS_VERSION,
+    analysisModel: policy.model,
+    analysisProvider: policy.provider,
+    analysisPolicy: visionPolicySnapshot(policy),
+    analysisVersion: ANALYSIS_VERSION,
     generatedAssets: [], approvedAssets: [],
   };
   const { error: sessionError } = await service.from("catalog_sessions").insert({
@@ -821,7 +1256,7 @@ function generationFailureCode(error: unknown, message: string) {
 
 async function validatePose(args: {
   generated: { base64: string; mimeType: string }; references: LoadedReference[];
-  approved: LoadedReference[]; session: JsonRecord; pose: StudioPose & { poseNumber: number };
+  approved: LoadedReference[]; session: JsonRecord; pose: StudioPose & { poseNumber: number }; organizationId: string;
 }) {
   const garmentFamily = String((args.session.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
   const qaRefs = selectReferences(args.references, args.approved, args.pose.id, garmentFamily, MAX_REFERENCES);
@@ -851,47 +1286,51 @@ async function validatePose(args: {
   });
 
   const addUsage = (total: Record<string, number>, raw: JsonRecord) => {
-    const usage = (raw.usageMetadata || {}) as Record<string, number>;
+    const usage = (raw.usageMetadata || raw.usage || {}) as Record<string, number>;
+    const inputTokens = Number(usage.promptTokenCount || usage.input_tokens || 0);
+    const outputTokens = Number(usage.candidatesTokenCount || usage.output_tokens || 0);
+    const totalTokens = Number(usage.totalTokenCount || usage.total_tokens || 0);
+    const thoughtTokens = Number(usage.thoughtsTokenCount || usage.reasoning_tokens || 0);
     return {
-      promptTokenCount: Number(total.promptTokenCount || 0) + Number(usage.promptTokenCount || 0),
-      candidatesTokenCount: Number(total.candidatesTokenCount || 0) + Number(usage.candidatesTokenCount || 0),
-      totalTokenCount: Number(total.totalTokenCount || 0) + Number(usage.totalTokenCount || 0),
-      thoughtsTokenCount: Number(total.thoughtsTokenCount || 0) + Number(usage.thoughtsTokenCount || 0),
+      promptTokenCount: Number(total.promptTokenCount || 0) + inputTokens,
+      candidatesTokenCount: Number(total.candidatesTokenCount || 0) + outputTokens,
+      totalTokenCount: Number(total.totalTokenCount || 0) + totalTokens,
+      thoughtsTokenCount: Number(total.thoughtsTokenCount || 0) + thoughtTokens,
     };
   };
-  const run = async (policy: GeminiPolicy, independent = false) => {
+  const run = async (policy: VisionPolicy, independent = false) => {
     const parts = independent
       ? [...baseParts, { text: "INDEPENDENT RECHECK: disregard prior numeric scores, re-inspect each critical region separately, and return newly reasoned evidence-based scores." }]
       : baseParts;
-    const result = await geminiJson(policy, parts);
-    return { result, qa: parseQaResponse(result.text, { garmentFamily }) };
+    const result = await visionJson(policy, parts);
+    return { result, qa: parseQaResponse(result.text, { garmentFamily, poseType: args.pose.id }) };
   };
 
   const complex = ["saree", "lehenga", "suit", "multi-piece"].some((family) => garmentFamily.toLowerCase().includes(family));
-  const initialPolicy = resolveGeminiPolicy({ purpose: "qa", garmentFamily });
+  const initialPolicy = await resolveVisionPolicy(args.organizationId, { purpose: "qa", garmentFamily });
   let { result, qa } = await run(initialPolicy);
   let usageMetadata = addUsage({}, result.raw);
 
   if (complex) {
     if (qa.requiresIndependentRecheck) {
-      const independent = await run(resolveGeminiPolicy({ purpose: "qa_escalation", garmentFamily }), true);
+      const independent = await run(await resolveVisionPolicy(args.organizationId, { purpose: "qa_escalation", garmentFamily }), true);
       result = independent.result;
       qa = independent.qa;
       usageMetadata = addUsage(usageMetadata, result.raw);
     }
-    return { ...qa, usageMetadata, policy: result.policy };
+    return { ...qa, usageMetadata, policy: result.policy, visionAttempts: result.attempts };
   }
 
   const hasSevereDefects = qa.reason.includes("Critical attributes far below");
   if (qa.automaticallyVerified || hasSevereDefects) {
-    return { ...qa, usageMetadata, policy: result.policy };
+    return { ...qa, usageMetadata, policy: result.policy, visionAttempts: result.attempts };
   }
 
-  const confirmation = await run(resolveGeminiPolicy({ purpose: "qa_escalation", garmentFamily }), qa.requiresIndependentRecheck);
+  const confirmation = await run(await resolveVisionPolicy(args.organizationId, { purpose: "qa_escalation", garmentFamily }), qa.requiresIndependentRecheck);
   result = confirmation.result;
   qa = confirmation.qa;
   usageMetadata = addUsage(usageMetadata, result.raw);
-  return { ...qa, usageMetadata, policy: result.policy };
+  return { ...qa, usageMetadata, policy: result.policy, visionAttempts: result.attempts };
 }
 async function kickWorker(jobId?: string) {
   return fetch(FUNCTION_URL, {
@@ -920,6 +1359,12 @@ async function queueGeneration(request: Request, args: JsonRecord) {
   const enabled = poses.filter((pose) => pose.enabled !== false && pose.prompt?.trim());
   if (enabled.length !== 5 || enabled.map((pose) => pose.id).join(",") !== "full_front,angled,back,creative,closeup") throw new Error("The current generation session must contain the complete ordered five-pose plan.");
   assertSareeGenerationReady({ ...sessionData, posePlan: enabled });
+  const queuedReferences = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
+  const queuedGarmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
+  assertTrueBackReferenceAvailable(
+    queuedReferences,
+    isSareeReferenceSet(queuedReferences, queuedGarmentFamily) ? "saree" : queuedGarmentFamily,
+  );
   const allowedModels = ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"];
   const model = allowedModels.includes(String(args.model)) ? String(args.model) : OPENAI_MODEL;
   const quality = ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : "medium";
@@ -1262,11 +1707,11 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     housePreferences: await stylingPreferenceBrief(orgId, category),
   }) });
 
-  const policy = resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: category });
-  const result = await geminiJson(policy, parts);
+  const policy = await resolveVisionPolicy(orgId, { purpose: "product_truth", garmentFamily: category });
+  const result = await visionJson(policy, parts);
   const normalized = normalizeAnalysis(result.json, category);
   
-  return { analysisResult: normalized, usage: result.raw.usageMetadata };
+  return { analysisResult: normalized, usage: result.raw.usageMetadata || result.raw.usage, policy: visionPolicySnapshot(policy, result.attempts) };
 }
 async function handleProductTruthNode(node: JsonRecord, sessionId: string) {
   const { data: edges, error: edgesError } = await service.from("generation_flow_edges").select("source_node_id").eq("target_node_id", node.id);
@@ -1540,7 +1985,49 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
     approved.push(loaded);
   }
   const selected = selectReferences(loadedReferences, approved, poseData.id, garmentFamily, MAX_REFERENCES);
-  return { loadedReferences, approved, poseData, selected, storedPoseData };
+  const authoritativeBackReference = poseData.id === "back"
+    ? selected.find((reference) => isDirectBackProductRole(reference.role)) || null
+    : null;
+  if (poseData.id === "back" && (selected.length !== 1 || !authoritativeBackReference)) {
+    throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
+  }
+  return { loadedReferences, approved, poseData, selected, authoritativeBackReference, storedPoseData };
+}
+
+function selectedReferenceManifest(selected: LoadedReference[], poseData: StudioPose & { poseNumber: number }) {
+  return selected.map((reference, index) => ({
+    imageNumber: index + 1,
+    role: reference.role,
+    referenceId: String(reference.id || ""),
+    hash: String(reference.hash || ""),
+    filename: String(reference.filename || ""),
+    storagePath: String(reference.storagePath || ""),
+    storageBackend: String(reference.storageBackend || ""),
+    authority: poseData.id === "back" && isDirectBackProductRole(reference.role)
+      ? "true_back_product_authority"
+      : "selected_reference",
+  }));
+}
+
+function appendReferenceManifest(
+  storedPoseData: JsonRecord,
+  args: { attempt: number; generationEpoch: number; pose: StudioPose & { poseNumber: number }; selected: LoadedReference[] },
+) {
+  const existing = Array.isArray(storedPoseData.referenceManifests)
+    ? storedPoseData.referenceManifests.filter((entry): entry is JsonRecord => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
+    : [];
+  const next = {
+    attempt: args.attempt,
+    generationEpoch: args.generationEpoch,
+    selectedAt: new Date().toISOString(),
+    poseId: args.pose.id,
+    poseNumber: args.pose.poseNumber,
+    references: selectedReferenceManifest(args.selected, args.pose),
+  };
+  const withoutCurrent = existing.filter((entry) => (
+    Number(entry.attempt || 0) !== args.attempt || Number(entry.generationEpoch || 0) !== args.generationEpoch
+  ));
+  return [...withoutCurrent, next].slice(-20);
 }
 
 async function compilePosePrompt(
@@ -1621,7 +2108,30 @@ async function processWorker(request: Request, args: JsonRecord) {
   // Run the corrected v14 Product Truth gate before changing workflow state or
   // making any paid provider request. This also protects queued v13 jobs that
   // existed before the cache-version migration.
-  assertSareeGenerationReady(sessionData);
+  try {
+    assertSareeGenerationReady(sessionData);
+  } catch (error) {
+    const message = errorMessage(error);
+    await failPoseAndJob(job, session, pose, message, "saree_analysis_incomplete");
+    return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed", error: message };
+  }
+  // Resolve (and for Pose 3 validate) source evidence before changing a pose to
+  // processing. A missing/replaced rear reference must fail transparently and
+  // never leave a job looking like it is spending time or provider credits.
+  let resolvedPoseReferences: Awaited<ReturnType<typeof resolvePoseReferences>>;
+  try {
+    resolvedPoseReferences = await resolvePoseReferences(job, sessionData, pose);
+  } catch (error) {
+    const message = errorMessage(error);
+    await failPoseAndJob(job, session, pose, message, "reference_preflight_failed");
+    return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed", error: message };
+  }
+  const { loadedReferences, approved, poseData, selected, authoritativeBackReference, storedPoseData } = resolvedPoseReferences;
+  const attempt = Number(pose.attempt_count || 0) + 1;
+  if (attempt > MAX_GENERATION_ATTEMPTS) {
+    await failPoseAndJob(job, session, pose, `Pose ${pose.pose_index} exhausted ${MAX_GENERATION_ATTEMPTS} generation attempts.`);
+    return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed" };
+  }
   const now = new Date().toISOString();
   await Promise.all([
     service.from("session_generations").update({ status: "processing", attempt_count: Number(pose.attempt_count || 0), updated_at: now }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id),
@@ -1631,7 +2141,6 @@ async function processWorker(request: Request, args: JsonRecord) {
   // The worker is the production path. Keep reference loading and prompt
   // compilation in the shared helpers so Studio and Bulk/Catalog cannot drift
   // into two different product-fidelity policies.
-  const { loadedReferences, approved, poseData, selected, storedPoseData } = await resolvePoseReferences(job, sessionData, pose);
   let qaCorrections = (Array.isArray(storedPoseData.corrections)
     ? storedPoseData.corrections.map(String)
     : [String(storedPoseData.correction || "")]).map((entry) => entry.trim()).filter(Boolean);
@@ -1643,11 +2152,6 @@ async function processWorker(request: Request, args: JsonRecord) {
   let attemptCost = 0;
   let attemptUsage: ProviderUsage | undefined;
   let providerRequestId = "";
-  const attempt = Number(pose.attempt_count || 0) + 1;
-  if (attempt > MAX_GENERATION_ATTEMPTS) {
-    await failPoseAndJob(job, session, pose, `Pose ${pose.pose_index} exhausted ${MAX_GENERATION_ATTEMPTS} generation attempts.`);
-    return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed" };
-  }
   try {
     const compiled = await compilePosePrompt(job, session, sessionData, pose, poseData, selected, storedPoseData);
     const prompt = compiled.prompt;
@@ -1656,6 +2160,20 @@ async function processWorker(request: Request, args: JsonRecord) {
     Object.assign(storedPoseData, {
       appliedLearningRuleIds: learningRuleIds,
       appliedLearningAt: new Date().toISOString(),
+      referenceManifests: appendReferenceManifest(storedPoseData, {
+        attempt,
+        generationEpoch: Number(pose.generation_epoch || 1),
+        pose: poseData,
+        selected,
+      }),
+      ...(authoritativeBackReference ? {
+        authoritativeBackReference: {
+          referenceId: String(authoritativeBackReference.id || ""),
+          role: authoritativeBackReference.role,
+          hash: String(authoritativeBackReference.hash || ""),
+          storagePath: String(authoritativeBackReference.storagePath || ""),
+        },
+      } : {}),
     });
     await service.from("session_generations").update({
       full_prompt: prompt,
@@ -1682,11 +2200,32 @@ async function processWorker(request: Request, args: JsonRecord) {
     if (job.pose_qa !== false) {
       try {
         qaStarted = Date.now();
-        qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData });
+        qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData, organizationId: String(job.org_id) });
         qaLatencyMs = Date.now() - qaStarted;
       } catch (error) {
         qaUnavailable = errorMessage(error);
         qa = unavailableQaResult(`Automatic consistency QA could not run: ${qaUnavailable}`);
+        const providerError = error instanceof VisionProviderError ? error : null;
+        await recordAiRun({
+          organization_id: job.org_id,
+          planning_request_id: job.planning_request_id,
+          batch_id: job.batch_id || null,
+          job_id: job.job_id,
+          session_id: job.session_id,
+          pose_index: pose.pose_index,
+          run_kind: "quality_assurance",
+          model: providerError?.model || "unknown",
+          provider: providerError?.provider || "unknown",
+          purpose: "qa",
+          thinking_level: providerError?.thinkingLevel || "none",
+          input_fingerprint: smallHash(prompt),
+          input_summary: { pose: pose.pose_index, attempt, attempts: providerError?.attempts || [] },
+          output_json: { errorCode: providerError?.failure.code || "qa_provider_unavailable" },
+          status: "failed",
+          latency_ms: Date.now() - qaStarted,
+          cost_usd: 0,
+          cost_source: "provider_cost_not_available",
+        });
       }
     }
     await recordAiRun({
@@ -1697,6 +2236,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         pose: pose.pose_index,
         attempt,
         referenceRoles: selected.map((reference) => reference.role),
+        referenceManifest: selectedReferenceManifest(selected, poseData),
         appliedLearningRuleIds: learningRuleIds,
       },
       output_json: { generated: true }, status: "completed", latency_ms: Date.now() - generatedStarted,
@@ -1711,21 +2251,23 @@ async function processWorker(request: Request, args: JsonRecord) {
        const qaUsage = (qa.usageMetadata || {}) as any;
        const inTok = Number(qaUsage?.promptTokenCount || 0);
        const outTok = Number(qaUsage?.candidatesTokenCount || 0);
-       const policy = (qa as any).policy || resolveGeminiPolicy({ purpose: "qa" });
-       const pricing = GEMINI_PRICING[policy.model] || GEMINI_PRICING["gemini-3.6-flash"];
-       const estCost = (inTok * pricing.input + outTok * pricing.output) / 1000000;
+       const policy = (qa as any).policy as VisionPolicy | undefined;
+       const pricing = policy?.provider === "gemini"
+         ? GEMINI_PRICING[policy.model] || GEMINI_PRICING["gemini-3.6-flash"]
+         : null;
+       const estCost = pricing ? (inTok * pricing.input + outTok * pricing.output) / 1000000 : 0;
        await recordAiRun({
          organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
-         job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: policy.model, provider: "google",
-         purpose: policy.purpose, thinking_level: policy.thinkingLevel,
-         input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt, policy },
+         job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: policy?.model || "unknown", provider: policy?.provider || "unknown",
+         purpose: policy?.purpose || "qa", thinking_level: policy?.thinkingLevel || "none",
+         input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt, policy: policy ? visionPolicySnapshot(policy, (qa as any).visionAttempts || []) : null },
          output_json: { qa, qaVersion: QA_VERSION }, status: qa.outcome, latency_ms: qaLatencyMs,
          provider_request_id: "",
          input_tokens: inTok, input_text_tokens: inTok,
          input_image_tokens: 0, output_tokens: outTok,
          total_tokens: Number(qaUsage?.totalTokenCount || 0), thoughts_token_count: Number(qaUsage?.thoughtsTokenCount || 0),
-         usage_payload: { geminiQa: qaUsage },
-         cost_usd: estCost, cost_source: `estimated_public_rates_${pricing.version}`,
+         usage_payload: { providerQa: qaUsage, attempts: (qa as any).visionAttempts || [] },
+         cost_usd: estCost, cost_source: pricing ? `estimated_public_rates_${pricing.version}` : "provider_cost_not_available",
        });
     }
     if (!qa.pass) {
@@ -2021,7 +2563,7 @@ async function rerunPoseQa(request: Request, args: JsonRecord) {
   const reviewedAt = new Date().toISOString();
   let qa: Awaited<ReturnType<typeof validatePose>>;
   try {
-    qa = await validatePose({ generated, references, approved: [], session: sessionData, pose: poseData });
+    qa = await validatePose({ generated, references, approved: [], session: sessionData, pose: poseData, organizationId: workspace.organization.id });
   } catch (error) {
     const message = errorMessage(error);
     const unavailable = unavailableQaResult(`Automatic consistency QA could not run: ${message}`);
@@ -2411,11 +2953,68 @@ async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
   };
 }
 
+const ADMIN_MANAGED_VISION_PURPOSES: VisionPurpose[] = ["product_truth", "qa"];
+
+function visionProviderConfigured(provider: AiProvider) {
+  return Boolean(Deno.env.get(providerSecretName(provider))?.trim());
+}
+
+function aiModelRegistryForAdmin() {
+  return AI_PROVIDERS.map((provider) => {
+    const models = new Map<string, { id: string; label: string; purposes: string[]; thinkingLevels: string[] }>();
+    for (const purpose of ADMIN_MANAGED_VISION_PURPOSES) {
+      for (const model of AI_MODEL_REGISTRY[provider][purpose] || []) {
+        const existing = models.get(model) || {
+          id: model,
+          label: model,
+          purposes: [],
+          thinkingLevels: [],
+        };
+        if (!existing.purposes.includes(purpose)) existing.purposes.push(purpose);
+        for (const thinking of allowedThinkingLevels({ provider }, purpose, { strictJson: true })) {
+          if (!existing.thinkingLevels.includes(thinking)) existing.thinkingLevels.push(thinking);
+        }
+        models.set(model, existing);
+      }
+    }
+    return { provider, configured: visionProviderConfigured(provider), models: [...models.values()] };
+  });
+}
+
+function adminVisionPolicyRow(purpose: VisionPurpose, row?: JsonRecord | null) {
+  if (row) {
+    return {
+      purpose,
+      primaryProvider: String(row.primary_provider || "gemini"),
+      primaryModel: String(row.primary_model || ""),
+      primaryThinking: String(row.primary_reasoning || "high"),
+      fallbackEnabled: row.fallback_enabled === true,
+      fallbackProvider: String(row.fallback_provider || ""),
+      fallbackModel: String(row.fallback_model || ""),
+      fallbackThinking: String(row.fallback_reasoning || ""),
+      revision: Number(row.revision || 1),
+    };
+  }
+  const defaultPrimary = defaultVisionRoute({ purpose });
+  const defaultFallback = defaultVisionFallback({ purpose });
+  return {
+    purpose,
+    primaryProvider: defaultPrimary.provider,
+    primaryModel: defaultPrimary.model,
+    primaryThinking: defaultPrimary.thinkingLevel,
+    fallbackEnabled: true,
+    fallbackProvider: defaultFallback.provider,
+    fallbackModel: defaultFallback.model,
+    fallbackThinking: defaultFallback.thinkingLevel,
+    revision: 0,
+  };
+}
+
 async function adminOverview(request: Request) {
   const { workspace } = await workspaceFor(request);
   if (!workspace.isAdmin && !workspace.permissions.some((permission) => permission.startsWith("admin."))) throw new Error("You do not have access to the admin console.");
   const orgId = workspace.organization.id;
-  const [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, teamsResult, teamMembershipsResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult] = await Promise.all([
+  const [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, teamsResult, teamMembershipsResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult, aiPoliciesResult] = await Promise.all([
     service.from("organization_members").select("*").eq("organization_id", orgId).order("display_name"),
     service.from("roles").select("*").eq("organization_id", orgId).order("name"),
     service.from("permissions").select("*").order("module").order("key"),
@@ -2428,8 +3027,11 @@ async function adminOverview(request: Request) {
     service.from("event_email_deliveries").select("*").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(10),
     service.from("openai_usage_daily").select("usage_date,image_count,request_count,actual_cost_usd,synced_at").eq("organization_id", orgId).order("usage_date", { ascending: false }).limit(100),
     service.from("ai_runs").select("job_id, session_id, pose_index, run_kind, provider, model, input_tokens, output_tokens, cost_usd, created_at").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(200),
+    service.from("organization_ai_model_policies").select("purpose,primary_provider,primary_model,primary_reasoning,fallback_enabled,fallback_provider,fallback_model,fallback_reasoning,revision")
+      .eq("organization_id", orgId).in("purpose", ADMIN_MANAGED_VISION_PURPOSES),
   ]);
   for (const result of [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, teamsResult, teamMembershipsResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult]) if (result.error) throw new Error(result.error.message);
+  if (aiPoliciesResult.error && aiPoliciesResult.error.code !== "42P01") throw new Error(aiPoliciesResult.error.message);
   const permissions = permissionsResult.data || [];
   const roles = (rolesResult.data || []).map((role) => ({
     ...role,
@@ -2461,7 +3063,8 @@ async function adminOverview(request: Request) {
     },
     health: {
       supabase: true, firebaseConfigured: Boolean(Deno.env.get("FIREBASE_SERVICE_ACCOUNT")),
-      openaiConfigured: Boolean(Deno.env.get("OPENAI_API_KEY")), geminiConfigured: Boolean(Deno.env.get("GEMINI_API_KEY")),
+      openaiConfigured: visionProviderConfigured("openai"), geminiConfigured: visionProviderConfigured("gemini"),
+      qwenConfigured: visionProviderConfigured("qwen"), metaConfigured: visionProviderConfigured("meta"),
       openaiAdminConfigured: Boolean(Deno.env.get("OPENAI_ADMIN_KEY")), emailConfigured: Boolean(Deno.env.get("RESEND_API_KEY") && Deno.env.get("RESEND_FROM")),
       memberCount: members.length, settingsCount: automationResult.data ? 1 : 0,
     },
@@ -2475,6 +3078,11 @@ async function adminOverview(request: Request) {
       lastSyncedAt: (usageResult.data || []).map((row) => row.synced_at).filter(Boolean).sort().at(-1) || null,
     },
     recentAiRuns: aiRunsResult.data || [],
+    aiModelPolicies: ADMIN_MANAGED_VISION_PURPOSES.map((purpose) => adminVisionPolicyRow(
+      purpose,
+      ((aiPoliciesResult.data || []) as JsonRecord[]).find((entry) => entry.purpose === purpose),
+    )),
+    aiModelRegistry: aiModelRegistryForAdmin(),
   };
 }
 
@@ -2937,16 +3545,16 @@ async function setVariantReferencesOperation(request: Request, args: JsonRecord)
   const { data: variant, error: variantError } = await service.from("planning_requests").select("*").eq("id", requestId).eq("organization_id", workspace.organization.id).single();
   if (variantError) throw new Error(variantError.message);
   if (!variant) throw new Error("Colourway not found.");
-  const roleArgs: Array<[string, string, string]> = [
-    ["frontReferenceId", "front_image_url", "front_image_path"], ["backReferenceId", "back_image_url", "back_image_path"],
-    ["fabricPatternReferenceId", "", ""], ["additionalProductReferenceId", "", ""],
-    ["sareeFrontDrapeReferenceId", "front_image_url", "front_image_path"], ["sareeBackDrapeReferenceId", "back_image_url", "back_image_path"],
-    ["sareeBodyDetailReferenceId", "", ""], ["sareePalluSpreadReferenceId", "", ""],
-    ["sareeBorderTasselsReferenceId", "", ""], ["sareeBlouseFrontReferenceId", "", ""], ["sareeBlouseBackPieceReferenceId", "", ""],
+  const roleArgs: Array<[string, string, string, readonly string[]]> = [
+    ["frontReferenceId", "front_image_url", "front_image_path", ["front"]], ["backReferenceId", "back_image_url", "back_image_path", ["back"]],
+    ["fabricPatternReferenceId", "", "", ["fabric_pattern"]], ["additionalProductReferenceId", "", "", ["additional_product"]],
+    ["sareeFrontDrapeReferenceId", "front_image_url", "front_image_path", ["saree_front_drape"]], ["sareeBackDrapeReferenceId", "back_image_url", "back_image_path", ["saree_back_drape"]],
+    ["sareeBodyDetailReferenceId", "", "", ["saree_body_detail"]], ["sareePalluSpreadReferenceId", "", "", ["saree_pallu_spread"]],
+    ["sareeBorderTasselsReferenceId", "", "", ["saree_border_tassels"]], ["sareeBlouseFrontReferenceId", "", "", ["saree_blouse_front"]], ["sareeBlouseBackPieceReferenceId", "", "", ["saree_blouse_back_piece"]],
   ];
-  if (args.referenceId) roleArgs.push(["referenceId", "", ""]);
+  if (args.referenceId) roleArgs.push(["referenceId", "", "", []]);
   const patch: JsonRecord = { updated_at: new Date().toISOString() };
-  for (const [key, urlColumn, pathColumn] of roleArgs) {
+  for (const [key, urlColumn, pathColumn, allowedRoles] of roleArgs) {
     if (!args[key]) continue;
     const { data: asset, error: assetError } = await service.from("planning_assets").select("*")
       .eq("id", String(args[key]))
@@ -2955,23 +3563,37 @@ async function setVariantReferencesOperation(request: Request, args: JsonRecord)
       .single();
     if (assetError) throw new Error(assetError.message);
     if (!asset) throw new Error("Uploaded reference not found.");
-    const resolvedUrlColumn = urlColumn || (asset.asset_role === "saree_front_drape" ? "front_image_url" : asset.asset_role === "saree_back_drape" ? "back_image_url" : "");
-    const resolvedPathColumn = pathColumn || (asset.asset_role === "saree_front_drape" ? "front_image_path" : asset.asset_role === "saree_back_drape" ? "back_image_path" : "");
+    if (allowedRoles.length && !allowedRoles.includes(String(asset.asset_role))) throw new Error(`The selected ${key} upload has role ${asset.asset_role}, not ${allowedRoles.join(" or ")}.`);
+    const isFrontRole = ["front", "saree_front_drape"].includes(String(asset.asset_role));
+    const isBackRole = ["back", "saree_back_drape"].includes(String(asset.asset_role));
+    // Planning's legacy `referenceId` route is used by the current UI. It must
+    // still advance the canonical pointer for generic front/back uploads; not
+    // doing so left hundreds of valid rear assets unselectable by Bulk.
+    const resolvedUrlColumn = urlColumn || (isFrontRole ? "front_image_url" : isBackRole ? "back_image_url" : "");
+    const resolvedPathColumn = pathColumn || (isFrontRole ? "front_image_path" : isBackRole ? "back_image_path" : "");
     if (resolvedUrlColumn) patch[resolvedUrlColumn] = asset.image_url;
     if (resolvedPathColumn) patch[resolvedPathColumn] = asset.storage_path;
   }
   const front = String(patch.front_image_url || variant.front_image_url || "");
+  const frontPath = String(patch.front_image_path || variant.front_image_path || "");
   const back = String(patch.back_image_url || variant.back_image_url || "");
+  const backPath = String(patch.back_image_path || variant.back_image_path || "");
   const { data: referenceAssets, error: referenceAssetsError } = await service.from("planning_assets").select("asset_role,image_url,storage_path")
     .eq("planning_request_id", requestId)
     .eq("organization_id", workspace.organization.id)
-    .in("asset_role", [...PRODUCT_REFERENCE_ROLES]);
+    .in("asset_role", [...PRODUCT_REFERENCE_ROLES])
+    .order("created_at");
   if (referenceAssetsError) throw new Error(referenceAssetsError.message);
-  const inputRoles = (referenceAssets || []).map((asset) => ({
+  const inputRoles = selectCurrentCatalogProductReferences((referenceAssets || []).map((asset) => ({
     role: String(asset.asset_role), downloadUrl: String(asset.image_url || ""), storagePath: String(asset.storage_path || ""), hash: "", filename: "", mimeType: "", size: 0,
-  }));
+  })), {
+    frontDownloadUrl: front,
+    frontStoragePath: frontPath,
+    backDownloadUrl: back,
+    backStoragePath: backPath,
+  });
   const missingReferences = missingRequiredReferenceLabels(inputRoles, isSareeReferenceSet(inputRoles) ? "saree" : String(variant.category || ""));
-  const referencesReady = missingReferences.length === 0 && Boolean(front && back);
+  const referencesReady = missingReferences.length === 0 && Boolean((front || frontPath) && (back || backPath));
   patch.validation_status = referencesReady ? "ready" : "pending";
   patch.validation_report = referencesReady ? { ready: true, reasons: [] } : { ready: false, reasons: missingReferences.map((label) => `${label} image is required.`) };
   patch.analysis_status = referencesReady ? "stale" : "pending";
@@ -3153,7 +3775,12 @@ function sareeReferenceRequirementMessage(missing: string[]) {
   return `Saree detected. Add or map: ${missing.join(", ")}. A full pallu-spread image is required before generation.`;
 }
 
-async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, references: ReferenceInput[]) {
+async function analyzeCatalogVariant(
+  batch: JsonRecord,
+  variant: JsonRecord,
+  references: ReferenceInput[],
+  suppliedPolicy?: VisionPolicy,
+) {
   const settings = (batch.generation_settings || {}) as JsonRecord;
   const category = catalogVariantCategory(batch, variant);
   const loaded = await loadAvailableReferences(references, String(batch.organization_id), category);
@@ -3168,10 +3795,10 @@ async function analyzeCatalogVariant(batch: JsonRecord, variant: JsonRecord, ref
     modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
     housePreferences: await stylingPreferenceBrief(String(batch.organization_id), category),
   }) });
-  const policy = resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: category });
-  const result = await geminiJson(policy, parts);
+  const policy = suppliedPolicy || await resolveVisionPolicy(String(batch.organization_id), { purpose: "product_truth", garmentFamily: category });
+  const result = await visionJson(policy, parts);
   const normalized = normalizeAnalysis(result.json, category);
-  return applyCatalogMemory(batch, normalized);
+  return { normalized: applyCatalogMemory(batch, normalized), policy: result.policy, attempts: result.attempts };
 }
 
 async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
@@ -3182,27 +3809,42 @@ async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
     .eq("organization_id", organizationId)
     .order("created_at");
   if (assetsError) throw new Error(`Could not load catalog references: ${assetsError.message}`);
-  const productRefs: ReferenceInput[] = (assets || [])
+  const rawProductRefs: ReferenceInput[] = (assets || [])
     .filter((asset) => (PRODUCT_REFERENCE_ROLES as readonly string[]).includes(asset.asset_role))
     .map((asset) => ({
       id: asset.id, role: asset.asset_role, downloadUrl: asset.image_url, storagePath: asset.storage_path, storageBackend: asset.storage_backend as CatalogStorageBackend,
       hash: String((asset.metadata as JsonRecord)?.hash || asset.id), filename: String((asset.metadata as JsonRecord)?.filename || `${asset.asset_role}.jpg`),
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     }));
+  // Historical planning_assets rows remain available for audit, but a queued
+  // Catalog session is an immutable snapshot of the *current* uploaded front
+  // and rear files. Do not let a replaced rear image slip back into the input
+  // set merely because it is still retained in the history table.
+  const productRefs: ReferenceInput[] = selectCurrentCatalogProductReferences(rawProductRefs, {
+    frontDownloadUrl: String(variant.front_image_url || ""),
+    frontStoragePath: String(variant.front_image_path || ""),
+    backDownloadUrl: String(variant.back_image_url || ""),
+    backStoragePath: String(variant.back_image_path || ""),
+  });
   for (const [role, urlKey, pathKey] of [
     ["front", "front_image_url", "front_image_path"],
     ["back", "back_image_url", "back_image_path"],
   ] as const) {
-    if (productRefs.some((reference) => reference.role === role)) continue;
+    const aliases = role === "front" ? ["front", "saree_front_drape"] : ["back", "saree_back_drape"];
+    if (productRefs.some((reference) => aliases.includes(reference.role))) continue;
     const downloadUrl = String(variant[urlKey] || "");
     const storagePath = String(variant[pathKey] || "");
     if (!downloadUrl && !storagePath) continue;
+    const matchedStoredReference = rawProductRefs.find((reference) => (
+      aliases.includes(reference.role)
+      && ((storagePath && reference.storagePath === storagePath) || (downloadUrl && reference.downloadUrl === downloadUrl))
+    ));
     productRefs.push({
       id: `${variant.id}:${role}`,
       role,
       downloadUrl,
       storagePath,
-      storageBackend: "firebase",
+      storageBackend: matchedStoredReference?.storageBackend || "firebase",
       hash: smallHash(`${downloadUrl}|${storagePath}`),
       filename: `${role}.jpg`,
       mimeType: "image/jpeg",
@@ -3220,13 +3862,17 @@ async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
   return { productRefs, references: canonicalReferences([...productRefs, ...sharedRefs]) };
 }
 
-function catalogAnalysisFingerprint(batch: JsonRecord, variant: JsonRecord, references: ReferenceInput[]) {
+async function catalogAnalysisFingerprint(batch: JsonRecord, variant: JsonRecord, references: ReferenceInput[]) {
   const settings = (batch.generation_settings || {}) as JsonRecord;
   const pHash = smallHash([
     variant.sku_name, variant.product_description, catalogVariantCategory(batch, variant), settings.modelDirection, settings.sceneDirection,
   ].map((value) => String(value || "")).join("|"));
   const rHash = referenceHash(references);
-  return { pHash, rHash, fingerprint: smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}`) };
+  const policy = await resolveVisionPolicy(String(batch.organization_id), {
+    purpose: "product_truth",
+    garmentFamily: catalogVariantCategory(batch, variant),
+  });
+  return { pHash, rHash, policy, fingerprint: smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}|${visionPolicyFingerprint(policy)}`) };
 }
 
 function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof normalizeAnalysis>) {
@@ -3464,14 +4110,15 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
     }
     return { processed: false, reason: "references_incomplete", requestId: variant.id, missing };
   }
-  const hashes = catalogAnalysisFingerprint(batch as JsonRecord, variant as JsonRecord, references);
+  const hashes = await catalogAnalysisFingerprint(batch as JsonRecord, variant as JsonRecord, references);
   if (variant.analysis_status === "ready" && variant.analysis_fingerprint === hashes.fingerprint && variant.ai_analysis) {
     return { processed: false, reason: "analysis_current", requestId: variant.id };
   }
   const started = Date.now();
   await service.from("planning_requests").update({ analysis_status: "analyzing", updated_at: new Date().toISOString() }).eq("id", variant.id);
   try {
-    const normalized = await analyzeCatalogVariant(batch as JsonRecord, variant as JsonRecord, references);
+    const analysis = await analyzeCatalogVariant(batch as JsonRecord, variant as JsonRecord, references, hashes.policy);
+    const normalized = analysis.normalized;
     const now = new Date().toISOString();
     const detectedSaree = String(normalized.productIdentity.garmentFamily || "").trim().toLowerCase() === "saree";
     const missingDetectedSareeEvidence = detectedSaree ? missingRequiredReferenceLabels(references, "saree") : [];
@@ -3493,9 +4140,9 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
         }).eq("id", variant.id),
         recordAiRun({
           organization_id: batch.organization_id, planning_request_id: variant.id, batch_id: batchId,
-          job_id: "", run_kind: "catalog_product_preflight", model: resolveGeminiPolicy({ purpose: "product_truth", garmentFamily: "saree" }).model,
-          provider: "gemini", input_fingerprint: hashes.fingerprint,
-          input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role) },
+          job_id: "", run_kind: "catalog_product_preflight", model: analysis.policy.model,
+          provider: analysis.policy.provider, purpose: analysis.policy.purpose, thinking_level: analysis.policy.thinkingLevel, input_fingerprint: hashes.fingerprint,
+          input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(hashes.policy, analysis.attempts) },
           output_json: normalized, status: "completed", latency_ms: Date.now() - started,
           cost_usd: 0, cost_source: "provider_cost_not_available",
         }),
@@ -3510,9 +4157,9 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
       }).eq("id", variant.id),
       recordAiRun({
         organization_id: batch.organization_id, planning_request_id: variant.id, batch_id: batchId,
-        job_id: "", run_kind: "catalog_product_preflight", model: resolveGeminiPolicy({ purpose: "product_truth" }).model,
-        provider: "gemini", input_fingerprint: hashes.fingerprint,
-        input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role) },
+        job_id: "", run_kind: "catalog_product_preflight", model: analysis.policy.model,
+        provider: analysis.policy.provider, purpose: analysis.policy.purpose, thinking_level: analysis.policy.thinkingLevel, input_fingerprint: hashes.fingerprint,
+        input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(hashes.policy, analysis.attempts) },
         output_json: normalized, status: "completed", latency_ms: Date.now() - started,
         cost_usd: 0, cost_source: "provider_cost_not_available",
       }),
@@ -3528,8 +4175,27 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
     if (!args.requestId) scheduleBackground(kickCatalogPreflight(batchId));
     return { processed: true, requestId: variant.id, fingerprint: hashes.fingerprint };
   } catch (error) {
+    const providerError = error instanceof VisionProviderError ? error : null;
+    await recordAiRun({
+      organization_id: batch.organization_id,
+      planning_request_id: variant.id,
+      batch_id: batchId,
+      job_id: "",
+      run_kind: "catalog_product_preflight",
+      model: providerError?.model || hashes.policy.model,
+      provider: providerError?.provider || hashes.policy.provider,
+      purpose: hashes.policy.purpose,
+      thinking_level: providerError?.thinkingLevel || hashes.policy.thinkingLevel,
+      input_fingerprint: hashes.fingerprint,
+      input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(hashes.policy, providerError?.attempts || []) },
+      output_json: { errorCode: providerError?.failure.code || "vision_request_failed" },
+      status: "failed",
+      latency_ms: Date.now() - started,
+      cost_usd: 0,
+      cost_source: "provider_cost_not_available",
+    });
     await service.from("planning_requests").update({
-      analysis_status: "failed", error_message: `Automatic Gemini preflight failed: ${errorMessage(error)}`.slice(0, 1000), updated_at: new Date().toISOString(),
+      analysis_status: "failed", error_message: `Automatic vision preflight failed: ${errorMessage(error)}`.slice(0, 1000), updated_at: new Date().toISOString(),
     }).eq("id", variant.id);
     return { processed: false, reason: "analysis_failed", requestId: variant.id, error: errorMessage(error) };
   }
@@ -3612,8 +4278,9 @@ async function queueCatalogVariantGeneration(
   const { productRefs, references } = await catalogReferenceInputs(batch, variant);
   const category = catalogVariantCategory(batch, variant);
   assertRequiredProductReferences(references, category);
+  assertTrueBackReferenceAvailable(references, isSareeReferenceSet(references, category) ? "saree" : category);
 
-  const analysisHashes = catalogAnalysisFingerprint(batch, variant, references);
+  const analysisHashes = await catalogAnalysisFingerprint(batch, variant, references);
   const storedNormalized = variant.ai_analysis
     ? normalizeAnalysis(variant.ai_analysis as JsonRecord, category)
     : null;
@@ -3622,9 +4289,17 @@ async function queueCatalogVariantGeneration(
     && Boolean(storedNormalized)
     && sareeAnalysisIssues({ ...storedNormalized, references }).length === 0;
   const analysisStartedAt = Date.now();
-  let normalized = hasCurrentAnalysis
-    ? applyCatalogMemory(batch, storedNormalized!)
-    : await analyzeCatalogVariant(batch, variant, references);
+  let analysisPolicy = analysisHashes.policy;
+  let analysisAttempts: VisionAttempt[] = [];
+  let normalized: ReturnType<typeof normalizeAnalysis>;
+  if (hasCurrentAnalysis) {
+    normalized = applyCatalogMemory(batch, storedNormalized!);
+  } else {
+    const analysis = await analyzeCatalogVariant(batch, variant, references, analysisHashes.policy);
+    normalized = analysis.normalized;
+    analysisPolicy = analysis.policy;
+    analysisAttempts = analysis.attempts;
+  }
 
   const { data: workflowItem, error: workflowItemError } = await service.from("catalog_work_items")
     .select("id,special_instructions,campaign_season,marketplaces")
@@ -3685,10 +4360,12 @@ async function queueCatalogVariantGeneration(
       batch_id: batchId,
       job_id: "",
       run_kind: "catalog_product_preflight",
-      model: resolveGeminiPolicy({ purpose: "product_truth" }).model,
-      provider: "gemini",
+      model: analysisPolicy.model,
+      provider: analysisPolicy.provider,
+      purpose: analysisPolicy.purpose,
+      thinking_level: analysisPolicy.thinkingLevel,
       input_fingerprint: analysisHashes.fingerprint,
-      input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role) },
+      input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(analysisHashes.policy, analysisAttempts) },
       output_json: normalized,
       status: "completed",
       latency_ms: Date.now() - analysisStartedAt,
@@ -3754,7 +4431,9 @@ async function queueCatalogVariantGeneration(
     posePlan: poses,
     consistencyRules: CONSISTENCY_RULES,
     workflowDirection: workflowDirection || null,
-    analysisModel: resolveGeminiPolicy({ purpose: "product_truth" }).model,
+    analysisModel: analysisPolicy.model,
+    analysisProvider: analysisPolicy.provider,
+    analysisPolicy: visionPolicySnapshot(analysisHashes.policy, analysisAttempts),
     analysisVersion: ANALYSIS_VERSION,
     generatedAssets: [],
     approvedAssets: [],
@@ -5241,6 +5920,76 @@ async function updateAutomationSettingsOperation(request: Request, args: JsonRec
   return data;
 }
 
+async function updateAiModelPoliciesOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "admin.settings");
+  const submitted = (Array.isArray(args.policies) ? args.policies : []) as JsonRecord[];
+  if (!submitted.length || submitted.length > ADMIN_MANAGED_VISION_PURPOSES.length) {
+    throw new Error("Save one or both supported vision policies.");
+  }
+  const seenPurposes = new Set<string>();
+  const rows: JsonRecord[] = [];
+  for (const entry of submitted) {
+    const purpose = String(entry.purpose || "") as VisionPurpose;
+    if (!ADMIN_MANAGED_VISION_PURPOSES.includes(purpose) || seenPurposes.has(purpose)) {
+      throw new Error("Only one Product truth or QA policy may be saved at a time.");
+    }
+    seenPurposes.add(purpose);
+    const primary = assertAllowedAiModelRoute({
+      provider: String(entry.primaryProvider || ""),
+      model: String(entry.primaryModel || ""),
+      thinkingLevel: String(entry.primaryThinking || ""),
+    }, purpose, { strictJson: true });
+    const fallbackEnabled = entry.fallbackEnabled === true;
+    const fallback = fallbackEnabled
+      ? assertAllowedAiModelRoute({
+        provider: String(entry.fallbackProvider || ""),
+        model: String(entry.fallbackModel || ""),
+        thinkingLevel: String(entry.fallbackThinking || ""),
+      }, purpose, { strictJson: true })
+      : null;
+    if (fallback && fallback.provider === primary.provider && fallback.model === primary.model) {
+      throw new Error("Choose a different fallback provider or model.");
+    }
+    rows.push({
+      organization_id: workspace.organization.id,
+      purpose,
+      primary_provider: primary.provider,
+      primary_model: primary.model,
+      primary_reasoning: primary.thinkingLevel,
+      fallback_enabled: Boolean(fallback),
+      fallback_provider: fallback?.provider || null,
+      fallback_model: fallback?.model || null,
+      fallback_reasoning: fallback?.thinkingLevel || null,
+      updated_by_member_id: workspace.member.id,
+      updated_at: new Date().toISOString(),
+    });
+  }
+  const { data, error } = await service.from("organization_ai_model_policies")
+    .upsert(rows, { onConflict: "organization_id,purpose" })
+    .select("purpose,primary_provider,primary_model,primary_reasoning,fallback_enabled,fallback_provider,fallback_model,fallback_reasoning,revision");
+  if (error) throw new Error(`Could not save AI model routing: ${error.message}`);
+  await service.from("audit_logs").insert({
+    organization_id: workspace.organization.id,
+    actor_member_id: workspace.member.id,
+    actor_email: workspace.user.email,
+    action: "admin.ai_model_policies.updated",
+    resource_type: "organization_ai_model_policies",
+    resource_id: workspace.organization.id,
+    metadata: {
+      policies: (data || []).map((row) => ({
+        purpose: row.purpose,
+        primary: `${row.primary_provider}:${row.primary_model}`,
+        fallback: row.fallback_enabled ? `${row.fallback_provider}:${row.fallback_model}` : null,
+        revision: row.revision,
+      })),
+    },
+  });
+  return {
+    success: true,
+    policies: (data || []).map((row) => adminVisionPolicyRow(String(row.purpose) as VisionPurpose, row as JsonRecord)),
+  };
+}
+
 async function runEventAutomationOperation(request: Request) {
   assertInternal(request);
   const { data: settingsRows, error } = await service.from("event_automation_settings").select("*,organizations(name)");
@@ -5428,6 +6177,7 @@ Deno.serve(async (request) => {
       "admin.upsertTeam": () => upsertOrganizationTeamOperation(request, args),
       "admin.updateRolePermissions": () => updateRolePermissionsOperation(request, args),
       "admin.updateAutomationSettings": () => updateAutomationSettingsOperation(request, args),
+      "admin.updateAiModelPolicies": () => updateAiModelPoliciesOperation(request, args),
       "profile.update": () => updateOwnProfileOperation(request, args),
       "usage.sync": () => syncOpenAiUsageOperation(request, args),
       "files.saveReference": () => saveReferenceOperation(request, args),

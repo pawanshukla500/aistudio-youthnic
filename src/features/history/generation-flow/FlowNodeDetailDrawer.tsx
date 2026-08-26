@@ -33,9 +33,9 @@ export function FlowNodeDetailDrawer({
         
         {/* Render specific views based on node type if needed, e.g. QA reasons, references */}
         {node.type === 'reference' && (
-          <div className="text-xs text-amber-700 bg-amber-50 p-3 rounded-lg border border-amber-200">
-            Exact per-attempt reference IDs were not persisted.
-          </div>
+          Array.isArray(node.data?.referenceManifest?.references) && node.data.referenceManifest.references.length > 0
+            ? <div className="text-xs text-emerald-700 bg-emerald-50 p-3 rounded-lg border border-emerald-200">This source manifest was persisted before the provider request. For a true-back pose, the rear product image is the sole visual authority.</div>
+            : <div className="text-xs text-amber-700 bg-amber-50 p-3 rounded-lg border border-amber-200">This older attempt did not persist an exact per-attempt source manifest.</div>
         )}
         
         {node.type === 'memory' && (

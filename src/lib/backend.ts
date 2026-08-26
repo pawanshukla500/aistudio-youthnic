@@ -33,7 +33,7 @@ export const api = {
   eventIntelligence: { roadmap: "eventIntelligence.roadmap", runResearch: "eventIntelligence.runResearch", seedCalendar: "eventIntelligence.seedCalendar" },
   eventDigest: { sendDigestNow: "eventDigest.sendDigestNow" },
   events: { create: "events.create" },
-  admin: { overview: "admin.overview", upsertTeam: "admin.upsertTeam", updateRolePermissions: "admin.updateRolePermissions", updateAutomationSettings: "admin.updateAutomationSettings", syncOpenAiUsage: "admin.syncOpenAiUsage" },
+  admin: { overview: "admin.overview", upsertTeam: "admin.upsertTeam", updateRolePermissions: "admin.updateRolePermissions", updateAutomationSettings: "admin.updateAutomationSettings", updateAiModelPolicies: "admin.updateAiModelPolicies", syncOpenAiUsage: "admin.syncOpenAiUsage" },
   authActions: { createUser: "authActions.createUser", updateMemberAccess: "authActions.updateMemberAccess", deleteMember: "authActions.deleteMember" },
   profile: { update: "profile.update" },
 } as const;
@@ -258,6 +258,10 @@ async function getJob(jobId: string) {
     const assetUsageDetails = record(assetUsage.input_tokens_details);
     const outputUrl = pose.status === "completed" ? (pose.output_url || asset?.image_url || null) : (pose.output_url || null);
     const poseGenerationData = record(pose.generation_data);
+    const referenceManifests = Array.isArray(poseGenerationData.referenceManifests)
+      ? poseGenerationData.referenceManifests as Record<string, any>[]
+      : [];
+    const referenceManifest = referenceManifests.at(-1) || null;
     const retainedPrevious = record(pose.retained_previous_output);
     const priorWasRetained = poseGenerationData.previousOutputRetained === true || Boolean(retainedPrevious.outputUrl || retainedPrevious.storagePath);
     const hasRetainedPreviousOutput = pose.status === "failed" && priorWasRetained && Boolean(outputUrl || retainedPrevious.outputUrl || asset?.image_url);
@@ -286,6 +290,7 @@ async function getJob(jobId: string) {
       actualCost: Number(pose.actual_cost_usd || assetMetadata.actualCostUsd || 0),
       usageReported: Boolean(record(pose.usage_payload).providerReported || assetUsage.input_tokens || assetUsage.output_tokens),
       rejectedAttempts: (Array.isArray(record(pose.generation_data).rejectedAttempts) ? record(pose.generation_data).rejectedAttempts : []) as Record<string, any>[],
+      referenceManifest,
       productFidelity: Number(record(pose.qa_payload).productFidelity ?? record(pose.qa_payload).score ?? 0),
       fidelityScores: record(record(pose.qa_payload).scores) as Record<string, number>,
       fidelityWeakest: (Array.isArray(record(pose.qa_payload).weakest) ? record(pose.qa_payload).weakest : []) as string[],
@@ -327,6 +332,7 @@ async function getJob(jobId: string) {
       actualCost: Number(metadata.actualCostUsd || 0),
       usageReported: Boolean(usage.input_tokens || usage.output_tokens),
       rejectedAttempts: [] as Record<string, any>[],
+      referenceManifest: null,
       productFidelity: Number(record(metadata.qa).productFidelity ?? record(metadata.qa).score ?? 0),
       fidelityScores: record(record(metadata.qa).scores) as Record<string, number>,
       fidelityWeakest: (Array.isArray(record(metadata.qa).weakest) ? record(metadata.qa).weakest : []) as string[],
@@ -735,6 +741,8 @@ async function mutateBackend(endpoint: BackendEndpoint, args: Record<string, any
       return invokeAppApi("admin.upsertTeam", args);
     case api.admin.updateAutomationSettings:
       return invokeAppApi("admin.updateAutomationSettings", args);
+    case api.admin.updateAiModelPolicies:
+      return invokeAppApi("admin.updateAiModelPolicies", args);
     case api.admin.syncOpenAiUsage:
       return invokeAppApi("usage.sync", args);
     case api.profile.update:

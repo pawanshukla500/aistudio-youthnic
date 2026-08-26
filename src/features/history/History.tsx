@@ -523,6 +523,21 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     )}
                   </div>
                 )}
+                {Array.isArray(selectedPose.referenceManifest?.references) && selectedPose.referenceManifest.references.length > 0 && (
+                  <div className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">References sent to generator{selectedPose.poseNumber === 3 ? " — true back" : ""}</p>
+                    <p className="mt-1 text-[10px] leading-4 text-secondary">This is the immutable source manifest for this attempt. {selectedPose.poseNumber === 3 ? "Only the listed rear product image was allowed to establish the back design." : ""}</p>
+                    <ol className="mt-3 space-y-1.5">
+                      {selectedPose.referenceManifest.references.map((reference: any, index: number) => (
+                        <li key={`${reference.hash || reference.filename || reference.role}:${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-white px-2.5 py-2 text-[10px]">
+                          <span className="font-bold text-on-surface">{reference.imageNumber || index + 1}. {String(reference.role || "reference").replace(/_/g, " ")}</span>
+                          {reference.authority === "true_back_product_authority" && <span className="rounded-full bg-success-container px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-success">Rear authority</span>}
+                          <span className="min-w-0 truncate text-secondary">{reference.filename || "Stored reference"}{reference.hash ? ` · ${reference.hash}` : ""}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
                 <div className="rounded-xl bg-surface-container-lowest p-4">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">OpenAI usage</p>
                   <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">

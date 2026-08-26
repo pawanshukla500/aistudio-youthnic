@@ -25,7 +25,94 @@ export const SAREE_REFERENCE_ROLES = [
   "saree_blouse_back_piece",
 ] as const;
 
-type ReferenceLike = { role: string; hash?: string; downloadUrl?: string; storagePath?: string };
+export type ReferenceLike = { role: string; hash?: string; downloadUrl?: string; storagePath?: string };
+
+export type CurrentCatalogReferencePointers = {
+  frontDownloadUrl?: string;
+  frontStoragePath?: string;
+  backDownloadUrl?: string;
+  backStoragePath?: string;
+};
+
+/**
+ * A true-back frame has one visual product authority: the current, uploaded
+ * rear product image. Do not broaden this list with a blouse piece, pallu,
+ * fabric close-up, style frame, or generated anchor. Those can contain a
+ * legitimate but front-only detail and cause it to be invented on the rear.
+ */
+export function isDirectBackProductRole(role: string) {
+  return role === "back" || role === "saree_back_drape";
+}
+
+export function selectTrueBackReferences<T extends ReferenceLike>(references: T[], garmentFamily = ""): T[] {
+  const preferredRoles = garmentFamily.toLowerCase() === "saree"
+    ? ["saree_back_drape", "back"]
+    : ["back"];
+  for (const role of preferredRoles) {
+    const reference = references.find((entry) => entry.role === role);
+    if (reference) return [reference];
+  }
+  return [];
+}
+
+function sameReferencePointer(
+  reference: ReferenceLike,
+  downloadUrl: string | undefined,
+  storagePath: string | undefined,
+) {
+  const expectedUrl = String(downloadUrl || "");
+  const expectedPath = String(storagePath || "");
+  return Boolean(
+    (expectedPath && String(reference.storagePath || "") === expectedPath)
+    || (expectedUrl && String(reference.downloadUrl || "") === expectedUrl),
+  );
+}
+
+function pointerForRole(role: string, pointers: CurrentCatalogReferencePointers) {
+  if (["front", "saree_front_drape"].includes(role)) {
+    return { downloadUrl: pointers.frontDownloadUrl, storagePath: pointers.frontStoragePath };
+  }
+  if (isDirectBackProductRole(role)) {
+    return { downloadUrl: pointers.backDownloadUrl, storagePath: pointers.backStoragePath };
+  }
+  return null;
+}
+
+/**
+ * Planning keeps prior uploads as audit history. Generation must not treat all
+ * of those historical rows as live product evidence after a user replaces a
+ * front or back image. Inputs are ordered oldest-to-newest by the callers, so
+ * the last non-primary role is the current version; primary roles additionally
+ * must match the request's canonical front/back pointer.
+ */
+export function selectCurrentCatalogProductReferences<T extends ReferenceLike>(
+  references: T[],
+  pointers: CurrentCatalogReferencePointers,
+): T[] {
+  const currentByRole = new Map<string, T>();
+  let currentFront: T | null = null;
+  let currentBack: T | null = null;
+  for (const reference of references) {
+    const pointer = pointerForRole(reference.role, pointers);
+    if (pointer) {
+      const pointerIsSet = Boolean(pointer.downloadUrl || pointer.storagePath);
+      if (pointerIsSet && !sameReferencePointer(reference, pointer.downloadUrl, pointer.storagePath)) continue;
+      // Front/back aliases are one logical slot. With pointers present the slot
+      // must match that file; with legacy blank pointers, last upload wins.
+      // Callers order historical assets oldest-to-newest, so this is a stable
+      // compatibility fallback rather than hash-order roulette.
+      if (["front", "saree_front_drape"].includes(reference.role)) currentFront = reference;
+      else currentBack = reference;
+      continue;
+    }
+    currentByRole.set(reference.role, reference);
+  }
+  return canonicalReferences([
+    ...currentByRole.values(),
+    ...(currentFront ? [currentFront] : []),
+    ...(currentBack ? [currentBack] : []),
+  ]);
+}
 
 export function isSareeReferenceSet(references: ReferenceLike[], garmentFamily = "") {
   return garmentFamily.toLowerCase().includes("saree") || references.some((reference) => reference.role.startsWith("saree_"));
@@ -95,18 +182,11 @@ export function canonicalReferences<T extends ReferenceLike>(references: T[]): T
 
 function preferredProductOrder(poseType: string, garmentFamily: string) {
   if (garmentFamily === "saree") {
-    // A true back image must not use a front drape/blouse as visual evidence:
-    // a visible front trim can otherwise be copied onto an unproven rear. The
-    // back drape, pallu, body detail, borders and blouse-back piece cover the
-    // relevant SKU truth without inventing rear decoration.
-    if (poseType === "back") return ["saree_back_drape", "back", "saree_pallu_spread", "saree_body_detail", "fabric_pattern", "saree_border_tassels", "saree_blouse_back_piece", "mannequin", "additional_product"];
+    if (poseType === "back") return ["saree_back_drape", "back"];
     if (poseType === "closeup") return ["saree_body_detail", "fabric_pattern", "saree_border_tassels", "saree_blouse_front", "saree_pallu_spread", "saree_front_drape", "front", "saree_back_drape", "back", "saree_blouse_back_piece", "mannequin", "additional_product"];
     return ["saree_front_drape", "front", "saree_body_detail", "fabric_pattern", "saree_pallu_spread", "saree_border_tassels", "saree_back_drape", "back", "saree_blouse_front", "saree_blouse_back_piece", "mannequin", "additional_product"];
   }
-  // Do not provide a front-product frame to a true-back generation. Its visual
-  // details may be valid for the front only (for example front-hem lace), and
-  // the regional evidence contract cannot reliably undo a conflicting image.
-  if (poseType === "back") return ["back", "fabric_pattern", "mannequin", "additional_product"];
+  if (poseType === "back") return ["back"];
   if (poseType === "closeup") return ["fabric_pattern", "front", "back", "mannequin", "additional_product"];
   return ["front", "back", "mannequin", "fabric_pattern", "additional_product"];
 }
@@ -119,6 +199,12 @@ export function selectReferences<T extends ReferenceLike>(
   maxReferences = MAX_IMAGE_REFERENCES,
 ): T[] {
   const normalizedFamily = garmentFamily.toLowerCase();
+  // Do this before the normal priority/cap calculation. A true back pose is
+  // deliberately the one exception to the multi-reference strategy: only the
+  // direct rear upload can establish rear construction, decorative placement,
+  // and the absence of lace or trim. The exact one-file result is shared by
+  // Studio, Catalog/Bulk, generation, and QA.
+  if (poseType === "back") return selectTrueBackReferences(references, normalizedFamily).slice(0, Math.max(0, maxReferences));
   const order = preferredProductOrder(poseType, normalizedFamily);
   const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
   const style = references.filter((reference) => reference.role === "style_reference");
