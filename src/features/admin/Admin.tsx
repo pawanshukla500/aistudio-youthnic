@@ -41,6 +41,8 @@ type AiModelPolicy = {
   fallbackModel?: string;
   fallbackThinking?: string;
   revision?: number;
+  repairRequired?: boolean;
+  repairMessage?: string;
 };
 type AiModelRegistryEntry = {
   provider: string;
@@ -535,14 +537,16 @@ export function Admin() {
   const defaultAiPolicy = (purpose: AiPolicyPurpose): AiModelPolicy => {
     const primary = aiRegistry.find((entry) => entry.configured && modelsFor(entry.provider, purpose).length) || aiRegistry.find((entry) => modelsFor(entry.provider, purpose).length);
     const primaryModel = primary ? modelsFor(primary.provider, purpose)[0] : undefined;
-    const fallback = aiRegistry.find((entry) => entry.provider !== primary?.provider && entry.configured && modelsFor(entry.provider, purpose).length);
+    const fallback = purpose === "image_generation"
+      ? undefined
+      : aiRegistry.find((entry) => entry.provider !== primary?.provider && entry.configured && modelsFor(entry.provider, purpose).length);
     const fallbackModel = fallback ? modelsFor(fallback.provider, purpose)[0] : undefined;
     return {
       purpose,
       primaryProvider: primary?.provider || "gemini",
       primaryModel: primaryModel?.id || "",
       primaryThinking: normalizedThinking(primary?.provider || "gemini", primaryModel?.id || "", purpose, primaryModel?.thinkingLevels[0]),
-      fallbackEnabled: Boolean(fallback && fallbackModel),
+      fallbackEnabled: purpose !== "image_generation" && Boolean(fallback && fallbackModel),
       fallbackProvider: fallback?.provider,
       fallbackModel: fallbackModel?.id,
       fallbackThinking: fallback && fallbackModel ? normalizedThinking(fallback.provider, fallbackModel.id, purpose, fallbackModel.thinkingLevels[0]) : undefined,
@@ -690,7 +694,14 @@ export function Admin() {
     const invalidPolicy = aiPoliciesForEditor.find((policy) =>
       !policy.primaryProvider || !policy.primaryModel ||
       !providerFor(policy.primaryProvider)?.configured ||
-      (policy.fallbackEnabled && (!policy.fallbackProvider || !policy.fallbackModel || !providerFor(policy.fallbackProvider)?.configured)),
+      !modelsFor(policy.primaryProvider, policy.purpose).some((model) => model.id === policy.primaryModel) ||
+      (policy.fallbackEnabled && (
+        policy.purpose === "image_generation" ||
+        !policy.fallbackProvider ||
+        !policy.fallbackModel ||
+        !providerFor(policy.fallbackProvider)?.configured ||
+        !modelsFor(policy.fallbackProvider, policy.purpose).some((model) => model.id === policy.fallbackModel)
+      )),
     );
     if (invalidPolicy) {
       setNotice({ tone: "error", text: `Choose configured server-side ${invalidPolicy.fallbackEnabled ? "primary and fallback models" : "primary model"} for ${managedAiPurposes.find((entry) => entry.purpose === invalidPolicy.purpose)?.label || "this policy"}.` });
@@ -709,7 +720,7 @@ export function Admin() {
             : undefined,
         })),
       });
-      setNotice({ tone: "success", text: "AI model routing policies were saved. New analysis and QA runs will record the selected provider and model." });
+      setNotice({ tone: "success", text: "AI model routing policies were saved. New Studio and Catalog jobs will use the configured image-generation model." });
     } catch (reason) {
       setNotice({ tone: "error", text: getErrorMessage(reason, "Could not save AI model policies.") });
     } finally {
@@ -1075,8 +1086,8 @@ export function Admin() {
             <div className="flex flex-col justify-between gap-4 rounded-2xl border border-outline-variant/40 bg-white p-6 shadow-sm lg:flex-row lg:items-start">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">Server-side AI routing</p>
-                <h3 className="mt-2 font-syne text-xl font-bold text-on-surface">Vision analysis, pose planning, and QA</h3>
-                <p className="mt-2 max-w-3xl text-sm leading-6 text-secondary">Choose approved server-side providers for structured product analysis and image QA. API keys are never shown or stored in this screen. A fallback is used only for provider availability, quota, or billing failures — never to hide an invalid product reference or a failed fidelity check.</p>
+                <h3 className="mt-2 font-syne text-xl font-bold text-on-surface">Generation, vision analysis, pose planning, and QA</h3>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-secondary">Choose approved server-side routes for final image generation, structured product analysis, and image QA. API keys are never shown or stored in this screen. Only providers with a tested adapter can be selected for each task; a vision model can never become a final image generator by configuration alone.</p>
               </div>
               <button disabled={saving || !overview.capabilities.canManageSettings} onClick={() => void saveAiPolicies()} className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"><Brain className="h-4 w-4" />Save AI routing</button>
             </div>
@@ -1096,6 +1107,7 @@ export function Admin() {
                 const fallbackThinkingLevels = policy.fallbackProvider && policy.fallbackModel ? thinkingLevelsFor(policy.fallbackProvider, policy.fallbackModel, policy.purpose) : ["none"];
                 const primaryConfigured = providerFor(policy.primaryProvider)?.configured === true;
                 const fallbackConfigured = !policy.fallbackEnabled || providerFor(policy.fallbackProvider || "")?.configured === true;
+                const primaryCandidates = aiRegistry.filter((entry) => modelsFor(entry.provider, policy.purpose).length);
                 const fallbackCandidates = aiRegistry.filter((entry) => entry.provider !== policy.primaryProvider && modelsFor(entry.provider, policy.purpose).length);
                 return (
                   <article key={policy.purpose} className="overflow-hidden rounded-2xl border border-outline-variant/40 bg-white shadow-sm">
@@ -1106,12 +1118,14 @@ export function Admin() {
                       <div>
                         <div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-sm font-bold text-on-surface">Primary provider</h4><span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase ${primaryConfigured ? "bg-success-surface text-success" : "bg-warning-surface text-warning"}`}>{primaryConfigured ? "Configured" : "Missing secret"}</span></div>
                         <div className="grid gap-3 sm:grid-cols-3">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Provider<select value={policy.primaryProvider} disabled={saving || !overview.capabilities.canManageSettings} onChange={(event) => { const provider = event.target.value; const model = modelsFor(provider, policy.purpose)[0]; updateAiPolicy(policy.purpose, (current) => ({ ...current, primaryProvider: provider, primaryModel: model?.id || "", primaryThinking: normalizedThinking(provider, model?.id || "", policy.purpose, model?.thinkingLevels[0]) })); }} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50">{aiRegistry.map((entry) => <option key={entry.provider} value={entry.provider} disabled={!entry.configured && entry.provider !== policy.primaryProvider}>{providerLabel(entry.provider)}{entry.configured ? "" : " · missing secret"}</option>)}</select></label>
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Provider<select value={policy.primaryProvider} disabled={saving || !overview.capabilities.canManageSettings} onChange={(event) => { const provider = event.target.value; const model = modelsFor(provider, policy.purpose)[0]; updateAiPolicy(policy.purpose, (current) => ({ ...current, primaryProvider: provider, primaryModel: model?.id || "", primaryThinking: normalizedThinking(provider, model?.id || "", policy.purpose, model?.thinkingLevels[0]) })); }} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50">{primaryCandidates.map((entry) => <option key={entry.provider} value={entry.provider} disabled={!entry.configured && entry.provider !== policy.primaryProvider}>{providerLabel(entry.provider)}{entry.configured ? "" : " · missing secret"}</option>)}</select></label>
                           <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Model<select value={policy.primaryModel} disabled={saving || !overview.capabilities.canManageSettings || !primaryModels.length} onChange={(event) => { const modelId = event.target.value; updateAiPolicy(policy.purpose, (current) => ({ ...current, primaryModel: modelId, primaryThinking: normalizedThinking(current.primaryProvider, modelId, policy.purpose, current.primaryThinking) })); }} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50"><option value="" disabled>Select model</option>{primaryModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label>
                           <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Thinking<select value={policy.primaryThinking} disabled={saving || !overview.capabilities.canManageSettings || policy.primaryProvider === "qwen"} onChange={(event) => updateAiPolicy(policy.purpose, (current) => ({ ...current, primaryThinking: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50">{primaryThinkingLevels.map((level) => <option key={level} value={level}>{thinkingLabel(level)}</option>)}</select></label>
                         </div>
                         {policy.primaryProvider === "qwen" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Qwen structured vision runs with thinking off so the Product Truth JSON contract remains reliable.</p>}
                         {policy.primaryProvider === "meta" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Meta Muse Spark does not support “thinking off”; choose a supported reasoning effort.</p>}
+                        {policy.purpose === "image_generation" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">GPT Image 2 is the default production image model. Gemini, Qwen, and Muse Spark are available only for vision analysis or QA until a separately tested image-generation adapter is added.</p>}
+                        {policy.repairRequired && <p className="mt-3 rounded-lg border border-warning/25 bg-warning-surface px-3 py-2 text-xs leading-5 text-warning">{policy.repairMessage || "This stored policy needs review. Save the displayed route to repair it."}</p>}
                       </div>
 
                       {policy.purpose !== "image_generation" && (

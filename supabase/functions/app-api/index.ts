@@ -23,6 +23,8 @@ import {
   allowedThinkingLevels,
   assertAllowedAiModelRoute,
   classifyVisionProviderFailure,
+  DEFAULT_IMAGE_GENERATION_ROUTE,
+  defaultImageGenerationRoute,
   providerSecretName,
   type AiModelPurpose,
   type AiProvider,
@@ -67,7 +69,7 @@ const SUPABASE_URL = requiredEnv("SUPABASE_URL");
 const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
 const PUBLISHABLE_KEY = Deno.env.get("SB_PUBLISHABLE_KEY")?.trim() || Deno.env.get("SUPABASE_ANON_KEY")?.trim() || requiredEnv("SUPABASE_ANON_KEY");
 const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/app-api`;
-const OPENAI_MODEL = "gpt-image-2";
+const OPENAI_MODEL = DEFAULT_IMAGE_GENERATION_ROUTE.model;
 const MAX_REFERENCES = MAX_IMAGE_REFERENCES;
 const MAX_GENERATION_ATTEMPTS = 3;
 const QA_VERSION = "saree-qa-v14-listing-grade";
@@ -271,6 +273,12 @@ type VisionPolicy = NormalizedAiModelRoute & {
   source: "default" | "organization";
 };
 
+type ImageGenerationPolicy = NormalizedAiModelRoute & {
+  purpose: "image_generation";
+  revision: number;
+  source: "default" | "organization";
+};
+
 type VisionAttempt = {
   provider: AiProvider;
   model: string;
@@ -418,6 +426,63 @@ async function resolveVisionPolicy(orgId: string, args: {
     revision: Math.max(1, Number(row.revision || 1)),
     source: "organization",
   };
+}
+
+function defaultImageGenerationPolicy(): ImageGenerationPolicy {
+  return {
+    ...defaultImageGenerationRoute(),
+    purpose: "image_generation",
+    revision: 0,
+    source: "default",
+  };
+}
+
+function imageGenerationPolicySnapshot(policy: ImageGenerationPolicy) {
+  return {
+    purpose: policy.purpose,
+    provider: policy.provider,
+    model: policy.model,
+    thinkingLevel: policy.thinkingLevel,
+    revision: policy.revision,
+    source: policy.source,
+  };
+}
+
+/**
+ * Final-image generation is deliberately separate from visual analysis. The
+ * current worker only has an OpenAI Images adapter; the allow-list enforces
+ * that a vision model or a future provider cannot be selected prematurely.
+ */
+async function resolveImageGenerationPolicy(orgId: string): Promise<ImageGenerationPolicy> {
+  const fallback = defaultImageGenerationPolicy();
+  const { data, error } = await service.from("organization_ai_model_policies")
+    .select("primary_provider,primary_model,primary_reasoning,fallback_enabled,revision")
+    .eq("organization_id", orgId)
+    .eq("purpose", "image_generation")
+    .maybeSingle();
+  // Keep staged/older local deployments usable until the policy migration is
+  // available. We never write or trust an unvalidated model in this path.
+  if (error?.code === "42P01") return fallback;
+  if (error) throw new Error(`Could not load the organization image-generation policy: ${error.message}`);
+  if (!data) return fallback;
+  if (data.fallback_enabled === true) {
+    throw new Error("Stored image-generation routing is invalid. Clear its fallback and choose an approved OpenAI GPT Image model in Administration.");
+  }
+  try {
+    const primary = assertAllowedAiModelRoute({
+      provider: String(data.primary_provider || ""),
+      model: String(data.primary_model || ""),
+      thinkingLevel: String(data.primary_reasoning || ""),
+    }, "image_generation");
+    return {
+      ...primary,
+      purpose: "image_generation",
+      revision: Math.max(1, Number(data.revision || 1)),
+      source: "organization",
+    };
+  } catch {
+    throw new Error("Stored image-generation routing is invalid. Choose an approved OpenAI GPT Image model in Administration.");
+  }
 }
 
 function requiredEnv(name: string) {
@@ -1365,8 +1430,11 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     queuedReferences,
     isSareeReferenceSet(queuedReferences, queuedGarmentFamily) ? "saree" : queuedGarmentFamily,
   );
-  const allowedModels = ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"];
-  const model = allowedModels.includes(String(args.model)) ? String(args.model) : OPENAI_MODEL;
+  // The organization policy is authoritative. Older Studio clients may still
+  // send `model`; retain that field in the request contract but never let it
+  // override the reviewed server-side route.
+  const imageGenerationPolicy = await resolveImageGenerationPolicy(workspace.organization.id);
+  const model = imageGenerationPolicy.model;
   const quality = ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : "medium";
   const jobId = `job_${crypto.randomUUID()}`;
   const now = new Date().toISOString();
@@ -1376,11 +1444,13 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     productDetails: String(args.productDetails || sessionData.productDetails || ""), category: String(args.category || sessionData.category || "ethnic/fusion"),
     backgroundStyle: String(args.backgroundStyle || ""), modelIdentityDirection: String(args.modelIdentity || ""),
     references: sessionData.references || [], analysisFingerprint: session.analysis_fingerprint,
+    imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
+    requestedModel: String(args.model || "").trim() || null,
   };
   const { error: jobError } = await service.from("generation_jobs").insert({
     job_id: jobId, user_id: workspace.user.firebaseUid, user_email: workspace.user.email, org_id: workspace.organization.id,
     status: "queued", readiness_status: "ready", readiness_reasons: [], sku_name: jobData.skuName, session_id: sessionId, job_data: jobData,
-    planning_request_id: session.planning_request_id, total_poses: 5, provider: "openai", model,
+    planning_request_id: session.planning_request_id, total_poses: 5, provider: imageGenerationPolicy.provider, model,
     aspect_ratio: String(args.aspectRatio || "3:4"), image_size: String(args.imageSize || "2K"), quality,
     pose_qa: args.poseQa !== false, estimated_cost_usd: 0.25, created_at: now, updated_at: now,
   });
@@ -1403,11 +1473,11 @@ async function queueGeneration(request: Request, args: JsonRecord) {
   const { error: poseError } = await service.from("session_generations").insert(poseRows);
   if (poseError) console.error(poseError.message);
   await Promise.all([
-    service.from("catalog_sessions").update({ job_id: jobId, status: "generating", updated_at: now, session_data: { ...sessionData, posePlan: enabled } }).eq("session_id", sessionId),
+    service.from("catalog_sessions").update({ job_id: jobId, status: "generating", updated_at: now, session_data: { ...sessionData, posePlan: enabled, imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy) } }).eq("session_id", sessionId),
     service.from("planning_requests").update({ status: "generating", generation_status: "queued", generation_job_id: jobId, queued_at: now, updated_at: now }).eq("id", session.planning_request_id),
   ]);
   scheduleBackground(kickWorker());
-  return { success: true, jobId };
+  return { success: true, jobId, provider: imageGenerationPolicy.provider, model };
 }
 
 async function nextJob(args: JsonRecord) {
@@ -2115,6 +2185,21 @@ async function processWorker(request: Request, args: JsonRecord) {
     await failPoseAndJob(job, session, pose, message, "saree_analysis_incomplete");
     return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed", error: message };
   }
+  // A generation job is an immutable snapshot of the approved organization
+  // policy. Validate it again at the paid-provider boundary so legacy or
+  // malformed database rows cannot invoke an arbitrary model.
+  let imageGenerationRoute: NormalizedAiModelRoute;
+  try {
+    imageGenerationRoute = assertAllowedAiModelRoute({
+      provider: String(job.provider || "openai"),
+      model: String(job.model || OPENAI_MODEL),
+      thinkingLevel: "none",
+    }, "image_generation");
+  } catch {
+    const message = "This generation job has an unsupported image provider or model. Requeue it after selecting an approved OpenAI GPT Image model in Administration.";
+    await failPoseAndJob(job, session, pose, message, "image_generation_policy_invalid");
+    return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed", error: message };
+  }
   // Resolve (and for Pose 3 validate) source evidence before changing a pose to
   // processing. A missing/replaced rear reference must fail transparently and
   // never leave a job looking like it is spending time or provider credits.
@@ -2183,7 +2268,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
     const generatedStarted = Date.now();
     const generated = await generateImage({
-      prompt, model: String(job.model || OPENAI_MODEL), size: normalizeImageSize(String(job.aspect_ratio || "3:4"), String(job.image_size || "2K"), String(job.model || OPENAI_MODEL)),
+      prompt, model: imageGenerationRoute.model, size: normalizeImageSize(String(job.aspect_ratio || "3:4"), String(job.image_size || "2K"), imageGenerationRoute.model),
       quality: String(job.quality || "medium"), references: selected,
     });
     attemptUsage = generated.usage;
@@ -2230,11 +2315,17 @@ async function processWorker(request: Request, args: JsonRecord) {
     }
     await recordAiRun({
       organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
-      job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "image_generation", model: job.model, provider: "openai",
+      job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "image_generation", model: imageGenerationRoute.model, provider: imageGenerationRoute.provider,
       input_fingerprint: smallHash(prompt),
       input_summary: {
         pose: pose.pose_index,
         attempt,
+        policy: ((job.job_data as JsonRecord | undefined)?.imageGenerationPolicy || {
+          provider: imageGenerationRoute.provider,
+          model: imageGenerationRoute.model,
+          thinkingLevel: imageGenerationRoute.thinkingLevel,
+          source: "legacy_job",
+        }),
         referenceRoles: selected.map((reference) => reference.role),
         referenceManifest: selectedReferenceManifest(selected, poseData),
         appliedLearningRuleIds: learningRuleIds,
@@ -2329,7 +2420,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         sku_matched: true, asset_role: "generated", storage_backend: stored.storageBackend,
         metadata: {
           poseIndex: pose.pose_index, poseType: pose.pose_type, qa, qaStatus, qaVersion: QA_VERSION,
-          model: job.model, quality: job.quality,
+          model: imageGenerationRoute.model, provider: imageGenerationRoute.provider, quality: job.quality,
           providerRequestId: generated.requestId, usage: generated.usage.raw, actualCostUsd: attemptCost,
         },
       }),
@@ -2954,6 +3045,11 @@ async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
 }
 
 const ADMIN_MANAGED_VISION_PURPOSES: VisionPurpose[] = ["product_truth", "qa"];
+const ADMIN_MANAGED_AI_PURPOSES: AiModelPurpose[] = [
+  "product_truth",
+  "qa",
+  "image_generation",
+];
 
 function visionProviderConfigured(provider: AiProvider) {
   return Boolean(Deno.env.get(providerSecretName(provider))?.trim());
@@ -2962,11 +3058,11 @@ function visionProviderConfigured(provider: AiProvider) {
 function aiModelRegistryForAdmin() {
   return AI_PROVIDERS.map((provider) => {
     const models = new Map<string, { id: string; label: string; purposes: string[]; thinkingLevels: string[] }>();
-    for (const purpose of ADMIN_MANAGED_VISION_PURPOSES) {
+    for (const purpose of ADMIN_MANAGED_AI_PURPOSES) {
       for (const model of AI_MODEL_REGISTRY[provider][purpose] || []) {
         const existing = models.get(model) || {
           id: model,
-          label: model,
+          label: model === OPENAI_MODEL ? "GPT Image 2 · recommended" : model,
           purposes: [],
           thinkingLevels: [],
         };
@@ -2981,18 +3077,19 @@ function aiModelRegistryForAdmin() {
   });
 }
 
-function adminVisionPolicyRow(purpose: VisionPurpose, row?: JsonRecord | null) {
-  if (row) {
+function defaultAdminAiPolicyRow(purpose: AiModelPurpose) {
+  if (purpose === "image_generation") {
+    const route = defaultImageGenerationPolicy();
     return {
       purpose,
-      primaryProvider: String(row.primary_provider || "gemini"),
-      primaryModel: String(row.primary_model || ""),
-      primaryThinking: String(row.primary_reasoning || "high"),
-      fallbackEnabled: row.fallback_enabled === true,
-      fallbackProvider: String(row.fallback_provider || ""),
-      fallbackModel: String(row.fallback_model || ""),
-      fallbackThinking: String(row.fallback_reasoning || ""),
-      revision: Number(row.revision || 1),
+      primaryProvider: route.provider,
+      primaryModel: route.model,
+      primaryThinking: route.thinkingLevel,
+      fallbackEnabled: false,
+      fallbackProvider: "",
+      fallbackModel: "",
+      fallbackThinking: "",
+      revision: route.revision,
     };
   }
   const defaultPrimary = defaultVisionRoute({ purpose });
@@ -3008,6 +3105,104 @@ function adminVisionPolicyRow(purpose: VisionPurpose, row?: JsonRecord | null) {
     fallbackThinking: defaultFallback.thinkingLevel,
     revision: 0,
   };
+}
+
+/**
+ * Legacy policy rows predate the strict provider/model registry. Never echo a
+ * mismatched pair into a select box: present a safe, editable default and make
+ * the repair explicit. Runtime resolution remains fail-closed until an admin
+ * saves the repaired configuration.
+ */
+function adminAiPolicyRow(purpose: AiModelPurpose, row?: JsonRecord | null) {
+  const fallback = defaultAdminAiPolicyRow(purpose);
+  if (!row) return fallback;
+  let primary: NormalizedAiModelRoute;
+  try {
+    primary = assertAllowedAiModelRoute({
+      provider: String(row.primary_provider || ""),
+      model: String(row.primary_model || ""),
+      thinkingLevel: String(row.primary_reasoning || ""),
+    }, purpose, { strictJson: true });
+  } catch {
+    return {
+      ...fallback,
+      repairRequired: true,
+      repairMessage: "This stored provider/model pair is no longer valid. The form shows a safe default; review it and save the repaired policy.",
+    };
+  }
+  if (purpose === "image_generation") {
+    if (row.fallback_enabled === true) {
+      return {
+        purpose,
+        primaryProvider: primary.provider,
+        primaryModel: primary.model,
+        primaryThinking: primary.thinkingLevel,
+        fallbackEnabled: false,
+        fallbackProvider: "",
+        fallbackModel: "",
+        fallbackThinking: "",
+        revision: Math.max(1, Number(row.revision || 1)),
+        repairRequired: true,
+        repairMessage: "Image generation cannot use a fallback provider. The fallback has been cleared in this form; save to repair the stored policy.",
+      };
+    }
+    return {
+      purpose,
+      primaryProvider: primary.provider,
+      primaryModel: primary.model,
+      primaryThinking: primary.thinkingLevel,
+      fallbackEnabled: false,
+      fallbackProvider: "",
+      fallbackModel: "",
+      fallbackThinking: "",
+      revision: Math.max(1, Number(row.revision || 1)),
+    };
+  }
+  if (row.fallback_enabled !== true) {
+    return {
+      purpose,
+      primaryProvider: primary.provider,
+      primaryModel: primary.model,
+      primaryThinking: primary.thinkingLevel,
+      fallbackEnabled: false,
+      fallbackProvider: "",
+      fallbackModel: "",
+      fallbackThinking: "",
+      revision: Math.max(1, Number(row.revision || 1)),
+    };
+  }
+  try {
+    const secondary = assertAllowedAiModelRoute({
+      provider: String(row.fallback_provider || ""),
+      model: String(row.fallback_model || ""),
+      thinkingLevel: String(row.fallback_reasoning || ""),
+    }, purpose, { strictJson: true });
+    return {
+      purpose,
+      primaryProvider: primary.provider,
+      primaryModel: primary.model,
+      primaryThinking: primary.thinkingLevel,
+      fallbackEnabled: true,
+      fallbackProvider: secondary.provider,
+      fallbackModel: secondary.model,
+      fallbackThinking: secondary.thinkingLevel,
+      revision: Math.max(1, Number(row.revision || 1)),
+    };
+  } catch {
+    return {
+      purpose,
+      primaryProvider: primary.provider,
+      primaryModel: primary.model,
+      primaryThinking: primary.thinkingLevel,
+      fallbackEnabled: false,
+      fallbackProvider: "",
+      fallbackModel: "",
+      fallbackThinking: "",
+      revision: Math.max(1, Number(row.revision || 1)),
+      repairRequired: true,
+      repairMessage: "The stored fallback provider/model pair is no longer valid. It has been removed in this form; save to repair the policy.",
+    };
+  }
 }
 
 async function adminOverview(request: Request) {
@@ -3028,7 +3223,7 @@ async function adminOverview(request: Request) {
     service.from("openai_usage_daily").select("usage_date,image_count,request_count,actual_cost_usd,synced_at").eq("organization_id", orgId).order("usage_date", { ascending: false }).limit(100),
     service.from("ai_runs").select("job_id, session_id, pose_index, run_kind, provider, model, input_tokens, output_tokens, cost_usd, created_at").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(200),
     service.from("organization_ai_model_policies").select("purpose,primary_provider,primary_model,primary_reasoning,fallback_enabled,fallback_provider,fallback_model,fallback_reasoning,revision")
-      .eq("organization_id", orgId).in("purpose", ADMIN_MANAGED_VISION_PURPOSES),
+      .eq("organization_id", orgId).in("purpose", ADMIN_MANAGED_AI_PURPOSES),
   ]);
   for (const result of [membersResult, rolesResult, permissionsResult, rolePermissionsResult, memberRolesResult, teamsResult, teamMembershipsResult, auditsResult, automationResult, deliveriesResult, usageResult, aiRunsResult]) if (result.error) throw new Error(result.error.message);
   if (aiPoliciesResult.error && aiPoliciesResult.error.code !== "42P01") throw new Error(aiPoliciesResult.error.message);
@@ -3078,7 +3273,7 @@ async function adminOverview(request: Request) {
       lastSyncedAt: (usageResult.data || []).map((row) => row.synced_at).filter(Boolean).sort().at(-1) || null,
     },
     recentAiRuns: aiRunsResult.data || [],
-    aiModelPolicies: ADMIN_MANAGED_VISION_PURPOSES.map((purpose) => adminVisionPolicyRow(
+    aiModelPolicies: ADMIN_MANAGED_AI_PURPOSES.map((purpose) => adminAiPolicyRow(
       purpose,
       ((aiPoliciesResult.data || []) as JsonRecord[]).find((entry) => entry.purpose === purpose),
     )),
@@ -4414,8 +4609,11 @@ async function queueCatalogVariantGeneration(
   const sessionId = `session_${crypto.randomUUID()}`;
   const jobId = `job_${crypto.randomUUID()}`;
   const queuedAt = new Date().toISOString();
-  const allowedModels = ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"];
-  const model = allowedModels.includes(String(generationSettings.model)) ? String(generationSettings.model) : OPENAI_MODEL;
+  // Catalog uses the same tenant-controlled final-image policy as Studio.
+  // `generationSettings.model` remains readable for legacy imports but cannot
+  // override the configured provider/model pair.
+  const imageGenerationPolicy = await resolveImageGenerationPolicy(String(batch.organization_id));
+  const model = imageGenerationPolicy.model;
   const quality = ["low", "medium", "high"].includes(String(generationSettings.quality)) ? String(generationSettings.quality) : "medium";
   const sessionData = {
     skuId: String(variant.request_code || variant.id),
@@ -4434,6 +4632,7 @@ async function queueCatalogVariantGeneration(
     analysisModel: analysisPolicy.model,
     analysisProvider: analysisPolicy.provider,
     analysisPolicy: visionPolicySnapshot(analysisHashes.policy, analysisAttempts),
+    imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
     analysisVersion: ANALYSIS_VERSION,
     generatedAssets: [],
     approvedAssets: [],
@@ -4461,6 +4660,8 @@ async function queueCatalogVariantGeneration(
     modelIdentityDirection: String((workflowDirection as JsonRecord | null)?.model_direction || generationSettings.modelDirection || ""),
     references,
     analysisFingerprint: analysisHashes.fingerprint,
+    imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
+    requestedModel: String(generationSettings.model || "").trim() || null,
   };
   const { error: jobInsertError } = await service.from("generation_jobs").insert({
     job_id: jobId,
@@ -4476,7 +4677,7 @@ async function queueCatalogVariantGeneration(
     job_data: jobData,
     planning_request_id: variant.id,
     total_poses: 5,
-    provider: "openai",
+    provider: imageGenerationPolicy.provider,
     model,
     aspect_ratio: String(generationSettings.aspectRatio || "3:4"),
     image_size: String(generationSettings.imageSize || "2K"),
@@ -5923,15 +6124,15 @@ async function updateAutomationSettingsOperation(request: Request, args: JsonRec
 async function updateAiModelPoliciesOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "admin.settings");
   const submitted = (Array.isArray(args.policies) ? args.policies : []) as JsonRecord[];
-  if (!submitted.length || submitted.length > ADMIN_MANAGED_VISION_PURPOSES.length) {
-    throw new Error("Save one or both supported vision policies.");
+  if (!submitted.length || submitted.length > ADMIN_MANAGED_AI_PURPOSES.length) {
+    throw new Error("Save one or more supported AI routing policies.");
   }
   const seenPurposes = new Set<string>();
   const rows: JsonRecord[] = [];
   for (const entry of submitted) {
-    const purpose = String(entry.purpose || "") as VisionPurpose;
-    if (!ADMIN_MANAGED_VISION_PURPOSES.includes(purpose) || seenPurposes.has(purpose)) {
-      throw new Error("Only one Product truth or QA policy may be saved at a time.");
+    const purpose = String(entry.purpose || "") as AiModelPurpose;
+    if (!ADMIN_MANAGED_AI_PURPOSES.includes(purpose) || seenPurposes.has(purpose)) {
+      throw new Error("Only one policy may be saved for each supported AI purpose.");
     }
     seenPurposes.add(purpose);
     const primary = assertAllowedAiModelRoute({
@@ -5939,7 +6140,10 @@ async function updateAiModelPoliciesOperation(request: Request, args: JsonRecord
       model: String(entry.primaryModel || ""),
       thinkingLevel: String(entry.primaryThinking || ""),
     }, purpose, { strictJson: true });
-    const fallbackEnabled = entry.fallbackEnabled === true;
+    if (purpose === "image_generation" && entry.fallbackEnabled === true) {
+      throw new Error("Image generation does not support a fallback provider. Configure one approved OpenAI GPT Image model.");
+    }
+    const fallbackEnabled = purpose !== "image_generation" && entry.fallbackEnabled === true;
     const fallback = fallbackEnabled
       ? assertAllowedAiModelRoute({
         provider: String(entry.fallbackProvider || ""),
@@ -5986,7 +6190,7 @@ async function updateAiModelPoliciesOperation(request: Request, args: JsonRecord
   });
   return {
     success: true,
-    policies: (data || []).map((row) => adminVisionPolicyRow(String(row.purpose) as VisionPurpose, row as JsonRecord)),
+    policies: (data || []).map((row) => adminAiPolicyRow(String(row.purpose) as AiModelPurpose, row as JsonRecord)),
   };
 }
 

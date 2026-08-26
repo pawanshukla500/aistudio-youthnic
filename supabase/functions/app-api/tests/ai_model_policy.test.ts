@@ -3,11 +3,19 @@ import {
   allowedModelsForPurpose,
   assertAllowedAiModelRoute,
   classifyVisionProviderFailure,
+  DEFAULT_IMAGE_GENERATION_ROUTE,
+  defaultImageGenerationRoute,
   normalizeAiModelRoute,
   validateAiModelRoute,
 } from "../lib/aiModelPolicy.ts";
 
 Deno.test("vision registry keeps image generation on approved OpenAI image models", () => {
+  assertEquals(DEFAULT_IMAGE_GENERATION_ROUTE, {
+    provider: "openai",
+    model: "gpt-image-2",
+    thinkingLevel: "none",
+  });
+  assertEquals(defaultImageGenerationRoute(), DEFAULT_IMAGE_GENERATION_ROUTE);
   assertEquals(allowedModelsForPurpose("openai", "image_generation"), [
     "gpt-image-2",
     "gpt-image-1.5",
@@ -42,6 +50,15 @@ Deno.test("vision registry keeps image generation on approved OpenAI image model
       assertAllowedAiModelRoute(
         { provider: "openai", model: "gpt-5.6-terra" },
         "image_generation",
+      ),
+    Error,
+    "not approved",
+  );
+  assertThrows(
+    () =>
+      assertAllowedAiModelRoute(
+        { provider: "gemini", model: "gpt-5.6-terra" },
+        "product_truth",
       ),
     Error,
     "not approved",

@@ -19,7 +19,7 @@ export function OutputSettings({ value, onChange }: { value: OutputOptions; onCh
           </div>
           <div>
             <h2 className="text-base font-bold text-on-surface">Output settings</h2>
-            <p className="mt-0.5 text-xs text-secondary">{value.model} · {value.aspectRatio} · {value.imageSize} · {value.quality} quality</p>
+            <p className="mt-0.5 text-xs text-secondary">Organization image model · {value.aspectRatio} · {value.imageSize} · {value.quality} quality</p>
           </div>
         </div>
         <div className="text-secondary">
@@ -29,14 +29,9 @@ export function OutputSettings({ value, onChange }: { value: OutputOptions; onCh
 
       {isOpen && (
         <div className="space-y-5 border-t border-outline-variant/30 bg-white/50 p-5">
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-secondary">OpenAI image model</label>
-            <select value={value.model} onChange={(event) => set("model", event.target.value as OutputOptions["model"])} className="h-10 w-full rounded-md border border-outline-variant bg-white px-3 text-sm outline-none focus:border-primary">
-              <option value="gpt-image-2">GPT Image 2 · recommended</option>
-              <option value="gpt-image-1.5">GPT Image 1.5</option>
-              <option value="gpt-image-1">GPT Image 1</option>
-              <option value="gpt-image-1-mini">GPT Image 1 mini · economical</option>
-            </select>
+          <div className="rounded-lg border border-outline-variant/60 bg-surface-container-low/60 p-3">
+            <p className="text-xs font-semibold text-on-surface">Image generation model</p>
+            <p className="mt-1 text-[11px] leading-4 text-secondary">Your organization’s server-side AI routing selects the production model. GPT Image 2 is the default; an administrator can change only to an approved image model in Administration.</p>
           </div>
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-secondary">Model identity</label>
