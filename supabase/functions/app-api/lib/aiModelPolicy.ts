@@ -51,6 +51,17 @@ export type AiRouteValidationOptions = {
   strictJson?: boolean;
 };
 
+/**
+ * Final product images are currently generated through the OpenAI Images API.
+ * Keep this route explicit so a vision/planning model can never accidentally
+ * become a paid image-generation model just because it accepts image input.
+ */
+export const DEFAULT_IMAGE_GENERATION_ROUTE = {
+  provider: "openai",
+  model: "gpt-image-2",
+  thinkingLevel: "none",
+} as const satisfies NormalizedAiModelRoute;
+
 type Registry = Record<
   AiProvider,
   Readonly<Partial<Record<AiModelPurpose, readonly string[]>>>
@@ -280,6 +291,13 @@ export function assertAllowedAiModelRoute(
   const validation = validateAiModelRoute(route, purpose, options);
   if (!validation.valid) throw new Error(validation.message);
   return validation.route;
+}
+
+export function defaultImageGenerationRoute(): NormalizedAiModelRoute {
+  return assertAllowedAiModelRoute(
+    DEFAULT_IMAGE_GENERATION_ROUTE,
+    "image_generation",
+  );
 }
 
 export type ProviderFailureInput = {
