@@ -58,6 +58,11 @@ export type TracePose = {
   full_prompt?: string;
   attempts: TraceAttempt[];
   final_output_url?: string;
+  referenceManifest?: {
+    attempt?: number;
+    generationEpoch?: number;
+    references?: Array<{ imageNumber?: number; role?: string; filename?: string; hash?: string; authority?: string }>;
+  } | null;
 };
 
 export type GenerationTraceViewModel = {

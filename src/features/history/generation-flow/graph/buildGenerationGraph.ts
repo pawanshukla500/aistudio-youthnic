@@ -16,6 +16,7 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
     const genData = p.generation_data || {};
     const corrections = genData.corrections || [];
     const rejectedAttempts = genData.rejectedAttempts || [];
+    const referenceManifests = Array.isArray(genData.referenceManifests) ? genData.referenceManifests : [];
 
     const attempts: TraceAttempt[] = [];
     const attemptCount = Math.max(p.attempt_count || 1, rejectedAttempts.length + 1, poseAiRuns.length);
@@ -90,6 +91,7 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
       full_prompt: p.full_prompt,
       attempts,
       final_output_url: p.output_url,
+      referenceManifest: referenceManifests.at(-1) || null,
     };
   });
 
@@ -139,8 +141,15 @@ export function buildGenerationGraph(trace: GenerationTraceViewModel) {
     const poseId = addNode(newId(`pose-${pose.pose_index}`), 'pose', { pose }, 6, planId);
     
     let currentId = poseId;
+    if (pose.referenceManifest) {
+      currentId = addNode(newId(`reference-${pose.pose_index}`), 'reference', {
+        poseIndex: pose.pose_index,
+        poseTitle: pose.title,
+        referenceManifest: pose.referenceManifest,
+      }, 7, currentId);
+    }
     if (pose.full_prompt) {
-      currentId = addNode(newId(`prompt-${pose.pose_index}`), 'prompt', { prompt: pose.full_prompt }, 7, currentId);
+      currentId = addNode(newId(`prompt-${pose.pose_index}`), 'prompt', { prompt: pose.full_prompt }, 8, currentId);
     }
     
     pose.attempts.forEach((attempt, aIdx) => {

@@ -5,6 +5,7 @@ import {
   isSareeReferenceSet,
   missingRequiredReferenceLabels,
   roleLabel,
+  selectCurrentCatalogProductReferences,
   selectReferences,
 } from "../lib/referencePolicy.ts";
 
@@ -44,11 +45,11 @@ Deno.test("legacy saree aliases remain valid and pallu has a distinct authority 
     { role: "saree_pallu_spread" },
   ], [], "back", "saree");
 
-  assertEquals(selected.map((reference) => reference.role).sort(), ["back", "fabric_pattern", "saree_pallu_spread"].sort());
+  assertEquals(selected.map((reference) => reference.role), ["back"]);
   assertStringIncludes(roleLabel("saree_pallu_spread"), "FULLY SPREAD PALLU");
 });
 
-Deno.test("true back poses put the direct back source first and exclude a generated anchor", () => {
+Deno.test("true back poses use exactly one direct rear product image and exclude every other visual source", () => {
   const generic = selectReferences(
     [
       { role: "model_identity", hash: "model" },
@@ -60,9 +61,7 @@ Deno.test("true back poses put the direct back source first and exclude a genera
     "back",
     "dress",
   );
-  assertEquals(generic[0]?.role, "back");
-  assertEquals(generic.some((reference) => reference.role === "front"), false);
-  assertEquals(generic.some((reference) => reference.role === "approved_pose"), false);
+  assertEquals(generic.map((reference) => reference.role), ["back"]);
 
   const saree = selectReferences(
     [
@@ -72,14 +71,43 @@ Deno.test("true back poses put the direct back source first and exclude a genera
       { role: "saree_body_detail", hash: "body" },
       { role: "saree_pallu_spread", hash: "pallu" },
       { role: "saree_border_tassels", hash: "border" },
+      { role: "saree_blouse_back_piece", hash: "blouse-back" },
+      { role: "style_reference", hash: "style" },
     ],
     [{ role: "approved_pose", hash: "front-anchor" }],
     "back",
     "saree",
   );
-  assertEquals(saree[0]?.role, "saree_back_drape");
-  assertEquals(saree.some((reference) => reference.role === "saree_front_drape"), false);
-  assertEquals(saree.some((reference) => reference.role === "approved_pose"), false);
+  assertEquals(saree.map((reference) => reference.role), ["saree_back_drape"]);
+});
+
+Deno.test("Catalog keeps prior assets for audit but resolves only current direct front and rear uploads", () => {
+  const references = selectCurrentCatalogProductReferences([
+    { id: "old-front", role: "front", downloadUrl: "https://assets.example/old-front.jpg", storagePath: "old/front.jpg" },
+    { id: "old-back", role: "back", downloadUrl: "https://assets.example/old-back.jpg", storagePath: "old/back.jpg" },
+    { id: "body-v1", role: "saree_body_detail", downloadUrl: "https://assets.example/body-v1.jpg", storagePath: "body/v1.jpg" },
+    { id: "body-v2", role: "saree_body_detail", downloadUrl: "https://assets.example/body-v2.jpg", storagePath: "body/v2.jpg" },
+    { id: "new-front", role: "saree_front_drape", downloadUrl: "https://assets.example/new-front.jpg", storagePath: "new/front.jpg" },
+    { id: "new-back", role: "saree_back_drape", downloadUrl: "https://assets.example/new-back.jpg", storagePath: "new/back.jpg" },
+  ], {
+    frontDownloadUrl: "https://assets.example/new-front.jpg",
+    frontStoragePath: "new/front.jpg",
+    backDownloadUrl: "https://assets.example/new-back.jpg",
+    backStoragePath: "new/back.jpg",
+  });
+
+  assertEquals(references.map((reference) => reference.id), ["new-front", "new-back", "body-v2"]);
+  assertEquals(references.some((reference) => reference.id === "old-back"), false);
+});
+
+Deno.test("Catalog legacy rows without a canonical pointer use the newest direct rear upload, not a stale saree alias", () => {
+  const references = selectCurrentCatalogProductReferences([
+    { id: "old-saree-back", role: "saree_back_drape", storagePath: "old/back.jpg" },
+    { id: "new-legacy-back", role: "back", storagePath: "new/back.jpg" },
+  ], {});
+
+  assertEquals(references.map((reference) => reference.id), ["new-legacy-back"]);
+  assertEquals(selectReferences(references, [], "back", "saree").map((reference) => reference.id), ["new-legacy-back"]);
 });
 
 Deno.test("Pose 1 cannot become a saree anchor before strict verification", () => {

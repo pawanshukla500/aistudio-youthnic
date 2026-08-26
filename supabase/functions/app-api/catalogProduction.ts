@@ -1,7 +1,7 @@
 import { type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.112.2";
 import { type JsonRecord } from "./profiles.ts";
 import { buildCatalogStageTimeline } from "./lib/catalogStageTimeline.ts";
-import { PRODUCT_REFERENCE_ROLES, isSareeReferenceSet, missingRequiredReferenceLabels } from "./lib/referencePolicy.ts";
+import { PRODUCT_REFERENCE_ROLES, isSareeReferenceSet, missingRequiredReferenceLabels, selectCurrentCatalogProductReferences } from "./lib/referencePolicy.ts";
 
 export type CatalogWorkspace = {
   organization: { id: string; name: string };
@@ -1154,10 +1154,13 @@ export async function getCatalogWorkflowDetail(
   const latestByPose = [1, 2, 3, 4, 5].map((poseIndex) => {
     const versions = poseVersions.filter((version) => Number(version.pose_index) === poseIndex);
     const currentPose = poseRows.find((pose) => Number(pose.pose_index) === poseIndex);
+    const generationData = asRecord(currentPose?.generation_data);
+    const referenceManifests = Array.isArray(generationData.referenceManifests) ? generationData.referenceManifests : [];
+    const latestReferenceManifest = referenceManifests.at(-1) || null;
     return {
       poseIndex,
       title: text(versions[0]?.title || currentPose?.title || `Pose ${poseIndex}`),
-      current: versions[0] || (currentPose ? {
+      current: versions[0] ? { ...versions[0], reference_manifest: latestReferenceManifest } : (currentPose ? {
         generation_id: currentPose.generation_id,
         pose_index: currentPose.pose_index,
         version_number: Number(currentPose.generation_epoch || 1),
@@ -1171,6 +1174,7 @@ export async function getCatalogWorkflowDetail(
         model: jobResult.data?.model || "",
         prompt_metadata: currentPose.usage_payload,
         regeneration_metadata: { history: currentPose.regeneration_history },
+        reference_manifest: latestReferenceManifest,
       } : null),
       versions,
       reviews: (reviewsResult.data || []).filter((review) => versions.some((version) => version.id === review.asset_version_id)),
@@ -1178,18 +1182,31 @@ export async function getCatalogWorkflowDetail(
   });
   const completedPoseCount = latestByPose.filter((pose) => pose.current && ["completed", "approved"].includes(text(pose.current.generation_status || pose.current.approval_status))).length;
 
+  const request = requestResult.data;
+  const currentReferenceRows = selectCurrentCatalogProductReferences((assetsResult.data || []).map((asset) => ({
+    id: text(asset.id),
+    role: text(asset.asset_role),
+    downloadUrl: text(asset.image_url),
+    storagePath: text(asset.storage_path),
+  })), {
+    frontDownloadUrl: text(request?.front_image_url),
+    frontStoragePath: text(request?.front_image_path),
+    backDownloadUrl: text(request?.back_image_url),
+    backStoragePath: text(request?.back_image_path),
+  });
+  const currentReferenceIds = new Set(currentReferenceRows.map((reference) => reference.id));
   const references = await Promise.all((assetsResult.data || []).map(async (asset) => ({
     ...asset,
+    is_current_product_reference: currentReferenceIds.has(text(asset.id)),
     image_url: await signedCatalogAssetUrl(service, workspace.organization.id, asset as JsonRecord, "image_url") || asset.image_url,
   })));
-  const request = requestResult.data;
-  const dependencyReferences = references.map((asset) => ({
-    role: text(asset.asset_role), downloadUrl: text(asset.image_url), storagePath: text(asset.storage_path),
+  const dependencyReferences = currentReferenceRows.map((reference) => ({
+    role: reference.role, downloadUrl: text(reference.downloadUrl), storagePath: text(reference.storagePath),
   }));
-  if (request?.front_image_url && !dependencyReferences.some((reference) => ["front", "saree_front_drape"].includes(reference.role))) {
+  if ((request?.front_image_url || request?.front_image_path) && !dependencyReferences.some((reference) => ["front", "saree_front_drape"].includes(reference.role))) {
     dependencyReferences.push({ role: "front", downloadUrl: text(request.front_image_url), storagePath: text(request.front_image_path) });
   }
-  if (request?.back_image_url && !dependencyReferences.some((reference) => ["back", "saree_back_drape"].includes(reference.role))) {
+  if ((request?.back_image_url || request?.back_image_path) && !dependencyReferences.some((reference) => ["back", "saree_back_drape"].includes(reference.role))) {
     dependencyReferences.push({ role: "back", downloadUrl: text(request.back_image_url), storagePath: text(request.back_image_path) });
   }
   const sareeReferences = isSareeReferenceSet(dependencyReferences, text(request?.category));
@@ -1344,6 +1361,7 @@ export async function bulkGenerateCatalogWorkItems(
       .eq("organization_id", workspace.organization.id)
       .in("planning_request_id", linkedRequestIds)
       .in("asset_role", [...PRODUCT_REFERENCE_ROLES])
+      .order("created_at")
     : { data: [], error: null };
   if (linkedAssetsError) throw new Error(linkedAssetsError.message);
 
@@ -1357,13 +1375,18 @@ export async function bulkGenerateCatalogWorkItems(
     const request = requestById.get(requestId);
     assertCatalogRequestEvidenceReady(request, text(item.sku_name));
     const requestAssets = (linkedAssets || []).filter((asset) => String(asset.planning_request_id) === requestId);
-    const availableReferences = requestAssets.map((asset) => ({
+    const availableReferences = selectCurrentCatalogProductReferences(requestAssets.map((asset) => ({
       role: text(asset.asset_role), downloadUrl: text(asset.image_url), storagePath: text(asset.storage_path),
-    }));
-    if (request?.front_image_url && !availableReferences.some((reference) => ["front", "saree_front_drape"].includes(reference.role))) {
+    })), {
+      frontDownloadUrl: text(request?.front_image_url),
+      frontStoragePath: text(request?.front_image_path),
+      backDownloadUrl: text(request?.back_image_url),
+      backStoragePath: text(request?.back_image_path),
+    });
+    if ((request?.front_image_url || request?.front_image_path) && !availableReferences.some((reference) => ["front", "saree_front_drape"].includes(reference.role))) {
       availableReferences.push({ role: "front", downloadUrl: text(request.front_image_url), storagePath: text(request.front_image_path) });
     }
-    if (request?.back_image_url && !availableReferences.some((reference) => ["back", "saree_back_drape"].includes(reference.role))) {
+    if ((request?.back_image_url || request?.back_image_path) && !availableReferences.some((reference) => ["back", "saree_back_drape"].includes(reference.role))) {
       availableReferences.push({ role: "back", downloadUrl: text(request.back_image_url), storagePath: text(request.back_image_path) });
     }
     const missing = missingRequiredReferenceLabels(availableReferences, text(request?.category));
@@ -1469,11 +1492,24 @@ export async function bulkGenerateCatalogWorkItems(
         batchId = adHocBatchId;
       }
       const requestAssets = (linkedAssets || []).filter((asset) => String(asset.planning_request_id) === requestId);
-      const frontAsset = requestAssets.find((asset) => ["saree_front_drape", "front"].includes(text(asset.asset_role)));
-      const backAsset = requestAssets.find((asset) => ["saree_back_drape", "back"].includes(text(asset.asset_role)));
+      const currentRequestAssets = selectCurrentCatalogProductReferences(requestAssets.map((asset) => ({
+        ...asset,
+        role: text(asset.asset_role),
+        downloadUrl: text(asset.image_url),
+        storagePath: text(asset.storage_path),
+      })), {
+        frontDownloadUrl: text(request?.front_image_url),
+        frontStoragePath: text(request?.front_image_path),
+        backDownloadUrl: text(request?.back_image_url),
+        backStoragePath: text(request?.back_image_path),
+      });
+      const frontAsset = currentRequestAssets.find((asset) => ["saree_front_drape", "front"].includes(text(asset.role)));
+      const backAsset = currentRequestAssets.find((asset) => ["saree_back_drape", "back"].includes(text(asset.role)));
       const referencePatch: JsonRecord = {};
       if (request && !request.front_image_url && frontAsset?.image_url) referencePatch.front_image_url = frontAsset.image_url;
+      if (request && !request.front_image_path && frontAsset?.storage_path) referencePatch.front_image_path = frontAsset.storage_path;
       if (request && !request.back_image_url && backAsset?.image_url) referencePatch.back_image_url = backAsset.image_url;
+      if (request && !request.back_image_path && backAsset?.storage_path) referencePatch.back_image_path = backAsset.storage_path;
       
       upsertRequests.push({
         ...request,
