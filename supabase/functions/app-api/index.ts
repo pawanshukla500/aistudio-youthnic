@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.112.2";
 import * as ExcelJS from "https://esm.sh/exceljs@4.4.0";
+import { encodeBase64, decodeBase64 } from "jsr:@std/encoding/base64";
 import { deleteFirebaseObject, downloadFirebaseObject, uploadFirebaseObject, createFirebaseUser, updateFirebaseUser, deleteFirebaseUser } from "./firebase-admin.ts";
 import {
   ANALYSIS_VERSION,
@@ -566,9 +567,7 @@ function scheduleBackground(promise: Promise<unknown>) {
 }
 
 function bytesToBase64(bytes: Uint8Array) {
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  return btoa(binary);
+  return encodeBase64(bytes);
 }
 
 async function blobToBase64(blob: Blob) {
@@ -1291,10 +1290,9 @@ async function generateImage(args: { prompt: string; model: string; size: string
   const item = Array.isArray(data.data) ? data.data[0] as JsonRecord | undefined : undefined;
   if (!item?.b64_json && !item?.url) throw new Error("OpenAI returned no image data.");
   if (item.b64_json) {
-    const binary = atob(String(item.b64_json));
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const bytes = decodeBase64(String(item.b64_json));
     return {
-      blob: new Blob([bytes], { type: "image/jpeg" }), base64: String(item.b64_json), mimeType: "image/jpeg",
+      blob: new Blob([bytes], { type: "image/png" }), base64: String(item.b64_json), mimeType: "image/png",
       requestId, usage, costUsd,
     };
   }
