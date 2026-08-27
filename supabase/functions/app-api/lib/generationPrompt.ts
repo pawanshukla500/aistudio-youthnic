@@ -341,7 +341,13 @@ ${isTrueBack ? "- BACK-POSE EVIDENCE VETO: only a confirmed rear region whose So
 ${isTrueBack ? `REAR PRODUCT GEOMETRY LOCK:
 - The direct rear product image is the only visual geometry source for this frame. Reproduce only the rear-facing motif shape, scale, spacing, orientation, repeat, density, weave, border, tassel, blouse-back, and embroidery actually visible there.
 - Do not use a fabric close-up, front frame, pallu spread, border image, blouse piece, or generated image to complete unseen rear geometry.
-- If the rear image does not clearly resolve a region, render it as plain base fabric with no inferred decoration, trim, closure, motif, border, tassel, or embroidery.` : `PRINT AND EMBROIDERY GEOMETRY LOCK - the difference between photographing THIS garment and inventing a similar one:
+- If the rear image does not clearly resolve a region, render it as plain base fabric with no inferred decoration, trim, closure, motif, border, tassel, or embroidery.` : (isSaree ? `SAREE GEOMETRY AND PATTERN LOCK - the difference between photographing THIS saree and inventing a similar one:
+- The SAREE BODY / WEAVE CLOSE-UP image is the pixel-level authority for the main body's motif shape, scale, spacing, orientation, and weave structure. Read the body geometry strictly from that image.
+- The FULLY SPREAD PALLU image is the sole authority for pallu artwork, scale, orientation, repeat, density, and edge construction.
+- The SAREE BORDER / TASSELS DETAIL image is the sole authority for upper/lower border widths, border motifs, and tassel construction.
+- Reproduce all motifs at their stated physical scale relative to the body or pallu. Do not enlarge, simplify, stylize, redraw, or "clean up" a motif.
+- Keep every accent colour inside the print and embroidery. Small secondary-colour details within a motif field are part of this product's identity, not noise to average away.
+- If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it.` : `PRINT AND EMBROIDERY GEOMETRY LOCK - the difference between photographing THIS garment and inventing a similar one:
 Pattern geometry: ${patternGeometryJson}
 Embroidery geometry: ${embroideryGeometryJson}
 - The FABRIC / PATTERN DETAIL image is the pixel-level authority for motif shape, motif scale, spacing, orientation and embroidery construction. Read the geometry off that image rather than reproducing a generic version of the same craft or style.
@@ -349,7 +355,7 @@ Embroidery geometry: ${embroideryGeometryJson}
 - Keep the print's orientation, repeat interval and density identical, including where panels differ - body, sleeves, yoke, bottom wear and dupatta each keep their own stated treatment.
 - Keep every accent colour inside the print. Small secondary-colour details within a motif field are part of this product's identity, not noise to average away.
 - Reproduce embroidery as the same internal geometry: same lattice or motif structure, same count and rhythm of repeated units, same borders, same coverage area, and the same relationship to the neckline, tie, drawstring and tassel.
-- If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".`}
+- If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".`)}
 
 LOCKED ART DIRECTION - MUST NOT CHANGE BETWEEN POSES:
 ${creativeJson}
