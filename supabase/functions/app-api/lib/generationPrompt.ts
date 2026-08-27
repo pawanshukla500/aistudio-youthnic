@@ -217,6 +217,55 @@ function embroideryGeometryOf(product: JsonRecord) {
   return Object.keys(geometry).length ? geometry : { placement: String(product?.embroidery || "") };
 }
 
+function detectPoseCategory(text: string) {
+  const t = text.toLowerCase();
+  if (/side|profile|lateral|three\.quarter|3\.4/.test(t)) return "side";
+  if (/back|rear|behind|posterior/.test(t)) return "back";
+  if (/front|hero|straight|facing/.test(t)) return "front";
+  if (/walk|motion|step|stride|movement|dynamic/.test(t)) return "dynamic";
+  if (/playful|detail|moment|showcase|highlight|close|cropped/.test(t)) return "playful";
+  return "generic";
+}
+
+function poseCategoryRules(category: string) {
+  return {
+    side: `
+- SIDE PROFILE POSE: The model's body must be turned exactly 90 degrees to camera.
+- Show the garment's SIDE SEAM clearly - how fabric hangs along the side.
+- Show sleeve opening from the side angle.
+- Show garment LENGTH from the side - hemline silhouette.
+- ONE arm should be slightly forward, one slightly back for natural depth.
+- Face turned 3/4 toward camera (not full profile), eyes looking slightly toward lens.
+- Feet positioned in a natural staggered stance.
+- DO NOT show the front print centered - show it from the side angle.
+- Background visible behind the model must show depth and space.`,
+    back: `
+- BACK VIEW POSE: The model's back faces the camera completely.
+- Show the BACK NECKLINE, back construction, back hemline.
+- Show how the garment falls and drapes from the back.
+- If the garment has back print/embroidery/detail, showcase it.
+- Model may look back over one shoulder (slight head turn) for engagement.
+- Arms relaxed at sides or one hand slightly lifting hem.
+- Hair positioned to NOT cover back neckline or back details.
+- Feet visible, same footwear as front poses.
+- DO NOT show front-facing garment features.`,
+    front: `
+- FRONT HERO POSE: Model squarely facing the camera.
+- Ensure the front construction and neckline are perfectly symmetrical and visible.
+- Stance should be grounded and confident.`,
+    dynamic: `
+- DYNAMIC POSE: Show active movement (walking, stepping, spinning).
+- Fabric must show realistic motion lines, flare, and weight shift.
+- Model's posture must lean naturally into the movement.
+- Hair and accessories should react to the motion.`,
+    playful: `
+- PLAYFUL / DETAIL POSE: Focus on charm, product interaction, or detail showcase.
+- Expression should be warm, joyful, or confident.
+- Framing might be slightly cropped or closer to highlight a specific feature.`,
+    generic: "",
+  }[category] || "";
+}
+
 export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
   session: JsonRecord; references: PromptReference[]; correction?: string; learnings?: string;
@@ -276,6 +325,8 @@ export function composeGenerationPrompt(args: {
   const learnings = boundedText(args.learnings, 900);
   const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).join(", ");
   const visibilityRules = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
+  const poseCategory = detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || ""));
+  const categoryRules = poseCategoryRules(poseCategory);
   const evidenceLines = promptEvidence.slice(0, 16).map((entry) => {
     const row = objectValue(entry);
     return `- Region ${boundedText(row.region, 120).toUpperCase() || "UNKNOWN"}: [State: ${boundedText(row.state, 80)}]
@@ -386,6 +437,7 @@ Details to highlight: ${highlightedDetails}
 Visibility rules: ${visibilityRules}
 Purpose: ${boundedText(args.pose.purpose, 420)}
 Consistency notes: ${boundedText(args.pose.consistencyNotes, 600)}
+${categoryRules ? `POSE CATEGORY RULES (${poseCategory.toUpperCase()}):\n${categoryRules}` : ""}
 ${correction ? `
 CORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:
 ${correction}
