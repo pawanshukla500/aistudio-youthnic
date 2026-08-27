@@ -265,7 +265,7 @@ export type StudioAnalysis = {
 export type { StylingPlanProfile };
 
 export type OutputOptions = {
-  model: "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1" | "gpt-image-1-mini";
+  model: "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1" | "gpt-image-1-mini" | "reve-2.1-image";
   modelIdentity: string;
   aspectRatio: string;
   imageSize: string;
