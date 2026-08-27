@@ -6395,8 +6395,16 @@ Deno.serve(async (request) => {
       "jobs.remove": () => removeJob(request, args),
       "jobs.downloadAsset": () => downloadGeneratedAsset(request, args),
       "jobs.downloadAssets": () => downloadGeneratedAssets(request, args),
-      "worker": () => processWorker(request, args),
-      "nodeWorker": () => processNode(request, args),
+      "worker": async () => {
+        assertInternal(request);
+        scheduleBackground(processWorker(request, args).catch(e => console.error(e)));
+        return { ack: true };
+      },
+      "nodeWorker": async () => {
+        assertInternal(request);
+        scheduleBackground(processNode(request, args).catch(e => console.error(e)));
+        return { ack: true };
+      },
       "admin.overview": () => adminOverview(request),
       "admin.generationFlow.list": () => adminGenerationFlowList(request),
       "admin.generationFlow.get": () => adminGenerationFlowGet(request, args),
