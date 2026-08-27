@@ -214,10 +214,11 @@ type ProviderUsage = {
 };
 
 const IMAGE_TOKEN_RATES: Record<string, { textInput: number; imageInput: number; imageOutput: number }> = {
-  "gpt-image-2": { textInput: 5, imageInput: 8, imageOutput: 30 },
-  "gpt-image-1.5": { textInput: 5, imageInput: 8, imageOutput: 32 },
-  "gpt-image-1": { textInput: 5, imageInput: 10, imageOutput: 40 },
-  "gpt-image-1-mini": { textInput: 2, imageInput: 2.5, imageOutput: 8 },
+  "gpt-image-2": { textInput: 2.5, imageInput: 20, imageOutput: 50 },
+  "gpt-image-1.5": { textInput: 2.5, imageInput: 20, imageOutput: 50 },
+  "gpt-image-1": { textInput: 2.5, imageInput: 20, imageOutput: 50 },
+  "gpt-image-1-mini": { textInput: 0.15, imageInput: 0.15, imageOutput: 0.6 },
+  "reve-2.1-image": { textInput: 2.5, imageInput: 20, imageOutput: 50 },
 };
 
 const GEMINI_PRICING: Record<string, { input: number; output: number; version: string; source: string }> = {
@@ -1266,15 +1267,19 @@ async function generateImage(args: { prompt: string; model: string; size: string
     const reference = args.references[index];
     body.append("image[]", reference.blob, `${String(index + 1).padStart(2, "0")}_${reference.role}_${reference.filename.replace(/[^a-zA-Z0-9._-]/g, "_")}`);
   }
-  const response = await fetch("https://api.openai.com/v1/images/edits", {
-    method: "POST", headers: { Authorization: `Bearer ${requiredEnv("OPENAI_API_KEY")}` }, body,
+  const isReve = args.model.startsWith("reve-");
+  const apiUrl = isReve ? "https://api.reve.com/v2/create" : "https://api.openai.com/v1/images/edits";
+  const apiKey = isReve ? requiredEnv("REVE_API_KEY") : requiredEnv("OPENAI_API_KEY");
+
+  const response = await fetch(apiUrl, {
+    method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body,
   });
   const responseText = await response.text();
   let data: JsonRecord = {};
   try { data = JSON.parse(responseText) as JsonRecord; } catch { data = {}; }
   if (!response.ok) {
     const providerError = data.error as JsonRecord | undefined;
-    const providerMessage = String(providerError?.message || responseText.slice(0, 800) || `OpenAI image request failed (${response.status}).`);
+    const providerMessage = String(providerError?.message || responseText.slice(0, 800) || `${isReve ? 'Reve' : 'OpenAI'} image request failed (${response.status}).`);
     const error = new Error(providerMessage) as Error & { code?: string; status?: number; retryAfterMs?: number };
     error.code = String(providerError?.code || providerError?.type || "");
     error.status = response.status;
@@ -1288,7 +1293,7 @@ async function generateImage(args: { prompt: string; model: string; size: string
   const usage = providerUsage(data.usage);
   const costUsd = usageCostUsd(args.model, usage);
   const item = Array.isArray(data.data) ? data.data[0] as JsonRecord | undefined : undefined;
-  if (!item?.b64_json && !item?.url) throw new Error("OpenAI returned no image data.");
+  if (!item?.b64_json && !item?.url) throw new Error(`${isReve ? 'Reve' : 'OpenAI'} returned no image data.`);
   if (item.b64_json) {
     const bytes = decodeBase64(String(item.b64_json));
     return {
@@ -1297,7 +1302,7 @@ async function generateImage(args: { prompt: string; model: string; size: string
     };
   }
   const imageResponse = await fetch(String(item.url));
-  if (!imageResponse.ok) throw new Error("The generated OpenAI image could not be downloaded.");
+  if (!imageResponse.ok) throw new Error(`The generated ${isReve ? 'Reve' : 'OpenAI'} image could not be downloaded.`);
   const blob = await imageResponse.blob();
   return { blob, base64: await blobToBase64(blob), mimeType: blob.type || "image/jpeg", requestId, usage, costUsd };
 }

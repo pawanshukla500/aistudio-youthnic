@@ -8,7 +8,7 @@
  * and tests without accidentally accepting an arbitrary model/base URL.
  */
 
-export const AI_PROVIDERS = ["gemini", "openai", "qwen", "meta"] as const;
+export const AI_PROVIDERS = ["gemini", "openai", "qwen", "meta", "reve"] as const;
 export type AiProvider = typeof AI_PROVIDERS[number];
 
 export const AI_MODEL_PURPOSES = [
@@ -98,6 +98,9 @@ export const AI_MODEL_REGISTRY: Registry = {
     product_truth: ["muse-spark-1.2"],
     qa: ["muse-spark-1.2"],
     qa_escalation: ["muse-spark-1.2"],
+  },
+  reve: {
+    image_generation: ["reve-2.1-image"],
   },
 };
 
