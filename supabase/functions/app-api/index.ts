@@ -1483,22 +1483,22 @@ async function queueGeneration(request: Request, args: JsonRecord) {
       productDetails: jobData.productDetails,
       category: jobData.category,
       creativeDirection: {
-        ...sessionData.creativeDirection,
+        ...(sessionData.creativeDirection as Record<string, unknown> || {}),
         scene: jobData.backgroundStyle,
       },
       modelIdentity: {
-        ...sessionData.modelIdentity,
+        ...(sessionData.modelIdentity as Record<string, unknown> || {}),
         direction: jobData.modelIdentityDirection,
       },
       posePlan: enabled,
       imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy)
     }
-  }).eq("session_id", sessionId);
+  }).eq("session_id", sessionId).then((res) => { if (res.error) throw new Error(res.error.message); return res; });
 
   const updates: Promise<any>[] = [sessionUpdate];
   if (session.planning_request_id) {
     updates.push(
-      service.from("planning_requests").update({ status: "generating", generation_status: "queued", generation_job_id: jobId, queued_at: now, updated_at: now }).eq("id", session.planning_request_id)
+      service.from("planning_requests").update({ status: "generating", generation_status: "queued", generation_job_id: jobId, queued_at: now, updated_at: now }).eq("id", session.planning_request_id).then((res) => { if (res.error) throw new Error(res.error.message); return res; })
     );
   }
   await Promise.all(updates);
