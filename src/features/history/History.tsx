@@ -107,6 +107,7 @@ function visiblePoseAsset(pose: any) {
 }
 
 function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
+  const navigate = useNavigate();
   const { data: job, error: _jobError } = useQuery(api.jobs.get, { jobId });
   const workspace = useWorkspace();
   const { user } = workspace;
@@ -127,6 +128,22 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const [downloadError, setDownloadError] = useState("");
   const [rerunningQaId, setRerunningQaId] = useState<string | null>(null);
   const [qaRerunNotice, setQaRerunNotice] = useState("");
+  const [isCloning, setIsCloning] = useState(false);
+
+  const cloneJob = async () => {
+    if (!job) return;
+    try {
+      setIsCloning(true);
+      const result = await invokeAppApi<{ sessionId: string }>("jobs.clone", { jobId });
+      if (result.sessionId) {
+        navigate(`/studio?session=${result.sessionId}`);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not clone session.");
+    } finally {
+      setIsCloning(false);
+    }
+  };
 
   const runLatestQa = async (pose: any) => {
     setRerunningQaId(pose._id);
@@ -316,6 +333,14 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           >
             {referencesLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Images className="h-3.5 w-3.5" />}
             {referencesLoading ? "Loading..." : showReferences ? "Hide references" : "View references"}
+          </button>
+          <button
+            onClick={() => void cloneJob()}
+            disabled={isCloning}
+            className="flex items-center gap-2 rounded-lg bg-surface-container px-3 py-1.5 text-xs font-bold text-on-surface transition-colors hover:bg-surface-container-high disabled:opacity-50"
+          >
+            {isCloning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
+            {isCloning ? "Cloning..." : "Clone Session"}
           </button>
           <button
             onClick={downloadZip}

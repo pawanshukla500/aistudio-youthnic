@@ -2204,6 +2204,27 @@ async function processWorker(request: Request, args: JsonRecord) {
     return { processed: true, completed: true, jobId: job.job_id };
   }
   const sessionData = session.session_data as JsonRecord;
+  
+  // Organization Budget Pre-flight Check
+  const { data: budget } = await service.from("organization_budgets").select("*").eq("organization_id", job.org_id).eq("is_enabled", true).maybeSingle();
+  if (budget) {
+    const startOfDay = new Date();
+    startOfDay.setUTCHours(0, 0, 0, 0);
+    const { data: runs, error: runsError } = await service.from("ai_runs")
+      .select("cost_usd")
+      .eq("organization_id", job.org_id)
+      .gte("created_at", startOfDay.toISOString());
+    
+    if (!runsError && runs) {
+      const todaySpend = runs.reduce((sum, run) => sum + Number(run.cost_usd || 0), 0);
+      if (todaySpend >= Number(budget.daily_limit)) {
+        const message = `Organization daily AI budget limit ($${budget.daily_limit}) exceeded. Today's spend: $${todaySpend.toFixed(2)}.`;
+        await failPoseAndJob(job, session, pose, message, "budget_exceeded");
+        return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed", error: message };
+      }
+    }
+  }
+
   // Run the corrected v14 Product Truth gate before changing workflow state or
   // making any paid provider request. This also protects queued v13 jobs that
   // existed before the cache-version migration.
@@ -2537,6 +2558,153 @@ async function processWorker(request: Request, args: JsonRecord) {
   }
   await failPoseAndJob({ ...job, actual_cost_usd: Number(job.actual_cost_usd || 0) + attemptCost }, session, pose, lastError, terminalFailureCode);
   return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed", error: lastError };
+}
+
+async function cloneJob(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "studio.generate");
+  const jobId = String(args.jobId || "");
+  const { data: sourceJob, error: jobError } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  if (jobError || !sourceJob) throw new Error("Source job not found or access denied.");
+  
+  const { data: sourceSession, error: sessionError } = await service.from("catalog_sessions").select("*").eq("session_id", sourceJob.session_id).single();
+  if (sessionError || !sourceSession) throw new Error("Source session not found.");
+  
+  const newSessionId = `session_${crypto.randomUUID()}`;
+  
+  const { data: planningRequest, error: planningError } = await service.from("planning_requests").insert({
+    organization_id: workspace.organization.id,
+    created_by_member_id: workspace.member.id,
+    sku_name: String(sourceJob.sku_name || "Cloned product"),
+    product_description: "Cloned from " + sourceJob.job_id,
+    photoshoot_type: "ai_catalog_5_pose",
+    category: (sourceSession.session_data as JsonRecord)?.category || "ethnic/fusion",
+    status: "analyzed",
+    request_code: `STUDIO-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+    generation_status: "ready",
+    completion_status: "pending",
+    validation_status: "ready"
+  }).select("id").single();
+  
+  if (planningError || !planningRequest) throw new Error("Could not create planning request for cloned session.");
+  
+  const newSessionData = {
+    ...(sourceSession.session_data as JsonRecord),
+    skuId: planningRequest.id,
+    generatedAssets: [],
+    approvedAssets: [],
+  };
+  
+  const { error: newSessionError } = await service.from("catalog_sessions").insert({
+    session_id: newSessionId,
+    job_id: "",
+    user_id: workspace.user.firebaseUid,
+    organization_id: workspace.organization.id,
+    planning_request_id: planningRequest.id,
+    status: "ready",
+    analysis_fingerprint: sourceSession.analysis_fingerprint,
+    product_hash: sourceSession.product_hash,
+    reference_hash: sourceSession.reference_hash,
+    session_data: newSessionData
+  });
+  if (newSessionError) throw new Error("Could not create cloned session.");
+  
+  return { sessionId: newSessionId };
+}
+
+async function approvePose(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.manage");
+  const generationId = String(args.generationId || "");
+  const status = String(args.status || "approved");
+  const notes = String(args.notes || "");
+  
+  if (!["approved", "rejected", "pending"].includes(status)) {
+    throw new Error("Invalid approval status");
+  }
+
+  const { data: pose, error: poseError } = await service.from("session_generations")
+    .update({
+      approval_status: status,
+      approved_by: workspace.member.id,
+      approved_at: new Date().toISOString(),
+      approval_notes: notes
+    })
+    .eq("generation_id", generationId)
+    .select("generation_id")
+    .single();
+
+  if (poseError || !pose) throw new Error("Could not update approval status or pose not found.");
+
+  return { success: true, generationId: pose.generation_id, status };
+}
+
+async function batchUpload(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.manage");
+  const fileName = String(args.fileName || "batch.csv");
+  const rows = Array.isArray(args.rows) ? args.rows : [];
+  if (rows.length === 0) throw new Error("No rows provided for batch upload.");
+
+  const { data: batch, error: batchError } = await service.from("batch_upload_jobs").insert({
+    organization_id: workspace.organization.id,
+    file_name: fileName,
+    total_rows: rows.length,
+    status: "processing",
+    created_by: workspace.member.id
+  }).select("id").single();
+
+  if (batchError || !batch) throw new Error("Could not create batch upload job.");
+
+  scheduleBackground((async () => {
+    let completed = 0;
+    let failed = 0;
+    for (const row of rows) {
+      try {
+        const sku = String(row.sku || "");
+        if (!sku) throw new Error("Missing SKU");
+        
+        const { error } = await service.from("planning_requests").insert({
+          organization_id: workspace.organization.id,
+          created_by_member_id: workspace.member.id,
+          sku_name: sku,
+          category: "ethnic/fusion",
+          status: "ready",
+          request_code: `BATCH-${crypto.randomUUID().slice(0,8).toUpperCase()}`,
+        });
+        if (error) throw error;
+        completed++;
+      } catch (err) {
+        failed++;
+        console.error(`Row failed:`, err);
+      }
+    }
+    
+    await service.from("batch_upload_jobs").update({
+      completed_rows: completed,
+      failed_rows: failed,
+      status: failed === rows.length ? "failed" : "completed",
+      updated_at: new Date().toISOString()
+    }).eq("id", batch.id);
+  })());
+
+  return { batchId: batch.id, total: rows.length };
+}
+
+async function exportZip(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.view");
+  const jobId = String(args.jobId || "");
+  const { data: job, error: jobError } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
+  if (jobError || !job) throw new Error("Job not found.");
+  
+  const { data: poses, error: posesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).eq("status", "completed");
+  if (posesError || !poses || poses.length === 0) throw new Error("No completed poses found for this job.");
+
+  const files = [];
+  for (const pose of poses) {
+    if (pose.storage_path) {
+      const url = await signCatalogObject(workspace.organization.id, pose.storage_path, "supabase");
+      files.push({ name: `${job.sku_name.replace(/[^a-zA-Z0-9]/g, "_")}_pose${pose.pose_index}.jpg`, url });
+    }
+  }
+  return { files };
 }
 
 async function cancelJob(request: Request, args: JsonRecord) {
@@ -6391,6 +6559,10 @@ Deno.serve(async (request) => {
     const handlers: Record<string, () => Promise<unknown>> = {
       "studio.analyze": () => analyze(request, args),
       "studio.queue": () => queueGeneration(request, args),
+      "jobs.clone": () => cloneJob(request, args),
+      "jobs.approve": () => approvePose(request, args),
+      "jobs.exportZip": () => exportZip(request, args),
+      "batch.upload": () => batchUpload(request, args),
       "jobs.cancel": () => cancelJob(request, args),
       "jobs.regenerate": () => regeneratePose(request, args),
       "jobs.rerunQa": () => rerunPoseQa(request, args),
