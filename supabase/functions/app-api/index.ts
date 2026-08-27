@@ -1495,7 +1495,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     }
   }).eq("session_id", sessionId).then((res) => { if (res.error) throw new Error(res.error.message); return res; });
 
-  const updates: Promise<any>[] = [sessionUpdate];
+  const updates: PromiseLike<any>[] = [sessionUpdate];
   if (session.planning_request_id) {
     updates.push(
       service.from("planning_requests").update({ status: "generating", generation_status: "queued", generation_job_id: jobId, queued_at: now, updated_at: now }).eq("id", session.planning_request_id).then((res) => { if (res.error) throw new Error(res.error.message); return res; })
