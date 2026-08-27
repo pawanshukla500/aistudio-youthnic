@@ -1472,10 +1472,36 @@ async function queueGeneration(request: Request, args: JsonRecord) {
   }));
   const { error: poseError } = await service.from("session_generations").insert(poseRows);
   if (poseError) console.error(poseError.message);
-  await Promise.all([
-    service.from("catalog_sessions").update({ job_id: jobId, status: "generating", updated_at: now, session_data: { ...sessionData, posePlan: enabled, imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy) } }).eq("session_id", sessionId),
-    service.from("planning_requests").update({ status: "generating", generation_status: "queued", generation_job_id: jobId, queued_at: now, updated_at: now }).eq("id", session.planning_request_id),
-  ]);
+  const sessionUpdate = service.from("catalog_sessions").update({
+    job_id: jobId,
+    status: "generating",
+    updated_at: now,
+    session_data: {
+      ...sessionData,
+      skuId: jobData.skuId,
+      skuName: jobData.skuName,
+      productDetails: jobData.productDetails,
+      category: jobData.category,
+      creativeDirection: {
+        ...sessionData.creativeDirection,
+        scene: jobData.backgroundStyle,
+      },
+      modelIdentity: {
+        ...sessionData.modelIdentity,
+        direction: jobData.modelIdentityDirection,
+      },
+      posePlan: enabled,
+      imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy)
+    }
+  }).eq("session_id", sessionId);
+
+  const updates: Promise<any>[] = [sessionUpdate];
+  if (session.planning_request_id) {
+    updates.push(
+      service.from("planning_requests").update({ status: "generating", generation_status: "queued", generation_job_id: jobId, queued_at: now, updated_at: now }).eq("id", session.planning_request_id)
+    );
+  }
+  await Promise.all(updates);
   scheduleBackground(kickWorker());
   return { success: true, jobId, provider: imageGenerationPolicy.provider, model };
 }
@@ -6539,6 +6565,6 @@ Deno.serve(async (request) => {
     return json({ data: await handler() });
   } catch (error) {
     console.error("app-api request failed", errorMessage(error));
-    return json({ error: errorMessage(error) }, 400);
+    return json({ error: errorMessage(error) }, 200);
   }
 });
