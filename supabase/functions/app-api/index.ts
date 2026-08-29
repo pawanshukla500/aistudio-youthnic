@@ -2081,7 +2081,7 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
   const authoritativeBackReference = poseData.id === "back"
     ? selected.find((reference) => isDirectBackProductRole(reference.role)) || null
     : null;
-  if (poseData.id === "back" && (selected.length !== 1 || !authoritativeBackReference)) {
+  if (poseData.id === "back" && !authoritativeBackReference) {
     throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
   }
   return { loadedReferences, approved, poseData, selected, authoritativeBackReference, storedPoseData };
