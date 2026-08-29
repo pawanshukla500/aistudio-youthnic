@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.112.2";
+import type { Database } from "../../../src/database.types.ts";
 import * as ExcelJS from "https://esm.sh/exceljs@4.4.0";
 import { encodeBase64, decodeBase64 } from "jsr:@std/encoding/base64";
 import { deleteFirebaseObject, downloadFirebaseObject, uploadFirebaseObject, createFirebaseUser, updateFirebaseUser, deleteFirebaseUser } from "./firebase-admin.ts";
@@ -83,7 +84,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const service = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+const service = createClient<Database>(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
@@ -531,7 +532,7 @@ function retryDelayMs(error: unknown, attempt: number) {
 
 function userClient(request: Request) {
   const authorization = request.headers.get("Authorization") || "";
-  return createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
+  return createClient<Database>(SUPABASE_URL, PUBLISHABLE_KEY, {
     global: { headers: { Authorization: authorization } },
     auth: { persistSession: false, autoRefreshToken: false },
   });

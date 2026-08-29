@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../database.types";
 import { firebaseAuth } from "./firebase";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
@@ -15,7 +16,7 @@ if (!supabaseUrl || !supabasePublishableKey) {
  * current Firebase ID token on every request and enforces organization access
  * with PostgreSQL RLS; no second browser auth session is created.
  */
-export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
+export const supabase = createClient<Database>(supabaseUrl, supabasePublishableKey, {
   accessToken: async () => firebaseAuth.currentUser?.getIdToken(false) ?? null,
   auth: {
     autoRefreshToken: false,
