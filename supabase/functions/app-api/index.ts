@@ -134,7 +134,9 @@ async function downloadCatalogObject(orgId: string, storagePath: string, storage
   const backend = String(storageBackend || "firebase") as CatalogStorageBackend;
   if (backend === "supabase") {
     const tenantPath = supabaseCatalogPath(orgId, storagePath);
-    const { data, error } = await service.storage.from(CATALOG_ASSET_BUCKET).download(tenantPath);
+    const { data, error } = await service.storage.from(CATALOG_ASSET_BUCKET).download(tenantPath, {
+      transform: { width: 1200, quality: 85 }
+    });
     if (error || !data) throw new Error(`Supabase Storage download failed: ${error?.message || "object unavailable"}`);
     return data;
   }
