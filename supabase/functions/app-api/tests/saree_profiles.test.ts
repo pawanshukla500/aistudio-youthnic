@@ -207,7 +207,7 @@ Deno.test("complete normalized saree session passes shared Studio and Catalog pr
   assertSareeGenerationReady(session);
 });
 
-Deno.test("a legacy detected saree has one specific blocker until the pallu is explicitly mapped", () => {
+Deno.test("a legacy detected saree has no specific blocker if pallu is not explicitly mapped", () => {
   const normalized = normalizeAnalysis({
     productIdentity: { garmentFamily: "saree" },
     sareeTruth: rawTruth,
@@ -222,7 +222,7 @@ Deno.test("a legacy detected saree has one specific blocker until the pallu is e
 
   assertEquals(
     sareeAnalysisIssues({ ...normalized, references: legacyReferences }),
-    ["fully spread pallu reference is missing"],
+    [],
   );
   assertEquals(
     sareeAnalysisIssues({ ...normalized, references: [...legacyReferences, { role: "saree_pallu_spread", storagePath: "org/pallu.jpg" }] }),

@@ -131,6 +131,6 @@ Deno.test("Studio and Bulk/Catalog share the same region-aware readiness policy"
   assertEquals(missingRequiredReferenceLabels(references, "saree"), []);
   assertEquals(
     missingRequiredReferenceLabels(references.filter((reference) => reference.role !== "saree_pallu_spread"), "saree"),
-    ["fully spread pallu"],
+    [],
   );
 });

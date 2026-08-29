@@ -813,8 +813,6 @@ export function sareeAnalysisIssues(session: unknown): string[] {
   const requiredEvidence: Array<[string, string[]]> = [
     ["full saree front", ["saree_front_drape", "front"]],
     ["rear/back drape", ["saree_back_drape", "back"]],
-    ["saree body detail", ["saree_body_detail", "fabric_pattern"]],
-    ["fully spread pallu", ["saree_pallu_spread"]],
   ];
   for (const [label, roles] of requiredEvidence) {
     if (!roles.some((role) => availableRoles.has(role))) {
