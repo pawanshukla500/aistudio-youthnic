@@ -5,6 +5,7 @@ import { api, useMutation, useQuery } from "../../lib/backend";
 import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { DailyReminderPopup } from "./DailyReminderPopup";
 
 export function Layout() {
   const { organization, user, membership, permissions, roles, isAdmin } = useWorkspace();
@@ -187,6 +188,7 @@ export function Layout() {
           </form>
         </div>
       )}
+      <DailyReminderPopup />
     </div>
   );
 }

@@ -51,9 +51,11 @@ export function CatalogProduction() {
   const [viewingItem, setViewingItem] = useState<CatalogWorkItem | null>(null);
   const [workflowItem, setWorkflowItem] = useState<CatalogWorkItem | null>(null);
   const [showSkuPicker, setShowSkuPicker] = useState(false);
+  const [showAddSkuModal, setShowAddSkuModal] = useState(false);
   const [selectedSkuIds, setSelectedSkuIds] = useState<Set<string>>(new Set());
   const [selectedTableIds, setSelectedTableIds] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
+  const [addSkuData, setAddSkuData] = useState({ skuName: "", requestId: "", priority: "normal" });
   const [qcDialog, setQcDialog] = useState<{ id: string; decision: "passed" | "rejected" } | null>(null);
   const [qcComments, setQcComments] = useState("");
   const [generationDialog, setGenerationDialog] = useState<{ mode: "selected" | "ready"; ids: string[] } | null>(null);
@@ -422,6 +424,38 @@ export function CatalogProduction() {
     }
   };
 
+  const confirmManualAdd = async () => {
+    if (!addSkuData.skuName.trim() || !addSkuData.requestId.trim()) {
+      setNotice({ tone: "error", message: "SKU Name and Request ID are required." });
+      return;
+    }
+    setUploading(true);
+    setNotice(null);
+    try {
+      const rows = [{
+        "SKU Name": addSkuData.skuName.trim(),
+        "Request ID": addSkuData.requestId.trim(),
+        "Priority": addSkuData.priority
+      }];
+      const result = await invokeAppApi<{ inserted: number; skipped: number; errors: unknown[]; workItemIds: string[]; queueableWorkItemIds: string[] }>("catalogProduction.importGoogleSheet", { rows });
+      
+      if (result.errors.length) {
+        setNotice({ tone: "error", message: `Failed to add SKU: ${result.errors.length} error(s) occurred.` });
+      } else if (result.skipped) {
+        setNotice({ tone: "error", message: `SKU already exists.` });
+      } else {
+        setNotice({ tone: "success", message: `SKU ${addSkuData.skuName} added successfully!` });
+        setShowAddSkuModal(false);
+        setAddSkuData({ skuName: "", requestId: "", priority: "normal" });
+        await fetchWorkItems(true);
+      }
+    } catch (error) {
+      setNotice({ tone: "error", message: `Failed to add SKU: ${errorMessage(error)}` });
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const tableProps = {
     items: filteredWorkItems,
     members,
@@ -530,6 +564,9 @@ export function CatalogProduction() {
             )}
             {canManagePlanning && (
               <>
+                <button onClick={() => setShowAddSkuModal(true)} disabled={uploading} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                  <Plus className="h-4 w-4" /> Add SKU
+                </button>
                 <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleFileUpload} />
                 <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-50">
                   <Upload className={`h-4 w-4 ${uploading ? "animate-pulse" : ""}`} /> {uploading ? "Uploading…" : "Upload Excel"}
@@ -718,6 +755,54 @@ export function CatalogProduction() {
             <span><span className="block text-sm font-bold text-on-surface">Start queue-ready SKUs after import</span><span className="mt-1 block text-xs leading-5 text-secondary">Only rows with complete required product evidence are queued. Sarees need full front, rear drape, pallu spread, and body-detail evidence. Rejected or blocked work is not restarted automatically.</span></span>
           </label>
         </div>}
+      </ActionDialog>
+
+      <ActionDialog
+        open={showAddSkuModal}
+        title="Add SKU to Catalog Production"
+        description="Manually add a SKU to track its generation, QC, and listing status without uploading an Excel file."
+        confirmLabel="Add SKU"
+        busy={uploading}
+        confirmDisabled={!addSkuData.skuName.trim() || !addSkuData.requestId.trim()}
+        onCancel={() => { if (!uploading) setShowAddSkuModal(false); }}
+        onConfirm={() => void confirmManualAdd()}
+      >
+        <div className="space-y-4 pt-2">
+          <label className="block text-xs font-bold text-secondary">
+            SKU Name
+            <input
+              type="text"
+              autoFocus
+              value={addSkuData.skuName}
+              onChange={(e) => setAddSkuData({ ...addSkuData, skuName: e.target.value })}
+              placeholder="e.g. gold-butti"
+              className="mt-2 w-full rounded-xl border border-outline-variant bg-surface-container/20 px-3 py-2.5 text-sm font-normal text-on-surface outline-none focus:border-primary"
+            />
+          </label>
+          <label className="block text-xs font-bold text-secondary">
+            Request ID
+            <input
+              type="text"
+              value={addSkuData.requestId}
+              onChange={(e) => setAddSkuData({ ...addSkuData, requestId: e.target.value })}
+              placeholder="e.g. STUDIO-12345"
+              className="mt-2 w-full rounded-xl border border-outline-variant bg-surface-container/20 px-3 py-2.5 text-sm font-normal text-on-surface outline-none focus:border-primary"
+            />
+          </label>
+          <label className="block text-xs font-bold text-secondary">
+            Priority
+            <select
+              value={addSkuData.priority}
+              onChange={(e) => setAddSkuData({ ...addSkuData, priority: e.target.value })}
+              className="mt-2 w-full rounded-xl border border-outline-variant bg-surface-container/20 px-3 py-2.5 text-sm font-normal text-on-surface outline-none focus:border-primary"
+            >
+              <option value="low">Low</option>
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </label>
+        </div>
       </ActionDialog>
     </div>
   );
