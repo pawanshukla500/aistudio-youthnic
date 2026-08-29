@@ -1035,6 +1035,7 @@ sareeTruth: Record exact base and secondary colours; fabric family; weave/lattic
 sareeDrapePlan: Choose a baseDrapeFamily (e.g., "shoulder-side/open-pallu" or "shoulder-side/pleated-pallu"), frontPleatTreatment, palluShoulderPlacement, handInteraction, borderVisibility, and poseSpecificDrapeState (e.g. how the angled pose shows the pallu fall).
 
 posePlan: Design 5 distinct poses (full_front, angled, back, creative, closeup). For each, specify the cameraAngle, framing, bodyPosition, handPlacement, expression, and write a detailed photorealistic 'prompt' that combines these elements with the product and model identity.
+CRITICAL: Every individual 'prompt' MUST be completely self-contained. The image generator does not see the other poses. You MUST explicitly describe the model's exact face, hair, skin tone, makeup, styling, bottom wear, footwear, and the exact studio/scene background and lighting inside EVERY SINGLE 'prompt' string. NEVER use phrases like "consistent with previous poses", "same as full_front", or "locked scene" inside the 'prompt' string itself.
 
 Across all five, ONLY pose, angle, framing, and expression may change. Exact product, colors, pattern, bottom wear, face, hairstyle, makeup, accessories, footwear, scene, lighting, shadows, camera/lens feel, and color treatment remain locked.
 
