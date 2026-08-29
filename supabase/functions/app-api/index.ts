@@ -909,13 +909,6 @@ function extractChatCompletionText(data: JsonRecord) {
   return String(message?.content || "").trim();
 }
 
-const OPEN_RESPONSE_JSON_FORMAT = {
-  type: "json_schema",
-  name: "fashion_product_identity",
-  strict: false,
-  schema: { type: "object", additionalProperties: true },
-};
-
 function assertVisionProviderConfigured(route: NormalizedAiModelRoute) {
   const secretName = providerSecretName(route.provider);
   if (Deno.env.get(secretName)?.trim()) return;
@@ -932,7 +925,7 @@ function assertVisionProviderConfigured(route: NormalizedAiModelRoute) {
 
 async function openAiCompatibleVisionJson(route: NormalizedAiModelRoute, parts: JsonRecord[], provider: "openai" | "meta") {
   assertVisionProviderConfigured(route);
-  const endpoint = provider === "openai" ? "https://api.openai.com/v1/responses" : "https://api.meta.ai/v1/responses";
+  const endpoint = provider === "openai" ? "https://api.openai.com/v1/chat/completions" : "https://api.meta.ai/v1/chat/completions";
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -941,12 +934,11 @@ async function openAiCompatibleVisionJson(route: NormalizedAiModelRoute, parts: 
     },
     body: JSON.stringify({
       model: route.model,
-      store: false,
-      input: [{ role: "user", content: responseContentFromParts(parts) }],
-      text: { format: OPEN_RESPONSE_JSON_FORMAT },
+      messages: [{ role: "user", content: chatContentFromParts(parts) }],
+      response_format: { type: "json_object" },
       ...(provider === "meta"
-        ? { reasoning: { effort: route.thinkingLevel } }
-        : route.thinkingLevel !== "none" ? { reasoning: { effort: route.thinkingLevel } } : {}),
+        ? {}
+        : route.thinkingLevel !== "none" ? { reasoning_effort: route.thinkingLevel } : {}),
     }),
   });
   const data = await response.json().catch(() => ({})) as JsonRecord;
@@ -958,7 +950,7 @@ async function openAiCompatibleVisionJson(route: NormalizedAiModelRoute, parts: 
       code: String(providerError?.code || providerError?.type || ""),
     });
   }
-  const text = extractResponseApiText(data);
+  const text = extractChatCompletionText(data);
   if (!text) throw visionProviderError(route, { status: 422, message: `${provider} returned no structured visual response.` });
   return { raw: data, text, json: parseJsonResponse(text) };
 }
