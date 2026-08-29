@@ -55,6 +55,20 @@ jobs:
       - name: Validate catalog migration SQL
         run: npm run validate:catalog-sql
 
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Verify database types sync
+        run: |
+          supabase gen types typescript --project-id ${{ vars.SUPABASE_PROJECT_REF }} > generated.types.ts
+          if ! cmp -s src/database.types.ts generated.types.ts; then
+            echo "::error::Supabase types are out of sync! The database schema has changed but src/database.types.ts was not updated."
+            exit 1
+          fi
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
       - name: Type-check application Edge Function
         run: deno check --frozen supabase/functions/app-api/index.ts
 
