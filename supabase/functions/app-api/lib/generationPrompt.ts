@@ -304,7 +304,10 @@ export function composeGenerationPrompt(args: {
   const embroideryGeometryJson = compactJson(embroideryGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
   // Allow model face and approved pose anchor so the AI can recreate
   // the identical model and studio background for the back pose.
-  const promptReferences = args.references;
+  // Defense in depth: strip out any stray front product references if mistakenly passed.
+  const promptReferences = isTrueBack
+    ? args.references.filter((ref) => isDirectBackProductRole(ref.role) || ref.role === "model_identity" || ref.role === "approved_pose")
+    : args.references;
   if (isTrueBack && !promptReferences.some((ref) => isDirectBackProductRole(ref.role))) {
     throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
   }

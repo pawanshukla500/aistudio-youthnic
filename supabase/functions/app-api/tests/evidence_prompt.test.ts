@@ -146,14 +146,13 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   });
 
   assertStringIncludes(prompt, "IMAGE 1: BACK PRODUCT");
-  assertEquals(prompt.includes("IMAGE 2:"), false);
+  assertStringIncludes(prompt, "IMAGE 2: APPROVED POSE 1");
   assertStringIncludes(prompt, "rear-plain-marker");
   assertEquals(prompt.includes("front-only-lace-marker"), false);
   assertEquals(prompt.includes("front-lace-construction-marker"), false);
   assertEquals(prompt.includes("front-lace-embroidery-marker"), false);
   assertStringIncludes(prompt, "BACK-POSE EVIDENCE VETO");
   assertStringIncludes(prompt, "REAR PRODUCT GEOMETRY LOCK");
-  assertEquals(prompt.includes("IMAGE 2: APPROVED POSE 1"), false);
 });
 
 Deno.test("a saree true-back prompt cannot carry a hallucinated front-derived blouse or border into the rear", () => {
