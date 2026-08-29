@@ -1,0 +1,46 @@
+-- Fix unindexed foreign keys
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ai_runs_batch_id ON public.ai_runs (batch_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ai_runs_prompt_version_id ON public.ai_runs (prompt_version_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_analysis_cache_organization_id ON public.analysis_cache (organization_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_logs_actor_member_id ON public.audit_logs (actor_member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_batch_approvals_decided_by_member_id ON public.batch_approvals (decided_by_member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_batch_approvals_organization_id ON public.batch_approvals (organization_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_batch_upload_jobs_created_by ON public.batch_upload_jobs (created_by);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_event_research_runs_organization_id ON public.event_research_runs (organization_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_execution_events_ai_run_id ON public.execution_events (ai_run_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_execution_events_batch_id ON public.execution_events (batch_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_execution_events_organization_id ON public.execution_events (organization_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_generation_flow_edges_source_node_id ON public.generation_flow_edges (source_node_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_generation_jobs_batch_id ON public.generation_jobs (batch_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_generation_learning_rules_approved_by_member_id ON public.generation_learning_rules (approved_by_member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_generation_learning_rules_created_by_member_id ON public.generation_learning_rules (created_by_member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_learning_daily_digests_knowledge_id ON public.learning_daily_digests (knowledge_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_marketing_events_knowledge_id ON public.marketing_events (knowledge_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_member_roles_assigned_by_member_id ON public.member_roles (assigned_by_member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_member_roles_role_id ON public.member_roles (role_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_event_id ON public.notifications (event_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_planning_request_id ON public.notifications (planning_request_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_organization_member_notification_preferences_member_id ON public.organization_member_notification_preferences (member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_organization_team_memberships_member_id ON public.organization_team_memberships (member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_planning_batches_approved_by_member_id ON public.planning_batches (approved_by_member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_planning_batches_assigned_member_id ON public.planning_batches (assigned_member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_planning_batches_created_by_member_id ON public.planning_batches (created_by_member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_planning_requests_approved_by_member_id ON public.planning_requests (approved_by_member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_planning_requests_assigned_member_id ON public.planning_requests (assigned_member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_planning_requests_created_by_member_id ON public.planning_requests (created_by_member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_prompt_patterns_organization_id ON public.prompt_patterns (organization_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_qa_reviews_organization_id ON public.qa_reviews (organization_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_qa_reviews_planning_request_id ON public.qa_reviews (planning_request_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_role_permissions_permission_id ON public.role_permissions (permission_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_session_generations_approved_by ON public.session_generations (approved_by);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_styling_decisions_batch_id ON public.styling_decisions (batch_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_styling_decisions_decided_by_member_id ON public.styling_decisions (decided_by_member_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_styling_decisions_planning_request_id ON public.styling_decisions (planning_request_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_visual_attributes_ai_run_id ON public.visual_attributes (ai_run_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_visual_attributes_organization_id ON public.visual_attributes (organization_id);
+
+-- Fix missing RLS policies for app configuration/audit tables
+CREATE POLICY "Allow read access to authenticated users" ON public.app_audit_logs FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow read access to authenticated users" ON public.app_migration_archive FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow read access to authenticated users" ON public.app_settings FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow read access to authenticated users" ON public.app_system_settings FOR SELECT TO authenticated USING (true);
