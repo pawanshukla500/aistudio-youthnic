@@ -127,8 +127,6 @@ export function missingRequiredReferenceLabels(references: ReferenceLike[], garm
     ? [
       ["full saree front", ["saree_front_drape", "front"]],
       ["rear/back drape", ["saree_back_drape", "back"]],
-      ["fully spread pallu", ["saree_pallu_spread"]],
-      ["saree body/weave detail", ["saree_body_detail", "fabric_pattern"]],
     ]
     : [["front product", ["front"]], ["back product", ["back"]]];
   return requirements.filter(([, accepted]) => !accepted.some((role) => roles.has(role))).map(([label]) => label);
