@@ -82,7 +82,7 @@ async function resolveAssetRow<T extends Record<string, any>>(row: T, urlField: 
   return { ...row, [urlField]: resolvedUrl } as T;
 }
 
-async function resolveReferenceEntry(entry: Record<string, any>) {
+async function resolveReferenceEntry(entry: any): Promise<any> {
   const storageBackend = entry.storageBackend || entry.storageProvider || entry.storage_backend;
   const storagePath = entry.storagePath || entry.storage_path;
   const fallbackUrl = entry.downloadUrl || entry.image_url;
