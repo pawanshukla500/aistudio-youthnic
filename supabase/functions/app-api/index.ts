@@ -2052,10 +2052,10 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
   const loadedReferences = await loadAvailableReferences(sourceInputs, String(job.org_id), garmentFamily);
   const storedPoseData = (pose.generation_data || {}) as JsonRecord;
   const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
-  // A direct rear product reference is authoritative for the back pose. A
-  // generated front anchor adds no trustworthy rear evidence and can carry a
-  // prior hallucination into the new frame, so do not load it at all here.
-  const canUseAnchorForPose = poseData.id !== "back";
+  // Provide the front anchor to the back pose for model identity and background
+  // continuity. The generation prompt explicitly instructs the LLM not to use
+  // it as a garment geometry source for the back pose.
+  const canUseAnchorForPose = true;
   let { data: anchorPose } = Number(pose.pose_index) > 1 && canUseAnchorForPose
     ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title,qa_status").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
     : { data: null };
