@@ -96,7 +96,7 @@ async function resolveReferenceEntry(entry: any): Promise<any> {
 async function resolveJobAssetReferences<T extends Record<string, any>>(row: T) {
   const jobData = record(row.job_data);
   const references = Array.isArray(jobData.references)
-    ? await Promise.all(jobData.references.map((entry: Record<string, any>) => resolveReferenceEntry(entry)))
+    ? await Promise.all(jobData.references.map((entry: any) => resolveReferenceEntry(entry)))
     : [];
   return { ...row, job_data: { ...jobData, references } } as T;
 }
@@ -125,7 +125,7 @@ function jobSummary(row: Record<string, any>, members: Record<string, any>[] = [
     inputTokens: Number(row.input_tokens || 0),
     outputTokens: Number(row.output_tokens || 0),
     totalTokens: Number(row.total_tokens || 0),
-    thumbnailUrl: generatedThumbnailUrl || references.find((entry: Record<string, any>) => entry.role === "saree_front_drape")?.downloadUrl || references.find((entry: Record<string, any>) => entry.role === "front")?.downloadUrl || references[0]?.downloadUrl || null,
+    thumbnailUrl: generatedThumbnailUrl || references.find((entry: any) => entry.role === "saree_front_drape")?.downloadUrl || references.find((entry: any) => entry.role === "front")?.downloadUrl || references[0]?.downloadUrl || null,
     productDetails: String(jobData.productDetails || ""),
     creatorName: member?.display_name || (row.user_id === "catalog-worker" ? "Automatic catalog" : row.user_email || "Workspace member"),
     creatorEmail: row.user_email || member?.email || "",
@@ -224,7 +224,7 @@ async function getJob(jobId: string) {
       })
       : null;
     const rejectedAttempts = Array.isArray(generationData.rejectedAttempts)
-      ? await Promise.all(generationData.rejectedAttempts.map((attempt: Record<string, any>) => resolveReferenceEntry({
+      ? await Promise.all(generationData.rejectedAttempts.map((attempt: any) => resolveReferenceEntry({
         ...attempt,
         downloadUrl: attempt.url,
         storageBackend: attempt.storageBackend || resolved.storage_backend,
@@ -383,7 +383,7 @@ export async function getJobReferenceImages(jobId: string) {
   const { data, error } = await supabase.from("generation_jobs").select("job_data").eq("job_id", jobId).maybeSingle();
   if (error) throw error;
   const references = record(data?.job_data).references;
-  const resolved = await Promise.all((Array.isArray(references) ? references : []).map((entry: Record<string, any>) => resolveReferenceEntry(entry)));
+  const resolved = await Promise.all((Array.isArray(references) ? references : []).map((entry: any) => resolveReferenceEntry(entry)));
   return resolved
     .map((entry: Record<string, any>, index: number) => ({
       _id: String(entry.id || `${jobId}-ref-${index}`),
@@ -488,7 +488,7 @@ async function getCatalog(catalogId: string) {
   const settings = record(batch.generation_settings);
   const resolvedAssets = await Promise.all((assetsResult.data || []).map((asset) => resolveAssetRow(asset)));
   const resolvedPoses = await Promise.all((posesResult.data || []).map((pose) => resolveAssetRow(pose, "output_url")));
-  const resolvedBatchReferences = await Promise.all((Array.isArray(batch.reference_images) ? batch.reference_images : []).map((entry: Record<string, any>) => resolveReferenceEntry(entry)));
+  const resolvedBatchReferences = await Promise.all((Array.isArray(batch.reference_images) ? batch.reference_images : []).map((entry: any) => resolveReferenceEntry(entry)));
   const hydrated = (variants || []).map((variant) => {
     const variantAssets = resolvedAssets.filter((asset) => asset.planning_request_id === variant.id);
     const latest = (role: string) => [...variantAssets].reverse().find((asset) => asset.asset_role === role);
@@ -546,8 +546,8 @@ async function getCatalog(catalogId: string) {
   // model_identity) tagged by its own role - split them back out here instead of treating
   // everything as a style reference, which would misfile a model face upload.
   const referenceEntries = resolvedBatchReferences;
-  const styleEntries = referenceEntries.filter((entry: Record<string, any>) => (entry.role || "style_reference") === "style_reference");
-  const modelEntry = referenceEntries.find((entry: Record<string, any>) => entry.role === "model_identity");
+  const styleEntries = referenceEntries.filter((entry: any) => (entry.role || "style_reference") === "style_reference");
+  const modelEntry = referenceEntries.find((entry: any) => entry.role === "model_identity");
   return {
     ...batch,
     _id: batch.id,
@@ -566,7 +566,7 @@ async function getCatalog(catalogId: string) {
     poseQa: settings.poseQa !== false,
     scheduleError: batch.schedule_error || "",
     variants: hydrated,
-    styleReferences: styleEntries.map((entry: Record<string, any>) => ({ _id: `style:${entry.id}`, url: entry.downloadUrl || entry.image_url, filename: entry.filename || "Style reference" })),
+    styleReferences: styleEntries.map((entry: any) => ({ _id: `style:${entry.id}`, url: entry.downloadUrl || entry.image_url, filename: entry.filename || "Style reference" })),
     modelReference: modelEntry ? { _id: `model_identity:${modelEntry.id}`, url: modelEntry.downloadUrl || modelEntry.image_url, filename: modelEntry.filename || "Model face reference" } : null,
     hasLockedAnchor: Boolean(record(batch.catalog_memory).anchorOutputUrl),
     stylingPlan: record(batch.catalog_memory).stylingPlan ? record(record(batch.catalog_memory).stylingPlan) : null,
