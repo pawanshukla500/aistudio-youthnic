@@ -27,6 +27,7 @@ import { ActionDialog } from "../../components/ui/ActionDialog";
 import { normalizePlan, type StylingPlan } from "../../lib/stylingPlan";
 import { supabase } from "../../lib/supabase";
 import { uploadCatalogAsset } from "../../lib/catalogStorage";
+import { resizeImageFile } from "../../lib/imageResizer";
 
 const CATEGORIES = ["ethnic/fusion", "saree", "western/casual", "dress", "formal", "streetwear", "activewear"];
 const ASPECTS = ["3:4", "4:5", "2:3", "9:16", "1:1", "16:9"];
@@ -227,12 +228,13 @@ export function Planning() {
   }, [selectedId, selectedLoaded, selectedPreferredSchedule]);
 
   const uploadRef = async (role: string, file: File, sku: string, catalogId: Id<"catalogs">) => {
+    const resizedFile = await resizeImageFile(file, 1280, 0.85);
     const uploaded = await uploadCatalogAsset({
       organizationId: String(organization._id),
       scope: "catalog",
       ownerKey: `${String(catalogId)}-${sku}`,
       role,
-      file,
+      file: resizedFile,
     });
     return saveReference({
       organizationId: organization._id,
@@ -243,10 +245,10 @@ export function Planning() {
       storageProvider: uploaded.storageBackend,
       storagePath: uploaded.storagePath,
       downloadUrl: uploaded.downloadUrl,
-      hash: await fileHash(file),
-      filename: file.name,
-      mimeType: file.type,
-      size: file.size,
+      hash: await fileHash(resizedFile),
+      filename: resizedFile.name,
+      mimeType: resizedFile.type,
+      size: resizedFile.size,
     });
   };
 
