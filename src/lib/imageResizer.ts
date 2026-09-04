@@ -1,7 +1,7 @@
 export async function resizeImageFile(file: File, maxDimension: number): Promise<File> {
   if (!file.type.startsWith("image/") || file.type === "image/svg+xml") return file;
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
