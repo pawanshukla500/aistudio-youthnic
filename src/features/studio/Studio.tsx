@@ -6,6 +6,7 @@ import { Button } from "../../components/ui/Button";
 import { ActionDialog } from "../../components/ui/ActionDialog";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import { uploadCatalogAsset } from "../../lib/catalogStorage";
+import { resizeImageFile } from "../../lib/imageResizer";
 import { AnalysisProfile } from "./components/AnalysisProfile";
 import { OutputSettings } from "./components/OutputSettings";
 import { PosePlan } from "./components/PosePlan";
@@ -288,12 +289,15 @@ export function Studio() {
     const inFlight = uploadPromisesRef.current.get(reference.id);
     if (inFlight) return inFlight;
     const promise = (async () => {
+      // Resize to 1920x1920 to keep high fidelity for generation, while vastly reducing
+      // file size. This speeds up upload and prevents 504 timeouts on the analysis Edge Function.
+      const resizedFile = await resizeImageFile(reference.file, 1920);
       const uploaded = await uploadCatalogAsset({
         organizationId: String(organization._id),
         scope: "references",
         ownerKey: effectiveSkuId,
         role: reference.role,
-        file: reference.file,
+        file: resizedFile,
       });
       return {
         ...reference,
