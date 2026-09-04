@@ -615,8 +615,17 @@ function bytesToBase64(bytes: Uint8Array) {
   return encodeBase64(bytes);
 }
 
-async function blobToBase64(blob: Blob) {
-  return bytesToBase64(new Uint8Array(await blob.arrayBuffer()));
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 function numberValue(value: unknown) {
@@ -757,9 +766,8 @@ async function loadReference(reference: ReferenceInput, orgId: string): Promise<
     if (response.ok) blob = await response.blob();
   }
   if (!blob) throw new Error(`Could not load ${reference.filename} from catalog asset storage.`);
-  const bytes = new Uint8Array(await blob.arrayBuffer());
   const mimeType = reference.mimeType || blob.type || "image/jpeg";
-  return { ...reference, mimeType, blob: new Blob([bytes], { type: mimeType }), base64: bytesToBase64(bytes) };
+  return { ...reference, mimeType, blob, base64: await blobToBase64(blob) };
 }
 
 function assertRequiredProductReferences(references: ReferenceInput[], garmentFamily = "") {
