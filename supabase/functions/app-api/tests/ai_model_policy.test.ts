@@ -200,3 +200,27 @@ Deno.test("transient provider failures may retry/fallback, but invalid product i
   assertEquals(invalid.fallbackEligible, false);
   assert(invalid.message.includes("invalid or unsupported"));
 });
+
+Deno.test("Gemini 3.8 Flash and Gemini 3.1 Pro are approved for visual analysis and QA", () => {
+  assertEquals(
+    validateAiModelRoute(
+      { provider: "gemini", model: "gemini-3.8-flash", thinkingLevel: "high" },
+      "qa",
+    ),
+    {
+      valid: true,
+      route: { provider: "gemini", model: "gemini-3.8-flash", thinkingLevel: "high" },
+    },
+  );
+  assertEquals(
+    validateAiModelRoute(
+      { provider: "gemini", model: "gemini-3.1-pro", thinkingLevel: "high" },
+      "product_truth",
+    ),
+    {
+      valid: true,
+      route: { provider: "gemini", model: "gemini-3.1-pro", thinkingLevel: "high" },
+    },
+  );
+});
+

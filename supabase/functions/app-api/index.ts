@@ -6,7 +6,9 @@ import {
   ANALYSIS_VERSION,
   CONSISTENCY_RULES,
   assertSareeGenerationReady,
+  buildColorwayAnalysisPrompt,
   buildCombinedAnalysisPrompt,
+  mergeVariantColorways,
   normalizeAnalysis,
   normalizeStylingPlan,
   parseJsonResponse,
@@ -92,9 +94,9 @@ const CATALOG_ASSET_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
 type CatalogStorageBackend = "firebase" | "supabase" | "external";
 
 function configuredCatalogStorageBackend(): CatalogStorageBackend {
-  const configured = String(Deno.env.get("CATALOG_ASSET_STORAGE_BACKEND") || "supabase").trim().toLowerCase();
-  if (configured === "firebase" || configured === "external") return configured;
-  return "supabase";
+  const configured = String(Deno.env.get("CATALOG_ASSET_STORAGE_BACKEND") || "firebase").trim().toLowerCase();
+  if (configured === "supabase" || configured === "external") return configured;
+  return "firebase";
 }
 
 async function signCatalogObject(orgId: string, storagePath: string, storageBackend: unknown, fallbackUrl = "") {
@@ -134,9 +136,7 @@ async function downloadCatalogObject(orgId: string, storagePath: string, storage
   const backend = String(storageBackend || "firebase") as CatalogStorageBackend;
   if (backend === "supabase") {
     const tenantPath = supabaseCatalogPath(orgId, storagePath);
-    const { data, error } = await service.storage.from(CATALOG_ASSET_BUCKET).download(tenantPath, {
-      transform: { width: 1200, quality: 85 }
-    });
+    const { data, error } = await service.storage.from(CATALOG_ASSET_BUCKET).download(tenantPath);
     if (error || !data) throw new Error(`Supabase Storage download failed: ${error?.message || "object unavailable"}`);
     return data;
   }
@@ -224,9 +224,37 @@ const IMAGE_TOKEN_RATES: Record<string, { textInput: number; imageInput: number;
 };
 
 const GEMINI_PRICING: Record<string, { input: number; output: number; version: string; source: string }> = {
+  "gemini-3.8-flash": { input: 0.15, output: 0.60, version: "2025-01", source: "google_standard_flash" },
   "gemini-3.6-flash": { input: 0.15, output: 0.60, version: "2024-08", source: "google_standard_flash" },
   "gemini-3.1-pro-preview": { input: 1.25, output: 5.00, version: "2024-08", source: "google_standard_pro" },
+  "gemini-3.1-pro": { input: 1.25, output: 5.00, version: "2024-08", source: "google_standard_pro" },
 };
+
+const OPENAI_VISION_PRICING: Record<string, { input: number; output: number; version: string; source: string }> = {
+  "gpt-5.6-sol": { input: 2.50, output: 10.00, version: "2025-01", source: "openai_standard_sol" },
+  "gpt-5.6-terra": { input: 1.25, output: 5.00, version: "2025-01", source: "openai_standard_terra" },
+};
+
+function extractVisionUsageAndCost(raw: JsonRecord, provider: string, model: string) {
+  const usageMeta = (raw.usageMetadata || raw.usage || raw) as JsonRecord;
+  const inTok = Number(usageMeta.promptTokenCount ?? usageMeta.prompt_tokens ?? usageMeta.input_tokens ?? 0);
+  const outTok = Number(usageMeta.candidatesTokenCount ?? usageMeta.completion_tokens ?? usageMeta.output_tokens ?? 0);
+  const totalTok = Number(usageMeta.totalTokenCount ?? usageMeta.total_tokens ?? (inTok + outTok));
+  const details = (usageMeta.completion_tokens_details || {}) as JsonRecord;
+  const thoughtsTok = Number(usageMeta.thoughtsTokenCount ?? details.reasoning_tokens ?? 0);
+
+  let pricing: { input: number; output: number; version: string; source: string } | null = null;
+  if (provider === "gemini") {
+    pricing = GEMINI_PRICING[model] || GEMINI_PRICING["gemini-3.8-flash"] || GEMINI_PRICING["gemini-3.6-flash"];
+  } else if (provider === "openai") {
+    pricing = OPENAI_VISION_PRICING[model] || OPENAI_VISION_PRICING["gpt-5.6-sol"];
+  }
+
+  const costUsd = pricing ? (inTok * pricing.input + outTok * pricing.output) / 1000000 : 0;
+  const costSource = pricing ? `estimated_public_rates_${pricing.version}` : "provider_cost_not_available";
+
+  return { inTok, outTok, totalTok, thoughtsTok, costUsd, costSource, pricing };
+}
 
 type GeminiPurpose = "product_truth" | "shoot_planning" | "qa" | "qa_escalation";
 
@@ -240,16 +268,16 @@ function resolveGeminiPolicy(args: { purpose: GeminiPurpose; garmentFamily?: str
   const PT_MODEL = Deno.env.get("GEMINI_PRODUCT_TRUTH_MODEL")?.trim() || "gemini-3.1-pro-preview";
   const PT_THINKING = (Deno.env.get("GEMINI_PRODUCT_TRUTH_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
 
-  const SIMPLE_MODEL = Deno.env.get("GEMINI_SIMPLE_PLANNER_MODEL")?.trim() || "gemini-3.6-flash";
+  const SIMPLE_MODEL = Deno.env.get("GEMINI_SIMPLE_PLANNER_MODEL")?.trim() || "gemini-3.1-pro-preview";
   const SIMPLE_THINKING = (Deno.env.get("GEMINI_SIMPLE_PLANNER_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
 
   const COMPLEX_MODEL = Deno.env.get("GEMINI_COMPLEX_PLANNER_MODEL")?.trim() || "gemini-3.1-pro-preview";
   const COMPLEX_THINKING = (Deno.env.get("GEMINI_COMPLEX_PLANNER_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
 
-  const QA_MODEL = Deno.env.get("GEMINI_QA_MODEL")?.trim() || "gemini-3.6-flash";
-  const QA_THINKING = (Deno.env.get("GEMINI_QA_THINKING_LEVEL")?.trim() as "high" | "medium") || "medium";
+  const QA_MODEL = Deno.env.get("GEMINI_QA_MODEL")?.trim() || "gemini-3.8-flash";
+  const QA_THINKING = (Deno.env.get("GEMINI_QA_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
 
-  const QA_ESCALATION_MODEL = Deno.env.get("GEMINI_QA_ESCALATION_MODEL")?.trim() || "gemini-3.1-pro-preview";
+  const QA_ESCALATION_MODEL = Deno.env.get("GEMINI_QA_ESCALATION_MODEL")?.trim() || "gemini-3.8-flash";
   const QA_ESCALATION_THINKING = (Deno.env.get("GEMINI_QA_ESCALATION_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
 
   if (args.purpose === "product_truth") return { purpose: args.purpose, model: PT_MODEL, thinkingLevel: PT_THINKING };
@@ -258,14 +286,11 @@ function resolveGeminiPolicy(args: { purpose: GeminiPurpose; garmentFamily?: str
     return isComplex ? { purpose: args.purpose, model: COMPLEX_MODEL, thinkingLevel: COMPLEX_THINKING } : { purpose: args.purpose, model: SIMPLE_MODEL, thinkingLevel: SIMPLE_THINKING };
   }
   if (args.purpose === "qa") {
-    const isComplex = ["saree", "lehenga", "suit", "multi-piece"].some((family) => args.garmentFamily?.toLowerCase().includes(family));
-    return isComplex
-      ? { purpose: args.purpose, model: QA_ESCALATION_MODEL, thinkingLevel: QA_ESCALATION_THINKING }
-      : { purpose: args.purpose, model: QA_MODEL, thinkingLevel: QA_THINKING };
+    return { purpose: args.purpose, model: QA_MODEL, thinkingLevel: QA_THINKING };
   }
   if (args.purpose === "qa_escalation") return { purpose: args.purpose, model: QA_ESCALATION_MODEL, thinkingLevel: QA_ESCALATION_THINKING };
 
-  return { purpose: args.purpose, model: "gemini-3.6-flash", thinkingLevel: "high" };
+  return { purpose: args.purpose, model: "gemini-3.8-flash", thinkingLevel: "high" };
 }
 
 type VisionPurpose = Extract<AiModelPurpose, "product_truth" | "qa" | "qa_escalation">;
@@ -329,21 +354,38 @@ function defaultVisionRoute(args: {
   uncertainty?: boolean;
   referenceCount?: number;
 }): NormalizedAiModelRoute {
-  const geminiPurpose: GeminiPurpose = args.purpose === "qa_escalation" ? "qa_escalation" : args.purpose;
+  if (args.purpose === "product_truth") {
+    return assertAllowedAiModelRoute({
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      thinkingLevel: "high",
+    }, args.purpose, { strictJson: true });
+  }
   const current = resolveGeminiPolicy({
-    purpose: geminiPurpose,
+    purpose: args.purpose,
     garmentFamily: args.garmentFamily,
     uncertainty: args.uncertainty,
     referenceCount: args.referenceCount,
   });
-  return assertAllowedAiModelRoute({ provider: "gemini", model: current.model, thinkingLevel: current.thinkingLevel }, args.purpose, { strictJson: true });
+  return assertAllowedAiModelRoute({
+    provider: "gemini",
+    model: current.model,
+    thinkingLevel: current.thinkingLevel,
+  }, args.purpose, { strictJson: true });
 }
 
 function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiModelRoute {
+  if (args.purpose === "product_truth") {
+    return assertAllowedAiModelRoute({
+      provider: "gemini",
+      model: "gemini-3.1-pro-preview",
+      thinkingLevel: "high",
+    }, args.purpose, { strictJson: true });
+  }
   return assertAllowedAiModelRoute({
     provider: "openai",
-    model: "gpt-5.6-terra",
-    thinkingLevel: args.purpose === "qa" ? "medium" : "high",
+    model: "gpt-5.6-sol",
+    thinkingLevel: "high",
   }, args.purpose, { strictJson: true });
 }
 
@@ -1132,13 +1174,7 @@ async function analyze(request: Request, args: JsonRecord) {
       sku_name: String(args.skuName || ""), product_category: String(args.category || ""), payload: normalized,
       expires_at: new Date(Date.now() + 30 * 86400_000).toISOString(), updated_at: new Date().toISOString(),
     }, { onConflict: "org_key,cache_kind,cache_key" });
-    const usage = result.raw.usageMetadata as any || {};
-    const inTok = Number(usage.promptTokenCount || 0);
-    const outTok = Number(usage.candidatesTokenCount || 0);
-    const pricing = result.policy.provider === "gemini"
-      ? GEMINI_PRICING[result.policy.model] || GEMINI_PRICING["gemini-3.6-flash"]
-      : null;
-    const estCost = pricing ? (inTok * pricing.input + outTok * pricing.output) / 1000000 : 0;
+    const calculated = extractVisionUsageAndCost(result.raw, result.policy.provider, result.policy.model);
     
     await recordAiRun({
       organization_id: orgId, job_id: "", run_kind: "product_reference_analysis", model: result.policy.model, provider: result.policy.provider,
@@ -1148,10 +1184,10 @@ async function analyze(request: Request, args: JsonRecord) {
         roles: references.map((reference) => reference.role),
         policy: visionPolicySnapshot(policy, result.attempts),
       },
-      output_json: normalized, status: "completed", latency_ms: Date.now() - started, cost_usd: estCost,
-      cost_source: pricing ? `estimated_public_rates_${pricing.version}` : "provider_cost_not_available",
-      input_tokens: inTok, input_text_tokens: inTok, input_image_tokens: 0, output_tokens: outTok,
-      total_tokens: Number(usage.totalTokenCount || 0), thoughts_token_count: Number(usage.thoughtsTokenCount || 0),
+      output_json: normalized, status: "completed", latency_ms: Date.now() - started, cost_usd: calculated.costUsd,
+      cost_source: calculated.costSource,
+      input_tokens: calculated.inTok, input_text_tokens: calculated.inTok, input_image_tokens: 0, output_tokens: calculated.outTok,
+      total_tokens: calculated.totalTok, thoughts_token_count: calculated.thoughtsTok,
       usage_payload: { providerAnalysis: result.raw.usageMetadata || result.raw.usage || {}, attempts: result.attempts },
     });
   }
@@ -1349,10 +1385,10 @@ async function validatePose(args: {
 
   const addUsage = (total: Record<string, number>, raw: JsonRecord) => {
     const usage = (raw.usageMetadata || raw.usage || {}) as Record<string, number>;
-    const inputTokens = Number(usage.promptTokenCount || usage.input_tokens || 0);
-    const outputTokens = Number(usage.candidatesTokenCount || usage.output_tokens || 0);
-    const totalTokens = Number(usage.totalTokenCount || usage.total_tokens || 0);
-    const thoughtTokens = Number(usage.thoughtsTokenCount || usage.reasoning_tokens || 0);
+    const inputTokens = Number(usage.promptTokenCount ?? usage.prompt_tokens ?? usage.input_tokens ?? 0);
+    const outputTokens = Number(usage.candidatesTokenCount ?? usage.completion_tokens ?? usage.output_tokens ?? 0);
+    const totalTokens = Number(usage.totalTokenCount ?? usage.total_tokens ?? (inputTokens + outputTokens));
+    const thoughtTokens = Number(usage.thoughtsTokenCount ?? usage.reasoning_tokens ?? 0);
     return {
       promptTokenCount: Number(total.promptTokenCount || 0) + inputTokens,
       candidatesTokenCount: Number(total.candidatesTokenCount || 0) + outputTokens,
@@ -1778,14 +1814,6 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
   const { data: batch, error: batchError } = await service.from("planning_batches").select("*").eq("id", inputs.batchId).maybeSingle();
   if (batchError) throw new Error(batchError.message);
   if (!batch) throw new Error("Catalog batch not found for visual analysis.");
-  const loaded = await loadAvailableReferences(references, String(batch.organization_id), String(inputs.category || ""));
-  
-  const manifest: Array<{ number: number; role: string }> = [];
-  const parts: JsonRecord[] = [];
-  loaded.forEach((reference, index) => {
-    manifest.push({ number: index + 1, role: roleLabel(reference.role) });
-    parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
-  });
 
   const { data: variant, error: variantError } = await service.from("planning_requests").select("*").eq("id", inputs.variantId).eq("batch_id", inputs.batchId).maybeSingle();
   if (variantError) throw new Error(variantError.message);
@@ -1794,17 +1822,75 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
   const category = String(settings.category || variant?.category || "ethnic/fusion");
   const orgId = String(batch?.organization_id || "");
 
+  const memory = (batch?.catalog_memory || {}) as JsonRecord;
+  const baseAnalysis = memory.baseAnalysis as ReturnType<typeof normalizeAnalysis> | undefined;
+  const policy = await resolveVisionPolicy(orgId, { purpose: "product_truth", garmentFamily: category });
+
+  // Token optimization: If base product analysis already exists for the batch, extract colorway only
+  if (baseAnalysis && baseAnalysis.productIdentity?.garmentFamily) {
+    const frontRef = references.find((r) => ["front", "saree_front_drape"].includes(r.role)) || references[0];
+    const loadedRefs = frontRef ? await loadAvailableReferences([frontRef], orgId, category) : [];
+    if (loadedRefs.length > 0) {
+      const manifest = [{ number: 1, role: roleLabel(loadedRefs[0].role) }];
+      const parts: JsonRecord[] = [
+        { text: `IMAGE 1: ${roleLabel(loadedRefs[0].role)}` },
+        { inlineData: { mimeType: loadedRefs[0].mimeType, data: loadedRefs[0].base64 } },
+        {
+          text: buildColorwayAnalysisPrompt({
+            skuName: String(variant?.sku_name || "Variant"),
+            garmentFamily: baseAnalysis.productIdentity.garmentFamily,
+            referenceManifest: manifest,
+            baseMainColor: baseAnalysis.productIdentity.mainColor,
+            baseSecondaryColors: baseAnalysis.productIdentity.secondaryColors,
+          }),
+        },
+      ];
+      const result = await visionJson(policy, parts);
+      const merged = mergeVariantColorways(baseAnalysis, result.json, String(variant?.sku_name || ""));
+      return {
+        analysisResult: merged,
+        usage: result.raw.usageMetadata || result.raw.usage,
+        policy: visionPolicySnapshot(policy, result.attempts),
+        isColorwayDelta: true,
+      };
+    }
+  }
+
+  const loaded = await loadAvailableReferences(references, orgId, String(inputs.category || ""));
+  const manifest: Array<{ number: number; role: string }> = [];
+  const parts: JsonRecord[] = [];
+  loaded.forEach((reference, index) => {
+    manifest.push({ number: index + 1, role: roleLabel(reference.role) });
+    parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
+  });
+
   parts.push({ text: buildCombinedAnalysisPrompt({
     skuName: String(variant?.sku_name), productDetails: String(variant?.product_description || ""), category,
     modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
     housePreferences: await stylingPreferenceBrief(orgId, category),
   }) });
 
-  const policy = await resolveVisionPolicy(orgId, { purpose: "product_truth", garmentFamily: category });
   const result = await visionJson(policy, parts);
   const normalized = normalizeAnalysis(result.json, category);
+
+  // Store baseAnalysis into catalog_memory
+  try {
+    if (batch.id) {
+      await service.rpc("merge_catalog_memory", {
+        p_batch_id: String(batch.id),
+        p_patch: {
+          baseAnalysis: normalized,
+          baseGarmentFamily: normalized.productIdentity.garmentFamily,
+          baseAnalysisVariantId: variant.id,
+        },
+        p_require_absent: "baseAnalysis",
+      });
+    }
+  } catch (err) {
+    console.error("Could not save baseAnalysis in catalog memory:", errorMessage(err));
+  }
   
-  return { analysisResult: normalized, usage: result.raw.usageMetadata || result.raw.usage, policy: visionPolicySnapshot(policy, result.attempts) };
+  return { analysisResult: normalized, usage: result.raw.usageMetadata || result.raw.usage, policy: visionPolicySnapshot(policy, result.attempts), isColorwayDelta: false };
 }
 async function handleProductTruthNode(node: JsonRecord, sessionId: string) {
   const { data: edges, error: edgesError } = await service.from("generation_flow_edges").select("source_node_id").eq("target_node_id", node.id);
@@ -2384,25 +2470,20 @@ async function processWorker(request: Request, args: JsonRecord) {
     
     if (!qaUnavailable && job.pose_qa !== false) {
        const qaUsage = (qa.usageMetadata || {}) as any;
-       const inTok = Number(qaUsage?.promptTokenCount || 0);
-       const outTok = Number(qaUsage?.candidatesTokenCount || 0);
        const policy = (qa as any).policy as VisionPolicy | undefined;
-       const pricing = policy?.provider === "gemini"
-         ? GEMINI_PRICING[policy.model] || GEMINI_PRICING["gemini-3.6-flash"]
-         : null;
-       const estCost = pricing ? (inTok * pricing.input + outTok * pricing.output) / 1000000 : 0;
+       const calculated = extractVisionUsageAndCost({ usageMetadata: qaUsage }, policy?.provider || "gemini", policy?.model || "gemini-3.8-flash");
        await recordAiRun({
          organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
-         job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: policy?.model || "unknown", provider: policy?.provider || "unknown",
-         purpose: policy?.purpose || "qa", thinking_level: policy?.thinkingLevel || "none",
+         job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: policy?.model || "gemini-3.8-flash", provider: policy?.provider || "gemini",
+         purpose: policy?.purpose || "qa", thinking_level: policy?.thinkingLevel || "high",
          input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt, policy: policy ? visionPolicySnapshot(policy, (qa as any).visionAttempts || []) : null },
          output_json: { qa, qaVersion: QA_VERSION }, status: qa.outcome, latency_ms: qaLatencyMs,
          provider_request_id: "",
-         input_tokens: inTok, input_text_tokens: inTok,
-         input_image_tokens: 0, output_tokens: outTok,
-         total_tokens: Number(qaUsage?.totalTokenCount || 0), thoughts_token_count: Number(qaUsage?.thoughtsTokenCount || 0),
+         input_tokens: calculated.inTok, input_text_tokens: calculated.inTok,
+         input_image_tokens: 0, output_tokens: calculated.outTok,
+         total_tokens: calculated.totalTok, thoughts_token_count: calculated.thoughtsTok,
          usage_payload: { providerQa: qaUsage, attempts: (qa as any).visionAttempts || [] },
-         cost_usd: estCost, cost_source: pricing ? `estimated_public_rates_${pricing.version}` : "provider_cost_not_available",
+         cost_usd: calculated.costUsd, cost_source: calculated.costSource,
        });
     }
     if (!qa.pass) {
@@ -4169,6 +4250,65 @@ async function analyzeCatalogVariant(
 ) {
   const settings = (batch.generation_settings || {}) as JsonRecord;
   const category = catalogVariantCategory(batch, variant);
+  const memory = (batch.catalog_memory || {}) as JsonRecord;
+  const baseAnalysis = memory.baseAnalysis as ReturnType<typeof normalizeAnalysis> | undefined;
+  const policy = suppliedPolicy || await resolveVisionPolicy(String(batch.organization_id), { purpose: "product_truth", garmentFamily: category });
+
+  // OPTIMIZATION: If the catalog batch already has an analyzed base product,
+  // do not waste tokens re-analyzing the identical cut, silhouette, structure, and pose plan.
+  // Instead, run a lightweight colorway analysis and merge into the base garment!
+  if (baseAnalysis && baseAnalysis.productIdentity?.garmentFamily) {
+    const frontRef = references.find((r) => ["front", "saree_front_drape"].includes(r.role)) || references[0];
+    const loadedRefs = frontRef ? await loadAvailableReferences([frontRef], String(batch.organization_id), category) : [];
+    if (loadedRefs.length > 0) {
+      const manifest = [{ number: 1, role: roleLabel(loadedRefs[0].role) }];
+      const parts: JsonRecord[] = [
+        { text: `IMAGE 1: ${roleLabel(loadedRefs[0].role)}` },
+        { inlineData: { mimeType: loadedRefs[0].mimeType, data: loadedRefs[0].base64 } },
+        {
+          text: buildColorwayAnalysisPrompt({
+            skuName: String(variant.sku_name || "Variant"),
+            garmentFamily: baseAnalysis.productIdentity.garmentFamily,
+            referenceManifest: manifest,
+            baseMainColor: baseAnalysis.productIdentity.mainColor,
+            baseSecondaryColors: baseAnalysis.productIdentity.secondaryColors,
+          }),
+        },
+      ];
+      const result = await visionJson(policy, parts);
+      const merged = mergeVariantColorways(baseAnalysis, result.json, String(variant.sku_name || ""));
+      const normalized = applyCatalogMemory(batch, merged);
+
+      // Record colorway learning in catalog_memory asynchronously
+      try {
+        if (batch.id) {
+          const colorways = { ...((memory.colorways || {}) as JsonRecord) };
+          colorways[String(variant.id)] = {
+            sku: variant.sku_name,
+            mainColor: merged.productIdentity.mainColor,
+            secondaryColors: merged.productIdentity.secondaryColors,
+            analyzedAt: new Date().toISOString(),
+          };
+          await service.rpc("merge_catalog_memory", {
+            p_batch_id: String(batch.id),
+            p_patch: { colorways },
+          });
+        }
+      } catch (err) {
+        console.error("Could not record colorway in catalog memory:", errorMessage(err));
+      }
+
+      return {
+        normalized,
+        policy: result.policy,
+        attempts: result.attempts,
+        usage: result.raw.usageMetadata || result.raw.usage,
+        isColorwayDelta: true,
+      };
+    }
+  }
+
+  // Full base analysis for the first SKU in the batch
   const loaded = await loadAvailableReferences(references, String(batch.organization_id), category);
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
@@ -4181,10 +4321,33 @@ async function analyzeCatalogVariant(
     modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
     housePreferences: await stylingPreferenceBrief(String(batch.organization_id), category),
   }) });
-  const policy = suppliedPolicy || await resolveVisionPolicy(String(batch.organization_id), { purpose: "product_truth", garmentFamily: category });
   const result = await visionJson(policy, parts);
   const normalized = normalizeAnalysis(result.json, category);
-  return { normalized: applyCatalogMemory(batch, normalized), policy: result.policy, attempts: result.attempts };
+
+  // Store baseAnalysis into catalog_memory so subsequent SKUs reuse it
+  try {
+    if (batch.id) {
+      await service.rpc("merge_catalog_memory", {
+        p_batch_id: String(batch.id),
+        p_patch: {
+          baseAnalysis: normalized,
+          baseGarmentFamily: normalized.productIdentity.garmentFamily,
+          baseAnalysisVariantId: variant.id,
+        },
+        p_require_absent: "baseAnalysis",
+      });
+    }
+  } catch (err) {
+    console.error("Could not save baseAnalysis in catalog memory:", errorMessage(err));
+  }
+
+  return {
+    normalized: applyCatalogMemory(batch, normalized),
+    policy: result.policy,
+    attempts: result.attempts,
+    usage: result.raw.usageMetadata || result.raw.usage,
+    isColorwayDelta: false,
+  };
 }
 
 async function catalogReferenceInputs(batch: JsonRecord, variant: JsonRecord) {
@@ -4510,6 +4673,7 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
     const missingDetectedSareeEvidence = detectedSaree ? missingRequiredReferenceLabels(references, "saree") : [];
     if (missingDetectedSareeEvidence.length) {
       const message = sareeReferenceRequirementMessage(missingDetectedSareeEvidence);
+      const calculatedIncomplete = extractVisionUsageAndCost({ usage: analysis.usage }, analysis.policy.provider, analysis.policy.model);
       await Promise.all([
         service.from("planning_requests").update({
           category: "saree",
@@ -4528,13 +4692,17 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
           organization_id: batch.organization_id, planning_request_id: variant.id, batch_id: batchId,
           job_id: "", run_kind: "catalog_product_preflight", model: analysis.policy.model,
           provider: analysis.policy.provider, purpose: analysis.policy.purpose, thinking_level: analysis.policy.thinkingLevel, input_fingerprint: hashes.fingerprint,
-          input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(hashes.policy, analysis.attempts) },
+          input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(hashes.policy, analysis.attempts), isColorwayDelta: analysis.isColorwayDelta },
           output_json: normalized, status: "completed", latency_ms: Date.now() - started,
-          cost_usd: 0, cost_source: "provider_cost_not_available",
+          cost_usd: calculatedIncomplete.costUsd, cost_source: calculatedIncomplete.costSource,
+          input_tokens: calculatedIncomplete.inTok, input_text_tokens: calculatedIncomplete.inTok, input_image_tokens: 0, output_tokens: calculatedIncomplete.outTok,
+          total_tokens: calculatedIncomplete.totalTok, thoughts_token_count: calculatedIncomplete.thoughtsTok,
+          usage_payload: { providerAnalysis: analysis.usage || {}, attempts: analysis.attempts, isColorwayDelta: analysis.isColorwayDelta },
         }),
       ]);
       return { processed: false, reason: "saree_references_incomplete", requestId: variant.id, missing: missingDetectedSareeEvidence };
     }
+    const calculated = extractVisionUsageAndCost({ usage: analysis.usage }, analysis.policy.provider, analysis.policy.model);
     await Promise.all([
       service.from("planning_requests").update({
         analysis_status: "ready", analysis_fingerprint: hashes.fingerprint, analysis_updated_at: now,
@@ -4545,9 +4713,12 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
         organization_id: batch.organization_id, planning_request_id: variant.id, batch_id: batchId,
         job_id: "", run_kind: "catalog_product_preflight", model: analysis.policy.model,
         provider: analysis.policy.provider, purpose: analysis.policy.purpose, thinking_level: analysis.policy.thinkingLevel, input_fingerprint: hashes.fingerprint,
-        input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(hashes.policy, analysis.attempts) },
+        input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(hashes.policy, analysis.attempts), isColorwayDelta: analysis.isColorwayDelta },
         output_json: normalized, status: "completed", latency_ms: Date.now() - started,
-        cost_usd: 0, cost_source: "provider_cost_not_available",
+        cost_usd: calculated.costUsd, cost_source: calculated.costSource,
+        input_tokens: calculated.inTok, input_text_tokens: calculated.inTok, input_image_tokens: 0, output_tokens: calculated.outTok,
+        total_tokens: calculated.totalTok, thoughts_token_count: calculated.thoughtsTok,
+        usage_payload: { providerAnalysis: analysis.usage || {}, attempts: analysis.attempts, isColorwayDelta: analysis.isColorwayDelta },
       }),
     ]);
     // Proposed after the analysis is safely stored, and never inside its Promise.all:

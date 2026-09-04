@@ -1075,3 +1075,70 @@ export function smallHash(value: string) {
   }
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
+
+export function buildColorwayAnalysisPrompt(args: {
+  skuName: string;
+  garmentFamily: string;
+  referenceManifest: Array<{ number: number; role: string }>;
+  baseMainColor?: string;
+  baseSecondaryColors?: string[];
+}) {
+  const manifest = args.referenceManifest.map(({ number, role }) => `IMAGE ${number}: ${role}`).join("\n");
+  return `You are a fashion catalog colorist and merchandiser.
+This product SKU is a colorway variant of an already-analyzed catalog collection of garment style "${args.garmentFamily}".
+The structural garment cut, pattern geometry, styling plan, and pose plan are already established.
+Analyze the supplied reference image(s) to identify ONLY the colorway details for this SKU:
+
+SKU: ${args.skuName}
+${manifest}
+
+Return JSON with this exact schema:
+{
+  "mainColor": "exact primary dominant color name (e.g. Royal Blue, Crimson Red, Mustard Yellow)",
+  "secondaryColors": ["secondary accent color", "border/trim color", "underlying tone"],
+  "accentColors": ["small secondary accent colors in motifs or embroidery"]
+}`;
+}
+
+export function mergeVariantColorways(
+  baseAnalysis: ReturnType<typeof normalizeAnalysis>,
+  colorResult: JsonRecord,
+  _variantSkuName?: string
+): ReturnType<typeof normalizeAnalysis> {
+  const mainColor = String(colorResult.mainColor || colorResult.primaryColor || colorResult.main_color || "").trim();
+  const secondary = (colorResult.secondaryColors || colorResult.secondary_colors) as unknown[];
+  const secondaryColors = Array.isArray(secondary)
+    ? secondary.map((c) => String(c || "").trim()).filter(Boolean)
+    : [];
+  const accents = (colorResult.accentColors || colorResult.accent_colors) as unknown[];
+  const accentColors = Array.isArray(accents)
+    ? accents.map((c) => String(c || "").trim()).filter(Boolean)
+    : [];
+
+  const cloned = structuredClone(baseAnalysis);
+
+  if (mainColor) {
+    cloned.productIdentity.mainColor = mainColor;
+  }
+  if (secondaryColors.length) {
+    cloned.productIdentity.secondaryColors = secondaryColors;
+  }
+
+  if (cloned.productIdentity.patternGeometry && accentColors.length) {
+    cloned.productIdentity.patternGeometry.accentColors = accentColors;
+  }
+
+  if (cloned.productIdentity.sareeTruth) {
+    if (mainColor) {
+      cloned.productIdentity.sareeTruth.body.baseColor = mainColor;
+      cloned.productIdentity.sareeTruth.borders.borderColors = secondaryColors.length ? secondaryColors.join(", ") : mainColor;
+      cloned.productIdentity.sareeTruth.pallu.baseColor = mainColor;
+    }
+    if (secondaryColors.length) {
+      cloned.productIdentity.sareeTruth.body.secondaryColors = secondaryColors;
+    }
+  }
+
+  return cloned;
+}
+

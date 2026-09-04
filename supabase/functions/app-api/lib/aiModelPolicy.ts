@@ -74,9 +74,9 @@ type Registry = Record<
  */
 export const AI_MODEL_REGISTRY: Registry = {
   gemini: {
-    product_truth: ["gemini-3.1-pro-preview", "gemini-3.6-flash"],
-    qa: ["gemini-3.1-pro-preview", "gemini-3.6-flash"],
-    qa_escalation: ["gemini-3.1-pro-preview", "gemini-3.6-flash"],
+    product_truth: ["gemini-3.1-pro-preview", "gemini-3.1-pro", "gemini-3.6-flash", "gemini-3.8-flash"],
+    qa: ["gemini-3.1-pro-preview", "gemini-3.1-pro", "gemini-3.6-flash", "gemini-3.8-flash"],
+    qa_escalation: ["gemini-3.1-pro-preview", "gemini-3.1-pro", "gemini-3.6-flash", "gemini-3.8-flash"],
   },
   openai: {
     product_truth: ["gpt-5.6-terra", "gpt-5.6-sol"],
