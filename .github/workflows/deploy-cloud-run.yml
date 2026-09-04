@@ -64,6 +64,7 @@ jobs:
           supabase gen types typescript --project-id ${{ vars.SUPABASE_PROJECT_REF }} > generated.types.ts
           if ! cmp -s src/database.types.ts generated.types.ts; then
             echo "::error::Supabase types are out of sync! The database schema has changed but src/database.types.ts was not updated."
+            diff -u src/database.types.ts generated.types.ts | head -n 100 || true
             exit 1
           fi
         env:

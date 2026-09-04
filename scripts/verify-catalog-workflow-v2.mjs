@@ -66,8 +66,9 @@ for (const table of tenantTables) {
 assert.match(migration, /organization_id = \(select private\.current_organization_id\(\)\)/, "Tenant RLS predicate is missing");
 assert.match(migration, /revoke insert, update, delete .* authenticated/, "Authenticated direct mutations are not revoked");
 assert.match(migration, /storage\.foldername\(name\)\)\[1\].*current_organization_id/s, "Storage paths are not tenant-prefixed");
-assert.match(catalogStorage, /storage\.from\(CATALOG_ASSET_BUCKET\)\.upload|const bucket = supabase\.storage\.from\(CATALOG_ASSET_BUCKET\)/, "Browser reference uploads do not use Supabase Storage");
-assert.match(edge, /CATALOG_ASSET_STORAGE_BACKEND[\s\S]*\|\| "supabase"/, "Generated catalog assets do not default to Supabase Storage");
+assert.match(catalogStorage, /uploadBytes\(/, "Browser reference uploads must use Firebase Storage");
+assert.match(catalogStorage, /firebaseStorage/, "Browser reference uploads must use Firebase Storage reference");
+assert.match(edge, /CATALOG_ASSET_STORAGE_BACKEND[\s\S]*\|\| "firebase"/, "Generated catalog assets must default to Firebase Storage");
 assert.match(edge, /uploadCatalogObject[\s\S]*storage_backend: stored\.storageBackend/, "Generated asset metadata does not preserve its Storage backend");
 assert.match(edge, /assertCatalogReferenceOwnership[\s\S]*firebaseCatalogPath\(orgId, storagePath\)/, "Service-role reference loading does not enforce the tenant path prefix");
 assert.match(catalogStoragePaths, /firebaseCatalogPath[\s\S]*outside the current organization/, "Firebase legacy reference paths do not enforce their exact tenant layouts");
