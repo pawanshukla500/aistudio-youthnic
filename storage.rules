@@ -7,9 +7,14 @@ service firebase.storage {
         && request.auth.uid == userId;
     }
 
-    // Product references uploaded from the browser by authenticated workspace users
-    match /organizations/{organizationId}/references/{allPaths=**} {
-      allow read, write: if request.auth != null;
+    // Product references and catalog assets uploaded from the browser by authenticated workspace users
+    match /organizations/{organizationId}/{scope}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && (scope == 'references' || scope == 'catalog')
+        && (!('organization_id' in request.auth.token) || request.auth.token.organization_id == organizationId);
+      allow update, delete: if request.auth != null
+        && (!('organization_id' in request.auth.token) || request.auth.token.organization_id == organizationId);
     }
 
     // Generated files are written only by Firebase Admin in the Supabase Edge worker.

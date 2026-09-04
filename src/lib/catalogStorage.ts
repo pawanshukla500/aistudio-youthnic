@@ -23,7 +23,7 @@ export async function uploadCatalogAsset(args: {
   const storagePath = [
     "organizations",
     args.organizationId,
-    "references",
+    safeSegment(args.scope, "references"),
     safeSegment(args.ownerKey, "unassigned"),
     safeSegment(args.role, "reference"),
     `${crypto.randomUUID()}-${extensionSafeName}`,
