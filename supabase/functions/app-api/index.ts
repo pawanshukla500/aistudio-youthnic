@@ -265,20 +265,20 @@ type GeminiPolicy = {
 };
 
 function resolveGeminiPolicy(args: { purpose: GeminiPurpose; garmentFamily?: string; uncertainty?: boolean; referenceCount?: number; }): GeminiPolicy {
-  const PT_MODEL = Deno.env.get("GEMINI_PRODUCT_TRUTH_MODEL")?.trim() || "gemini-3.1-pro-preview";
-  const PT_THINKING = (Deno.env.get("GEMINI_PRODUCT_TRUTH_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
+  const PT_MODEL = Deno.env.get("GEMINI_PRODUCT_TRUTH_MODEL")?.trim() || "gemini-3.8-flash";
+  const PT_THINKING = (Deno.env.get("GEMINI_PRODUCT_TRUTH_THINKING_LEVEL")?.trim() as "high" | "medium") || "medium";
 
-  const SIMPLE_MODEL = Deno.env.get("GEMINI_SIMPLE_PLANNER_MODEL")?.trim() || "gemini-3.1-pro-preview";
-  const SIMPLE_THINKING = (Deno.env.get("GEMINI_SIMPLE_PLANNER_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
+  const SIMPLE_MODEL = Deno.env.get("GEMINI_SIMPLE_PLANNER_MODEL")?.trim() || "gemini-3.8-flash";
+  const SIMPLE_THINKING = (Deno.env.get("GEMINI_SIMPLE_PLANNER_THINKING_LEVEL")?.trim() as "high" | "medium") || "medium";
 
-  const COMPLEX_MODEL = Deno.env.get("GEMINI_COMPLEX_PLANNER_MODEL")?.trim() || "gemini-3.1-pro-preview";
-  const COMPLEX_THINKING = (Deno.env.get("GEMINI_COMPLEX_PLANNER_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
+  const COMPLEX_MODEL = Deno.env.get("GEMINI_COMPLEX_PLANNER_MODEL")?.trim() || "gemini-3.8-flash";
+  const COMPLEX_THINKING = (Deno.env.get("GEMINI_COMPLEX_PLANNER_THINKING_LEVEL")?.trim() as "high" | "medium") || "medium";
 
   const QA_MODEL = Deno.env.get("GEMINI_QA_MODEL")?.trim() || "gemini-3.8-flash";
-  const QA_THINKING = (Deno.env.get("GEMINI_QA_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
+  const QA_THINKING = (Deno.env.get("GEMINI_QA_THINKING_LEVEL")?.trim() as "high" | "medium") || "medium";
 
   const QA_ESCALATION_MODEL = Deno.env.get("GEMINI_QA_ESCALATION_MODEL")?.trim() || "gemini-3.8-flash";
-  const QA_ESCALATION_THINKING = (Deno.env.get("GEMINI_QA_ESCALATION_THINKING_LEVEL")?.trim() as "high" | "medium") || "high";
+  const QA_ESCALATION_THINKING = (Deno.env.get("GEMINI_QA_ESCALATION_THINKING_LEVEL")?.trim() as "high" | "medium") || "medium";
 
   if (args.purpose === "product_truth") return { purpose: args.purpose, model: PT_MODEL, thinkingLevel: PT_THINKING };
   if (args.purpose === "shoot_planning") {
@@ -290,7 +290,7 @@ function resolveGeminiPolicy(args: { purpose: GeminiPurpose; garmentFamily?: str
   }
   if (args.purpose === "qa_escalation") return { purpose: args.purpose, model: QA_ESCALATION_MODEL, thinkingLevel: QA_ESCALATION_THINKING };
 
-  return { purpose: args.purpose, model: "gemini-3.8-flash", thinkingLevel: "high" };
+  return { purpose: args.purpose, model: "gemini-3.8-flash", thinkingLevel: "medium" };
 }
 
 type VisionPurpose = Extract<AiModelPurpose, "product_truth" | "qa" | "qa_escalation">;
@@ -356,9 +356,9 @@ function defaultVisionRoute(args: {
 }): NormalizedAiModelRoute {
   if (args.purpose === "product_truth") {
     return assertAllowedAiModelRoute({
-      provider: "openai",
-      model: "gpt-5.6-sol",
-      thinkingLevel: "high",
+      provider: "gemini",
+      model: "gemini-3.8-flash",
+      thinkingLevel: "medium",
     }, args.purpose, { strictJson: true });
   }
   const current = resolveGeminiPolicy({
@@ -378,14 +378,14 @@ function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiMo
   if (args.purpose === "product_truth") {
     return assertAllowedAiModelRoute({
       provider: "gemini",
-      model: "gemini-3.1-pro-preview",
-      thinkingLevel: "high",
+      model: "gemini-3.6-flash",
+      thinkingLevel: "medium",
     }, args.purpose, { strictJson: true });
   }
   return assertAllowedAiModelRoute({
-    provider: "openai",
-    model: "gpt-5.6-sol",
-    thinkingLevel: "high",
+    provider: "gemini",
+    model: "gemini-3.8-flash",
+    thinkingLevel: "medium",
   }, args.purpose, { strictJson: true });
 }
 
@@ -616,16 +616,8 @@ function bytesToBase64(bytes: Uint8Array) {
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
+  const buffer = await blob.arrayBuffer();
+  return bytesToBase64(new Uint8Array(buffer));
 }
 
 function numberValue(value: unknown) {
@@ -892,6 +884,7 @@ async function geminiJson(policy: GeminiPolicy, parts: JsonRecord[]): Promise<{ 
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(policy.model)}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": requiredEnv("GEMINI_API_KEY") },
+    signal: AbortSignal.timeout(45_000),
     body: JSON.stringify({
       contents: [{ role: "user", parts }],
       generationConfig: {
@@ -980,6 +973,7 @@ async function openAiCompatibleVisionJson(route: NormalizedAiModelRoute, parts: 
   const endpoint = provider === "openai" ? "https://api.openai.com/v1/chat/completions" : "https://api.meta.ai/v1/chat/completions";
   const response = await fetch(endpoint, {
     method: "POST",
+    signal: AbortSignal.timeout(35_000),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${requiredEnv(providerSecretName(provider))}`,
@@ -1011,6 +1005,7 @@ async function qwenVisionJson(route: NormalizedAiModelRoute, parts: JsonRecord[]
   assertVisionProviderConfigured(route);
   const response = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
     method: "POST",
+    signal: AbortSignal.timeout(35_000),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${requiredEnv("QWEN_API_KEY")}`,

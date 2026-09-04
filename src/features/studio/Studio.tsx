@@ -289,9 +289,9 @@ export function Studio() {
     const inFlight = uploadPromisesRef.current.get(reference.id);
     if (inFlight) return inFlight;
     const promise = (async () => {
-      // Resize to 1920x1920 to keep high fidelity for generation, while vastly reducing
-      // file size. This speeds up upload and prevents 504 timeouts on the analysis Edge Function.
-      const resizedFile = await resizeImageFile(reference.file, 1920);
+      // Resize to 1280x1280 to maintain high fidelity while vastly reducing
+      // file size. This speeds up upload and prevents timeouts on the analysis Edge Function.
+      const resizedFile = await resizeImageFile(reference.file, 1280, 0.85);
       const uploaded = await uploadCatalogAsset({
         organizationId: String(organization._id),
         scope: "references",
@@ -301,11 +301,12 @@ export function Studio() {
       });
       return {
         ...reference,
+        file: resizedFile,
         uploadedId: reference.id,
         storageBackend: uploaded.storageBackend,
         storagePath: uploaded.storagePath,
         downloadUrl: uploaded.downloadUrl,
-        hash: await fileHash(reference.file),
+        hash: await fileHash(resizedFile),
       };
     })();
     uploadPromisesRef.current.set(reference.id, promise);

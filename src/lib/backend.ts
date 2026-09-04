@@ -52,11 +52,25 @@ export async function invokeAppApi<T = unknown>(operation: string, args: Record<
   const { data, error } = await supabase.functions.invoke("app-api", { body: { operation, args } });
   if (error) {
     let message = messageFromFunctionError(error);
-    try {
-      const body = await (error as { context?: Response }).context?.clone().json() as { error?: string } | undefined;
-      if (body?.error) message = body.error;
-    } catch {
-      // Keep the provider error supplied by supabase-js.
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const body = await context.clone().json() as { error?: string } | undefined;
+        if (body?.error) message = body.error;
+      } catch {
+        try {
+          const text = await context.clone().text();
+          if (context.status === 504 || text.includes("504") || text.toLowerCase().includes("gateway timeout")) {
+            message = `The server timed out while processing '${operation}'. Please retry with smaller images or faster AI model settings.`;
+          } else if (context.status === 413 || text.includes("413") || text.toLowerCase().includes("payload too large")) {
+            message = `The uploaded images for '${operation}' exceed the server size limit.`;
+          } else if (text && !text.includes("<!DOCTYPE") && !text.includes("<html") && text.trim().length > 0) {
+            message = text.trim().slice(0, 300);
+          }
+        } catch {
+          // Keep the provider error supplied by supabase-js.
+        }
+      }
     }
     if (message === "Edge Function returned a non-2xx status code") {
       message = `The application server encountered an error processing '${operation}'.`;
