@@ -151,6 +151,7 @@ export function providerSecretName(provider: AiProvider): string {
   if (provider === "gemini") return "GEMINI_API_KEY";
   if (provider === "openai") return "OPENAI_API_KEY";
   if (provider === "qwen") return "QWEN_API_KEY";
+  if (provider === "reve") return "REVE_API_KEY";
   return "META_MODEL_API_KEY";
 }
 

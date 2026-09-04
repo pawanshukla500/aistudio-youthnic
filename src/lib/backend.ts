@@ -58,6 +58,9 @@ export async function invokeAppApi<T = unknown>(operation: string, args: Record<
     } catch {
       // Keep the provider error supplied by supabase-js.
     }
+    if (message === "Edge Function returned a non-2xx status code") {
+      message = `The application server encountered an error processing '${operation}'.`;
+    }
     throw new Error(message);
   }
   if (data?.error) throw new Error(String(data.error));
