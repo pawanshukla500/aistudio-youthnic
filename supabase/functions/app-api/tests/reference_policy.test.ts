@@ -49,7 +49,7 @@ Deno.test("legacy saree aliases remain valid and pallu has a distinct authority 
   assertStringIncludes(roleLabel("saree_pallu_spread"), "FULLY SPREAD PALLU");
 });
 
-Deno.test("true back poses use exactly one direct rear product image and exclude every other visual source", () => {
+Deno.test("true back poses use exactly one direct rear product image while preserving model identity and pose 1 scene anchor", () => {
   const generic = selectReferences(
     [
       { role: "model_identity", hash: "model" },
@@ -61,7 +61,9 @@ Deno.test("true back poses use exactly one direct rear product image and exclude
     "back",
     "dress",
   );
-  assertEquals(generic.map((reference) => reference.role), ["back"]);
+  assertEquals(generic.map((reference) => reference.role), ["back", "model_identity", "approved_pose"]);
+  assertEquals(generic.some((r) => r.role === "front"), false);
+  assertEquals(generic.some((r) => r.role === "fabric_pattern"), false);
 
   const saree = selectReferences(
     [
@@ -78,7 +80,12 @@ Deno.test("true back poses use exactly one direct rear product image and exclude
     "back",
     "saree",
   );
-  assertEquals(saree.map((reference) => reference.role), ["saree_back_drape"]);
+  assertEquals(saree.map((reference) => reference.role), ["saree_back_drape", "model_identity", "approved_pose"]);
+  assertEquals(saree.some((r) => r.role === "saree_front_drape"), false);
+  assertEquals(saree.some((r) => r.role === "saree_body_detail"), false);
+  assertEquals(saree.some((r) => r.role === "saree_pallu_spread"), false);
+  assertEquals(saree.some((r) => r.role === "saree_border_tassels"), false);
+  assertEquals(saree.some((r) => r.role === "saree_blouse_back_piece"), false);
 });
 
 Deno.test("Catalog keeps prior assets for audit but resolves only current direct front and rear uploads", () => {

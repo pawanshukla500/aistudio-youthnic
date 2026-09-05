@@ -244,9 +244,12 @@ function poseCategoryRules(category: string) {
 - Show the BACK NECKLINE, back construction, back hemline.
 - Show how the garment falls and drapes from the back.
 - If the garment has back print/embroidery/detail, showcase it.
-- Model may look back over one shoulder (slight head turn) for engagement.
+- DUPATTA / SHAWL / ACCESSORY UNOBSTRUCTED VIEW: For any outfit with a dupatta, scarf, shawl, or stole (e.g., kurti set, salwar suit, lehenga):
+  * The dupatta MUST NOT cover or drape across the back of the kurti/dress.
+  * Drape the dupatta forward over both arms/elbows or held in front so the entire rear garment (neckline, back panel, embroidery, seams, darts, and hem) is 100% visible and unobstructed from neck to hem.
+- Hair must be swept forward over shoulders or styled in an updo/bun so it does not cover the back neckline, ties, or rear embroidery.
+- Model may look back over one shoulder (slight head turn) for engagement. If profile or partial face is visible, it MUST be the identical model from the identity anchor.
 - Arms relaxed at sides or one hand slightly lifting hem.
-- Hair positioned to NOT cover back neckline or back details.
 - Feet visible, same footwear as front poses.
 - DO NOT show front-facing garment features.`,
     front: `
@@ -358,7 +361,7 @@ ${hasModelReference
       : "This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally beautiful adult face exactly as described in modelIdentity above - every later pose in this set must reproduce this same face."}
 ${faceVisible
     ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct and naturally shaped eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
-    : "The face is turned away and is not the subject of this pose - keep hair color/style, skin tone, and body proportions consistent with the identity anchor."}
+    : "The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face and profile MUST be 100% identical to the MODEL FACE REFERENCE / APPROVED POSE 1 identity - same jawline, nose profile, skin texture with visible pores, eye shape, and makeup. Never substitute a different person or face."}
 
 LOCKED PRODUCT - MUST NOT CHANGE:
 ${productCoreJson}
@@ -408,9 +411,16 @@ Embroidery geometry: ${embroideryGeometryJson}
 - Reproduce embroidery as the same internal geometry: same lattice or motif structure, same count and rhythm of repeated units, same borders, same coverage area, and the same relationship to the neckline, tie, drawstring and tassel.
 - If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".`)}
 
-LOCKED ART DIRECTION - MUST NOT CHANGE BETWEEN POSES:
+LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
 ${creativeJson}
 - Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, camera height and distance, depth of field and colour grade. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
+${hasApprovedAnchor
+  ? `- SET & BACKDROP HARD LOCK TO APPROVED POSE 1:
+  * Rebuild the EXACT SAME physical room and backdrop set from Pose 1: identical wall color, wall plaster/paint finish, texture, architectural elements, floor surface, and carpet/rug.
+  * ZERO NEW PROPS: Absolutely do NOT introduce new props, urns, brass urlis, flower petals, random steps, pedestals, or vases not shown in Pose 1.
+  * LIGHTING & SHADOW CONTINUITY: Keep the exact same light direction, shadow density, and warm/cool color temperature established in Pose 1.
+  * The camera and model remain in the exact same photoshoot location - only the pose and framing change.`
+  : "- Maintain a single, consistent studio set, wall finish, flooring, and lighting setup across all poses."}
 
 ${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in all five frames:
 - Footwear: ${boundedText(styling.footwear, 360)}
@@ -466,6 +476,9 @@ PROHIBITED UNRELATED CHANGES:
 ${rules.map((rule) => `- ${rule}`).join("\n")}
 - Never complete, mirror, continue, relocate, add or remove decoration for symmetry.
 - Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
+- Never change the backdrop wall color, texture, floor, or lighting from what was established in Pose 1.
+- Never add random background props (brass urlis, urns, flower petals, pedestals) not present in Pose 1.
+${args.pose.id === "back" ? "- DUPATTA REAR VISIBILITY LOCK: If wearing a dupatta or shawl, it must be draped forward over arms or in front. The back of the kurti/dress must be completely visible and never covered by the dupatta." : ""}
 ${args.pose.id === "back" ? "- TRUE BACK HARD RULE: shoulders and hips fully face away. Reproduce uploaded BACK exactly; never infer the rear from FRONT." : ""}
 ${args.pose.id === "closeup" ? "- POSE 5 HARD RULE: this is a genuine ZOOMED-IN face-to-chest or face-to-waist shot - visibly tighter in scale than the full-body hero pose, never a repeat of that wide framing. The face must be sharp, beautiful, and carry a natural Gen-Z expression, and one real product detail (embroidery, neckline, drape, print, or fabric texture) must also be sharp and clearly visible in the same frame." : ""}
 
