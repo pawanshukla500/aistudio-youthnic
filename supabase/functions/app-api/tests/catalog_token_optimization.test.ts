@@ -17,6 +17,7 @@ Deno.test("buildColorwayAnalysisPrompt generates lightweight targeted prompt", (
   assertStringIncludes(prompt, "mainColor");
   assertStringIncludes(prompt, "secondaryColors");
   assertStringIncludes(prompt, "accentColors");
+  assertStringIncludes(prompt, "bottomWearColor");
 });
 
 Deno.test("mergeVariantColorways preserves base silhouette and updates colors", () => {
@@ -51,4 +52,27 @@ Deno.test("mergeVariantColorways preserves base silhouette and updates colors", 
   assertEquals(merged.productIdentity.patternGeometry.accentColors, ["silver", "white"]);
   assertEquals(merged.productIdentity.sareeTruth?.body.baseColor, "ruby red");
   assertEquals(merged.productIdentity.sareeTruth?.borders.borderColors, "silver");
+});
+
+Deno.test("mergeVariantColorways preserves bottom wear cut and records variant bottom color", () => {
+  const baseAnalysis = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "ivory white",
+      bottomWearDetails: "Farshi Pajama with wide flared straight legs, front inverted box pleats, 3-inch gold hem band; NOT dhoti pants, NOT tapered",
+    },
+  }, "kurta_or_kurti_set");
+
+  const colorResult = {
+    mainColor: "emerald green",
+    secondaryColors: ["gold"],
+    bottomWearColor: "emerald green",
+  };
+
+  const merged = mergeVariantColorways(baseAnalysis, colorResult, "SKU-GRN-01");
+
+  assertEquals(merged.productIdentity.mainColor, "emerald green");
+  assertStringIncludes(merged.productIdentity.bottomWearDetails, "Farshi Pajama with wide flared straight legs");
+  assertStringIncludes(merged.productIdentity.bottomWearDetails, "NOT dhoti pants");
+  assertStringIncludes(merged.productIdentity.bottomWearDetails, "Variant Colorway: emerald green");
 });

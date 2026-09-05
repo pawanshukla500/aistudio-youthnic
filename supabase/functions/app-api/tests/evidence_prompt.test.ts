@@ -387,3 +387,82 @@ Deno.test("oversized canonical saree truth is blocked locally before a provider 
   );
   assertEquals(error.code, "prompt_budget_exceeded");
 });
+
+Deno.test("composeGenerationPrompt locks bottom wear architecture and strictly prohibits dhoti/salwar substitution", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "FARSHI-KURTI-SET",
+    productDetails: "Kurti set with fuchsia Farshi bottom",
+    pose: {
+      id: "full_front",
+      title: "Hero Stance",
+      poseNumber: 1,
+      description: "Full body hero",
+      cameraAngle: "straight",
+      framing: "full",
+      bodyPosition: "standing",
+      handPlacement: "sides",
+      expression: "confident",
+      highlightedDetails: ["Farshi pleats", "hem band"],
+      productVisibilityRules: ["complete bottom wear visible"],
+      purpose: "hero",
+      consistencyNotes: "locked",
+      prompt: "Show complete farshi kurti set.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "ivory white",
+        bottomWearDetails: "Farshi Pajama with wide flared straight legs, front inverted box pleats, 3-inch gold hem band; NOT dhoti pants, NOT tapered at ankle",
+      },
+    },
+    references: [{ role: "front" }],
+  });
+
+  assertStringIncludes(prompt, "LOCKED BOTTOM WEAR ARCHITECTURE & SILHOUETTE - HIGHEST FIDELITY:");
+  assertStringIncludes(prompt, "Farshi Pajama with wide flared straight legs");
+  assertStringIncludes(prompt, "ABSOLUTE PROHIBITION ON SILHOUETTE SUBSTITUTION:");
+  assertStringIncludes(prompt, "STRICTLY FORBIDDEN from rendering dhoti pants, tulip pants, harem pants, Afghani salwars");
+  assertStringIncludes(prompt, "ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION:");
+});
+
+Deno.test("true-back pose preserves bottom wear architecture without leaking front decoration", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "FARSHI-KURTI-SET-BACK",
+    productDetails: "Back view of Kurti set",
+    pose: {
+      id: "back",
+      title: "Full Back View",
+      poseNumber: 3,
+      description: "Rear view",
+      cameraAngle: "back",
+      framing: "full",
+      bodyPosition: "away",
+      handPlacement: "sides",
+      expression: "away",
+      highlightedDetails: ["rear kurti", "bottom wear from back"],
+      productVisibilityRules: ["dupatta draped forward", "bottom wear visible"],
+      purpose: "rear",
+      consistencyNotes: "locked",
+      prompt: "Show rear view.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        frontConstruction: "front-lace-should-not-leak",
+        bottomWearDetails: "Farshi Pajama with wide flared straight legs, front inverted box pleats, 3-inch gold hem band",
+        garmentEvidence: [
+          { region: "back hem", sourceRole: "back", state: "confirmed", visibleDecoration: "plain hem" },
+        ],
+      },
+    },
+    references: [{ role: "back" }],
+  });
+
+  // Verify bottom wear details survive in rear product core and bottom wear section
+  assertStringIncludes(prompt, "Farshi Pajama with wide flared straight legs");
+  assertStringIncludes(prompt, "LOCKED BOTTOM WEAR ARCHITECTURE & SILHOUETTE - HIGHEST FIDELITY:");
+  // Verify front detail does not leak
+  assertEquals(prompt.includes("front-lace-should-not-leak"), false);
+});

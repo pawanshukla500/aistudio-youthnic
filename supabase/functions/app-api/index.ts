@@ -4452,6 +4452,13 @@ function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof nor
       };
     });
   }
+  const baseAnalysis = memory.baseAnalysis as ReturnType<typeof normalizeAnalysis> | undefined;
+  if (
+    baseAnalysis?.productIdentity?.bottomWearDetails &&
+    (!normalized.productIdentity.bottomWearDetails || normalized.productIdentity.bottomWearDetails.trim().toLowerCase() === "unknown")
+  ) {
+    normalized.productIdentity.bottomWearDetails = baseAnalysis.productIdentity.bottomWearDetails;
+  }
   return normalized;
 }
 
