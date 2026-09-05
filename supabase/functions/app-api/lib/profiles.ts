@@ -256,15 +256,24 @@ export function getPoseSlots(garmentFamily: string): readonly StudioPose[] {
       framing: "3:4 portrait, head-to-toe true rear view with the full back and hem visible",
       bodyPosition: "Model faces fully away from camera with shoulders and hips square, weight relaxed and natural; no three-quarter cheat",
       handPlacement: "Hands placed naturally where they do not cover the back neckline, closure, embroidery, waist, or rear silhouette",
-      expression: "Face is not forced toward camera; preserve identity and playful Gen-Z energy through hair, body, and styling continuity",
-      productVisibilityRules: isSaree ? ["uploaded back image is the sole back-design authority", "rear drape and pallu fall visible"] : ["uploaded back image is the sole back-design authority", "entire rear construction visible", "never infer back details from the front"],
-      consistencyNotes: "Keep the same model, hair, accessories, footwear, scene, lighting, and exact bottom wear while showing the authoritative back",
-      description: "A true full back view sourced from the uploaded back product photograph.",
+      expression: "Face is not forced toward camera; preserve identity and playful Gen-Z energy through hair, body, and styling continuity; if glancing back, face and profile must match identity anchor",
+      productVisibilityRules: isSaree
+        ? ["uploaded back image is the sole back-design authority", "rear drape and pallu fall visible", "exact same backdrop wall, floor, and lighting from Pose 1 - zero new props"]
+        : [
+          "uploaded back image is the sole back-design authority",
+          "entire rear construction visible from neckline to hem",
+          "dupatta or shawl draped forward over arms/front only - back of kurti/dress must be 100% visible and unobstructed",
+          "hair swept forward or in an updo - back neckline, ties, and rear details completely unobstructed",
+          "never infer back details from the front",
+          "exact same backdrop wall, floor, and lighting from Pose 1 - zero new props",
+        ],
+      consistencyNotes: "Keep the exact same model identity, hair, accessories, footwear, exact bottom wear, and identical studio set/backdrop wall from Pose 1 while showcasing the authoritative back",
+      description: "A true full back view sourced from the uploaded back product photograph with unobstructed rear garment construction.",
       cameraAngle: "Eye-level straight-on back view",
       highlightedDetails: isSaree ? ["rear drape", "pallu fall", "back blouse details"] : ["back construction", "back neckline", "rear pattern placement"],
       primaryReference: "back",
       purpose: "Document the real back design",
-      prompt: "Turn the model fully away from camera and reproduce the uploaded back reference exactly. This must be a true back view, never an invented rear design.",
+      prompt: "Turn the model fully away from camera to capture the authentic rear garment design from the uploaded back reference. For outfits with a dupatta, shawl, or stole, drape it forward over the arms or front so the back panel, neckline, embroidery, seams, and fit remain 100% unobstructed and clearly visible. Preserve the exact model identity, styling, and the identical studio set, wall color, and lighting established in Pose 1.",
       enabled: true,
     },
     {
@@ -1026,7 +1035,7 @@ Create exactly five product-specific camera setups in one coherent commercial co
 
 - full_front: square, unobstructed head-to-toe hero; establishes face/hair/styling/footwear/scene/lighting anchor with playful, confident Gen-Z energy.
 - angled: best side or three-quarter orientation for THIS garment; for stitched garments, reveal side construction; for sarees, reveal drape depth and pallu fall. Show existing slits or pockets only when references prove they exist; never invent, extend, or extrapolate decoration into unknown side regions.
-- back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees.
+- back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees. For outfits with a dupatta or shawl, the dupatta must be draped forward over arms or front so the rear garment (neckline, back panel, embroidery, hem) is 100% unobstructed and visible. The studio set, backdrop wall, lighting, and model identity must strictly match the other poses.
 - creative: playful, scroll-stopping Gen-Z editorial movement tailored to this garment while keeping product completely readable. For sarees, use safe pallu movement tailored to its fabric physics.
 - closeup: a genuine zoomed-in face-to-chest or face-to-waist shot (never a repeat of the full-body hero framing) pairing a beautiful, cute, Gen-Z-style face with a genuine, natural expression AND one sharp, clearly visible real product detail (embroidery, neckline, drape, print, or fabric texture).
 
@@ -1054,6 +1063,8 @@ export const CONSISTENCY_RULES = [
   "Style references control only background, lighting, composition, camera, mood, and creative treatment.",
   "Never add text, random logos, extra layers, duplicate people, or unreferenced garment elements.",
   "Treat detailPlacementMap and absenceConstraints as hard locks: never relocate, mirror, extend, add, or remove a garment detail.",
+  "Keep the identical studio backdrop wall color, texture, flooring, and lighting established in Pose 1 across all poses 2-5 without adding new props (no brass urlis, urns, flower petals, or altered staircases).",
+  "In back poses, dupattas or shawls must be draped over the arms or in front so the entire back of the garment is 100% visible and unobstructed.",
   "The optional stylist accessory suggestion (creativeDirection.suggestedAccessories) may be added only when present, and must stay identical and product-appropriate across every pose - never invent a second, different accessory and never let it hide or replace any garment detail, bottom wear, or footwear shown in the product references.",
 ];
 
@@ -1065,7 +1076,8 @@ export const CONSISTENCY_RULES = [
 // v15 adds source-role provenance to regional evidence. Analyses made before it
 // can say that a rear detail exists without proving that the back image showed
 // it, so cache reuse would reintroduce front-to-back hallucinations.
-export const ANALYSIS_VERSION = "generation-session-v15-back-evidence-memory";
+// v16 ensures unobstructed rear garment visibility (dupatta forward drape) and strict backdrop continuity.
+export const ANALYSIS_VERSION = "generation-session-v16-rear-backdrop-continuity";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

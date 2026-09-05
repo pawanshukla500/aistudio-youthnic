@@ -197,12 +197,18 @@ export function selectReferences<T extends ReferenceLike>(
   maxReferences = MAX_IMAGE_REFERENCES,
 ): T[] {
   const normalizedFamily = garmentFamily.toLowerCase();
-  // Do this before the normal priority/cap calculation. A true back pose is
-  // deliberately the one exception to the multi-reference strategy: only the
-  // direct rear upload can establish rear construction, decorative placement,
-  // and the absence of lace or trim. The exact one-file result is shared by
-  // Studio, Catalog/Bulk, generation, and QA.
-  if (poseType === "back") return selectTrueBackReferences(references, normalizedFamily).slice(0, Math.max(0, maxReferences));
+  // For a true back pose, the DIRECT rear upload is the sole product authority
+  // (front, fabric_pattern, mannequin, etc. are strictly excluded to avoid leaking
+  // front details into the rear). However, the model_identity reference and
+  // the approved Pose 1 anchor MUST be included so the generator preserves the
+  // exact model identity and identical photoshoot studio environment/backdrop.
+  if (poseType === "back") {
+    const rearProduct = selectTrueBackReferences(references, normalizedFamily);
+    const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
+    const anchor = approved.slice(0, 1);
+    const priority = [...rearProduct, ...model, ...anchor];
+    return priority.slice(0, maxReferences);
+  }
   const order = preferredProductOrder(poseType, normalizedFamily);
 
   const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
