@@ -1421,7 +1421,7 @@ export async function bulkGenerateCatalogWorkItems(
     aspectRatio: "3:4",
     imageSize: "2K",
     quality: "medium",
-    poseQa: true,
+    poseQa: false,
   };
   let adHocBatchId = "";
   const now = new Date().toISOString();

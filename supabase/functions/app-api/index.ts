@@ -1488,7 +1488,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     status: "queued", readiness_status: "ready", readiness_reasons: [], sku_name: jobData.skuName, session_id: sessionId, job_data: jobData,
     planning_request_id: session.planning_request_id, total_poses: 5, provider: imageGenerationPolicy.provider, model,
     aspect_ratio: String(args.aspectRatio || "3:4"), image_size: String(args.imageSize || "2K"), quality,
-    pose_qa: args.poseQa !== false, estimated_cost_usd: 0.25, created_at: now, updated_at: now,
+    pose_qa: Boolean(args.poseQa), estimated_cost_usd: 0.25, created_at: now, updated_at: now,
   });
   if (jobError) throw new Error(jobError.message);
   
@@ -2415,7 +2415,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     let qaStarted = 0;
     let qaLatencyMs = 0;
     let qaUnavailable = "";
-    if (job.pose_qa !== false) {
+    if (Boolean(job.pose_qa)) {
       try {
         qaStarted = Date.now();
         qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData, organizationId: String(job.org_id) });
@@ -2471,7 +2471,7 @@ async function processWorker(request: Request, args: JsonRecord) {
       cost_usd: attemptCost, cost_source: generated.usage.providerReported ? "provider_reported_tokens_openai_public_rates" : "provider_not_reported",
     });
     
-    if (!qaUnavailable && job.pose_qa !== false) {
+    if (!qaUnavailable && Boolean(job.pose_qa)) {
        const qaUsage = (qa.usageMetadata || {}) as any;
        const policy = (qa as any).policy as VisionPolicy | undefined;
        const calculated = extractVisionUsageAndCost({ usageMetadata: qaUsage }, policy?.provider || "gemini", policy?.model || "gemini-3.8-flash");
@@ -2524,7 +2524,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     const storagePath = `organizations/${job.org_id}/generated/${job.job_id}/${pose.pose_index}-${safeSku}-${crypto.randomUUID()}.${extensionForMimeType(generated.mimeType)}`;
     const stored = await uploadCatalogObject({ orgId: String(job.org_id), storagePath, blob: generated.blob, mimeType: generated.mimeType });
     const completedAt = new Date().toISOString();
-    const { qaStatus } = qaStorageDisposition({ qaEnabled: job.pose_qa !== false, qaUnavailable: Boolean(qaUnavailable), outcome: qa.outcome });
+    const { qaStatus } = qaStorageDisposition({ qaEnabled: Boolean(job.pose_qa), qaUnavailable: Boolean(qaUnavailable), outcome: qa.outcome });
     const usagePatch = accumulatedUsage(pose as JsonRecord, generated.usage, generated.requestId, attemptCost);
     await Promise.all([
       service.from("session_generations").update({
@@ -2558,9 +2558,9 @@ async function processWorker(request: Request, args: JsonRecord) {
       service.from("qa_reviews").insert({
         organization_id: job.org_id, planning_request_id: job.planning_request_id, generation_job_id: job.job_id,
         pose_index: pose.pose_index,
-        reviewer_type: job.pose_qa === false ? "qa_disabled" : qaUnavailable ? "gemini_auto_unavailable" : "gemini_auto",
-        score: qa.score, passed: !qaUnavailable && job.pose_qa !== false && qa.automaticallyVerified,
-        issues: qaUnavailable ? ["qa_unavailable"] : job.pose_qa === false ? ["qa_disabled"] : qa.failed,
+        reviewer_type: !job.pose_qa ? "qa_disabled" : qaUnavailable ? "gemini_auto_unavailable" : "gemini_auto",
+        score: qa.score, passed: !qaUnavailable && Boolean(job.pose_qa) && qa.automaticallyVerified,
+        issues: qaUnavailable ? ["qa_unavailable"] : !job.pose_qa ? ["qa_disabled"] : qa.failed,
         notes: qa.reason, qa_version: QA_VERSION, outcome: qaStatus,
         generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt, metadata: { qa, qaUnavailable },
       }),
@@ -3941,7 +3941,7 @@ async function createCatalogOperation(request: Request, args: JsonRecord) {
   const generationSettings = {
     modelDirection: String(args.modelDirection || ""), sceneDirection: String(args.sceneDirection || ""),
     category: String(args.category || "ethnic/fusion"), aspectRatio: String(args.aspectRatio || "3:4"),
-    imageSize: String(args.imageSize || "2K"), quality: "medium", poseQa: args.poseQa !== false,
+    imageSize: String(args.imageSize || "2K"), quality: "medium", poseQa: Boolean(args.poseQa),
     lookAndMood: String(args.lookAndMood || ""), stylingRequirements: String(args.stylingRequirements || ""),
     lighting: String(args.lighting || ""), composition: String(args.composition || ""),
     poseDirection: String(args.poseDirection || ""),
@@ -5054,7 +5054,7 @@ async function queueCatalogVariantGeneration(
     aspect_ratio: String(generationSettings.aspectRatio || "3:4"),
     image_size: String(generationSettings.imageSize || "2K"),
     quality,
-    pose_qa: generationSettings.poseQa !== false,
+    pose_qa: Boolean(generationSettings.poseQa),
     estimated_cost_usd: 0.25,
     created_at: queuedAt,
     updated_at: queuedAt,

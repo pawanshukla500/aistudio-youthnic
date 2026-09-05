@@ -86,7 +86,7 @@ export function OutputSettings({ value, onChange }: { value: OutputOptions; onCh
           <label className="flex cursor-pointer items-center justify-between border-t border-outline-variant/30 pt-4">
             <span>
               <span className="block text-[13px] font-semibold text-on-surface">Enable Pose QA</span>
-              <span className="block text-[11px] text-secondary">Validate garment and pose consistency before returning image</span>
+              <span className="block text-[11px] text-secondary">Validate garment and pose consistency before returning image (optional)</span>
             </span>
             <input type="checkbox" checked={value.poseQa} onChange={(event) => set("poseQa", event.target.checked)} className="h-4 w-4 accent-primary" />
           </label>

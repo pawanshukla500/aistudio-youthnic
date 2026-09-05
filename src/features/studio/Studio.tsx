@@ -42,7 +42,7 @@ const defaultOptions: OutputOptions = {
   imageSize: "2K",
   quality: "medium",
   backgroundStyle: "Infer a premium consistent scene from the uploaded style reference",
-  poseQa: true,
+  poseQa: false,
 };
 
 async function fileHash(file: File) {
