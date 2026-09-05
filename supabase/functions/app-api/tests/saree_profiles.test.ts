@@ -53,8 +53,8 @@ const references = [
   { role: "saree_pallu_spread", storagePath: "org/pallu.jpg" },
 ];
 
-Deno.test("analysis version invalidates cached analyses without rear evidence provenance and backdrop continuity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v16-rear-backdrop-continuity");
+Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
+  assertEquals(ANALYSIS_VERSION, "generation-session-v17-bottom-wear-fidelity");
 });
 
 Deno.test("root-level sareeTruth and sareeDrapePlan survive canonical normalization", () => {
