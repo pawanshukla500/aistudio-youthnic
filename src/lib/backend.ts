@@ -580,7 +580,7 @@ async function getCatalog(catalogId: string) {
     category: settings.category || "ethnic/fusion",
     aspectRatio: settings.aspectRatio || "3:4",
     imageSize: settings.imageSize || "2K",
-    poseQa: settings.poseQa !== false,
+    poseQa: Boolean(settings.poseQa),
     scheduleError: batch.schedule_error || "",
     variants: hydrated,
     styleReferences: styleEntries.map((entry: any) => ({ _id: `style:${entry.id}`, url: entry.downloadUrl || entry.image_url, filename: entry.filename || "Style reference" })),

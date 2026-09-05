@@ -53,7 +53,7 @@ const emptyCreate = {
   category: "ethnic/fusion",
   aspectRatio: "3:4",
   imageSize: "2K",
-  poseQa: true,
+  poseQa: false,
   campaign: "",
   eventId: "",
   skusText: "",
@@ -1034,7 +1034,7 @@ export function Planning() {
               <label className="text-sm font-semibold text-secondary">Aspect ratio<select value={form.aspectRatio} onChange={(e) => setForm({ ...form, aspectRatio: e.target.value })} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface">{ASPECTS.map((a) => <option key={a} value={a}>{a}</option>)}</select></label>
               <label className="text-sm font-semibold text-secondary sm:col-span-2">Preferred generation date and time <span className="font-normal">(schedule after references are ready)</span><input type="datetime-local" value={scheduleAt} min={toDateTimeInput(Date.now())} onChange={(event) => setScheduleAt(event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface outline-none focus:border-primary" /><span className="mt-1 block text-[10px] font-normal text-secondary">Asia/Kolkata timezone</span></label>
               <label className="text-sm font-semibold text-secondary sm:col-span-2 lg:col-span-4">Colourway SKUs (one per line — <span className="font-normal">SKU, colour label</span>)<textarea rows={4} value={form.skusText} onChange={(e) => setForm({ ...form, skusText: e.target.value })} placeholder={"T45-Bubbly-Pink, Pink\nT45-Bubbly-Green, Green\nT45-Bubbly-Red, Red"} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 font-mono text-[13px] text-on-surface outline-none focus:border-primary" /></label>
-              <label className="flex items-center gap-2 text-sm font-semibold text-secondary sm:col-span-2 lg:col-span-4"><input type="checkbox" checked={form.poseQa} onChange={(e) => setForm({ ...form, poseQa: e.target.checked })} className="accent-primary" /> Run Gemini consistency QA on every pose (recommended)</label>
+              <label className="flex items-center gap-2 text-sm font-semibold text-secondary sm:col-span-2 lg:col-span-4"><input type="checkbox" checked={form.poseQa} onChange={(e) => setForm({ ...form, poseQa: e.target.checked })} className="accent-primary" /> Run Gemini consistency QA on every pose (optional)</label>
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button type="button" onClick={() => setShowCreate(false)} className="rounded-lg border border-outline-variant px-4 py-2 text-sm font-semibold">Cancel</button>

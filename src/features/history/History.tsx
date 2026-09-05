@@ -118,6 +118,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const [selectedPose, setSelectedPose] = useState<any | null>(null);
   const [regenerateTarget, setRegenerateTarget] = useState<any | null>(null);
   const [extraInstructions, setExtraInstructions] = useState("");
+  const [regeneratePoseQa, setRegeneratePoseQa] = useState(false);
   const [regenerateError, setRegenerateError] = useState("");
   const [showReferences, setShowReferences] = useState(false);
   const [references, setReferences] = useState<any[] | null>(null);
@@ -183,9 +184,10 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     setRegeneratingId(regenerateTarget._id);
     setRegenerateError("");
     try {
-      await regeneratePose({ poseId: regenerateTarget._id, requestedBy: user._id, poseQa: true, extraInstructions: extraInstructions.trim() });
+      await regeneratePose({ poseId: regenerateTarget._id, requestedBy: user._id, poseQa: regeneratePoseQa, extraInstructions: extraInstructions.trim() });
       setRegenerateTarget(null);
       setExtraInstructions("");
+      setRegeneratePoseQa(false);
       setSelectedPose(null);
     } catch (reason) {
       setRegenerateError(reason instanceof Error ? reason.message : "Could not queue this regeneration.");
@@ -575,7 +577,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   </dl>
                   {!selectedPose.usageReported && <p className="mt-3 text-[10px] leading-4 text-warning">This provider response did not include token usage, so no token cost was invented.</p>}
                 </div>
-                {selectedPose.completedAt && Date.now() - selectedPose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && <button onClick={() => { setRegenerateError(""); setExtraInstructions(""); setRegenerateTarget(selectedPose); }} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-soft-blush px-4 py-3 font-semibold text-primary hover:bg-primary/15"><RefreshCcw className="h-4 w-4" /> Regenerate with instructions</button>}
+                {selectedPose.completedAt && Date.now() - selectedPose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && <button onClick={() => { setRegenerateError(""); setExtraInstructions(""); setRegeneratePoseQa(false); setRegenerateTarget(selectedPose); }} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-soft-blush px-4 py-3 font-semibold text-primary hover:bg-primary/15"><RefreshCcw className="h-4 w-4" /> Regenerate with instructions</button>}
                 {selectedOutputUrl && (
                   <button onClick={() => void downloadPose(selectedPose)} disabled={downloadingPoseId === selectedPose._id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
                     {downloadingPoseId === selectedPose._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -643,6 +645,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             )}
             <label className="mt-6 block text-xs font-bold uppercase tracking-wider text-secondary">Extra instructions<textarea autoFocus maxLength={1000} rows={5} value={extraInstructions} onChange={(event) => setExtraInstructions(event.target.value)} placeholder="Example: Back side should not have hanging/latkan elements. Preserve the plain uploaded back construction exactly." className="mt-2 w-full resize-y rounded-xl border border-outline-variant p-3 text-sm font-normal normal-case leading-6 tracking-normal text-on-surface outline-none focus:border-primary" /></label>
             <div className="mt-2 flex justify-between text-[10px] text-secondary"><span>Leave blank to retry with the existing locked shoot plan.</span><span>{extraInstructions.length}/1000</span></div>
+            <label className="mt-4 flex items-center gap-2 text-xs font-semibold text-secondary"><input type="checkbox" checked={regeneratePoseQa} onChange={(event) => setRegeneratePoseQa(event.target.checked)} className="accent-primary" /> Run Gemini consistency QA on regenerated pose (optional)</label>
             {regenerateError && <p className="mt-4 rounded-xl border border-danger/20 bg-danger-surface p-3 text-sm text-danger">{regenerateError}</p>}
             <div className="mt-6 flex justify-end gap-3"><button type="button" disabled={Boolean(regeneratingId)} onClick={() => setRegenerateTarget(null)} className="rounded-xl border border-outline-variant px-4 py-2.5 text-sm font-bold text-secondary">Cancel</button><button disabled={Boolean(regeneratingId)} className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{regeneratingId ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}{regeneratingId ? "Queueing…" : "Regenerate pose"}</button></div>
           </form>

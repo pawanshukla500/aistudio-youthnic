@@ -130,6 +130,15 @@ Deno.test("QA provider failure preserves the paid output as unverified", () => {
   assertEquals(storage, { preserveOutput: true, qaStatus: "unverified" });
 });
 
+Deno.test("disabled QA preserves output as unverified without running reviewer", () => {
+  const result = unavailableQaResult("Automatic QA was disabled.");
+  const storage = qaStorageDisposition({ qaEnabled: false, qaUnavailable: false, outcome: result.outcome });
+
+  assertEquals(result.automaticallyVerified, false);
+  assertEquals(result.outcome, "unverified");
+  assertEquals(storage, { preserveOutput: true, qaStatus: "unverified" });
+});
+
 Deno.test("rejected attempts append without removing earlier paid outputs", () => {
   const history = appendRejectedAttemptHistory(
     [{ attempt: 1, storagePath: "rejected/one.jpg" }],
