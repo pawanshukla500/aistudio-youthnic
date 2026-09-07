@@ -12,7 +12,13 @@ import {
   CHEAP_OPENAI_VISION_ROUTE,
   OPENAI_TERRA_VISION_ROUTE,
   PRODUCT_TRUTH_TIMEOUT_MS,
+  PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS,
+  STUDIO_INVOKE_BUDGET_MS,
+  VISION_GATEWAY_RESERVE_MS,
   evaluateVisionRoutePromotion,
+  isSlowProductTruthHop,
+  productTruthGatewayBudgetMs,
+  productTruthHopTimeoutMs,
   geminiThinkingConfig,
   normalizeAiModelRoute,
   preferFastProductTruthRoute,
@@ -278,7 +284,7 @@ Deno.test("abort and truncated JSON are timeout/incomplete so Flash fallback can
   assertEquals(missingSecret.fallbackEligible, true);
 });
 
-Deno.test("product-truth defaults to fast thinking and reroutes slow GPT to Muse Spark 1.3", () => {
+Deno.test("product-truth defaults to fast thinking and reroutes slow GPT to Gemini Flash", () => {
   assertEquals(
     defaultThinkingLevel({ provider: "openai" }, "product_truth", {
       strictJson: true,
@@ -305,7 +311,7 @@ Deno.test("product-truth defaults to fast thinking and reroutes slow GPT to Muse
     thinkingLevel: "high",
   });
   assertEquals(preferred.rerouted, true);
-  assertEquals(preferred.route, FAST_PRODUCT_TRUTH_ROUTE);
+  assertEquals(preferred.route, FAST_PRODUCT_TRUTH_GEMINI_ROUTE);
   assertEquals(preferred.fallback, CHEAP_OPENAI_VISION_ROUTE);
   assertEquals(
     preferFastProductTruthRoute({
@@ -456,30 +462,27 @@ Deno.test("product-truth analyze clamps Admin high thinking to low for Muse and 
     }),
     "low",
   );
-  assertEquals(PRODUCT_TRUTH_TIMEOUT_MS, 50_000);
+  assertEquals(PRODUCT_TRUTH_TIMEOUT_MS, 34_000);
+  assertEquals(PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS, 18_000);
+  assertEquals(STUDIO_INVOKE_BUDGET_MS, 55_000);
 });
 
-Deno.test("product-truth failover is Muse then Luna then Terra then Gemini Flash", () => {
+Deno.test("product-truth failover is Gemini Flash then Luna then Muse last", () => {
+  const expected = [
+    "gemini:gemini-3.8-flash:low",
+    "openai:gpt-5.6-luna:low",
+    "meta:muse-spark-1.3:low",
+  ];
   assertEquals(
     productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE).map((route) =>
       `${route.provider}:${route.model}:${route.thinkingLevel}`
     ),
-    [
-      "meta:muse-spark-1.3:low",
-      "openai:gpt-5.6-luna:low",
-      "openai:gpt-5.6-terra:low",
-      "gemini:gemini-3.8-flash:low",
-    ],
+    expected,
   );
   assertEquals(
     productTruthRouteChain(FAST_PRODUCT_TRUTH_GEMINI_ROUTE, CHEAP_OPENAI_VISION_ROUTE)
-      .map((route) => `${route.provider}:${route.model}`),
-    [
-      "gemini:gemini-3.8-flash",
-      "openai:gpt-5.6-luna",
-      "openai:gpt-5.6-terra",
-      "meta:muse-spark-1.3",
-    ],
+      .map((route) => `${route.provider}:${route.model}:${route.thinkingLevel}`),
+    expected,
   );
   assertEquals(
     productTruthRouteChain({
@@ -487,12 +490,7 @@ Deno.test("product-truth failover is Muse then Luna then Terra then Gemini Flash
       model: "gpt-5.6-luna",
       thinkingLevel: "high",
     }).map((route) => `${route.provider}:${route.model}:${route.thinkingLevel}`),
-    [
-      "openai:gpt-5.6-luna:low",
-      "openai:gpt-5.6-terra:low",
-      "gemini:gemini-3.8-flash:low",
-      "meta:muse-spark-1.3:low",
-    ],
+    expected,
   );
   assertEquals(
     productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE, {
@@ -501,10 +499,9 @@ Deno.test("product-truth failover is Muse then Luna then Terra then Gemini Flash
       thinkingLevel: "none",
     }).map((route) => `${route.provider}:${route.model}`),
     [
-      "meta:muse-spark-1.3",
-      "openai:gpt-5.6-luna",
-      "openai:gpt-5.6-terra",
       "gemini:gemini-3.8-flash",
+      "openai:gpt-5.6-luna",
+      "meta:muse-spark-1.3",
       "qwen:qwen3.8-max",
     ],
   );
@@ -515,53 +512,95 @@ Deno.test("product-truth failover is Muse then Luna then Terra then Gemini Flash
       thinkingLevel: "high",
     }).map((route) => `${route.provider}:${route.model}`),
     [
-      "meta:muse-spark-1.3",
-      "openai:gpt-5.6-luna",
-      "openai:gpt-5.6-terra",
       "gemini:gemini-3.8-flash",
+      "openai:gpt-5.6-luna",
+      "meta:muse-spark-1.3",
       "gemini:gemini-3.1-pro",
+    ],
+  );
+  assertEquals(
+    productTruthRouteChain({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+      thinkingLevel: "low",
+    }).map((route) => `${route.provider}:${route.model}`),
+    [
+      "gemini:gemini-3.8-flash",
+      "openai:gpt-5.6-luna",
+      "meta:muse-spark-1.3",
     ],
   );
 });
 
-Deno.test("product-truth timeout budget stays at 45-55s and still reserves failover slices", () => {
+Deno.test("product-truth hop budget fits the 60s Studio invoke window", () => {
+  assertEquals(productTruthGatewayBudgetMs(145_000), STUDIO_INVOKE_BUDGET_MS);
+  assertEquals(productTruthGatewayBudgetMs(), STUDIO_INVOKE_BUDGET_MS);
   assertEquals(
-    remainingVisionTimeoutMs({
-      purpose: "product_truth",
-      remainingRouteCount: 4,
-      elapsedMs: 0,
-      gatewayBudgetMs: 145_000,
-    }),
-    50_000,
+    isSlowProductTruthHop({ provider: "meta", model: "muse-spark-1.3" }),
+    true,
   );
-  const afterPrimary = remainingVisionTimeoutMs({
+  assertEquals(
+    productTruthHopTimeoutMs({ provider: "meta", model: "muse-spark-1.3" }),
+    PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS,
+  );
+  assertEquals(
+    productTruthHopTimeoutMs({ provider: "gemini", model: "gemini-3.8-flash" }),
+    PRODUCT_TRUTH_TIMEOUT_MS,
+  );
+
+  const geminiFirst = remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 3,
-    elapsedMs: 50_000,
-    gatewayBudgetMs: 145_000,
+    elapsedMs: 0,
+    gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
+    route: FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
   });
-  assert(afterPrimary >= 12_000);
-  assert(afterPrimary <= 50_000);
+  assertEquals(geminiFirst, PRODUCT_TRUTH_TIMEOUT_MS);
+  assert(geminiFirst < STUDIO_INVOKE_BUDGET_MS);
+
+  const museIfFirst = remainingVisionTimeoutMs({
+    purpose: "product_truth",
+    remainingRouteCount: 3,
+    elapsedMs: 0,
+    gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
+    route: FAST_PRODUCT_TRUTH_ROUTE,
+  });
+  assertEquals(museIfFirst, PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS);
+  assert(museIfFirst <= 20_000);
+
+  const afterGeminiTimeout = remainingVisionTimeoutMs({
+    purpose: "product_truth",
+    remainingRouteCount: 2,
+    elapsedMs: PRODUCT_TRUTH_TIMEOUT_MS,
+    gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
+    route: CHEAP_OPENAI_VISION_ROUTE,
+  });
+  assert(afterGeminiTimeout >= 10_000);
+  assert(
+    PRODUCT_TRUTH_TIMEOUT_MS + afterGeminiTimeout + VISION_GATEWAY_RESERVE_MS <=
+      STUDIO_INVOKE_BUDGET_MS,
+  );
+
   const timeout = classifyVisionProviderFailure("meta", {
     name: "TimeoutError",
     message: "The signal has been aborted",
   });
-  assertEquals(shouldContinueVisionFallback(timeout, 3), true);
+  assertEquals(shouldContinueVisionFallback(timeout, 2), true);
   assertEquals(shouldRetrySameVisionRoute(timeout), false);
   assertEquals(shouldContinueVisionFallback(timeout, 0), false);
 });
 
-Deno.test("timeout on Muse fails over to Luna then Terra and logs every hop", async () => {
+Deno.test("timeout on hop-1 still invokes hop-2 and later hops", async () => {
   const routes = productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE);
   const invoked: string[] = [];
   const result = await runVisionProviderChain({
     routes,
     purpose: "product_truth",
-    gatewayBudgetMs: 145_000,
+    gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
     now: Date.now,
     invoke: async (route) => {
       invoked.push(`${route.provider}:${route.model}`);
-      if (route.model === "muse-spark-1.3" || route.model === "gpt-5.6-luna") {
+      if (route.model === "gemini-3.8-flash") {
         throw Object.assign(new Error("The signal has been aborted"), {
           name: "TimeoutError",
         });
@@ -574,20 +613,52 @@ Deno.test("timeout on Muse fails over to Luna then Terra and logs every hop", as
         message: error instanceof Error ? error.message : String(error),
       }),
   });
-  assertEquals(invoked, [
-    "meta:muse-spark-1.3",
-    "openai:gpt-5.6-luna",
-    "openai:gpt-5.6-terra",
-  ]);
-  assertEquals(result.route.model, "gpt-5.6-terra");
-  assertEquals(result.value, { ok: true, model: "gpt-5.6-terra" });
+  assertEquals(invoked[0], "gemini:gemini-3.8-flash");
+  assertEquals(invoked[1], "openai:gpt-5.6-luna");
+  assertEquals(result.route.model, "gpt-5.6-luna");
+  assertEquals(result.value, { ok: true, model: "gpt-5.6-luna" });
   const rows = visionAttemptTelemetryRows(result.attempts);
   assertEquals(rows.map((row) => `${row.model}:${row.status}:${row.attemptNumber}`), [
-    "muse-spark-1.3:failed:1",
-    "gpt-5.6-luna:failed:2",
-    "gpt-5.6-terra:completed:3",
+    "gemini-3.8-flash:failed:1",
+    "gpt-5.6-luna:completed:2",
   ]);
-  assertEquals(rows.filter((row) => row.status === "failed").length, 2);
+});
+
+Deno.test("60s gateway budget still runs hop-2 after a full hop-1 timeout", async () => {
+  const routes = productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE);
+  let clock = 0;
+  const invoked: Array<{ model: string; timeoutMs: number; at: number }> = [];
+  const result = await runVisionProviderChain({
+    routes,
+    purpose: "product_truth",
+    gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
+    now: () => clock,
+    invoke: async (route, timeoutMs) => {
+      invoked.push({ model: route.model, timeoutMs, at: clock });
+      if (route.model === "gemini-3.8-flash") {
+        clock += timeoutMs;
+        throw Object.assign(new Error("The selected vision provider timed out."), {
+          name: "TimeoutError",
+        });
+      }
+      clock += 1_000;
+      return { ok: true, model: route.model };
+    },
+    classify: (route, error) =>
+      classifyVisionProviderFailure(route.provider, {
+        name: (error as { name?: string }).name,
+        message: error instanceof Error ? error.message : String(error),
+      }),
+  });
+  assertEquals(invoked.map((hop) => hop.model), [
+    "gemini-3.8-flash",
+    "gpt-5.6-luna",
+  ]);
+  assertEquals(invoked[0].timeoutMs, PRODUCT_TRUTH_TIMEOUT_MS);
+  assert(invoked[1].timeoutMs >= 10_000);
+  assert(invoked[0].timeoutMs + invoked[1].timeoutMs <= STUDIO_INVOKE_BUDGET_MS);
+  assert(clock <= STUDIO_INVOKE_BUDGET_MS);
+  assertEquals(result.route.model, "gpt-5.6-luna");
 });
 
 Deno.test("hop timeout is enforced when invoke ignores timeoutMs", async () => {
@@ -612,10 +683,10 @@ Deno.test("failed hops are persisted before the next provider is invoked", async
   await runVisionProviderChain({
     routes,
     purpose: "product_truth",
-    gatewayBudgetMs: 145_000,
+    gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
     invoke: async (route) => {
       events.push(`invoke:${route.model}`);
-      if (route.model !== "gemini-3.8-flash") {
+      if (route.model !== "gpt-5.6-luna") {
         throw Object.assign(new Error("The signal has been aborted"), {
           name: "TimeoutError",
         });
@@ -632,14 +703,10 @@ Deno.test("failed hops are persisted before the next provider is invoked", async
     },
   });
   assertEquals(events, [
-    "invoke:muse-spark-1.3",
-    "log:muse-spark-1.3:failed",
-    "invoke:gpt-5.6-luna",
-    "log:gpt-5.6-luna:failed",
-    "invoke:gpt-5.6-terra",
-    "log:gpt-5.6-terra:failed",
     "invoke:gemini-3.8-flash",
-    "log:gemini-3.8-flash:completed",
+    "log:gemini-3.8-flash:failed",
+    "invoke:gpt-5.6-luna",
+    "log:gpt-5.6-luna:completed",
   ]);
 });
 

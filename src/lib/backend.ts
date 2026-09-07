@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "./supabase";
 import { resolveCatalogAssetUrl } from "./catalogStorage";
 import { visibleGenerationDetailedStatus } from "./generationStatus";
+import { functionInvokeErrorMessage } from "./errors";
 
 export type Id<_Table extends string> = string;
 export type BackendEndpoint = string;
@@ -51,31 +52,30 @@ function messageFromFunctionError(error: unknown) {
 export async function invokeAppApi<T = unknown>(operation: string, args: Record<string, unknown> = {}): Promise<T> {
   const { data, error } = await supabase.functions.invoke("app-api", { body: { operation, args } });
   if (error) {
-    let message = messageFromFunctionError(error);
+    const fallbackMessage = messageFromFunctionError(error);
     const context = (error as { context?: Response }).context;
+    let status: number | null = context?.status ?? null;
+    let bodyError: string | undefined;
+    let bodyText: string | undefined;
     if (context) {
       try {
         const body = await context.clone().json() as { error?: string } | undefined;
-        if (body?.error) message = body.error;
+        if (body?.error) bodyError = body.error;
       } catch {
         try {
-          const text = await context.clone().text();
-          if (context.status === 504 || text.includes("504") || text.toLowerCase().includes("gateway timeout")) {
-            message = `The server timed out while processing '${operation}'. Please retry with smaller images or faster AI model settings.`;
-          } else if (context.status === 413 || text.includes("413") || text.toLowerCase().includes("payload too large")) {
-            message = `The uploaded images for '${operation}' exceed the server size limit.`;
-          } else if (text && !text.includes("<!DOCTYPE") && !text.includes("<html") && text.trim().length > 0) {
-            message = text.trim().slice(0, 300);
-          }
+          bodyText = await context.clone().text();
         } catch {
           // Keep the provider error supplied by supabase-js.
         }
       }
     }
-    if (message === "Edge Function returned a non-2xx status code") {
-      message = `The application server encountered an error processing '${operation}'.`;
-    }
-    throw new Error(message);
+    throw new Error(functionInvokeErrorMessage({
+      operation,
+      fallbackMessage,
+      status,
+      bodyError,
+      bodyText,
+    }));
   }
   if (data?.error) throw new Error(String(data.error));
   return (data?.data ?? data) as T;

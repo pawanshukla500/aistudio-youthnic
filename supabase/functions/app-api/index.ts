@@ -35,8 +35,10 @@ import {
   FAST_PRODUCT_TRUTH_ROUTE,
   PRODUCT_TRUTH_TIMEOUT_MS,
   VISION_GATEWAY_BUDGET_MS,
+  VISION_HOP_MIN_MS,
   VISION_PROVIDER_TIMEOUT_MS,
   VISION_ROUTE_PROMOTION_THRESHOLD,
+  productTruthGatewayBudgetMs,
   clampProductTruthThinking,
   evaluateVisionRoutePromotion,
   geminiThinkingConfig,
@@ -526,6 +528,16 @@ function defaultVisionRoute(args: {
   uncertainty?: boolean;
   referenceCount?: number;
 }): NormalizedAiModelRoute {
+  if (
+    (args.purpose === "product_truth" || args.purpose === "qa") &&
+    Deno.env.get("GEMINI_API_KEY")?.trim()
+  ) {
+    return assertAllowedAiModelRoute(
+      FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+      args.purpose,
+      { strictJson: true },
+    );
+  }
   if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
     return assertAllowedAiModelRoute(
       FAST_PRODUCT_TRUTH_ROUTE,
@@ -657,16 +669,17 @@ function applyFastProductTruthRouting(policy: VisionPolicy): VisionPolicy {
   }, policy.fallback);
   let next = policy;
   if (preferred.rerouted) {
-    const museReady = preferred.route.provider === "meta" && Boolean(Deno.env.get("META_MODEL_API_KEY")?.trim());
     const geminiReady = Boolean(Deno.env.get("GEMINI_API_KEY")?.trim());
-    if (museReady) {
-      next = { ...policy, ...preferred.route, fallback: preferred.fallback };
-    } else if (geminiReady) {
+    const museReady = preferred.route.provider === "meta" &&
+      Boolean(Deno.env.get("META_MODEL_API_KEY")?.trim());
+    if (geminiReady) {
       next = {
         ...policy,
         ...FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
         fallback: preferred.fallback,
       };
+    } else if (museReady) {
+      next = { ...policy, ...preferred.route, fallback: preferred.fallback };
     }
   }
   if (next.purpose === "product_truth") {
@@ -1100,8 +1113,9 @@ function visionProviderError(
 // A provider call is deliberately a single attempt. `visionJson` below owns retries
 // and fallbacks so a monthly spend cap never becomes three identical Gemini calls,
 // and so Studio and Catalog take exactly the same route when a provider is unavailable.
-function visionGatewayBudgetMs() {
+function visionGatewayBudgetMs(purpose?: string) {
   const configured = Number(Deno.env.get("VISION_GATEWAY_BUDGET_MS") || "");
+  if (purpose === "product_truth") return productTruthGatewayBudgetMs(configured);
   if (Number.isFinite(configured) && configured >= 40_000) return Math.round(configured);
   return VISION_GATEWAY_BUDGET_MS;
 }
@@ -1370,16 +1384,11 @@ async function visionJson(
   options?: { onAttempt?: (attempt: VisionHopAttempt) => Promise<void> },
 ): Promise<VisionResult> {
   const routes = policy.purpose === "product_truth"
-    ? (policy.fallbacks?.length
-      ? [
-        { provider: policy.provider, model: policy.model, thinkingLevel: policy.thinkingLevel },
-        ...policy.fallbacks,
-      ]
-      : productTruthRouteChain({
-        provider: policy.provider,
-        model: policy.model,
-        thinkingLevel: policy.thinkingLevel,
-      }, policy.fallback))
+    ? productTruthRouteChain({
+      provider: policy.provider,
+      model: policy.model,
+      thinkingLevel: policy.thinkingLevel,
+    }, policy.fallback)
     : [
       { provider: policy.provider, model: policy.model, thinkingLevel: policy.thinkingLevel },
       ...(policy.fallback ? [policy.fallback] : []),
@@ -1388,18 +1397,17 @@ async function visionJson(
     const chained = await runVisionProviderChain({
       routes,
       purpose: policy.purpose,
-      gatewayBudgetMs: visionGatewayBudgetMs(),
+      gatewayBudgetMs: visionGatewayBudgetMs(policy.purpose),
       invoke: async (route, timeoutMs) => {
-        // Product-truth hops already fail over Muse → Luna → Terra → Gemini.
-        // A same-route retry would reuse the full hop timeout and starve later
-        // providers. QA still retries once, sharing the remaining hop budget.
+        // Product-truth hops already fail over Gemini → Luna → Muse inside the
+        // 60s Studio invoke window. A same-route retry would starve later hops.
         if (policy.purpose === "product_truth") {
           return await invokeVisionRoute(policy, route, parts, timeoutMs);
         }
         const hopStarted = Date.now();
         for (let attempt = 1; attempt <= 2; attempt += 1) {
           const remainingMs = Math.max(0, timeoutMs - (Date.now() - hopStarted));
-          if (remainingMs < 8_000) {
+          if (remainingMs < VISION_HOP_MIN_MS) {
             throw Object.assign(new Error("The selected vision provider timed out."), {
               name: "TimeoutError",
             });

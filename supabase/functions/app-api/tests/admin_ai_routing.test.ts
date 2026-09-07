@@ -62,10 +62,10 @@ Deno.test("OpenAI fallback cannot keep a Gemini model id", () => {
   assertEquals(coerced.repairRequired, true);
 });
 
-Deno.test("new vision routing prefers Muse 1.3 then Luna when both are configured", () => {
+Deno.test("new vision routing prefers Gemini Flash then Luna when both are configured", () => {
   const primary = preferredConfiguredProvider(registry, "product_truth");
-  assertEquals(primary?.provider, "meta");
-  assertEquals(preferredModelId("meta", primary!.models), "muse-spark-1.3");
+  assertEquals(primary?.provider, "gemini");
+  assertEquals(preferredModelId("gemini", primary!.models), "gemini-3.8-flash");
   const fallback = preferredConfiguredProvider(registry, "product_truth", {
     exclude: primary?.provider,
     fallback: true,
