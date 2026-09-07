@@ -1001,6 +1001,7 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
 export function buildCombinedAnalysisPrompt(args: {
   skuName: string; productDetails: string; category: string; modelDirection: string; sceneDirection: string;
   referenceManifest: Array<{ number: number; role: string }>; housePreferences?: string; fashionKnowledge?: string;
+  analysisLearning?: string;
 }) {
   const manifest = args.referenceManifest.map(({ number, role }) => `IMAGE ${number}: ${role}`).join("\n");
   return `You are the visual merchandiser and shoot planner for a fashion e-commerce studio.
@@ -1103,6 +1104,9 @@ Treat this as the house taste and start from it. It ranks below product truth an
 ` : ""}${args.fashionKnowledge ? `FASHION KNOWLEDGE (SEEDED CUT/PRINT GUIDANCE, SUBORDINATE TO PRODUCT REFERENCES):
 ${args.fashionKnowledge}
 Use this only to name and measure what the current product images actually show. If the references show a different bottom cut or print, follow the images. Never use this guidance to invent farshi volume or motifs that are not visible.
+` : ""}${args.analysisLearning ? `SUCCESSFUL HOUSE PATTERNS (POSE/SCENE LANGUAGE TO REUSE, SUBORDINATE TO PRODUCT REFERENCES):
+${args.analysisLearning}
+Reuse this language for pose energy, scene continuity, and styling so you do not re-derive a five-pose system from scratch. Product references still outrank these patterns. Never let a pattern change bottom-wear cut, print, or construction.
 ` : ""}Every choice is a styling addition only: it must never be treated as part of the garment, must never hide, replace or contradict a detail from the product references, and must never contradict detailPlacementMap or absenceConstraints. When the product references already show footwear or accessories that ship with the product, keep those and say so rather than replacing them.
 
 Accessory styling suggestion: look at what footwear and accessories (if any) the product references actually show. If the product's own footwear/bag/accessories are missing, incomplete, or would not read well on camera, propose ONE tasteful, trend-right, Gen-Z-appropriate addition (for example a specific footwear style or a small bag) in creativeDirection.suggestedAccessories, described specifically enough for a stylist to execute identically across all five poses. Only suggest an addition when it genuinely fits the pose plan and category - if the product references already show adequate footwear/accessories, or nothing suits the shot, leave creativeDirection.suggestedAccessories empty. This is a styling addition only: it must never be treated as part of the garment, and it must never contradict detailPlacementMap or absenceConstraints.

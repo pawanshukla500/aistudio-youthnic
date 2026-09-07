@@ -5,7 +5,11 @@ import {
   classifyVisionProviderFailure,
   DEFAULT_IMAGE_GENERATION_ROUTE,
   defaultImageGenerationRoute,
+  defaultThinkingLevel,
+  FAST_PRODUCT_TRUTH_ROUTE,
   normalizeAiModelRoute,
+  preferFastProductTruthRoute,
+  shouldRetrySameVisionRoute,
   validateAiModelRoute,
 } from "../lib/aiModelPolicy.ts";
 
@@ -199,6 +203,68 @@ Deno.test("transient provider failures may retry/fallback, but invalid product i
   assertEquals(invalid.retryable, false);
   assertEquals(invalid.fallbackEligible, false);
   assert(invalid.message.includes("invalid or unsupported"));
+});
+
+Deno.test("abort and truncated JSON are timeout/incomplete so Flash fallback can run", () => {
+  const aborted = classifyVisionProviderFailure("openai", {
+    name: "TimeoutError",
+    message: "The signal has been aborted",
+  });
+  assertEquals(aborted.code, "provider_timeout");
+  assertEquals(aborted.retryable, true);
+  assertEquals(aborted.fallbackEligible, true);
+  assertEquals(shouldRetrySameVisionRoute(aborted), false);
+
+  const truncated = classifyVisionProviderFailure("openai", {
+    message: "Unexpected token E in JSON at position 0",
+  });
+  assertEquals(truncated.code, "provider_incomplete_response");
+  assertEquals(truncated.fallbackEligible, true);
+  assertEquals(shouldRetrySameVisionRoute(truncated), false);
+
+  const emptyJson = classifyVisionProviderFailure("openai", {
+    status: 422,
+    message: "openai returned no structured visual response.",
+  });
+  assertEquals(emptyJson.code, "provider_incomplete_response");
+  assertEquals(emptyJson.fallbackEligible, true);
+});
+
+Deno.test("product-truth defaults to fast thinking and reroutes slow GPT to Gemini Flash", () => {
+  assertEquals(
+    defaultThinkingLevel({ provider: "openai" }, "product_truth", {
+      strictJson: true,
+    }),
+    "low",
+  );
+  assertEquals(
+    normalizeAiModelRoute(
+      { provider: "openai", model: "gpt-5.6-sol" },
+      "product_truth",
+      { strictJson: true },
+    ),
+    { provider: "openai", model: "gpt-5.6-sol", thinkingLevel: "low" },
+  );
+  const preferred = preferFastProductTruthRoute({
+    provider: "openai",
+    model: "gpt-5.6-sol",
+    thinkingLevel: "high",
+  });
+  assertEquals(preferred.rerouted, true);
+  assertEquals(preferred.route, FAST_PRODUCT_TRUTH_ROUTE);
+  assertEquals(preferred.fallback, {
+    provider: "openai",
+    model: "gpt-5.6-sol",
+    thinkingLevel: "high",
+  });
+  assertEquals(
+    preferFastProductTruthRoute({
+      provider: "gemini",
+      model: "gemini-3.8-flash",
+      thinkingLevel: "medium",
+    }).rerouted,
+    false,
+  );
 });
 
 Deno.test("Gemini 3.8 Flash and Gemini 3.1 Pro are approved for visual analysis and QA", () => {

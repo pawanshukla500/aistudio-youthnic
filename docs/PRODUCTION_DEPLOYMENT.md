@@ -9,8 +9,44 @@ Apply migrations and deploy the Edge API with an account that has access to proj
 ```powershell
 npx supabase link --project-ref cyygmyiqgdzgeoayxbro
 npx supabase db push
-npx supabase functions deploy app-api --project-ref cyygmyiqgdzgeoayxbro
+npx supabase functions deploy app-api --project-ref cyygmyiqgdzgeoayxbro --use-api
 ```
+
+Deploy **from this repository checkout only**. Never deploy a one-line
+`import "https://raw.githubusercontent.com/..."` stub as `app-api`. A previous
+MCP deploy left version 142 in that state; Studio analyze then fails before it
+can reach Gemini/OpenAI. GitHub Actions already deploys with `--use-api` from
+the `main` tree. After merge, confirm the live function source is the full
+`supabase/functions/app-api/index.ts` bundle, not a GitHub URL redirect.
+
+### Recommended Product Truth policy (order2 / `cyygmyiqgdzgeoayxbro`)
+
+Analysis/planning is a vision job. Slow GPT-5.6 high-reasoning routes time out
+inside the Edge Function and used to surface as "The vision provider could not
+complete this request" without falling back. This release reroutes slow OpenAI
+product-truth policies to Gemini 3.8 Flash at runtime when `GEMINI_API_KEY` is
+present. To persist the fast route in Administration (and in `ai_runs`), apply:
+
+```sql
+-- Product truth + pose planning: Gemini Flash primary, Gemini 3.6 Flash fallback.
+-- Replace the organization_id if this workspace is not the VB Export org.
+update public.organization_ai_model_policies
+set
+  primary_provider = 'gemini',
+  primary_model = 'gemini-3.8-flash',
+  primary_reasoning = 'medium',
+  fallback_enabled = true,
+  fallback_provider = 'gemini',
+  fallback_model = 'gemini-3.6-flash',
+  fallback_reasoning = 'medium',
+  revision = revision + 1,
+  updated_at = now()
+where purpose = 'product_truth';
+```
+
+Leave `image_generation` on an approved OpenAI GPT Image model. Do not put
+secrets in SQL or in the repo. `GEMINI_API_KEY` must remain set on the Edge
+Function for this route.
 
 Configure server-only Edge secrets. Never add their values to Vite variables or GitHub build arguments.
 

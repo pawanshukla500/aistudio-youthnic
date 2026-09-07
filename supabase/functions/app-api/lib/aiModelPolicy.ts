@@ -191,11 +191,69 @@ export function defaultThinkingLevel(
   options: AiRouteValidationOptions = {},
 ): AiThinkingLevel {
   const allowed = allowedThinkingLevels(route, purpose, options);
-  if (purpose === "image_generation" || allowed.includes("none")) return "none";
+  if (purpose === "image_generation") return "none";
+  // Product-truth analysis is a large structured vision call. Default OpenAI
+  // thinking to low so a missing org reasoning value cannot silently select
+  // high/xhigh (or none) and miss the Edge timeout. Gemini keeps medium.
+  if (purpose === "product_truth") {
+    const provider = text(route.provider);
+    if (provider === "openai" && allowed.includes("low")) return "low";
+    if (allowed.includes("medium")) return "medium";
+  }
+  if (allowed.includes("none")) return "none";
   if (purpose === "qa") {
     return allowed.includes("medium") ? "medium" : allowed[0];
   }
   return allowed.includes("high") ? "high" : allowed[0];
+}
+
+/**
+ * Gemini 3.8 Flash is the approved fast path for Product Truth / pose planning.
+ * Slow OpenAI reasoning models remain allowed, but analysis should not wait on
+ * them when a reviewed Flash route can do the visual work.
+ */
+export const FAST_PRODUCT_TRUTH_ROUTE = {
+  provider: "gemini",
+  model: "gemini-3.8-flash",
+  thinkingLevel: "medium",
+} as const satisfies NormalizedAiModelRoute;
+
+const FAST_OPENAI_THINKING: readonly AiThinkingLevel[] = ["none", "low"];
+
+export function isSlowReasoningVisionRoute(route: Pick<NormalizedAiModelRoute, "provider" | "thinkingLevel">) {
+  return route.provider === "openai" &&
+    !FAST_OPENAI_THINKING.includes(route.thinkingLevel);
+}
+
+export type FastProductTruthPreference = {
+  route: NormalizedAiModelRoute;
+  fallback?: NormalizedAiModelRoute;
+  rerouted: boolean;
+};
+
+/**
+ * Prefer a fast vision model for product-truth analysis when the stored primary
+ * is a slow OpenAI reasoning route. The original route is preserved as fallback
+ * so a Flash outage can still use the configured GPT model.
+ */
+export function preferFastProductTruthRoute(
+  primary: NormalizedAiModelRoute,
+  existingFallback?: NormalizedAiModelRoute,
+): FastProductTruthPreference {
+  if (!isSlowReasoningVisionRoute(primary)) {
+    return { route: primary, fallback: existingFallback, rerouted: false };
+  }
+  const fast = assertAllowedAiModelRoute(
+    FAST_PRODUCT_TRUTH_ROUTE,
+    "product_truth",
+    { strictJson: true },
+  );
+  const fallback = existingFallback &&
+      (existingFallback.provider !== fast.provider ||
+        existingFallback.model !== fast.model)
+    ? existingFallback
+    : primary;
+  return { route: fast, fallback, rerouted: true };
 }
 
 /**
@@ -320,6 +378,7 @@ export type VisionProviderFailure = {
     | "provider_timeout"
     | "provider_authentication_failed"
     | "provider_invalid_request"
+    | "provider_incomplete_response"
     | "provider_request_failed";
   status: number | null;
   retryable: boolean;
@@ -338,6 +397,15 @@ function failureText(input: ProviderFailureInput) {
   return [input.message, input.code, input.name].map(text).filter(Boolean).join(
     " ",
   ).toLowerCase();
+}
+
+function isAbortLike(input: ProviderFailureInput) {
+  const name = text(input.name).toLowerCase();
+  const detail = failureText(input);
+  return name === "timeouterror" || name === "aborterror" ||
+    name === "domexception" && /abort|timeout/.test(detail) ||
+    /the signal has been aborted|operation was aborted|aborterror|timeouterror/
+      .test(detail);
 }
 
 function failure(
@@ -381,7 +449,7 @@ export function classifyVisionProviderFailure(
   const invalidInput =
     /invalid\s+(?:argument|input|request)|malformed|unsupported\s+(?:image|media|mime|model)|schema\s+(?:invalid|error)|safety\s+(?:blocked|violation)|content\s+policy/
       .test(detail);
-  if (invalidInput || [400, 404, 409, 413, 415, 422].includes(status || 0)) {
+  if (invalidInput || [400, 404, 409, 413, 415].includes(status || 0)) {
     return failure(
       provider,
       "provider_invalid_request",
@@ -422,6 +490,7 @@ export function classifyVisionProviderFailure(
 
   if (
     [408, 504].includes(status || 0) ||
+    isAbortLike(input) ||
     /timeout|timed\s*out|deadline\s+exceeded/.test(detail)
   ) {
     return failure(
@@ -431,6 +500,20 @@ export function classifyVisionProviderFailure(
       true,
       true,
       "The selected vision provider timed out. The request can retry or use a configured fallback.",
+    );
+  }
+
+  if (
+    /unexpected token|invalid json|json parse|not valid json|incomplete json|invalid object|returned an invalid object|no structured (?:visual )?response/
+      .test(detail)
+  ) {
+    return failure(
+      provider,
+      "provider_incomplete_response",
+      status,
+      true,
+      true,
+      "The vision provider returned an incomplete response. The request can retry or use a configured fallback.",
     );
   }
 
@@ -463,4 +546,17 @@ export function canFallbackFromVisionFailure(
   failure: VisionProviderFailure | null | undefined,
 ) {
   return Boolean(failure?.fallbackEligible);
+}
+
+/**
+ * Timeouts and truncated JSON should fail over immediately. Retrying the same
+ * slow GPT reasoning call usually burns the Edge/gateway budget before Flash
+ * can run.
+ */
+export function shouldRetrySameVisionRoute(
+  failure: VisionProviderFailure | null | undefined,
+) {
+  if (!failure?.retryable) return false;
+  return failure.code !== "provider_timeout" &&
+    failure.code !== "provider_incomplete_response";
 }

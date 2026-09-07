@@ -152,9 +152,6 @@ export function Studio() {
       references: allReferences.map((reference) => ({
         id: reference.id,
         role: reference.role,
-        name: reference.file.name,
-        size: reference.file.size,
-        modified: reference.file.lastModified,
       })),
       skuId: effectiveSkuId,
       skuName: effectiveSkuName,
