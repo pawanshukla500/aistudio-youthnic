@@ -287,8 +287,9 @@ export const VISION_ROUTE_PROMOTION_THRESHOLD = 4;
 
 /**
  * Studio product-truth hops: Gemini Flash first (proven ~27s completions),
- * Luna, then Muse last at ≤25s. Stored Muse primaries are still attempted,
- * never as a 50s first hop. Terra/Sol are omitted from default hops.
+ * Luna, then Muse last at ≤25s. Stored Muse/Terra primaries are still
+ * attempted after that, never as a 50s first hop. Sol is omitted — it is
+ * not used for this workload.
  */
 export const PRODUCT_TRUTH_FAILOVER_CHAIN: readonly NormalizedAiModelRoute[] = [
   FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
@@ -327,8 +328,9 @@ export function withFastProductTruthThinking(
 }
 
 function isOmittedProductTruthHop(route: Pick<NormalizedAiModelRoute, "model">) {
-  const model = text(route.model);
-  return model === "gpt-5.6-sol" || model === "gpt-5.6-terra";
+  // Sol is never a product-truth hop (expensive reasoning). Terra is allowed
+  // only as a stored primary/fallback appended after Gemini → Luna → Muse.
+  return text(route.model) === "gpt-5.6-sol";
 }
 
 export function isSlowProductTruthHop(

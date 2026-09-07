@@ -528,6 +528,19 @@ Deno.test("product-truth failover is Gemini Flash then Luna then Muse last", () 
       "gemini:gemini-3.8-flash",
       "openai:gpt-5.6-luna",
       "meta:muse-spark-1.3",
+      "openai:gpt-5.6-terra",
+    ],
+  );
+  assertEquals(
+    productTruthRouteChain({
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      thinkingLevel: "low",
+    }).map((route) => `${route.provider}:${route.model}`),
+    [
+      "gemini:gemini-3.8-flash",
+      "openai:gpt-5.6-luna",
+      "meta:muse-spark-1.3",
     ],
   );
 });
