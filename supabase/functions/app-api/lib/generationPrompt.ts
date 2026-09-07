@@ -207,6 +207,12 @@ function compactOptionalPromptContent(prompt: string) {
     ["\n\nPROMPT:"],
     600,
   );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nFASHION KNOWLEDGE (SEEDED CUT/PRINT GUIDANCE, SUBORDINATE TO PRODUCT REFERENCES):\n",
+    ["\nCONTINUOUS LEARNING ADVISORY (APPROVED, REFERENCE-SCOPED GUIDANCE):", "\n\nPROMPT:"],
+    700,
+  );
   return compacted;
 }
 
@@ -276,7 +282,7 @@ function poseCategoryRules(category: string) {
 
 export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
-  session: JsonRecord; references: PromptReference[]; correction?: string; learnings?: string;
+  session: JsonRecord; references: PromptReference[]; correction?: string; learnings?: string; fashionKnowledge?: string;
 }) {
   const product = objectValue(args.session.productIdentity);
   const creative = objectValue(args.session.creativeDirection);
@@ -331,6 +337,7 @@ export function composeGenerationPrompt(args: {
   ];
   const correction = boundedText(args.correction, 1_200);
   const learnings = boundedText(args.learnings, 900);
+  const fashionKnowledge = boundedText(args.fashionKnowledge, 700);
   const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).join(", ");
   const visibilityRules = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
   const poseCategory = detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || ""));
@@ -474,6 +481,11 @@ ${correction ? `
 CORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:
 ${correction}
 - Address this correction completely and literally. Do not change anything else that was working.` : ""}
+${fashionKnowledge ? `
+FASHION KNOWLEDGE (SEEDED CUT/PRINT GUIDANCE, SUBORDINATE TO PRODUCT REFERENCES):
+${fashionKnowledge}
+- Valid only when the current product references confirm this bottom garment. Product references ALWAYS override this guidance.
+` : ""}
 ${learnings ? `
 CONTINUOUS LEARNING ADVISORY (APPROVED, REFERENCE-SCOPED GUIDANCE):
 ${learnings}

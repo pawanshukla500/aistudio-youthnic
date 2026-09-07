@@ -457,12 +457,14 @@ Deno.test("composeGenerationPrompt treats a dedicated bottom reference as print 
       },
     },
     references: [{ role: "front" }, { role: "fabric_pattern" }, { role: "bottom" }],
+    fashionKnowledge: "- Farshi pajama keeps two distinct legs and large gold florals from the bottom reference.",
   });
 
   assertStringIncludes(prompt, "BOTTOM WEAR / FARSHI");
   assertStringIncludes(prompt, "pixel-level authority for bottom-wear cut, volume, hem, fabric color, and print");
   assertStringIncludes(prompt, "FABRIC / PATTERN DETAIL image is the pixel-level authority for UPPER-garment");
   assertStringIncludes(prompt, "STRICTLY FORBIDDEN from rendering the bottoms as solid/undecorated color, as faint dots/speckles");
+  assertStringIncludes(prompt, "FASHION KNOWLEDGE (SEEDED CUT/PRINT GUIDANCE, SUBORDINATE TO PRODUCT REFERENCES):");
   assertEquals(prompt.includes("If the bottom wear is Farshi / Farshi Pajama, palazzo, or wide-leg pants"), false);
 });
 
