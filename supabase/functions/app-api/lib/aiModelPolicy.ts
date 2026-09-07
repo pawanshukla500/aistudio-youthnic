@@ -235,10 +235,9 @@ export function defaultThinkingLevel(
 }
 
 /**
- * Muse Spark 1.3 Standard is the approved fast product-truth route. Slow OpenAI
- * Sol/Terra-high reasoning remains allowed, but analysis should not wait on it
- * when Muse (or Gemini Flash) can do the visual work. Luna is the cheap OpenAI
- * fallback — never Sol.
+ * Gemini 3.8 Flash is the Studio analyze primary: live multi-image completions
+ * average ~27s. Muse Spark remains allowed and is attempted last at ≤25s.
+ * Luna is the cheap OpenAI fallback — never Sol.
  */
 export const FAST_PRODUCT_TRUTH_ROUTE = {
   provider: "meta",
@@ -265,29 +264,36 @@ export const OPENAI_TERRA_VISION_ROUTE = {
 } as const satisfies NormalizedAiModelRoute;
 
 /**
- * Multi-image product-truth JSON routinely needs 30–40s (Gemini Flash completions
- * on production were often 30–37s). A 28s abort killed those and then burned a
- * second 28s on Luna, which is why Studio showed a timeout at ~60s with only the
- * last hop recorded.
+ * Studio Analyze uses `supabase.functions.invoke("app-api")`. Without an
+ * explicit client timeout the browser/SDK aborts around 55–60s, which kills
+ * the Edge isolate right after a ~50s Muse hop — so hop 2 never starts and
+ * `ai_runs` shows only Muse `attempt_number=1` at ~50011ms.
+ *
+ * The Studio client now waits `STUDIO_ANALYZE_TIMEOUT_MS` (140s), matching
+ * `VISION_GATEWAY_BUDGET_MS`. Product-truth still must not give Muse a 50s
+ * first hop: Gemini Flash (~27s live) runs first, Muse is capped at 25s and
+ * runs last so a Muse-first org policy cannot brick Analyze.
  */
-export const PRODUCT_TRUTH_TIMEOUT_MS = 50_000;
+export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
+export const STUDIO_INVOKE_BUDGET_MS = STUDIO_ANALYZE_TIMEOUT_MS;
+export const PRODUCT_TRUTH_TIMEOUT_MS = 40_000;
+export const PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS = 25_000;
 export const VISION_PROVIDER_TIMEOUT_MS = 50_000;
 export const VISION_GATEWAY_BUDGET_MS = 145_000;
-export const VISION_GATEWAY_RESERVE_MS = 8_000;
-export const PRODUCT_TRUTH_MIN_SLICE_MS = 12_000;
+export const VISION_GATEWAY_RESERVE_MS = 5_000;
+export const PRODUCT_TRUTH_MIN_SLICE_MS = 10_000;
+export const VISION_HOP_MIN_MS = 8_000;
 export const VISION_ROUTE_PROMOTION_THRESHOLD = 4;
 
 /**
- * Remaining hops after the selected primary. Order is Luna → Terra → Gemini
- * Flash → Muse so a Muse primary becomes Muse → Luna → Terra → Gemini, and a
- * Gemini primary (interim Studio policy) still fails over to Luna then Terra.
- * A stored fallback that is not already in this chain is appended last so it
- * cannot consume hop budget before Terra/Gemini.
+ * Studio product-truth hops: Gemini Flash first (proven ~27s completions),
+ * Luna, then Muse last at ≤25s. Stored Muse/Terra primaries are still
+ * attempted after that, never as a 50s first hop. Sol is omitted — it is
+ * not used for this workload.
  */
 export const PRODUCT_TRUTH_FAILOVER_CHAIN: readonly NormalizedAiModelRoute[] = [
-  CHEAP_OPENAI_VISION_ROUTE,
-  OPENAI_TERRA_VISION_ROUTE,
   FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+  CHEAP_OPENAI_VISION_ROUTE,
   FAST_PRODUCT_TRUTH_ROUTE,
 ];
 
@@ -321,6 +327,42 @@ export function withFastProductTruthThinking(
   return { ...route, thinkingLevel: clampProductTruthThinking(route) };
 }
 
+function isOmittedProductTruthHop(route: Pick<NormalizedAiModelRoute, "model">) {
+  // Sol is never a product-truth hop (expensive reasoning). Terra is allowed
+  // only as a stored primary/fallback appended after Gemini → Luna → Muse.
+  return text(route.model) === "gpt-5.6-sol";
+}
+
+export function isSlowProductTruthHop(
+  route?: Pick<NormalizedAiModelRoute, "provider" | "model"> | null,
+) {
+  if (!route) return false;
+  const model = text(route.model);
+  return route.provider === "meta" ||
+    model.includes("muse-spark") ||
+    model.includes("terra") ||
+    model.includes("sol");
+}
+
+export function productTruthHopTimeoutMs(
+  route?: Pick<NormalizedAiModelRoute, "provider" | "model"> | null,
+) {
+  if (isSlowProductTruthHop(route)) return PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS;
+  return PRODUCT_TRUTH_TIMEOUT_MS;
+}
+
+/**
+ * Cap product-truth at the Studio client wait even when
+ * `VISION_GATEWAY_BUDGET_MS` is 145s. Returning after the client has
+ * disconnected still drops hop 2.
+ */
+export function productTruthGatewayBudgetMs(configured?: number) {
+  const value = Number.isFinite(configured) && (configured as number) >= 20_000
+    ? Math.round(configured as number)
+    : VISION_GATEWAY_BUDGET_MS;
+  return Math.min(value, STUDIO_INVOKE_BUDGET_MS);
+}
+
 export function productTruthRouteChain(
   primary: NormalizedAiModelRoute,
   existingFallback?: NormalizedAiModelRoute,
@@ -329,15 +371,17 @@ export function productTruthRouteChain(
   const seen = new Set<string>();
   const push = (route?: NormalizedAiModelRoute | null) => {
     if (!route) return;
-    if (text(route.model) === "gpt-5.6-sol") return;
+    if (isOmittedProductTruthHop(route)) return;
     const next = withFastProductTruthThinking(route);
     const key = routeKey(next);
     if (seen.has(key)) return;
     seen.add(key);
     chain.push(next);
   };
-  push(primary);
+  // Gemini Flash first regardless of stored Muse/Luna primary so a 50s Muse
+  // hop cannot consume the client wait (or a leftover 60s gateway).
   for (const hop of PRODUCT_TRUTH_FAILOVER_CHAIN) push(hop);
+  push(primary);
   push(existingFallback);
   return chain;
 }
@@ -377,16 +421,22 @@ export function remainingVisionTimeoutMs(args: {
   elapsedMs: number;
   gatewayBudgetMs: number;
   preferredTimeoutMs?: number;
+  route?: Pick<NormalizedAiModelRoute, "provider" | "model">;
 }): number {
   const preferred = args.preferredTimeoutMs ??
     (args.purpose === "product_truth"
-      ? PRODUCT_TRUTH_TIMEOUT_MS
+      ? productTruthHopTimeoutMs(args.route)
       : VISION_PROVIDER_TIMEOUT_MS);
   const remainingWall = Math.max(
     0,
     args.gatewayBudgetMs - args.elapsedMs - VISION_GATEWAY_RESERVE_MS,
   );
   if (remainingWall <= 0) return 0;
+  // Product-truth Studio client now waits 140s. Do not starve Gemini to reserve
+  // slices for later hops — later hops only run if this one fails fast.
+  if (args.purpose === "product_truth") {
+    return Math.min(preferred, remainingWall);
+  }
   if (args.remainingRouteCount <= 1) return Math.min(preferred, remainingWall);
   const reservedForLater = PRODUCT_TRUTH_MIN_SLICE_MS *
     Math.max(0, args.remainingRouteCount - 1);
@@ -447,7 +497,7 @@ export async function runVisionProviderChain<T>(args: {
   now?: () => number;
   /**
    * Fired after each hop is finished, before the next hop starts. Studio uses
-   * this to persist Muse/Luna failures immediately so a later 60s abort still
+   * this to persist Muse/Luna failures immediately so a later abort still
    * leaves Meta rows in `ai_runs`.
    */
   onAttempt?: (attempt: VisionHopAttempt) => Promise<void> | void;
@@ -478,9 +528,10 @@ export async function runVisionProviderChain<T>(args: {
       remainingRouteCount: args.routes.length - index,
       elapsedMs: now() - started,
       gatewayBudgetMs: args.gatewayBudgetMs,
+      route,
     });
     const hopStarted = now();
-    if (timeoutMs < 8_000) {
+    if (timeoutMs < VISION_HOP_MIN_MS) {
       lastFailure = classifyVisionProviderFailure(route.provider as AiProvider, {
         name: "TimeoutError",
         message: "The selected vision provider timed out.",
@@ -656,9 +707,10 @@ export type FastProductTruthPreference = {
 };
 
 /**
- * Prefer a fast vision model for product-truth analysis when the stored primary
- * is a slow OpenAI reasoning route. Expensive Sol is never kept as fallback;
- * Luna is the cheap OpenAI option.
+ * Prefer Gemini Flash for product-truth analysis when the stored primary is a
+ * slow OpenAI reasoning route. Expensive Sol is never kept as fallback; Luna is
+ * the cheap OpenAI option. Gemini first plus a 140s client wait keeps Analyze
+ * from dying on a Muse-first org policy.
  */
 export function preferFastProductTruthRoute(
   primary: NormalizedAiModelRoute,
@@ -668,7 +720,7 @@ export function preferFastProductTruthRoute(
     return { route: primary, fallback: existingFallback, rerouted: false };
   }
   const fast = assertAllowedAiModelRoute(
-    FAST_PRODUCT_TRUTH_ROUTE,
+    FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
     "product_truth",
     { strictJson: true },
   );
