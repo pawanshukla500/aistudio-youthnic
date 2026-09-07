@@ -117,13 +117,21 @@ Deno.test("Catalog legacy rows without a canonical pointer use the newest direct
   assertEquals(selectReferences(references, [], "back", "saree").map((reference) => reference.id), ["new-legacy-back"]);
 });
 
-Deno.test("Pose 1 cannot become a saree anchor before strict verification", () => {
+Deno.test("Pose 1 anchor eligibility handles verification and unverified default mode", () => {
   assertEquals(canUsePoseOneAnchor("saree", "requires_human_review"), false);
   assertEquals(canUsePoseOneAnchor("saree", "unverified"), false);
+  assertEquals(canUsePoseOneAnchor("saree", "unverified", true), false);
+  assertEquals(canUsePoseOneAnchor("saree", "unverified", false), true);
   assertEquals(canUsePoseOneAnchor("saree", "rejected_by_qa"), false);
   assertEquals(canUsePoseOneAnchor("saree", "automatically_verified"), true);
   assertEquals(canUsePoseOneAnchor("saree", "human_approved"), true);
   assertEquals(canUsePoseOneAnchor("dress", "passed"), true);
+  assertEquals(canUsePoseOneAnchor("dress", "unverified"), true);
+  assertEquals(canUsePoseOneAnchor("dress", "unverified", false), true);
+  assertEquals(canUsePoseOneAnchor("box shirt", "unverified"), true);
+  assertEquals(canUsePoseOneAnchor("", "unverified"), true);
+  assertEquals(canUsePoseOneAnchor("dress", "rejected_by_qa"), false);
+  assertEquals(canUsePoseOneAnchor("dress", "failed"), false);
 });
 
 Deno.test("full-body selection ranks dedicated bottom-wear evidence ahead of upper fabric close-ups", () => {
