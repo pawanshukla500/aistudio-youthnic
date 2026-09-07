@@ -110,7 +110,7 @@ const VISION_PURPOSES: readonly AiModelPurpose[] = [
   "qa_escalation",
 ];
 
-const GEMINI_THINKING: readonly AiThinkingLevel[] = ["medium", "high"];
+const GEMINI_THINKING: readonly AiThinkingLevel[] = ["low", "medium", "high"];
 const OPENAI_THINKING: readonly AiThinkingLevel[] = [
   "none",
   "low",
@@ -193,11 +193,12 @@ export function defaultThinkingLevel(
   const allowed = allowedThinkingLevels(route, purpose, options);
   if (purpose === "image_generation") return "none";
   // Product-truth analysis is a large structured vision call. Default OpenAI
-  // thinking to low so a missing org reasoning value cannot silently select
-  // high/xhigh (or none) and miss the Edge timeout. Gemini keeps medium.
+  // and Gemini Flash thinking to low so a missing org reasoning value cannot
+  // silently select high/medium and miss the Edge timeout.
   if (purpose === "product_truth") {
     const provider = text(route.provider);
     if (provider === "openai" && allowed.includes("low")) return "low";
+    if (allowed.includes("low")) return "low";
     if (allowed.includes("medium")) return "medium";
   }
   if (allowed.includes("none")) return "none";
@@ -215,7 +216,7 @@ export function defaultThinkingLevel(
 export const FAST_PRODUCT_TRUTH_ROUTE = {
   provider: "gemini",
   model: "gemini-3.8-flash",
-  thinkingLevel: "medium",
+  thinkingLevel: "low",
 } as const satisfies NormalizedAiModelRoute;
 
 const FAST_OPENAI_THINKING: readonly AiThinkingLevel[] = ["none", "low"];
@@ -254,6 +255,22 @@ export function preferFastProductTruthRoute(
     ? existingFallback
     : primary;
   return { route: fast, fallback, rerouted: true };
+}
+
+const GEMINI_FLASH_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash"] as const;
+
+/**
+ * Gemini 3.8 Flash supports thinking levels low/medium/high. Product-truth
+ * planning is a large multimodal JSON call; high/medium reasoning is what made
+ * Flash feel like a slow GPT job. Flash stays on low for analysis. Pro models
+ * keep the stored thinking level.
+ */
+export function preferFastProductTruthThinking(route: NormalizedAiModelRoute): AiThinkingLevel {
+  if (route.provider !== "gemini") return route.thinkingLevel;
+  if (!GEMINI_FLASH_MODELS.includes(route.model as typeof GEMINI_FLASH_MODELS[number])) {
+    return route.thinkingLevel;
+  }
+  return "low";
 }
 
 /**
@@ -462,7 +479,7 @@ export function classifyVisionProviderFailure(
 
   if (
     [401, 403].includes(status || 0) ||
-    /invalid[_\s-]*(?:api\s*)?key|unauthori[sz]ed|forbidden|authentication/
+    /invalid[_\s-]*(?:api\s*)?key|unauthori[sz]ed|forbidden|authentication|is not configured in the supabase edge function/
       .test(detail)
   ) {
     return failure(

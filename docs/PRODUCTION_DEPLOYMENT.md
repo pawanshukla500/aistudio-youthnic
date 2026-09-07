@@ -13,40 +13,54 @@ npx supabase functions deploy app-api --project-ref cyygmyiqgdzgeoayxbro --use-a
 ```
 
 Deploy **from this repository checkout only**. Never deploy a one-line
-`import "https://raw.githubusercontent.com/..."` stub as `app-api`. A previous
-MCP deploy left version 142 in that state; Studio analyze then fails before it
-can reach Gemini/OpenAI. GitHub Actions already deploys with `--use-api` from
-the `main` tree. After merge, confirm the live function source is the full
-`supabase/functions/app-api/index.ts` bundle, not a GitHub URL redirect.
+`import "https://raw.githubusercontent.com/..."` stub as `app-api`. Production
+`app-api` v142 was left in that state by a bad MCP deploy; Studio analyze then
+fails before it can reach Gemini. Restore by deploying this repo's
+`supabase/functions/app-api` bundle (GitHub Actions does this on merge to
+`main` with `--use-api`). After deploy, in the Supabase dashboard open Edge
+Function `app-api` and confirm the source is the multi-file bundle, not a
+GitHub URL redirect. Do not ship another GitHub-URL stub entrypoint.
 
-### Recommended Product Truth policy (order2 / `cyygmyiqgdzgeoayxbro`)
+### Live Product Truth policy (order2 / `cyygmyiqgdzgeoayxbro`)
 
-Analysis/planning is a vision job. Slow GPT-5.6 high-reasoning routes time out
-inside the Edge Function and used to surface as "The vision provider could not
-complete this request" without falling back. This release reroutes slow OpenAI
-product-truth policies to Gemini 3.8 Flash at runtime when `GEMINI_API_KEY` is
-present. To persist the fast route in Administration (and in `ai_runs`), apply:
+Studio analyze/plan **honors** `organization_ai_model_policies` purpose
+`product_truth`. It does not call OpenAI GPT for garment analysis when that
+row is Gemini. Live routing as of 2026-09-07:
+
+| purpose | primary | fallback |
+| --- | --- | --- |
+| `product_truth` (analyze + pose plan) | `gemini` / `gemini-3.8-flash` | `gemini-3.6-flash` |
+| `qa` | `gemini` / `gemini-3.8-flash` | `gemini-3.6-flash` |
+| `image_generation` (paid poses) | `openai` / `gpt-image-2` | none |
+
+`gemini-3.8-flash` is a valid Google Generative Language API model id (GA).
+The generateContent call uses `generationConfig.thinkingConfig.thinkingLevel`.
+GPT Image 2 in Output settings is **image generation only**; the collapsed
+Studio label previously said "Organization image model", which made analysis
+look like GPT.
+
+If analysis still feels slow on Flash, it is the combined vision+plan prompt
+plus medium/high thinking — not a hidden GPT route. This release keeps Flash
+on thinking `low` for product-truth. Optional persist in Administration:
 
 ```sql
--- Product truth + pose planning: Gemini Flash primary, Gemini 3.6 Flash fallback.
--- Replace the organization_id if this workspace is not the VB Export org.
+-- Optional: persist Flash thinking=low for product_truth (already Gemini).
+-- Skip if the live row is already gemini-3.8-flash / gemini-3.6-flash.
 update public.organization_ai_model_policies
 set
-  primary_provider = 'gemini',
-  primary_model = 'gemini-3.8-flash',
-  primary_reasoning = 'medium',
-  fallback_enabled = true,
-  fallback_provider = 'gemini',
-  fallback_model = 'gemini-3.6-flash',
-  fallback_reasoning = 'medium',
+  primary_reasoning = 'low',
+  fallback_reasoning = 'low',
   revision = revision + 1,
   updated_at = now()
-where purpose = 'product_truth';
+where purpose = 'product_truth'
+  and primary_provider = 'gemini'
+  and primary_model = 'gemini-3.8-flash';
 ```
 
-Leave `image_generation` on an approved OpenAI GPT Image model. Do not put
-secrets in SQL or in the repo. `GEMINI_API_KEY` must remain set on the Edge
-Function for this route.
+Leave `image_generation` on `gpt-image-2`. Do not put secrets in SQL or in
+the repo. `GEMINI_API_KEY` must remain set on the Edge Function.
+Query `ai_runs` (`run_kind = 'product_reference_analysis'`) after a Studio
+Analyze to confirm `provider`/`model` are Gemini, not OpenAI.
 
 Configure server-only Edge secrets. Never add their values to Vite variables or GitHub build arguments.
 

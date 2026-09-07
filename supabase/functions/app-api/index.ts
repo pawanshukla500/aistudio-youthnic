@@ -29,6 +29,7 @@ import {
   DEFAULT_IMAGE_GENERATION_ROUTE,
   defaultImageGenerationRoute,
   preferFastProductTruthRoute,
+  preferFastProductTruthThinking,
   providerSecretName,
   shouldRetrySameVisionRoute,
   type AiModelPurpose,
@@ -265,7 +266,7 @@ type GeminiPurpose = "product_truth" | "shoot_planning" | "qa" | "qa_escalation"
 type GeminiPolicy = {
   purpose: GeminiPurpose;
   model: string;
-  thinkingLevel: "high" | "medium";
+  thinkingLevel: "high" | "medium" | "low";
 };
 
 function resolveGeminiPolicy(args: { purpose: GeminiPurpose; garmentFamily?: string; uncertainty?: boolean; referenceCount?: number; }): GeminiPolicy {
@@ -362,7 +363,7 @@ function defaultVisionRoute(args: {
     return assertAllowedAiModelRoute({
       provider: "gemini",
       model: "gemini-3.8-flash",
-      thinkingLevel: "medium",
+      thinkingLevel: "low",
     }, args.purpose, { strictJson: true });
   }
   const current = resolveGeminiPolicy({
@@ -383,7 +384,7 @@ function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiMo
     return assertAllowedAiModelRoute({
       provider: "gemini",
       model: "gemini-3.6-flash",
-      thinkingLevel: "medium",
+      thinkingLevel: "low",
     }, args.purpose, { strictJson: true });
   }
   return assertAllowedAiModelRoute({
@@ -485,14 +486,16 @@ function applyFastProductTruthRouting(policy: VisionPolicy): VisionPolicy {
     model: policy.model,
     thinkingLevel: policy.thinkingLevel,
   }, policy.fallback);
-  if (!preferred.rerouted) return policy;
-  if (preferred.route.provider === "gemini" && !Deno.env.get("GEMINI_API_KEY")?.trim()) {
-    return policy;
-  }
+  const next = preferred.rerouted &&
+      !(preferred.route.provider === "gemini" && !Deno.env.get("GEMINI_API_KEY")?.trim())
+    ? { ...policy, ...preferred.route, fallback: preferred.fallback }
+    : policy;
   return {
-    ...policy,
-    ...preferred.route,
-    fallback: preferred.fallback,
+    ...next,
+    thinkingLevel: preferFastProductTruthThinking(next),
+    fallback: next.fallback
+      ? { ...next.fallback, thinkingLevel: preferFastProductTruthThinking(next.fallback) }
+      : next.fallback,
   };
 }
 
@@ -1108,7 +1111,7 @@ async function invokeVisionRoute(policy: VisionPolicy, route: NormalizedAiModelR
     const gemini = await geminiJson({
       purpose: policy.purpose,
       model: route.model,
-      thinkingLevel: route.thinkingLevel as "medium" | "high",
+      thinkingLevel: route.thinkingLevel as "medium" | "high" | "low",
     }, parts);
     return { raw: gemini.raw, text: gemini.text, json: gemini.json };
   }
@@ -1294,6 +1297,9 @@ async function analyze(request: Request, args: JsonRecord) {
       referenceHash: rHash,
       ...normalized,
       cacheHit,
+      analysisProvider: policy.provider,
+      analysisModel: policy.model,
+      analysisThinking: policy.thinkingLevel,
       requiresSareeEvidence: true,
       sareeEvidenceIssues: missingDetectedSareeEvidence,
     };
@@ -1337,7 +1343,7 @@ async function analyze(request: Request, args: JsonRecord) {
     product_hash: pHash, reference_hash: rHash, session_data: sessionData,
   });
   if (sessionError) throw new Error(sessionError.message);
-  return { sessionId, referenceIds: sessionData.referenceIds, analysisFingerprint: fingerprint, productHash: pHash, referenceHash: rHash, ...normalized, cacheHit };
+  return { sessionId, referenceIds: sessionData.referenceIds, analysisFingerprint: fingerprint, productHash: pHash, referenceHash: rHash, ...normalized, cacheHit, analysisProvider: policy.provider, analysisModel: policy.model, analysisThinking: policy.thinkingLevel };
 }
 
 function normalizeImageSize(aspectRatio: string, imageSize: string, model: string) {

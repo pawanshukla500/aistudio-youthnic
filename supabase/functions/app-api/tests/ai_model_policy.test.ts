@@ -9,6 +9,7 @@ import {
   FAST_PRODUCT_TRUTH_ROUTE,
   normalizeAiModelRoute,
   preferFastProductTruthRoute,
+  preferFastProductTruthThinking,
   shouldRetrySameVisionRoute,
   validateAiModelRoute,
 } from "../lib/aiModelPolicy.ts";
@@ -228,11 +229,23 @@ Deno.test("abort and truncated JSON are timeout/incomplete so Flash fallback can
   });
   assertEquals(emptyJson.code, "provider_incomplete_response");
   assertEquals(emptyJson.fallbackEligible, true);
+
+  const missingSecret = classifyVisionProviderFailure("gemini", {
+    message: "GEMINI_API_KEY is not configured in the Supabase Edge Function.",
+  });
+  assertEquals(missingSecret.code, "provider_authentication_failed");
+  assertEquals(missingSecret.fallbackEligible, false);
 });
 
 Deno.test("product-truth defaults to fast thinking and reroutes slow GPT to Gemini Flash", () => {
   assertEquals(
     defaultThinkingLevel({ provider: "openai" }, "product_truth", {
+      strictJson: true,
+    }),
+    "low",
+  );
+  assertEquals(
+    defaultThinkingLevel({ provider: "gemini" }, "product_truth", {
       strictJson: true,
     }),
     "low",
@@ -264,6 +277,45 @@ Deno.test("product-truth defaults to fast thinking and reroutes slow GPT to Gemi
       thinkingLevel: "medium",
     }).rerouted,
     false,
+  );
+  assertEquals(
+    preferFastProductTruthThinking({
+      provider: "gemini",
+      model: "gemini-3.8-flash",
+      thinkingLevel: "medium",
+    }),
+    "low",
+  );
+  assertEquals(
+    preferFastProductTruthThinking({
+      provider: "gemini",
+      model: "gemini-3.6-flash",
+      thinkingLevel: "high",
+    }),
+    "low",
+  );
+  assertEquals(
+    preferFastProductTruthThinking({
+      provider: "gemini",
+      model: "gemini-3.1-pro",
+      thinkingLevel: "high",
+    }),
+    "high",
+  );
+  assertEquals(
+    validateAiModelRoute({
+      provider: "gemini",
+      model: "gemini-3.8-flash",
+      thinkingLevel: "low",
+    }, "product_truth"),
+    {
+      valid: true,
+      route: {
+        provider: "gemini",
+        model: "gemini-3.8-flash",
+        thinkingLevel: "low",
+      },
+    },
   );
 });
 
