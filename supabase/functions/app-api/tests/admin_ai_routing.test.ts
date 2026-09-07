@@ -1,6 +1,5 @@
-/// <reference lib="deno.ns" />
 import { assertEquals } from "jsr:@std/assert@1";
-import { coerceAdminAiPolicy, modelsForProviderPurpose, preferredConfiguredProvider, preferredModelId, type AdminAiRegistryEntry } from "./aiRouting.ts";
+import { coerceAdminAiPolicy, modelsForProviderPurpose, preferredConfiguredProvider, preferredModelId, type AdminAiRegistryEntry } from "../../../../src/features/admin/aiRouting.ts";
 
 const registry: AdminAiRegistryEntry[] = [
   {
