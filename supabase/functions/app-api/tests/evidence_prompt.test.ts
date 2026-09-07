@@ -152,9 +152,11 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   assertEquals(prompt.includes("front-lace-construction-marker"), false);
   assertEquals(prompt.includes("front-lace-embroidery-marker"), false);
   assertStringIncludes(prompt, "BACK-POSE EVIDENCE VETO");
+  assertStringIncludes(prompt, "BACK-POSE DUPATTA & HAIR UNOBSTRUCTED RULE");
   assertStringIncludes(prompt, "REAR PRODUCT GEOMETRY LOCK");
   assertStringIncludes(prompt, "DUPATTA / SHAWL / ACCESSORY UNOBSTRUCTED VIEW");
   assertStringIncludes(prompt, "DUPATTA REAR VISIBILITY LOCK");
+  assertStringIncludes(prompt, "HAIR REAR VISIBILITY LOCK");
   assertStringIncludes(prompt, "SET & BACKDROP HARD LOCK TO APPROVED POSE 1");
   assertStringIncludes(prompt, "ZERO NEW PROPS");
   assertStringIncludes(prompt, "glances back over her shoulder");

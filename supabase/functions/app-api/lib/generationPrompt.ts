@@ -230,6 +230,7 @@ function embroideryGeometryOf(product: JsonRecord) {
 
 function detectPoseCategory(text: string) {
   const t = text.toLowerCase();
+  if (/\b(back|rear|behind|posterior)\b/.test(t) || t.includes("back view") || t.includes("true back") || t.includes("rear full")) return "back";
   if (/side|profile|lateral|three\.quarter|3\.4/.test(t)) return "side";
   if (/back|rear|behind|posterior/.test(t)) return "back";
   if (/front|hero|straight|facing/.test(t)) return "front";
@@ -340,7 +341,9 @@ export function composeGenerationPrompt(args: {
   const fashionKnowledge = boundedText(args.fashionKnowledge, 700);
   const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).join(", ");
   const visibilityRules = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
-  const poseCategory = detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || ""));
+  const poseCategory = (isTrueBack || args.pose.id === "back")
+    ? "back"
+    : detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || ""));
   const categoryRules = poseCategoryRules(poseCategory);
   const evidenceLines = promptEvidence.slice(0, 16).map((entry) => {
     const row = objectValue(entry);
@@ -407,7 +410,8 @@ CRITICAL EVIDENCE RULES:
 - If a region's state is "confirmed_absent", do not render the decoration, trim, closure, or specialized construction represented by that region.
 - If a region's state is "unknown", it MUST be rendered in plain base fabric without any unproven decoration, trim, or specialized construction. UNKNOWN DOES NOT MEAN INFER.
 - Do NOT extrapolate decoration. If trim is confirmed at the front hem but the side seam is unknown, do not extend the trim up the side.
-${isTrueBack ? "- BACK-POSE EVIDENCE VETO: only a confirmed rear region whose Source is BACK PRODUCT or SAREE REAR / BACK DRAPE may place rear construction or decoration. A front-, fabric-, pallu-, border-, blouse-, mannequin-, model-, style-, generated-, or unrecorded source cannot prove a rear lace, trim, border, closure, or motif. If the direct rear evidence does not explicitly prove it, render plain base fabric in that rear region." : ""}
+${isTrueBack ? `- BACK-POSE EVIDENCE VETO: only a confirmed rear region whose Source is BACK PRODUCT or SAREE REAR / BACK DRAPE may place rear construction or decoration. A front-, fabric-, pallu-, border-, blouse-, mannequin-, model-, style-, generated-, or unrecorded source cannot prove a rear lace, trim, border, closure, or motif. If the direct rear evidence does not explicitly prove it, render plain base fabric in that rear region.
+- BACK-POSE DUPATTA & HAIR UNOBSTRUCTED RULE: Hair must be swept forward over shoulders or styled in an updo, and dupatta/shawl must drape forward over arms so the entire rear garment construction and embroidery are 100% visible and unobstructed.` : ""}
 
 ${isTrueBack ? `REAR PRODUCT GEOMETRY LOCK:
 - The direct rear product image is the only visual geometry source for this frame. Reproduce only the rear-facing motif shape, scale, spacing, orientation, repeat, density, weave, border, tassel, blouse-back, and embroidery actually visible there.
@@ -513,8 +517,9 @@ ${rules.map((rule) => `- ${rule}`).join("\n")}
 - ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION: It is strictly forbidden to alter or replace the bottom wear cut, silhouette, volume, or print (e.g., never substitute palazzo, lehenga/skirt, dhoti pants, tulip pants, harem pants, or balloon salwars when Farshi / Farsi pajama is specified; never drop large gold/silver florals into solid color or tiny dots). Customers buy the complete set and expect the exact silhouette, color, and motif pattern shown in the product references.
 - Never change the backdrop wall color, texture, floor, or lighting from what was established in Pose 1.
 - Never add random background props (brass urlis, urns, flower petals, pedestals) not present in Pose 1.
-${args.pose.id === "back" ? "- DUPATTA REAR VISIBILITY LOCK: If wearing a dupatta or shawl, it must be draped forward over arms or in front. The back of the kurti/dress must be completely visible and never covered by the dupatta." : ""}
-${args.pose.id === "back" ? "- TRUE BACK HARD RULE: shoulders and hips fully face away. Reproduce uploaded BACK exactly; never infer the rear from FRONT." : ""}
+${(args.pose.id === "back" || isTrueBack) ? `- DUPATTA REAR VISIBILITY LOCK: If wearing a dupatta, scarf, stole, or shawl, it MUST be draped forward over both arms or held in front. The entire back of the kurti/dress (neckline, back panel, embroidery, seams, darts, and hem) must be 100% visible and NEVER covered or obstructed by the dupatta.
+- HAIR REAR VISIBILITY LOCK: Hair MUST be swept forward over the shoulders or styled in an updo/bun so the back neckline, rear embroidery, closures, and rear garment panel are completely unobstructed and fully visible.
+- TRUE BACK HARD RULE: shoulders and hips fully face away. Reproduce uploaded BACK exactly; never infer the rear from FRONT.` : ""}
 ${args.pose.id === "closeup" ? "- POSE 5 HARD RULE: this is a genuine ZOOMED-IN face-to-chest or face-to-waist shot - visibly tighter in scale than the full-body hero pose, never a repeat of that wide framing. The face must be sharp, beautiful, and carry a natural Gen-Z expression, and one real product detail (embroidery, neckline, drape, print, or fabric texture) must also be sharp and clearly visible in the same frame." : ""}
 
 Product accuracy is more important than style matching. Output only the finished photograph: no captions, labels, collage, borders or watermark.`;

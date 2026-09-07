@@ -2042,7 +2042,7 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   if (job.batch_id) {
     const batchId = String(job.batch_id);
     const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
-    const anchor = poses.find((pose) => Number(pose.pose_index) === 1 && pose.status === "completed" && canUsePoseOneAnchor(garmentFamily, pose.qa_status));
+    const anchor = poses.find((pose) => Number(pose.pose_index) === 1 && pose.status === "completed" && canUsePoseOneAnchor(garmentFamily, pose.qa_status, Boolean(job.pose_qa)));
     if (anchor?.output_url) {
       // Merged in the database for the same reason as the styling plan: a stylist
       // approving a plan at this moment must not lose the anchor, and vice versa.
@@ -2553,11 +2553,11 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
     const { data: batchRow, error: batchRowError } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
     if (batchRowError) throw new Error(batchRowError.message);
     const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
-    if ((memory.anchorOutputUrl || memory.anchorStoragePath) && canUsePoseOneAnchor(garmentFamily, memory.anchorQaStatus)) {
+    if ((memory.anchorOutputUrl || memory.anchorStoragePath) && canUsePoseOneAnchor(garmentFamily, memory.anchorQaStatus, Boolean(job.pose_qa))) {
       anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor", qa_status: String(memory.anchorQaStatus || "") };
     }
   }
-  if (anchorPose && !canUsePoseOneAnchor(garmentFamily, anchorPose.qa_status)) anchorPose = null;
+  if (anchorPose && !canUsePoseOneAnchor(garmentFamily, anchorPose.qa_status, Boolean(job.pose_qa))) anchorPose = null;
   const approved: LoadedReference[] = [];
   if (anchorPose?.output_url || anchorPose?.storage_path) {
     const loaded = await loadReference({
@@ -2994,7 +2994,7 @@ async function processWorker(request: Request, args: JsonRecord) {
       // verdict, so a set can be audited later without replaying the job.
       service.from("catalog_sessions").update({
         session_data: {
-          ...sessionData, generatedAssets, approvedAssets: generatedAssets.filter((asset) => asset.poseIndex === 1 && canUsePoseOneAnchor(String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), asset.qaStatus)),
+          ...sessionData, generatedAssets, approvedAssets: generatedAssets.filter((asset) => asset.poseIndex === 1 && canUsePoseOneAnchor(String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), asset.qaStatus, Boolean(job.pose_qa))),
           productDnaVersion: ANALYSIS_VERSION,
           validation: {
             ...(sessionData.validation && typeof sessionData.validation === "object" ? sessionData.validation as JsonRecord : {}),
@@ -3284,7 +3284,7 @@ async function syncCatalogAnchorQa(
   const ownsCurrentAnchor = String(memory.anchorJobId || "") === String(job.job_id);
   const hasAnchor = Boolean(memory.anchorOutputUrl || memory.anchorStoragePath);
   const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
-  const canPromote = !hasAnchor && canUsePoseOneAnchor(garmentFamily, outcome);
+  const canPromote = !hasAnchor && canUsePoseOneAnchor(garmentFamily, outcome, Boolean(job.pose_qa));
   if (!ownsCurrentAnchor && !canPromote) return;
   const patch = canPromote
     ? {

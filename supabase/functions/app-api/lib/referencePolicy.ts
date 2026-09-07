@@ -260,8 +260,11 @@ export function selectReferences<T extends ReferenceLike>(
   return [...selected, ...style.slice(0, remaining)];
 }
 
-export function canUsePoseOneAnchor(garmentFamily: string, qaStatus: unknown) {
+export function canUsePoseOneAnchor(garmentFamily: string, qaStatus: unknown, qaEnabled?: boolean) {
   const status = String(qaStatus || "");
   if (["automatically_verified", "human_approved"].includes(status)) return true;
-  return garmentFamily.toLowerCase() !== "saree" && ["passed", ""].includes(status);
+  if (["rejected_by_qa", "failed"].includes(status)) return false;
+  if (qaEnabled === false) return true;
+  return garmentFamily.toLowerCase() !== "saree" && ["passed", "unverified", ""].includes(status);
 }
+
