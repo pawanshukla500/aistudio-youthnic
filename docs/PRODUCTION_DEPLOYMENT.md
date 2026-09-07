@@ -27,9 +27,13 @@ Studio analyze/plan **honors** `organization_ai_model_policies` purpose
 `product_truth`. Product-truth hops use a **50s** per-provider timeout (Gemini
 Flash completions are often 30–37s; the previous 28s abort killed them). The
 runtime chain is **Muse Spark 1.3 → Luna → Terra → Gemini 3.8 Flash**, with
-thinking forced to `low`. Each hop writes its own `ai_runs` row. After four
-consecutive successful Luna or Terra analyses, the Edge Function auto-promotes
-that model on the tenant policy (audited as `ai_model_policies.auto_promoted`).
+thinking forced to `low`. Each hop writes its own `ai_runs` row **before the next
+hop starts** (so a later timeout still leaves Meta rows). After four consecutive
+successful Luna/Terra/Gemini analyses — or when the stored primary has zero
+completions and another approved model already has four in the recent window —
+the Edge Function auto-promotes that model (`audit_logs.action = ai_model_policies.auto_promoted`).
+Live `cyygmyiqgdzgeoayxbro` already has dozens of Gemini Flash completions, so
+Gemini is eligible immediately after this deploy.
 
 Hosted Supabase **request idle timeout is 150s**. That is enough for a 50s
 primary hop plus Luna/Terra/Gemini failover. The CLI has no `--max-duration`
