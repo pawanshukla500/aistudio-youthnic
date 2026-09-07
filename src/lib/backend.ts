@@ -33,7 +33,7 @@ export const api = {
   eventIntelligence: { roadmap: "eventIntelligence.roadmap", runResearch: "eventIntelligence.runResearch", seedCalendar: "eventIntelligence.seedCalendar" },
   eventDigest: { sendDigestNow: "eventDigest.sendDigestNow" },
   events: { create: "events.create" },
-  admin: { overview: "admin.overview", upsertTeam: "admin.upsertTeam", updateRolePermissions: "admin.updateRolePermissions", updateAutomationSettings: "admin.updateAutomationSettings", updateAiModelPolicies: "admin.updateAiModelPolicies", syncOpenAiUsage: "admin.syncOpenAiUsage" },
+  admin: { overview: "admin.overview", upsertTeam: "admin.upsertTeam", updateRolePermissions: "admin.updateRolePermissions", updateAutomationSettings: "admin.updateAutomationSettings", updateAiModelPolicies: "admin.updateAiModelPolicies", probeAiRoute: "admin.probeAiRoute", syncOpenAiUsage: "admin.syncOpenAiUsage" },
   authActions: { createUser: "authActions.createUser", updateMemberAccess: "authActions.updateMemberAccess", deleteMember: "authActions.deleteMember" },
   profile: { update: "profile.update" },
 } as const;
@@ -762,6 +762,8 @@ async function mutateBackend(endpoint: BackendEndpoint, args: Record<string, any
       return invokeAppApi("admin.updateAutomationSettings", args);
     case api.admin.updateAiModelPolicies:
       return invokeAppApi("admin.updateAiModelPolicies", args);
+    case api.admin.probeAiRoute:
+      return invokeAppApi("admin.probeAiRoute", args);
     case api.admin.syncOpenAiUsage:
       return invokeAppApi("usage.sync", args);
     case api.profile.update:

@@ -40,6 +40,18 @@ const creativeFields: Array<[keyof StudioAnalysis["creativeDirection"], string]>
   ["realismRules", "Photorealism rules"],
 ];
 
+function analysisRouteLabel(analysis: StudioAnalysis | null) {
+  if (!analysis?.analysisProvider || !analysis.analysisModel) return "Vision analysis";
+  const provider = analysis.analysisProvider === "gemini"
+    ? "Gemini"
+    : analysis.analysisProvider === "openai"
+      ? "OpenAI"
+      : analysis.analysisProvider;
+  const cache = analysis.cacheHit ? " · cache" : "";
+  const thinking = analysis.analysisThinking ? ` · ${analysis.analysisThinking}` : "";
+  return `${provider} ${analysis.analysisModel}${thinking}${cache}`;
+}
+
 function ProfileGrid({ items }: { items: Array<[string, unknown]> }) {
   return (
     <dl className="grid gap-3 sm:grid-cols-2">
@@ -102,11 +114,11 @@ export function AnalysisProfile({
             <h2 className="text-base font-bold text-on-surface">Scene & styling</h2>
             <p className="mt-0.5 text-xs text-secondary">
               {!ready
-                ? "Upload the required product evidence to start Gemini Vision analysis."
+                ? "Upload the required product evidence to start vision analysis."
                 : analyzing
-                  ? "Gemini Vision is locking the product, scene, model, and five-pose plan."
+                  ? `${analysisRouteLabel(analysis)} is locking the product, scene, model, and five-pose plan.`
                   : current
-                    ? "Current product identity and creative direction are locked for generation."
+                    ? `${analysisRouteLabel(analysis)} locked product identity and creative direction for generation.`
                     : "Inputs changed - analysis and the pose plan are stale and will rebuild automatically."}
             </p>
           </div>

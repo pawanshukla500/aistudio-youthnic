@@ -19,7 +19,7 @@ export function OutputSettings({ value, onChange }: { value: OutputOptions; onCh
           </div>
           <div>
             <h2 className="text-base font-bold text-on-surface">Output settings</h2>
-            <p className="mt-0.5 text-xs text-secondary">Organization image model · {value.aspectRatio} · {value.imageSize} · {value.quality} quality</p>
+            <p className="mt-0.5 text-xs text-secondary">Image generation · {value.model} · {value.aspectRatio} · {value.imageSize} · {value.quality} quality</p>
           </div>
         </div>
         <div className="text-secondary">

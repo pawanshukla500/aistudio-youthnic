@@ -74,10 +74,13 @@ Deno.test("analysis prompt distinguishes farshi from palazzo and does not take b
       { number: 3, role: "bottom" },
     ],
     fashionKnowledge: "- Farshi pajama is two-leg volume, not palazzo; copy large metallic florals from the bottom references.",
+    analysisLearning: "- Keep the terracotta courtyard locked; back pose drapes the dupatta forward.",
   });
   assertStringIncludes(prompt, "Farshi / Farsi / Farshi Pajama");
   assertStringIncludes(prompt, "TWO DISTINCT LEGS");
   assertStringIncludes(prompt, "NOT palazzo, NOT plain wide-leg, NOT lehenga");
+  assertStringIncludes(prompt, "SUCCESSFUL HOUSE PATTERNS");
+  assertStringIncludes(prompt, "terracotta courtyard");
   assertStringIncludes(prompt, "FABRIC / PATTERN DETAIL is NOT authority for bottoms");
   assertStringIncludes(prompt, "BOTTOM WEAR / FARSHI");
   assertStringIncludes(prompt, "FASHION KNOWLEDGE (SEEDED CUT/PRINT GUIDANCE, SUBORDINATE TO PRODUCT REFERENCES):");

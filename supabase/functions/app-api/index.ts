@@ -23,12 +23,21 @@ import { assertGenerationPromptWithinLimit, composeGenerationPrompt } from "./li
 import {
   AI_MODEL_REGISTRY,
   AI_PROVIDERS,
+  aiModelDisplayLabel,
+  aiModelHelpText,
   allowedThinkingLevels,
   assertAllowedAiModelRoute,
   classifyVisionProviderFailure,
   DEFAULT_IMAGE_GENERATION_ROUTE,
   defaultImageGenerationRoute,
+  CHEAP_OPENAI_VISION_ROUTE,
+  FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+  FAST_PRODUCT_TRUTH_ROUTE,
+  geminiThinkingConfig,
+  preferFastProductTruthRoute,
+  preferFastProductTruthThinking,
   providerSecretName,
+  shouldRetrySameVisionRoute,
   type AiModelPurpose,
   type AiProvider,
   type AiThinkingLevel,
@@ -37,6 +46,7 @@ import {
 } from "./lib/aiModelPolicy.ts";
 import { selectReusableLearningRules } from "./lib/learningRules.ts";
 import { selectFashionKnowledgeGuidance } from "./lib/fashionKnowledge.ts";
+import { selectPromptPatterns } from "./lib/promptPatterns.ts";
 import { firebaseCatalogPath, supabaseCatalogPath } from "./lib/catalogStoragePaths.ts";
 import {
   MAX_IMAGE_REFERENCES,
@@ -192,6 +202,28 @@ async function recordAiRun(args: JsonRecord) {
   if (error) console.error(`Failed to record ai_run telemetry: ${error.message}`);
 }
 
+function visionFailureRecord(error: unknown, policy: {
+  model: string;
+  provider: string;
+  thinkingLevel: string;
+}) {
+  const providerError = error instanceof VisionProviderError ? error : null;
+  const failure = providerError?.failure;
+  return {
+    model: providerError?.model || policy.model,
+    provider: providerError?.provider || policy.provider,
+    thinking_level: providerError?.thinkingLevel || policy.thinkingLevel,
+    error_message: (failure?.message || errorMessage(error)).slice(0, 1000),
+    output_json: {
+      errorCode: failure?.code || "vision_request_failed",
+      errorStatus: failure?.status ?? null,
+      retryable: failure?.retryable ?? false,
+      fallbackEligible: failure?.fallbackEligible ?? false,
+      attempts: providerError?.attempts || [],
+    },
+  };
+}
+
 type ReferenceInput = {
   id?: string;
   role: string;
@@ -227,13 +259,21 @@ const IMAGE_TOKEN_RATES: Record<string, { textInput: number; imageInput: number;
 const GEMINI_PRICING: Record<string, { input: number; output: number; version: string; source: string }> = {
   "gemini-3.8-flash": { input: 0.15, output: 0.60, version: "2025-01", source: "google_standard_flash" },
   "gemini-3.6-flash": { input: 0.15, output: 0.60, version: "2024-08", source: "google_standard_flash" },
+  "gemini-2.5-flash": { input: 0.15, output: 0.60, version: "2025-06", source: "google_standard_flash" },
   "gemini-3.1-pro-preview": { input: 1.25, output: 5.00, version: "2024-08", source: "google_standard_pro" },
   "gemini-3.1-pro": { input: 1.25, output: 5.00, version: "2024-08", source: "google_standard_pro" },
 };
 
 const OPENAI_VISION_PRICING: Record<string, { input: number; output: number; version: string; source: string }> = {
+  "gpt-5.6-luna": { input: 0.20, output: 1.20, version: "2026-07", source: "openai_standard_luna" },
   "gpt-5.6-sol": { input: 2.50, output: 10.00, version: "2025-01", source: "openai_standard_sol" },
   "gpt-5.6-terra": { input: 1.25, output: 5.00, version: "2025-01", source: "openai_standard_terra" },
+};
+
+const META_VISION_PRICING: Record<string, { input: number; output: number; version: string; source: string }> = {
+  "muse-spark-1.3": { input: 1.25, output: 4.25, version: "2026-09", source: "meta_standard_muse" },
+  "muse-spark-1.2": { input: 1.25, output: 4.25, version: "2026-09", source: "meta_standard_muse" },
+  "muse-spark-1.3-contributor": { input: 0.10, output: 0.20, version: "2026-09", source: "meta_contributor_muse" },
 };
 
 function extractVisionUsageAndCost(raw: JsonRecord, provider: string, model: string) {
@@ -248,7 +288,9 @@ function extractVisionUsageAndCost(raw: JsonRecord, provider: string, model: str
   if (provider === "gemini") {
     pricing = GEMINI_PRICING[model] || GEMINI_PRICING["gemini-3.8-flash"] || GEMINI_PRICING["gemini-3.6-flash"];
   } else if (provider === "openai") {
-    pricing = OPENAI_VISION_PRICING[model] || OPENAI_VISION_PRICING["gpt-5.6-sol"];
+    pricing = OPENAI_VISION_PRICING[model] || OPENAI_VISION_PRICING["gpt-5.6-luna"];
+  } else if (provider === "meta") {
+    pricing = META_VISION_PRICING[model] || META_VISION_PRICING["muse-spark-1.3"];
   }
 
   const costUsd = pricing ? (inTok * pricing.input + outTok * pricing.output) / 1000000 : 0;
@@ -262,7 +304,7 @@ type GeminiPurpose = "product_truth" | "shoot_planning" | "qa" | "qa_escalation"
 type GeminiPolicy = {
   purpose: GeminiPurpose;
   model: string;
-  thinkingLevel: "high" | "medium";
+  thinkingLevel: "high" | "medium" | "low";
 };
 
 function resolveGeminiPolicy(args: { purpose: GeminiPurpose; garmentFamily?: string; uncertainty?: boolean; referenceCount?: number; }): GeminiPolicy {
@@ -355,12 +397,19 @@ function defaultVisionRoute(args: {
   uncertainty?: boolean;
   referenceCount?: number;
 }): NormalizedAiModelRoute {
-  if (args.purpose === "product_truth") {
-    return assertAllowedAiModelRoute({
-      provider: "gemini",
-      model: "gemini-3.8-flash",
-      thinkingLevel: "medium",
-    }, args.purpose, { strictJson: true });
+  if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
+    return assertAllowedAiModelRoute(
+      FAST_PRODUCT_TRUTH_ROUTE,
+      args.purpose,
+      { strictJson: true },
+    );
+  }
+  if (args.purpose === "product_truth" || Deno.env.get("GEMINI_API_KEY")?.trim()) {
+    return assertAllowedAiModelRoute(
+      FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+      args.purpose,
+      { strictJson: true },
+    );
   }
   const current = resolveGeminiPolicy({
     purpose: args.purpose,
@@ -376,18 +425,11 @@ function defaultVisionRoute(args: {
 }
 
 function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiModelRoute {
-  if (args.purpose === "product_truth") {
-    return assertAllowedAiModelRoute({
-      provider: "gemini",
-      model: "gemini-3.6-flash",
-      thinkingLevel: "medium",
-    }, args.purpose, { strictJson: true });
-  }
-  return assertAllowedAiModelRoute({
-    provider: "gemini",
-    model: "gemini-3.8-flash",
-    thinkingLevel: "medium",
-  }, args.purpose, { strictJson: true });
+  return assertAllowedAiModelRoute(
+    CHEAP_OPENAI_VISION_ROUTE,
+    args.purpose,
+    { strictJson: true },
+  );
 }
 
 function visionPolicyFingerprint(policy: VisionPolicy) {
@@ -446,13 +488,13 @@ async function resolveVisionPolicy(orgId: string, args: {
     }
   }
   if (!row) {
-    return {
+    return applyFastProductTruthRouting({
       ...defaultRoute,
       purpose: args.purpose,
       fallback: defaultFallback,
       revision: 0,
       source: "default",
-    };
+    });
   }
   const primary = assertAllowedAiModelRoute({
     provider: String(row.primary_provider || ""),
@@ -466,12 +508,42 @@ async function resolveVisionPolicy(orgId: string, args: {
       thinkingLevel: String(row.fallback_reasoning || ""),
     }, args.purpose, { strictJson: true })
     : undefined;
-  return {
+  return applyFastProductTruthRouting({
     ...primary,
     purpose: args.purpose,
     fallback,
     revision: Math.max(1, Number(row.revision || 1)),
     source: "organization",
+  });
+}
+
+function applyFastProductTruthRouting(policy: VisionPolicy): VisionPolicy {
+  if (policy.purpose !== "product_truth" && policy.purpose !== "qa") return policy;
+  const preferred = preferFastProductTruthRoute({
+    provider: policy.provider,
+    model: policy.model,
+    thinkingLevel: policy.thinkingLevel,
+  }, policy.fallback);
+  let next = policy;
+  if (preferred.rerouted) {
+    const museReady = preferred.route.provider === "meta" && Boolean(Deno.env.get("META_MODEL_API_KEY")?.trim());
+    const geminiReady = Boolean(Deno.env.get("GEMINI_API_KEY")?.trim());
+    if (museReady) {
+      next = { ...policy, ...preferred.route, fallback: preferred.fallback };
+    } else if (geminiReady) {
+      next = {
+        ...policy,
+        ...FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+        fallback: preferred.fallback,
+      };
+    }
+  }
+  return {
+    ...next,
+    thinkingLevel: preferFastProductTruthThinking(next),
+    fallback: next.fallback
+      ? { ...next.fallback, thinkingLevel: preferFastProductTruthThinking(next.fallback) }
+      : next.fallback,
   };
 }
 
@@ -810,7 +882,9 @@ function extensionForMimeType(mimeType: string) {
 }
 
 function productHash(args: JsonRecord) {
-  return smallHash([args.skuId, args.skuName, args.category, args.productDetails, args.modelDirection, args.sceneDirection].map((value) => String(value || "").trim().replace(/\s+/g, " ")).join("|"));
+  // SKU code/name are labels, not visual inputs. Including them busted the
+  // 30-day analysis cache whenever a merchandiser typed a SKU after upload.
+  return smallHash([args.category, args.productDetails, args.modelDirection, args.sceneDirection].map((value) => String(value || "").trim().replace(/\s+/g, " ")).join("|"));
 }
 
 function referenceHash(references: ReferenceInput[]) {
@@ -881,16 +955,24 @@ function visionProviderError(
 // A provider call is deliberately a single attempt. `visionJson` below owns retries
 // and fallbacks so a monthly spend cap never becomes three identical Gemini calls,
 // and so Studio and Catalog take exactly the same route when a provider is unavailable.
-async function geminiJson(policy: GeminiPolicy, parts: JsonRecord[]): Promise<{ raw: JsonRecord; text: string; json: JsonRecord; policy: GeminiPolicy }> {
+const PRODUCT_TRUTH_TIMEOUT_MS = 28_000;
+const VISION_PROVIDER_TIMEOUT_MS = 50_000;
+
+async function geminiJson(
+  policy: GeminiPolicy,
+  parts: JsonRecord[],
+  timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+): Promise<{ raw: JsonRecord; text: string; json: JsonRecord; policy: GeminiPolicy }> {
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(policy.model)}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": requiredEnv("GEMINI_API_KEY") },
-    signal: AbortSignal.timeout(45_000),
+    signal: AbortSignal.timeout(timeoutMs),
     body: JSON.stringify({
       contents: [{ role: "user", parts }],
       generationConfig: {
         responseMimeType: "application/json",
-        thinkingConfig: { thinkingLevel: policy.thinkingLevel },
+        maxOutputTokens: 16384,
+        thinkingConfig: geminiThinkingConfig(policy.model, policy.thinkingLevel),
       },
       safetySettings: GEMINI_SAFETY_SETTINGS,
     }),
@@ -969,12 +1051,57 @@ function assertVisionProviderConfigured(route: NormalizedAiModelRoute) {
   });
 }
 
-async function openAiCompatibleVisionJson(route: NormalizedAiModelRoute, parts: JsonRecord[], provider: "openai" | "meta") {
+function openaiReasoningEffort(level: AiThinkingLevel) {
+  if (level === "none") return "";
+  return level === "max" ? "xhigh" : level;
+}
+
+async function openAiResponsesVisionJson(
+  route: NormalizedAiModelRoute,
+  parts: JsonRecord[],
+  timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+) {
+  assertVisionProviderConfigured(route);
+  const effort = openaiReasoningEffort(route.thinkingLevel);
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${requiredEnv("OPENAI_API_KEY")}`,
+    },
+    body: JSON.stringify({
+      model: route.model,
+      input: [{ role: "user", content: responseContentFromParts(parts) }],
+      ...(effort ? { reasoning: { effort } } : {}),
+      text: { format: { type: "json_object" } },
+    }),
+  });
+  const data = await response.json().catch(() => ({})) as JsonRecord;
+  if (!response.ok) {
+    const providerError = data.error as JsonRecord | undefined;
+    throw visionProviderError(route, {
+      status: response.status,
+      message: String(providerError?.message || data.message || `OpenAI vision request failed (${response.status}).`),
+      code: String(providerError?.code || providerError?.type || ""),
+    });
+  }
+  const text = extractResponseApiText(data);
+  if (!text) throw visionProviderError(route, { message: "openai returned no structured visual response." });
+  return { raw: data, text, json: parseJsonResponse(text) };
+}
+
+async function openAiCompatibleVisionJson(
+  route: NormalizedAiModelRoute,
+  parts: JsonRecord[],
+  provider: "openai" | "meta",
+  timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+) {
   assertVisionProviderConfigured(route);
   const endpoint = provider === "openai" ? "https://api.openai.com/v1/chat/completions" : "https://api.meta.ai/v1/chat/completions";
   const response = await fetch(endpoint, {
     method: "POST",
-    signal: AbortSignal.timeout(35_000),
+    signal: AbortSignal.timeout(timeoutMs),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${requiredEnv(providerSecretName(provider))}`,
@@ -983,9 +1110,10 @@ async function openAiCompatibleVisionJson(route: NormalizedAiModelRoute, parts: 
       model: route.model,
       messages: [{ role: "user", content: chatContentFromParts(parts) }],
       response_format: { type: "json_object" },
+      max_tokens: 16384,
       ...(provider === "meta"
-        ? {}
-        : route.thinkingLevel !== "none" ? { reasoning_effort: route.thinkingLevel } : {}),
+        ? { reasoning_effort: route.thinkingLevel === "none" ? "minimal" : route.thinkingLevel }
+        : route.thinkingLevel !== "none" ? { reasoning_effort: openaiReasoningEffort(route.thinkingLevel) } : {}),
     }),
   });
   const data = await response.json().catch(() => ({})) as JsonRecord;
@@ -998,15 +1126,31 @@ async function openAiCompatibleVisionJson(route: NormalizedAiModelRoute, parts: 
     });
   }
   const text = extractChatCompletionText(data);
-  if (!text) throw visionProviderError(route, { status: 422, message: `${provider} returned no structured visual response.` });
+  if (!text) throw visionProviderError(route, { message: `${provider} returned no structured visual response.` });
   return { raw: data, text, json: parseJsonResponse(text) };
+}
+
+async function openAiVisionJson(
+  route: NormalizedAiModelRoute,
+  parts: JsonRecord[],
+  timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+) {
+  try {
+    return await openAiResponsesVisionJson(route, parts, timeoutMs);
+  } catch (error) {
+    const classified = asVisionProviderError(error, route);
+    if (classified.failure.status === 404) {
+      return openAiCompatibleVisionJson(route, parts, "openai", timeoutMs);
+    }
+    throw classified;
+  }
 }
 
 async function qwenVisionJson(route: NormalizedAiModelRoute, parts: JsonRecord[]) {
   assertVisionProviderConfigured(route);
   const response = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
     method: "POST",
-    signal: AbortSignal.timeout(35_000),
+    signal: AbortSignal.timeout(50_000),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${requiredEnv("QWEN_API_KEY")}`,
@@ -1036,24 +1180,43 @@ async function qwenVisionJson(route: NormalizedAiModelRoute, parts: JsonRecord[]
 
 async function invokeVisionRoute(policy: VisionPolicy, route: NormalizedAiModelRoute, parts: JsonRecord[]) {
   if (route.provider === "gemini") {
+    const timeoutMs = policy.purpose === "product_truth"
+      ? PRODUCT_TRUTH_TIMEOUT_MS
+      : VISION_PROVIDER_TIMEOUT_MS;
     const gemini = await geminiJson({
       purpose: policy.purpose,
       model: route.model,
-      thinkingLevel: route.thinkingLevel as "medium" | "high",
-    }, parts);
+      thinkingLevel: route.thinkingLevel as "medium" | "high" | "low",
+    }, parts, timeoutMs);
     return { raw: gemini.raw, text: gemini.text, json: gemini.json };
   }
-  if (route.provider === "openai" || route.provider === "meta") return openAiCompatibleVisionJson(route, parts, route.provider);
+  if (route.provider === "openai") {
+    const timeoutMs = policy.purpose === "product_truth"
+      ? PRODUCT_TRUTH_TIMEOUT_MS
+      : VISION_PROVIDER_TIMEOUT_MS;
+    return openAiVisionJson(route, parts, timeoutMs);
+  }
+  if (route.provider === "meta") {
+    const timeoutMs = policy.purpose === "product_truth"
+      ? PRODUCT_TRUTH_TIMEOUT_MS
+      : VISION_PROVIDER_TIMEOUT_MS;
+    return openAiCompatibleVisionJson(route, parts, route.provider, timeoutMs);
+  }
   return qwenVisionJson(route, parts);
 }
 
 function asVisionProviderError(error: unknown, route: NormalizedAiModelRoute) {
   if (error instanceof VisionProviderError) return error;
+  const details = error && typeof error === "object" ? error as { name?: unknown; status?: unknown } : {};
   return new VisionProviderError({
     provider: route.provider,
     model: route.model,
     thinkingLevel: route.thinkingLevel,
-    failure: classifyVisionProviderFailure(route.provider, { message: errorMessage(error) }),
+    failure: classifyVisionProviderFailure(route.provider, {
+      message: errorMessage(error),
+      name: String(details.name || ""),
+      status: details.status,
+    }),
   });
 }
 
@@ -1074,7 +1237,7 @@ async function visionJson(policy: VisionPolicy, parts: JsonRecord[]): Promise<Vi
       } catch (error) {
         const providerError = asVisionProviderError(error, route);
         lastError = providerError;
-        if (providerError.failure.retryable && attempt < 2) {
+        if (providerError.failure.retryable && attempt < 2 && shouldRetrySameVisionRoute(providerError.failure)) {
           await sleep(500 * attempt);
           continue;
         }
@@ -1113,12 +1276,15 @@ async function analyze(request: Request, args: JsonRecord) {
   // up to the cache's thirty days. It stays out of the fingerprint on purpose -
   // that is queue-time validation of the references, and saving a plan writes a
   // decision, which would change the fingerprint and reject its own session.
-  const housePreferences = await stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion"));
-  const fashionKnowledge = await fashionKnowledgeBrief(orgId, String(args.category || ""));
-  const policy = await resolveVisionPolicy(orgId, { purpose: "product_truth", garmentFamily: String(args.category || "") });
+  const [housePreferences, fashionKnowledge, analysisLearning, policy] = await Promise.all([
+    stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion")),
+    fashionKnowledgeBrief(orgId, String(args.category || "")),
+    analysisLearningBrief(orgId, String(args.category || "ethnic/fusion")),
+    resolveVisionPolicy(orgId, { purpose: "product_truth", garmentFamily: String(args.category || "") }),
+  ]);
   const policyFingerprint = visionPolicyFingerprint(policy);
   const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}|${policyFingerprint}`);
-  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${policyFingerprint}:${smallHash(housePreferences)}:${smallHash(fashionKnowledge)}`;
+  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${policyFingerprint}:${smallHash(housePreferences)}:${smallHash(fashionKnowledge)}:${smallHash(analysisLearning)}`;
   let cacheHit = false;
   let normalized: ReturnType<typeof normalizeAnalysis> | null = null;
   const forceRefresh = args.forceRefresh === true;
@@ -1143,33 +1309,30 @@ async function analyze(request: Request, args: JsonRecord) {
     parts.push({ text: buildCombinedAnalysisPrompt({
       skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
       category: String(args.category || "ethnic/fusion"), modelDirection: String(args.modelDirection || ""),
-      sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences, fashionKnowledge,
+      sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences, fashionKnowledge, analysisLearning,
     }) });
 
     let result: VisionResult;
     try {
       result = await visionJson(policy, parts);
     } catch (error) {
-      const providerError = error instanceof VisionProviderError ? error : null;
+      const failure = visionFailureRecord(error, policy);
       await recordAiRun({
         organization_id: orgId,
         job_id: "",
         run_kind: "product_reference_analysis",
-        model: providerError?.model || policy.model,
-        provider: providerError?.provider || policy.provider,
         purpose: policy.purpose,
-        thinking_level: providerError?.thinkingLevel || policy.thinkingLevel,
         input_fingerprint: fingerprint,
         input_summary: {
           referenceCount: references.length,
           roles: references.map((reference) => reference.role),
-          policy: visionPolicySnapshot(policy, providerError?.attempts || []),
+          policy: visionPolicySnapshot(policy, error instanceof VisionProviderError ? error.attempts : []),
         },
-        output_json: { errorCode: providerError?.failure.code || "vision_request_failed" },
         status: "failed",
         latency_ms: Date.now() - started,
         cost_usd: 0,
         cost_source: "provider_cost_not_available",
+        ...failure,
       });
       throw error;
     }
@@ -1218,6 +1381,9 @@ async function analyze(request: Request, args: JsonRecord) {
       referenceHash: rHash,
       ...normalized,
       cacheHit,
+      analysisProvider: policy.provider,
+      analysisModel: policy.model,
+      analysisThinking: policy.thinkingLevel,
       requiresSareeEvidence: true,
       sareeEvidenceIssues: missingDetectedSareeEvidence,
     };
@@ -1261,7 +1427,7 @@ async function analyze(request: Request, args: JsonRecord) {
     product_hash: pHash, reference_hash: rHash, session_data: sessionData,
   });
   if (sessionError) throw new Error(sessionError.message);
-  return { sessionId, referenceIds: sessionData.referenceIds, analysisFingerprint: fingerprint, productHash: pHash, referenceHash: rHash, ...normalized, cacheHit };
+  return { sessionId, referenceIds: sessionData.referenceIds, analysisFingerprint: fingerprint, productHash: pHash, referenceHash: rHash, ...normalized, cacheHit, analysisProvider: policy.provider, analysisModel: policy.model, analysisThinking: policy.thinkingLevel };
 }
 
 function normalizeImageSize(aspectRatio: string, imageSize: string, model: string) {
@@ -1874,6 +2040,7 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
     housePreferences: await stylingPreferenceBrief(orgId, category),
     fashionKnowledge: await fashionKnowledgeBrief(orgId, category),
+    analysisLearning: await analysisLearningBrief(orgId, category),
   }) });
 
   const result = await visionJson(policy, parts);
@@ -2431,7 +2598,11 @@ async function processWorker(request: Request, args: JsonRecord) {
       } catch (error) {
         qaUnavailable = errorMessage(error);
         qa = unavailableQaResult(`Automatic consistency QA could not run: ${qaUnavailable}`);
-        const providerError = error instanceof VisionProviderError ? error : null;
+        const failure = visionFailureRecord(error, {
+          model: "unknown",
+          provider: "unknown",
+          thinkingLevel: "none",
+        });
         await recordAiRun({
           organization_id: job.org_id,
           planning_request_id: job.planning_request_id,
@@ -2440,17 +2611,14 @@ async function processWorker(request: Request, args: JsonRecord) {
           session_id: job.session_id,
           pose_index: pose.pose_index,
           run_kind: "quality_assurance",
-          model: providerError?.model || "unknown",
-          provider: providerError?.provider || "unknown",
           purpose: "qa",
-          thinking_level: providerError?.thinkingLevel || "none",
           input_fingerprint: smallHash(prompt),
-          input_summary: { pose: pose.pose_index, attempt, attempts: providerError?.attempts || [] },
-          output_json: { errorCode: providerError?.failure.code || "qa_provider_unavailable" },
+          input_summary: { pose: pose.pose_index, attempt, attempts: error instanceof VisionProviderError ? error.attempts : [] },
           status: "failed",
           latency_ms: Date.now() - qaStarted,
           cost_usd: 0,
           cost_source: "provider_cost_not_available",
+          ...failure,
         });
       }
     }
@@ -3339,18 +3507,26 @@ function visionProviderConfigured(provider: AiProvider) {
 }
 
 function aiModelRegistryForAdmin() {
+  type RegistryModel = {
+    id: string;
+    label: string;
+    help?: string;
+    purposes: string[];
+    thinkingLevels: string[];
+  };
   return AI_PROVIDERS.map((provider) => {
-    const models = new Map<string, { id: string; label: string; purposes: string[]; thinkingLevels: string[] }>();
+    const models = new Map<string, RegistryModel>();
     for (const purpose of ADMIN_MANAGED_AI_PURPOSES) {
       for (const model of AI_MODEL_REGISTRY[provider][purpose] || []) {
-        const existing = models.get(model) || {
+        const existing: RegistryModel = models.get(model) || {
           id: model,
-          label: model === OPENAI_MODEL ? "GPT Image 2 · recommended" : model,
+          label: aiModelDisplayLabel(model),
+          help: aiModelHelpText(model),
           purposes: [],
           thinkingLevels: [],
         };
         if (!existing.purposes.includes(purpose)) existing.purposes.push(purpose);
-        for (const thinking of allowedThinkingLevels({ provider }, purpose, { strictJson: true })) {
+        for (const thinking of allowedThinkingLevels({ provider, model }, purpose, { strictJson: true })) {
           if (!existing.thinkingLevels.includes(thinking)) existing.thinkingLevels.push(thinking);
         }
         models.set(model, existing);
@@ -4332,6 +4508,7 @@ async function analyzeCatalogVariant(
     modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
     housePreferences: await stylingPreferenceBrief(String(batch.organization_id), category),
     fashionKnowledge: await fashionKnowledgeBrief(String(batch.organization_id), category),
+    analysisLearning: await analysisLearningBrief(String(batch.organization_id), category),
   }) });
   const result = await visionJson(policy, parts);
   const normalized = normalizeAnalysis(result.json, category);
@@ -4565,6 +4742,59 @@ async function fashionKnowledgeBrief(orgId: string, category = "", garmentFamily
   }
 }
 
+async function analysisLearningBrief(orgId: string, category = "") {
+  const sections: string[] = [];
+  const orgFilter = /^[0-9a-f-]{36}$/i.test(orgId)
+    ? `organization_id.eq.${orgId},organization_id.is.null`
+    : "organization_id.is.null";
+  try {
+    const { data, error } = await service.from("prompt_patterns")
+      .select("id,organization_id,product_category,pattern_kind,title,pattern_text,success_count,failure_count,avg_quality")
+      .or(orgFilter)
+      .order("success_count", { ascending: false })
+      .limit(40);
+    if (error) console.error(`Could not load prompt patterns: ${error.message}`);
+    else {
+      const selected = selectPromptPatterns(data || [], {
+        organizationId: orgId,
+        productCategory: category,
+      });
+      if (selected.guidance) sections.push(selected.guidance);
+    }
+  } catch (error) {
+    console.error(`Could not load prompt patterns: ${errorMessage(error)}`);
+  }
+
+  // Category-scoped approved rules are safe only when the declared category
+  // already names the garment family. Ethnic/fusion is too broad to pick a family.
+  if (/^saree$/i.test(category.trim())) {
+    try {
+      const { data, error } = await service.from("generation_learning_rules")
+        .select("id,organization_id,garment_family,product_category,pose_id,scope,rule_kind,reference_fingerprint,guidance,status,approved_by_member_id,approved_at")
+        .eq("organization_id", orgId)
+        .eq("status", "approved")
+        .eq("garment_family", "saree")
+        .eq("product_category", category)
+        .eq("scope", "category")
+        .order("updated_at", { ascending: false })
+        .limit(20);
+      if (error) console.error(`Could not load analysis learning rules: ${error.message}`);
+      else {
+        const selected = selectReusableLearningRules(data || [], {
+          organizationId: orgId,
+          garmentFamily: "saree",
+          productCategory: category,
+        });
+        if (selected.guidance) sections.push(selected.guidance);
+      }
+    } catch (error) {
+      console.error(`Could not load analysis learning rules: ${errorMessage(error)}`);
+    }
+  }
+
+  return sections.join("\n");
+}
+
 async function saveCatalogStylingPlanOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const batch = await catalogBatch(workspace, String(args.catalogId || ""));
@@ -4777,24 +5007,21 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
     if (!args.requestId) scheduleBackground(kickCatalogPreflight(batchId));
     return { processed: true, requestId: variant.id, fingerprint: hashes.fingerprint };
   } catch (error) {
-    const providerError = error instanceof VisionProviderError ? error : null;
+    const failure = visionFailureRecord(error, hashes.policy);
     await recordAiRun({
       organization_id: batch.organization_id,
       planning_request_id: variant.id,
       batch_id: batchId,
       job_id: "",
       run_kind: "catalog_product_preflight",
-      model: providerError?.model || hashes.policy.model,
-      provider: providerError?.provider || hashes.policy.provider,
       purpose: hashes.policy.purpose,
-      thinking_level: providerError?.thinkingLevel || hashes.policy.thinkingLevel,
       input_fingerprint: hashes.fingerprint,
-      input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(hashes.policy, providerError?.attempts || []) },
-      output_json: { errorCode: providerError?.failure.code || "vision_request_failed" },
+      input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(hashes.policy, error instanceof VisionProviderError ? error.attempts : []) },
       status: "failed",
       latency_ms: Date.now() - started,
       cost_usd: 0,
       cost_source: "provider_cost_not_available",
+      ...failure,
     });
     await service.from("planning_requests").update({
       analysis_status: "failed", error_message: `Automatic vision preflight failed: ${errorMessage(error)}`.slice(0, 1000), updated_at: new Date().toISOString(),
@@ -6528,6 +6755,56 @@ async function updateAutomationSettingsOperation(request: Request, args: JsonRec
   return data;
 }
 
+async function probeAiRouteOperation(request: Request, args: JsonRecord) {
+  await workspaceFor(request, "admin.settings");
+  const purpose = String(args.purpose || "product_truth") as AiModelPurpose;
+  if (purpose === "image_generation" || !ADMIN_MANAGED_AI_PURPOSES.includes(purpose)) {
+    throw new Error("Connectivity probes are only available for vision analysis and QA routes.");
+  }
+  const route = assertAllowedAiModelRoute({
+    provider: String(args.provider || ""),
+    model: String(args.model || ""),
+    thinkingLevel: String(args.thinkingLevel || ""),
+  }, purpose, { strictJson: true });
+  assertVisionProviderConfigured(route);
+  const probeRoute: NormalizedAiModelRoute = {
+    ...route,
+    thinkingLevel: route.provider === "openai"
+      ? "none"
+      : route.provider === "meta"
+        ? "minimal"
+        : "low",
+  };
+  const parts: JsonRecord[] = [{ text: "Reply with JSON only: {\"ok\":true}" }];
+  const started = Date.now();
+  try {
+    if (route.provider === "gemini") {
+      await geminiJson({
+        purpose: purpose === "qa_escalation" ? "qa_escalation" : purpose === "qa" ? "qa" : "product_truth",
+        model: route.model,
+        thinkingLevel: "low",
+      }, parts, 8_000);
+    } else if (route.provider === "openai") {
+      await openAiVisionJson(probeRoute, parts, 8_000);
+    } else if (route.provider === "meta") {
+      await openAiCompatibleVisionJson(probeRoute, parts, "meta", 8_000);
+    } else if (route.provider === "qwen") {
+      await qwenVisionJson(route, parts);
+    } else {
+      throw new Error("No connectivity probe exists for this provider.");
+    }
+    return { ok: true, provider: route.provider, model: route.model, latencyMs: Date.now() - started };
+  } catch (error) {
+    return {
+      ok: false,
+      provider: route.provider,
+      model: route.model,
+      latencyMs: Date.now() - started,
+      message: error instanceof VisionProviderError ? error.failure.message : errorMessage(error),
+    };
+  }
+}
+
 async function updateAiModelPoliciesOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "admin.settings");
   const submitted = (Array.isArray(args.policies) ? args.policies : []) as JsonRecord[];
@@ -6801,6 +7078,7 @@ Deno.serve(async (request) => {
       "admin.updateRolePermissions": () => updateRolePermissionsOperation(request, args),
       "admin.updateAutomationSettings": () => updateAutomationSettingsOperation(request, args),
       "admin.updateAiModelPolicies": () => updateAiModelPoliciesOperation(request, args),
+      "admin.probeAiRoute": () => probeAiRouteOperation(request, args),
       "profile.update": () => updateOwnProfileOperation(request, args),
       "usage.sync": () => syncOpenAiUsageOperation(request, args),
       "files.saveReference": () => saveReferenceOperation(request, args),

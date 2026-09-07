@@ -74,14 +74,32 @@ type Registry = Record<
  */
 export const AI_MODEL_REGISTRY: Registry = {
   gemini: {
-    product_truth: ["gemini-3.1-pro-preview", "gemini-3.1-pro", "gemini-3.6-flash", "gemini-3.8-flash"],
-    qa: ["gemini-3.1-pro-preview", "gemini-3.1-pro", "gemini-3.6-flash", "gemini-3.8-flash"],
-    qa_escalation: ["gemini-3.1-pro-preview", "gemini-3.1-pro", "gemini-3.6-flash", "gemini-3.8-flash"],
+    product_truth: [
+      "gemini-2.5-flash",
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro",
+      "gemini-3.6-flash",
+      "gemini-3.8-flash",
+    ],
+    qa: [
+      "gemini-2.5-flash",
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro",
+      "gemini-3.6-flash",
+      "gemini-3.8-flash",
+    ],
+    qa_escalation: [
+      "gemini-2.5-flash",
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro",
+      "gemini-3.6-flash",
+      "gemini-3.8-flash",
+    ],
   },
   openai: {
-    product_truth: ["gpt-5.6-terra", "gpt-5.6-sol"],
-    qa: ["gpt-5.6-terra", "gpt-5.6-sol"],
-    qa_escalation: ["gpt-5.6-terra", "gpt-5.6-sol"],
+    product_truth: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+    qa: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+    qa_escalation: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
     image_generation: [
       "gpt-image-2",
       "gpt-image-1.5",
@@ -95,9 +113,9 @@ export const AI_MODEL_REGISTRY: Registry = {
     qa_escalation: ["qwen3.8-max"],
   },
   meta: {
-    product_truth: ["muse-spark-1.2"],
-    qa: ["muse-spark-1.2"],
-    qa_escalation: ["muse-spark-1.2"],
+    product_truth: ["muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.3-contributor"],
+    qa: ["muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.3-contributor"],
+    qa_escalation: ["muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.3-contributor"],
   },
   reve: {
     image_generation: ["reve-2.1-image"],
@@ -110,7 +128,7 @@ const VISION_PURPOSES: readonly AiModelPurpose[] = [
   "qa_escalation",
 ];
 
-const GEMINI_THINKING: readonly AiThinkingLevel[] = ["medium", "high"];
+const GEMINI_THINKING: readonly AiThinkingLevel[] = ["low", "medium", "high"];
 const OPENAI_THINKING: readonly AiThinkingLevel[] = [
   "none",
   "low",
@@ -125,6 +143,10 @@ const META_THINKING: readonly AiThinkingLevel[] = [
   "medium",
   "high",
   "xhigh",
+];
+const META_STANDARD_13_THINKING: readonly AiThinkingLevel[] = [
+  ...META_THINKING,
+  "max",
 ];
 
 function text(value: unknown) {
@@ -172,7 +194,7 @@ export function isAllowedAiModel(
 }
 
 export function allowedThinkingLevels(
-  route: Pick<AiModelRoute, "provider">,
+  route: Pick<AiModelRoute, "provider"> & { model?: string | null },
   purpose: AiModelPurpose,
   options: AiRouteValidationOptions = {},
 ): readonly AiThinkingLevel[] {
@@ -181,21 +203,190 @@ export function allowedThinkingLevels(
   if (provider === "qwen" && options.strictJson !== false) return ["none"];
   if (provider === "gemini") return GEMINI_THINKING;
   if (provider === "openai") return OPENAI_THINKING;
-  if (provider === "meta") return META_THINKING;
+  if (provider === "meta") {
+    return text(route.model) === "muse-spark-1.3"
+      ? META_STANDARD_13_THINKING
+      : META_THINKING;
+  }
   return [];
 }
 
 export function defaultThinkingLevel(
-  route: Pick<AiModelRoute, "provider">,
+  route: Pick<AiModelRoute, "provider"> & { model?: string | null },
   purpose: AiModelPurpose,
   options: AiRouteValidationOptions = {},
 ): AiThinkingLevel {
   const allowed = allowedThinkingLevels(route, purpose, options);
-  if (purpose === "image_generation" || allowed.includes("none")) return "none";
+  if (purpose === "image_generation") return "none";
+  // Product-truth analysis is a large structured vision call. Default OpenAI
+  // and Gemini Flash thinking to low so a missing org reasoning value cannot
+  // silently select high/medium and miss the Edge timeout.
+  if (purpose === "product_truth") {
+    const provider = text(route.provider);
+    if (provider === "openai" && allowed.includes("low")) return "low";
+    if (allowed.includes("low")) return "low";
+    if (allowed.includes("medium")) return "medium";
+  }
+  if (allowed.includes("none")) return "none";
   if (purpose === "qa") {
     return allowed.includes("medium") ? "medium" : allowed[0];
   }
   return allowed.includes("high") ? "high" : allowed[0];
+}
+
+/**
+ * Muse Spark 1.3 Standard is the approved fast product-truth route. Slow OpenAI
+ * Sol/Terra-high reasoning remains allowed, but analysis should not wait on it
+ * when Muse (or Gemini Flash) can do the visual work. Luna is the cheap OpenAI
+ * fallback — never Sol.
+ */
+export const FAST_PRODUCT_TRUTH_ROUTE = {
+  provider: "meta",
+  model: "muse-spark-1.3",
+  thinkingLevel: "low",
+} as const satisfies NormalizedAiModelRoute;
+
+export const FAST_PRODUCT_TRUTH_GEMINI_ROUTE = {
+  provider: "gemini",
+  model: "gemini-3.8-flash",
+  thinkingLevel: "low",
+} as const satisfies NormalizedAiModelRoute;
+
+export const CHEAP_OPENAI_VISION_ROUTE = {
+  provider: "openai",
+  model: "gpt-5.6-luna",
+  thinkingLevel: "low",
+} as const satisfies NormalizedAiModelRoute;
+
+const FAST_OPENAI_THINKING: readonly AiThinkingLevel[] = ["none", "low"];
+
+export function isSlowReasoningVisionRoute(route: Pick<NormalizedAiModelRoute, "provider" | "thinkingLevel">) {
+  return route.provider === "openai" &&
+    !FAST_OPENAI_THINKING.includes(route.thinkingLevel);
+}
+
+export type FastProductTruthPreference = {
+  route: NormalizedAiModelRoute;
+  fallback?: NormalizedAiModelRoute;
+  rerouted: boolean;
+};
+
+/**
+ * Prefer a fast vision model for product-truth analysis when the stored primary
+ * is a slow OpenAI reasoning route. Expensive Sol is never kept as fallback;
+ * Luna is the cheap OpenAI option.
+ */
+export function preferFastProductTruthRoute(
+  primary: NormalizedAiModelRoute,
+  existingFallback?: NormalizedAiModelRoute,
+): FastProductTruthPreference {
+  if (!isSlowReasoningVisionRoute(primary)) {
+    return { route: primary, fallback: existingFallback, rerouted: false };
+  }
+  const fast = assertAllowedAiModelRoute(
+    FAST_PRODUCT_TRUTH_ROUTE,
+    "product_truth",
+    { strictJson: true },
+  );
+  const cheapOpenAi = assertAllowedAiModelRoute(
+    CHEAP_OPENAI_VISION_ROUTE,
+    "product_truth",
+    { strictJson: true },
+  );
+  const fallback = existingFallback &&
+      !isSlowReasoningVisionRoute(existingFallback) &&
+      existingFallback.model !== "gpt-5.6-sol" &&
+      (existingFallback.provider !== fast.provider ||
+        existingFallback.model !== fast.model)
+    ? existingFallback
+    : cheapOpenAi;
+  return { route: fast, fallback, rerouted: true };
+}
+
+export function aiModelDisplayLabel(model: string): string {
+  const labels: Record<string, string> = {
+    "gpt-image-2": "GPT Image 2 · recommended",
+    "gpt-image-1.5": "GPT Image 1.5",
+    "gpt-image-1": "GPT Image 1",
+    "gpt-image-1-mini": "GPT Image 1 Mini",
+    "gpt-5.6-luna": "GPT 5.6 Luna · cost-efficient",
+    "gpt-5.6-terra": "GPT 5.6 Terra",
+    "gpt-5.6-sol": "GPT 5.6 Sol · expensive",
+    "muse-spark-1.3": "Muse Spark 1.3 · Standard",
+    "muse-spark-1.2": "Muse Spark 1.2 · Standard",
+    "muse-spark-1.3-contributor": "Muse Spark 1.3 Contributor · trains on prompts",
+    "gemini-3.8-flash": "Gemini 3.8 Flash",
+    "gemini-3.6-flash": "Gemini 3.6 Flash",
+    "gemini-3.1-pro": "Gemini 3.1 Pro",
+    "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",
+    "gemini-2.5-flash": "Gemini 2.5 Flash",
+    "qwen3.8-max": "Qwen 3.8 Max",
+    "reve-2.1-image": "Reve 2.1 Image",
+  };
+  return labels[text(model)] || text(model);
+}
+
+export function aiModelHelpText(model: string): string {
+  if (text(model) === "muse-spark-1.3-contributor") {
+    return "Contributor is cheaper (~$0.10 / $0.20 per 1M tokens) but Meta may train on prompts and completions. Do not use it for fashion product data unless the organization opts in.";
+  }
+  if (text(model) === "muse-spark-1.3" || text(model) === "muse-spark-1.2") {
+    return "Standard Muse Spark does not train on your data. About $1.25 / 1M input and $4.25 / 1M output.";
+  }
+  if (text(model) === "gpt-5.6-sol") {
+    return "Sol is the expensive GPT 5.6 flagship. Prefer Luna for fallback vision.";
+  }
+  if (text(model) === "gpt-5.6-luna") {
+    return "Luna is the cost-efficient GPT 5.6 vision fallback (~$0.20 / 1M input, $1.20 / 1M output). Prefer it over Sol.";
+  }
+  return "";
+}
+
+export function preferredModelId(
+  provider: string,
+  models: readonly string[],
+): string {
+  if (!models.length) return "";
+  if (provider === "openai" && models.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
+  if (provider === "meta" && models.includes("muse-spark-1.3")) return "muse-spark-1.3";
+  if (provider === "gemini" && models.includes("gemini-3.8-flash")) return "gemini-3.8-flash";
+  return models[0];
+}
+
+const GEMINI_FLASH_MODELS = [
+  "gemini-3.8-flash",
+  "gemini-3.6-flash",
+  "gemini-2.5-flash",
+] as const;
+
+/**
+ * Gemini 3.x uses thinkingLevel. Gemini 2.5 uses thinkingBudget. Sending the
+ * 3.x field to 2.5 (or the reverse) is a 400, not a slow timeout.
+ */
+export function geminiThinkingConfig(
+  model: string,
+  thinkingLevel: AiThinkingLevel,
+): { thinkingLevel: AiThinkingLevel } | { thinkingBudget: number } {
+  if (text(model).startsWith("gemini-2.")) {
+    if (thinkingLevel === "high") return { thinkingBudget: 8192 };
+    if (thinkingLevel === "medium") return { thinkingBudget: 2048 };
+    return { thinkingBudget: 0 };
+  }
+  return { thinkingLevel };
+}
+
+/**
+ * Gemini 3.8 Flash supports thinking levels low/medium/high. Product-truth
+ * planning is a large multimodal JSON call; high/medium reasoning is what made
+ * Flash feel like a slow GPT job. Flash stays on low for analysis. Pro models
+ * keep the stored thinking level.
+ */
+export function preferFastProductTruthThinking(route: NormalizedAiModelRoute): AiThinkingLevel {
+  if (route.provider !== "gemini") return route.thinkingLevel;
+  if (!GEMINI_FLASH_MODELS.includes(route.model as typeof GEMINI_FLASH_MODELS[number])) {
+    return route.thinkingLevel;
+  }
+  return "low";
 }
 
 /**
@@ -215,7 +406,7 @@ export function normalizeAiModelRoute(
     model: text(route.model),
     thinkingLevel: (suppliedLevel ||
       defaultThinkingLevel(
-        { provider },
+        { provider, model: text(route.model) },
         purpose,
         options,
       )) as AiThinkingLevel,
@@ -320,6 +511,7 @@ export type VisionProviderFailure = {
     | "provider_timeout"
     | "provider_authentication_failed"
     | "provider_invalid_request"
+    | "provider_incomplete_response"
     | "provider_request_failed";
   status: number | null;
   retryable: boolean;
@@ -338,6 +530,15 @@ function failureText(input: ProviderFailureInput) {
   return [input.message, input.code, input.name].map(text).filter(Boolean).join(
     " ",
   ).toLowerCase();
+}
+
+function isAbortLike(input: ProviderFailureInput) {
+  const name = text(input.name).toLowerCase();
+  const detail = failureText(input);
+  return name === "timeouterror" || name === "aborterror" ||
+    name === "domexception" && /abort|timeout/.test(detail) ||
+    /the signal has been aborted|operation was aborted|aborterror|timeouterror/
+      .test(detail);
 }
 
 function failure(
@@ -378,10 +579,28 @@ export function classifyVisionProviderFailure(
     );
   }
 
+  // 404 / "model not found" must fall over. A missing model id fails in ~1s;
+  // treating it as a non-fallback invalid request is what would hide a bad
+  // allowlisted id. 30–45s empty failures are timeouts, not 404s.
+  if (
+    status === 404 ||
+    /(?:model|models\/[\w.-]+)\s+(?:is\s+)?not found|not found for api version|is not available/
+      .test(detail)
+  ) {
+    return failure(
+      provider,
+      "provider_unavailable",
+      status,
+      false,
+      true,
+      "The selected vision model is not available. A configured fallback can be used.",
+    );
+  }
+
   const invalidInput =
-    /invalid\s+(?:argument|input|request)|malformed|unsupported\s+(?:image|media|mime|model)|schema\s+(?:invalid|error)|safety\s+(?:blocked|violation)|content\s+policy/
+    /invalid\s+(?:argument|input|request)|malformed|unsupported\s+(?:image|media|mime)|schema\s+(?:invalid|error)|safety\s+(?:blocked|violation)|content\s+policy/
       .test(detail);
-  if (invalidInput || [400, 404, 409, 413, 415, 422].includes(status || 0)) {
+  if (invalidInput || [400, 409, 413, 415].includes(status || 0)) {
     return failure(
       provider,
       "provider_invalid_request",
@@ -394,7 +613,7 @@ export function classifyVisionProviderFailure(
 
   if (
     [401, 403].includes(status || 0) ||
-    /invalid[_\s-]*(?:api\s*)?key|unauthori[sz]ed|forbidden|authentication/
+    /invalid[_\s-]*(?:api\s*)?key|unauthori[sz]ed|forbidden|authentication|is not configured in the supabase edge function/
       .test(detail)
   ) {
     return failure(
@@ -422,6 +641,7 @@ export function classifyVisionProviderFailure(
 
   if (
     [408, 504].includes(status || 0) ||
+    isAbortLike(input) ||
     /timeout|timed\s*out|deadline\s+exceeded/.test(detail)
   ) {
     return failure(
@@ -431,6 +651,20 @@ export function classifyVisionProviderFailure(
       true,
       true,
       "The selected vision provider timed out. The request can retry or use a configured fallback.",
+    );
+  }
+
+  if (
+    /unexpected token|invalid json|json parse|not valid json|incomplete json|invalid object|returned an invalid object|no structured (?:visual )?response/
+      .test(detail)
+  ) {
+    return failure(
+      provider,
+      "provider_incomplete_response",
+      status,
+      true,
+      true,
+      "The vision provider returned an incomplete response. The request can retry or use a configured fallback.",
     );
   }
 
@@ -463,4 +697,17 @@ export function canFallbackFromVisionFailure(
   failure: VisionProviderFailure | null | undefined,
 ) {
   return Boolean(failure?.fallbackEligible);
+}
+
+/**
+ * Timeouts and truncated JSON should fail over immediately. Retrying the same
+ * slow GPT reasoning call usually burns the Edge/gateway budget before Flash
+ * can run.
+ */
+export function shouldRetrySameVisionRoute(
+  failure: VisionProviderFailure | null | undefined,
+) {
+  if (!failure?.retryable) return false;
+  return failure.code !== "provider_timeout" &&
+    failure.code !== "provider_incomplete_response";
 }

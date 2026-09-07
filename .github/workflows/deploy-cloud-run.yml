@@ -50,7 +50,7 @@ jobs:
         run: node --check scripts/verify-catalog-workflow-live.mjs
 
       - name: Test catalog workflow utilities
-        run: deno test --frozen supabase/functions/app-api/lib/catalogHandoffCalendar.test.ts supabase/functions/app-api/lib/catalogStageTimeline.test.ts supabase/functions/app-api/lib/catalogRecipientSelection.test.ts
+        run: deno test --frozen supabase/functions/app-api/lib/catalogHandoffCalendar.test.ts supabase/functions/app-api/lib/catalogStageTimeline.test.ts supabase/functions/app-api/lib/catalogRecipientSelection.test.ts supabase/functions/app-api/tests/ai_model_policy.test.ts supabase/functions/app-api/tests/fashion_knowledge.test.ts supabase/functions/app-api/tests/learning_rules.test.ts supabase/functions/app-api/tests/prompt_patterns.test.ts supabase/functions/app-api/tests/saree_profiles.test.ts supabase/functions/app-api/tests/admin_ai_routing.test.ts && deno test --frozen --allow-read=supabase/functions/app-api/index.ts supabase/functions/app-api/tests/entrypoint_source.test.ts
 
       - name: Validate catalog migration SQL
         run: npm run validate:catalog-sql

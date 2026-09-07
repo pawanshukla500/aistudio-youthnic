@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import { getErrorMessage } from "../../lib/errors";
+import { coerceAdminAiPolicy, modelsForProviderPurpose, preferredConfiguredProvider, preferredModelId } from "./aiRouting";
 
 
 type AdminRole = Record<string, any> & { _id: Id<"roles">; name: string; slug: string; description?: string; permissions: string[] };
@@ -52,6 +53,7 @@ type AiModelRegistryEntry = {
     label: string;
     purposes: string[];
     thinkingLevels: string[];
+    help?: string;
   }>;
 };
 type AdminOverview = {
@@ -429,6 +431,7 @@ export function Admin() {
   const updateRolePermissions = useMutation(api.admin.updateRolePermissions);
   const updateAutomationSettings = useMutation(api.admin.updateAutomationSettings);
   const updateAiModelPolicies = useMutation(api.admin.updateAiModelPolicies);
+  const probeAiRoute = useMutation(api.admin.probeAiRoute);
   const syncOpenAiUsage = useAction(api.admin.syncOpenAiUsage);
   const [tab, setTab] = useState<Tab>("users");
   const [search, setSearch] = useState("");
@@ -458,6 +461,7 @@ export function Admin() {
     researchEnabled: true, reportRecipients: "", stateFilters: "Pan-India, All Indian states and union territories", timezone: "Asia/Kolkata",
   });
   const [aiPolicyDraft, setAiPolicyDraft] = useState<AiModelPolicy[]>([]);
+  const [routeProbes, setRouteProbes] = useState<Record<string, { status: "idle" | "running" | "pass" | "fail"; message?: string; latencyMs?: number }>>({});
 
   const selectedRole =
     overview?.roles.find((role) => role._id === selectedRoleId) || null;
@@ -521,7 +525,7 @@ export function Admin() {
   const aiRegistry = overview?.aiModelRegistry || [];
   const providerFor = (provider: string) => aiRegistry.find((entry) => entry.provider === provider);
   const modelsFor = (provider: string, purpose: AiPolicyPurpose) =>
-    (providerFor(provider)?.models || []).filter((model) => model.purposes.includes(purpose));
+    modelsForProviderPurpose(aiRegistry, provider, purpose);
   const thinkingLevelsFor = (provider: string, modelId: string, purpose: AiPolicyPurpose) => {
     if (provider === "qwen") return ["none"];
     const levels = modelsFor(provider, purpose).find((model) => model.id === modelId)?.thinkingLevels || [];
@@ -535,12 +539,16 @@ export function Admin() {
     return current && levels.includes(current) ? current : levels[0] || "none";
   };
   const defaultAiPolicy = (purpose: AiPolicyPurpose): AiModelPolicy => {
-    const primary = aiRegistry.find((entry) => entry.configured && modelsFor(entry.provider, purpose).length) || aiRegistry.find((entry) => modelsFor(entry.provider, purpose).length);
-    const primaryModel = primary ? modelsFor(primary.provider, purpose)[0] : undefined;
+    const primary = preferredConfiguredProvider(aiRegistry, purpose);
+    const primaryModel = primary
+      ? modelsFor(primary.provider, purpose).find((model) => model.id === preferredModelId(primary.provider, modelsFor(primary.provider, purpose))) || modelsFor(primary.provider, purpose)[0]
+      : undefined;
     const fallback = purpose === "image_generation"
       ? undefined
-      : aiRegistry.find((entry) => entry.provider !== primary?.provider && entry.configured && modelsFor(entry.provider, purpose).length);
-    const fallbackModel = fallback ? modelsFor(fallback.provider, purpose)[0] : undefined;
+      : preferredConfiguredProvider(aiRegistry, purpose, { exclude: primary?.provider, fallback: true });
+    const fallbackModel = fallback
+      ? modelsFor(fallback.provider, purpose).find((model) => model.id === preferredModelId(fallback.provider, modelsFor(fallback.provider, purpose))) || modelsFor(fallback.provider, purpose)[0]
+      : undefined;
     return {
       purpose,
       primaryProvider: primary?.provider || "gemini",
@@ -553,7 +561,10 @@ export function Admin() {
     };
   };
   const aiPoliciesForEditor = managedAiPurposes.map(({ purpose }) =>
-    aiPolicyDraft.find((policy) => policy.purpose === purpose) || defaultAiPolicy(purpose),
+    coerceAdminAiPolicy(
+      aiPolicyDraft.find((policy) => policy.purpose === purpose) || defaultAiPolicy(purpose),
+      aiRegistry,
+    ),
   );
   const updateAiPolicy = (purpose: AiPolicyPurpose, change: (policy: AiModelPolicy) => AiModelPolicy) => {
     setAiPolicyDraft((current) => {
@@ -725,6 +736,31 @@ export function Admin() {
       setNotice({ tone: "error", text: getErrorMessage(reason, "Could not save AI model policies.") });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const runRouteProbe = async (key: string, provider: string, model: string, thinkingLevel: string, purpose: AiPolicyPurpose) => {
+    if (purpose === "image_generation") return;
+    setRouteProbes((current) => ({ ...current, [key]: { status: "running" } }));
+    try {
+      const result = await probeAiRoute({
+        organizationId: organization._id,
+        purpose,
+        provider,
+        model,
+        thinkingLevel,
+      }) as { ok?: boolean; latencyMs?: number; message?: string };
+      setRouteProbes((current) => ({
+        ...current,
+        [key]: result.ok
+          ? { status: "pass", latencyMs: result.latencyMs }
+          : { status: "fail", latencyMs: result.latencyMs, message: result.message || "Probe failed." },
+      }));
+    } catch (reason) {
+      setRouteProbes((current) => ({
+        ...current,
+        [key]: { status: "fail", message: getErrorMessage(reason, "Probe failed.") },
+      }));
     }
   };
 
@@ -1116,24 +1152,39 @@ export function Admin() {
                     </div>
                     <div className="space-y-5 p-5">
                       <div>
-                        <div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-sm font-bold text-on-surface">Primary provider</h4><span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase ${primaryConfigured ? "bg-success-surface text-success" : "bg-warning-surface text-warning"}`}>{primaryConfigured ? "Configured" : "Missing secret"}</span></div>
+                        <div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-sm font-bold text-on-surface">Primary provider</h4><div className="flex items-center gap-2"><span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase ${primaryConfigured ? "bg-success-surface text-success" : "bg-warning-surface text-warning"}`}>{primaryConfigured ? "Configured" : "Missing secret"}</span>{policy.purpose !== "image_generation" && <button type="button" disabled={saving || !primaryConfigured || !policy.primaryModel || !overview.capabilities.canManageSettings || routeProbes[`${policy.purpose}-primary`]?.status === "running"} onClick={() => void runRouteProbe(`${policy.purpose}-primary`, policy.primaryProvider, policy.primaryModel, policy.primaryThinking, policy.purpose)} className="rounded-lg border border-outline-variant px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-secondary disabled:opacity-50">{routeProbes[`${policy.purpose}-primary`]?.status === "running" ? "Testing…" : "Test"}</button>}</div></div>
+                        {routeProbes[`${policy.purpose}-primary`]?.status === "pass" && <p className="mb-3 text-xs text-success">Primary probe passed in {routeProbes[`${policy.purpose}-primary`]?.latencyMs} ms.</p>}
+                        {routeProbes[`${policy.purpose}-primary`]?.status === "fail" && <p className="mb-3 text-xs text-danger">{routeProbes[`${policy.purpose}-primary`]?.message || "Primary probe failed."}</p>}
                         <div className="grid gap-3 sm:grid-cols-3">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Provider<select value={policy.primaryProvider} disabled={saving || !overview.capabilities.canManageSettings} onChange={(event) => { const provider = event.target.value; const model = modelsFor(provider, policy.purpose)[0]; updateAiPolicy(policy.purpose, (current) => ({ ...current, primaryProvider: provider, primaryModel: model?.id || "", primaryThinking: normalizedThinking(provider, model?.id || "", policy.purpose, model?.thinkingLevels[0]) })); }} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50">{primaryCandidates.map((entry) => <option key={entry.provider} value={entry.provider} disabled={!entry.configured && entry.provider !== policy.primaryProvider}>{providerLabel(entry.provider)}{entry.configured ? "" : " · missing secret"}</option>)}</select></label>
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Provider<select value={policy.primaryProvider} disabled={saving || !overview.capabilities.canManageSettings} onChange={(event) => { const provider = event.target.value; const options = modelsFor(provider, policy.purpose); const model = options.find((entry) => entry.id === preferredModelId(provider, options)) || options[0]; updateAiPolicy(policy.purpose, (current) => ({ ...current, primaryProvider: provider, primaryModel: model?.id || "", primaryThinking: normalizedThinking(provider, model?.id || "", policy.purpose, model?.thinkingLevels[0]) })); }} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50">{primaryCandidates.map((entry) => <option key={entry.provider} value={entry.provider} disabled={!entry.configured && entry.provider !== policy.primaryProvider}>{providerLabel(entry.provider)}{entry.configured ? "" : " · missing secret"}</option>)}</select></label>
                           <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Model<select value={policy.primaryModel} disabled={saving || !overview.capabilities.canManageSettings || !primaryModels.length} onChange={(event) => { const modelId = event.target.value; updateAiPolicy(policy.purpose, (current) => ({ ...current, primaryModel: modelId, primaryThinking: normalizedThinking(current.primaryProvider, modelId, policy.purpose, current.primaryThinking) })); }} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50"><option value="" disabled>Select model</option>{primaryModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label>
                           <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Thinking<select value={policy.primaryThinking} disabled={saving || !overview.capabilities.canManageSettings || policy.primaryProvider === "qwen"} onChange={(event) => updateAiPolicy(policy.purpose, (current) => ({ ...current, primaryThinking: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50">{primaryThinkingLevels.map((level) => <option key={level} value={level}>{thinkingLabel(level)}</option>)}</select></label>
                         </div>
                         {policy.primaryProvider === "qwen" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Qwen structured vision runs with thinking off so the Product Truth JSON contract remains reliable.</p>}
-                        {policy.primaryProvider === "meta" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Meta Muse Spark does not support “thinking off”; choose a supported reasoning effort.</p>}
+                        {policy.primaryProvider === "meta" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Muse Spark 1.3 Standard is recommended for fashion product data (~$1.25 / 1M input, $4.25 / 1M output). Contributor is cheaper (~$0.10 / $0.20) but Meta may train on prompts — do not select it unless the organization opts in. Reasoning cannot be turned off.</p>}
+                        {primaryModels.find((model) => model.id === policy.primaryModel)?.help && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">{primaryModels.find((model) => model.id === policy.primaryModel)?.help}</p>}
                         {policy.purpose === "image_generation" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">GPT Image 2 is the default production image model. Gemini, Qwen, and Muse Spark are available only for vision analysis or QA until a separately tested image-generation adapter is added.</p>}
                         {policy.repairRequired && <p className="mt-3 rounded-lg border border-warning/25 bg-warning-surface px-3 py-2 text-xs leading-5 text-warning">{policy.repairMessage || "This stored policy needs review. Save the displayed route to repair it."}</p>}
                       </div>
 
                       {policy.purpose !== "image_generation" && (
                         <div className="border-t border-outline-variant/25 pt-5">
-                          <label className="flex cursor-pointer items-start justify-between gap-3 rounded-xl border border-outline-variant/40 p-4"><span><span className="block text-sm font-bold text-on-surface">Use a fallback provider</span><span className="mt-1 block text-xs leading-5 text-secondary">Only used when the primary provider has an availability, quota, or billing failure.</span></span><input type="checkbox" checked={policy.fallbackEnabled} disabled={saving || !overview.capabilities.canManageSettings} onChange={(event) => updateAiPolicy(policy.purpose, (current) => { if (!event.target.checked) return { ...current, fallbackEnabled: false }; const existingUsable = current.fallbackProvider && current.fallbackProvider !== current.primaryProvider && modelsFor(current.fallbackProvider, policy.purpose).some((model) => model.id === current.fallbackModel); const candidate = existingUsable ? providerFor(current.fallbackProvider!) : fallbackCandidates.find((entry) => entry.configured) || fallbackCandidates[0]; const model = candidate ? modelsFor(candidate.provider, policy.purpose)[0] : undefined; return { ...current, fallbackEnabled: true, fallbackProvider: existingUsable ? current.fallbackProvider : candidate?.provider, fallbackModel: existingUsable ? current.fallbackModel : model?.id, fallbackThinking: existingUsable ? current.fallbackThinking : candidate && model ? normalizedThinking(candidate.provider, model.id, policy.purpose, model.thinkingLevels[0]) : undefined }; })} className="mt-1 h-4 w-4 accent-primary disabled:opacity-50" /></label>
-                          {policy.fallbackEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-3"><label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Fallback provider<select value={policy.fallbackProvider || ""} disabled={saving || !overview.capabilities.canManageSettings} onChange={(event) => { const provider = event.target.value; const model = modelsFor(provider, policy.purpose)[0]; updateAiPolicy(policy.purpose, (current) => ({ ...current, fallbackProvider: provider, fallbackModel: model?.id || "", fallbackThinking: normalizedThinking(provider, model?.id || "", policy.purpose, model?.thinkingLevels[0]) })); }} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50"><option value="" disabled>Select provider</option>{fallbackCandidates.map((entry) => <option key={entry.provider} value={entry.provider} disabled={!entry.configured && entry.provider !== policy.fallbackProvider}>{providerLabel(entry.provider)}{entry.configured ? "" : " · missing secret"}</option>)}</select></label>
+                          <label className="flex cursor-pointer items-start justify-between gap-3 rounded-xl border border-outline-variant/40 p-4"><span><span className="block text-sm font-bold text-on-surface">Use a fallback provider</span><span className="mt-1 block text-xs leading-5 text-secondary">Only used when the primary provider has an availability, quota, or billing failure. Prefer GPT 5.6 Luna (~$0.20 / $1.20 per 1M), not Sol.</span></span><input type="checkbox" checked={policy.fallbackEnabled} disabled={saving || !overview.capabilities.canManageSettings} onChange={(event) => updateAiPolicy(policy.purpose, (current) => { if (!event.target.checked) return { ...current, fallbackEnabled: false }; const existingUsable = current.fallbackProvider && current.fallbackProvider !== current.primaryProvider && modelsFor(current.fallbackProvider, policy.purpose).some((model) => model.id === current.fallbackModel); const candidate = existingUsable ? providerFor(current.fallbackProvider!) : fallbackCandidates.find((entry) => entry.provider === "openai" && entry.configured) || fallbackCandidates.find((entry) => entry.configured) || fallbackCandidates[0]; const options = candidate ? modelsFor(candidate.provider, policy.purpose) : []; const model = options.find((entry) => entry.id === preferredModelId(candidate?.provider || "", options)) || options[0]; return { ...current, fallbackEnabled: true, fallbackProvider: existingUsable ? current.fallbackProvider : candidate?.provider, fallbackModel: existingUsable ? current.fallbackModel : model?.id, fallbackThinking: existingUsable ? current.fallbackThinking : candidate && model ? normalizedThinking(candidate.provider, model.id, policy.purpose, model.thinkingLevels[0]) : undefined }; })} className="mt-1 h-4 w-4 accent-primary disabled:opacity-50" /></label>
+                          {policy.fallbackEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-3"><label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Fallback provider<select value={policy.fallbackProvider || ""} disabled={saving || !overview.capabilities.canManageSettings} onChange={(event) => { const provider = event.target.value; const options = modelsFor(provider, policy.purpose); const model = options.find((entry) => entry.id === preferredModelId(provider, options)) || options[0]; updateAiPolicy(policy.purpose, (current) => ({ ...current, fallbackProvider: provider, fallbackModel: model?.id || "", fallbackThinking: normalizedThinking(provider, model?.id || "", policy.purpose, model?.thinkingLevels[0]) })); }} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50"><option value="" disabled>Select provider</option>{fallbackCandidates.map((entry) => <option key={entry.provider} value={entry.provider} disabled={!entry.configured && entry.provider !== policy.fallbackProvider}>{providerLabel(entry.provider)}{entry.configured ? "" : " · missing secret"}</option>)}</select></label>
                             <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Fallback model<select value={policy.fallbackModel || ""} disabled={saving || !overview.capabilities.canManageSettings || !fallbackModels.length} onChange={(event) => { const modelId = event.target.value; updateAiPolicy(policy.purpose, (current) => ({ ...current, fallbackModel: modelId, fallbackThinking: normalizedThinking(current.fallbackProvider || "", modelId, policy.purpose, current.fallbackThinking) })); }} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50"><option value="" disabled>Select model</option>{fallbackModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label>
                             <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Fallback thinking<select value={policy.fallbackThinking || "none"} disabled={saving || !overview.capabilities.canManageSettings || policy.fallbackProvider === "qwen"} onChange={(event) => updateAiPolicy(policy.purpose, (current) => ({ ...current, fallbackThinking: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50">{fallbackThinkingLevels.map((level) => <option key={level} value={level}>{thinkingLabel(level)}</option>)}</select></label></div>}
+                          {policy.fallbackEnabled && policy.fallbackProvider && policy.fallbackModel && (
+                            <div className="mt-3 flex items-center justify-between gap-3">
+                              <p className="text-xs text-secondary">
+                                {routeProbes[`${policy.purpose}-fallback`]?.status === "pass"
+                                  ? `Fallback probe passed in ${routeProbes[`${policy.purpose}-fallback`]?.latencyMs} ms.`
+                                  : routeProbes[`${policy.purpose}-fallback`]?.status === "fail"
+                                    ? (routeProbes[`${policy.purpose}-fallback`]?.message || "Fallback probe failed.")
+                                    : "Tiny JSON ping. Does not generate catalog images."}
+                              </p>
+                              <button type="button" disabled={saving || !fallbackConfigured || !overview.capabilities.canManageSettings || routeProbes[`${policy.purpose}-fallback`]?.status === "running"} onClick={() => void runRouteProbe(`${policy.purpose}-fallback`, policy.fallbackProvider || "", policy.fallbackModel || "", policy.fallbackThinking || "low", policy.purpose)} className="rounded-lg border border-outline-variant px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-secondary disabled:opacity-50">{routeProbes[`${policy.purpose}-fallback`]?.status === "running" ? "Testing…" : "Test fallback"}</button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

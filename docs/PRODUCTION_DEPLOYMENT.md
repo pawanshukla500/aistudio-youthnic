@@ -9,8 +9,69 @@ Apply migrations and deploy the Edge API with an account that has access to proj
 ```powershell
 npx supabase link --project-ref cyygmyiqgdzgeoayxbro
 npx supabase db push
-npx supabase functions deploy app-api --project-ref cyygmyiqgdzgeoayxbro
+npx supabase functions deploy app-api --project-ref cyygmyiqgdzgeoayxbro --use-api
 ```
+
+Deploy **from this repository checkout only**. Never deploy a one-line
+`import "https://raw.githubusercontent.com/..."` stub as `app-api`. Production
+`app-api` v142 was left in that state by a bad MCP deploy; Studio analyze then
+fails before it can reach Gemini. Restore by deploying this repo's
+`supabase/functions/app-api` bundle (GitHub Actions does this on merge to
+`main` with `--use-api`). After deploy, in the Supabase dashboard open Edge
+Function `app-api` and confirm the source is the multi-file bundle, not a
+GitHub URL redirect. Do not ship another GitHub-URL stub entrypoint.
+
+### Live Product Truth policy (order2 / `cyygmyiqgdzgeoayxbro`)
+
+Studio analyze/plan **honors** `organization_ai_model_policies` purpose
+`product_truth`. It does not call OpenAI GPT for garment analysis when that
+row is Gemini. Live routing as of 2026-09-07:
+
+| purpose | primary | fallback |
+| --- | --- | --- |
+| `product_truth` (analyze + pose plan) | `gemini` / `gemini-3.8-flash` | `gemini-3.6-flash` |
+| `qa` | `gemini` / `gemini-3.8-flash` | `gemini-3.6-flash` |
+| `image_generation` (paid poses) | `openai` / `gpt-image-2` | none |
+
+Live `ai_runs` for `product_reference_analysis` in the last 12h show `gemini`
+/ `gemini-3.8-flash`, **status failed**, empty `error_message`, and **30–45s
+latency**. That matches production `AbortSignal.timeout(45_000)` on
+`geminiJson`, not a bad model id. Empty `error_message` is because failed
+analyze inserts omitted that column (it defaults to `''`).
+
+This release still honors stored Gemini rows, but the recommended production
+route is now **Muse Spark 1.3 Standard** with **GPT 5.6 Luna** fallback.
+Contributor Muse SKUs train on prompts and are not the default.
+
+Apply after this Edge Function is live (`META_MODEL_API_KEY` must be set).
+This updates every organization in project `cyygmyiqgdzgeoayxbro`
+(typically the single Youthnic org). Leave `image_generation` on `gpt-image-2`.
+Do not select `muse-spark-1.3-contributor` unless the org opts into training.
+
+```sql
+-- Product truth + QA: Muse Spark 1.3 Standard, cheap OpenAI Luna fallback.
+-- Do not use muse-spark-1.3-contributor unless the org opts into training.
+update public.organization_ai_model_policies
+set
+  primary_provider = 'meta',
+  primary_model = 'muse-spark-1.3',
+  primary_reasoning = 'low',
+  fallback_enabled = true,
+  fallback_provider = 'openai',
+  fallback_model = 'gpt-5.6-luna',
+  fallback_reasoning = 'low',
+  revision = revision + 1,
+  updated_at = now()
+where purpose in ('product_truth', 'qa');
+```
+
+Leave `image_generation` on `gpt-image-2`. Do not put secrets in SQL or in
+the repo. Required Edge secrets: `META_MODEL_API_KEY`, `OPENAI_API_KEY`,
+`GEMINI_API_KEY`.
+
+After a Studio Analyze, `ai_runs.provider` should be `meta` / `muse-spark-1.3`
+(or `openai` / `gpt-5.6-luna` if Muse failed over). Failed rows now store
+`error_message`.
 
 Configure server-only Edge secrets. Never add their values to Vite variables or GitHub build arguments.
 
@@ -19,6 +80,7 @@ npx supabase secrets set --project-ref cyygmyiqgdzgeoayxbro `
   OPENAI_API_KEY=... `
   OPENAI_ADMIN_KEY=... `
   GEMINI_API_KEY=... `
+  META_MODEL_API_KEY=... `
   FIREBASE_SERVICE_ACCOUNT=... `
   FIREBASE_PROJECT_ID=ai-studio-app-be068 `
   FIREBASE_STORAGE_BUCKET=ai-studio-app-be068.firebasestorage.app `
