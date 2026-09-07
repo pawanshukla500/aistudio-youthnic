@@ -36,6 +36,7 @@ import {
   type VisionProviderFailure,
 } from "./lib/aiModelPolicy.ts";
 import { selectReusableLearningRules } from "./lib/learningRules.ts";
+import { selectFashionKnowledgeGuidance } from "./lib/fashionKnowledge.ts";
 import { firebaseCatalogPath, supabaseCatalogPath } from "./lib/catalogStoragePaths.ts";
 import {
   MAX_IMAGE_REFERENCES,
@@ -1113,10 +1114,11 @@ async function analyze(request: Request, args: JsonRecord) {
   // that is queue-time validation of the references, and saving a plan writes a
   // decision, which would change the fingerprint and reject its own session.
   const housePreferences = await stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion"));
+  const fashionKnowledge = await fashionKnowledgeBrief(orgId, String(args.category || ""));
   const policy = await resolveVisionPolicy(orgId, { purpose: "product_truth", garmentFamily: String(args.category || "") });
   const policyFingerprint = visionPolicyFingerprint(policy);
   const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}|${policyFingerprint}`);
-  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${policyFingerprint}:${smallHash(housePreferences)}`;
+  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${policyFingerprint}:${smallHash(housePreferences)}:${smallHash(fashionKnowledge)}`;
   let cacheHit = false;
   let normalized: ReturnType<typeof normalizeAnalysis> | null = null;
   const forceRefresh = args.forceRefresh === true;
@@ -1141,7 +1143,7 @@ async function analyze(request: Request, args: JsonRecord) {
     parts.push({ text: buildCombinedAnalysisPrompt({
       skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
       category: String(args.category || "ethnic/fusion"), modelDirection: String(args.modelDirection || ""),
-      sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences,
+      sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences, fashionKnowledge,
     }) });
 
     let result: VisionResult;
@@ -1404,7 +1406,7 @@ async function validatePose(args: {
       ? [...baseParts, { text: "INDEPENDENT RECHECK: disregard prior numeric scores, re-inspect each critical region separately, and return newly reasoned evidence-based scores." }]
       : baseParts;
     const result = await visionJson(policy, parts);
-    return { result, qa: parseQaResponse(result.text, { garmentFamily, poseType: args.pose.id }) };
+    return { result, qa: parseQaResponse(result.text, { garmentFamily, poseType: args.pose.id, productIdentity: args.session.productIdentity }) };
   };
 
   const complex = ["saree", "lehenga", "suit", "multi-piece"].some((family) => garmentFamily.toLowerCase().includes(family));
@@ -1871,6 +1873,7 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     skuName: String(variant?.sku_name), productDetails: String(variant?.product_description || ""), category,
     modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
     housePreferences: await stylingPreferenceBrief(orgId, category),
+    fashionKnowledge: await fashionKnowledgeBrief(orgId, category),
   }) });
 
   const result = await visionJson(policy, parts);
@@ -2259,11 +2262,16 @@ async function compilePosePrompt(
     productCategory: String(sessionData.category || ""), poseType: poseData.id,
     referenceFingerprint: String(session.reference_hash || ""),
   });
+  const fashionKnowledge = await fashionKnowledgeBrief(
+    String(job.org_id),
+    String(sessionData.category || ""),
+    currentGarmentFamily,
+  );
 
   const prompt = composeGenerationPrompt({
     skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || "Untitled product"),
     productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
-    references: selected, correction: promptCorrection(), learnings: learningSelection.guidance,
+    references: selected, correction: promptCorrection(), learnings: learningSelection.guidance, fashionKnowledge,
   });
   return { prompt, qaCorrections, learningRuleIds: learningSelection.ruleIds };
 }
@@ -4017,7 +4025,7 @@ async function setVariantReferencesOperation(request: Request, args: JsonRecord)
   if (!variant) throw new Error("Colourway not found.");
   const roleArgs: Array<[string, string, string, readonly string[]]> = [
     ["frontReferenceId", "front_image_url", "front_image_path", ["front"]], ["backReferenceId", "back_image_url", "back_image_path", ["back"]],
-    ["fabricPatternReferenceId", "", "", ["fabric_pattern"]], ["additionalProductReferenceId", "", "", ["additional_product"]],
+    ["fabricPatternReferenceId", "", "", ["fabric_pattern"]], ["bottomReferenceId", "", "", ["bottom"]], ["additionalProductReferenceId", "", "", ["additional_product"]],
     ["sareeFrontDrapeReferenceId", "front_image_url", "front_image_path", ["saree_front_drape"]], ["sareeBackDrapeReferenceId", "back_image_url", "back_image_path", ["saree_back_drape"]],
     ["sareeBodyDetailReferenceId", "", "", ["saree_body_detail"]], ["sareePalluSpreadReferenceId", "", "", ["saree_pallu_spread"]],
     ["sareeBorderTasselsReferenceId", "", "", ["saree_border_tassels"]], ["sareeBlouseFrontReferenceId", "", "", ["saree_blouse_front"]], ["sareeBlouseBackPieceReferenceId", "", "", ["saree_blouse_back_piece"]],
@@ -4323,6 +4331,7 @@ async function analyzeCatalogVariant(
     skuName: String(variant.sku_name), productDetails: String(variant.product_description || ""), category,
     modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
     housePreferences: await stylingPreferenceBrief(String(batch.organization_id), category),
+    fashionKnowledge: await fashionKnowledgeBrief(String(batch.organization_id), category),
   }) });
   const result = await visionJson(policy, parts);
   const normalized = normalizeAnalysis(result.json, category);
@@ -4528,6 +4537,32 @@ async function stylingPreferenceBrief(orgId: string, category: string) {
     preferences.push(`- ${field}: the stylist has rewritten this ${counts.get(field)} time(s); most recently "${proposed.slice(0, 120)}" became "${approved.slice(0, 160)}".`);
   }
   return preferences.length ? preferences.join("\n") : "";
+}
+
+async function fashionKnowledgeBrief(orgId: string, category = "", garmentFamily = "") {
+  try {
+    const orgFilter = /^[0-9a-f-]{36}$/i.test(orgId)
+      ? `organization_id.eq.${orgId},organization_id.is.null`
+      : "organization_id.is.null";
+    const { data, error } = await service.from("fashion_knowledge_base")
+      .select("id,organization_id,category,topic,title,guidance,tags,priority,source,is_active")
+      .eq("is_active", true)
+      .or(orgFilter)
+      .order("priority", { ascending: false })
+      .limit(40);
+    if (error) {
+      console.error(`Could not load fashion knowledge: ${error.message}`);
+      return "";
+    }
+    return selectFashionKnowledgeGuidance(data || [], {
+      organizationId: orgId,
+      category,
+      garmentFamily,
+    }).guidance;
+  } catch (error) {
+    console.error(`Could not load fashion knowledge: ${error instanceof Error ? error.message : String(error)}`);
+    return "";
+  }
 }
 
 async function saveCatalogStylingPlanOperation(request: Request, args: JsonRecord) {

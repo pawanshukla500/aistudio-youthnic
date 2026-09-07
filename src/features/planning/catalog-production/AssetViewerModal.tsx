@@ -64,6 +64,12 @@ const referenceLabels: Record<string, string> = {
   saree_border_tassels: "Border / tassels",
   saree_blouse_front: "Blouse front",
   saree_blouse_back_piece: "Blouse back / unstitched piece",
+  front: "Front product",
+  back: "Back product",
+  fabric_pattern: "Fabric / pattern",
+  bottom: "Bottom wear / farshi",
+  mannequin: "Mannequin / flat-lay",
+  additional_product: "Additional product",
 };
 
 function qaLabel(status: string) {

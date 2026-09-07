@@ -7,6 +7,7 @@ export type ProductReferenceRole =
   | "front"
   | "back"
   | "fabric_pattern"
+  | "bottom"
   | "mannequin"
   | "additional_product"
   | "saree_front_drape"

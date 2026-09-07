@@ -1,6 +1,9 @@
 import {
   CONSISTENCY_RULES,
+  hasRecordedBottomWear,
+  isFarshiBottomWear,
   normalizeStylingPlan,
+  recordedBottomWearDetails,
   type JsonRecord,
   type StudioPose,
   sanitizeDetailPlacementMap,
@@ -204,6 +207,12 @@ function compactOptionalPromptContent(prompt: string) {
     ["\n\nPROMPT:"],
     600,
   );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nFASHION KNOWLEDGE (SEEDED CUT/PRINT GUIDANCE, SUBORDINATE TO PRODUCT REFERENCES):\n",
+    ["\nCONTINUOUS LEARNING ADVISORY (APPROVED, REFERENCE-SCOPED GUIDANCE):", "\n\nPROMPT:"],
+    700,
+  );
   return compacted;
 }
 
@@ -273,7 +282,7 @@ function poseCategoryRules(category: string) {
 
 export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
-  session: JsonRecord; references: PromptReference[]; correction?: string; learnings?: string;
+  session: JsonRecord; references: PromptReference[]; correction?: string; learnings?: string; fashionKnowledge?: string;
 }) {
   const product = objectValue(args.session.productIdentity);
   const creative = objectValue(args.session.creativeDirection);
@@ -328,6 +337,7 @@ export function composeGenerationPrompt(args: {
   ];
   const correction = boundedText(args.correction, 1_200);
   const learnings = boundedText(args.learnings, 900);
+  const fashionKnowledge = boundedText(args.fashionKnowledge, 700);
   const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).join(", ");
   const visibilityRules = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
   const poseCategory = detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || ""));
@@ -342,8 +352,10 @@ export function composeGenerationPrompt(args: {
   Absent: ${boundedStrings(row.explicitlyAbsent, 12, 180).join(", ") || "None"}
   Uncertainty: ${boundedText(row.uncertainty, 260) || "None"}`;
   }).join("\n");
-  const bottomWear = String(product?.bottomWearDetails || "").trim();
-  const hasBottomWear = Boolean(bottomWear && !/^(none|n\/a|not applicable|standalone)/i.test(bottomWear));
+  const bottomWear = recordedBottomWearDetails(product);
+  const hasBottomWear = hasRecordedBottomWear(product);
+  const farshiBottom = isFarshiBottomWear(bottomWear);
+  const hasBottomReference = promptReferences.some((reference) => reference.role === "bottom");
 
   const prompt = `Create ONE premium photorealistic fashion e-commerce photograph for ${boundedText(args.skuName, 160) || "this product"}.
 
@@ -380,7 +392,7 @@ ${sareeDrapePlanJson}`) : ""}
 User notes: ${isTrueBack ? "Non-authoritative for rear construction. The direct uploaded back product image remains the sole product source." : boundedText(args.productDetails, 1_200)}
 Reference authority: ${isTrueBack
     ? "The one direct uploaded BACK / SAREE REAR-BACK DRAPE image in the manifest is the sole visual product authority. Do not derive rear construction from a front, pallu, body detail, border, blouse, mannequin, model, style, or generated image."
-    : `original product images always outrank generated anchors and style references. FRONT controls front construction; BACK solely controls rear construction; FABRIC/PATTERN resolves material and small construction; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion and drape, while a FLAT-LAY resolves outline, construction, panel layout and length only, since flat cloth shows no worn drape. ADDITIONAL supports product truth; STYLE controls art direction only.${isSaree ? " For sarees, FULL SAREE FRONT and REAR/BACK DRAPE control their complete worn regions; SAREE BODY/WEAVE controls body colour, weave and motif geometry; FULLY SPREAD PALLU alone controls the pallu boundary and artwork; BORDER/TASSELS controls edge geometry and tassel construction; BLOUSE FRONT/BACK controls only the matching blouse region. Never classify or treat the pallu spread as generic body fabric." : ""}`}
+    : `original product images always outrank generated anchors and style references. FRONT controls front construction and, when bottoms are visible, bottom-wear cut and print; BACK solely controls rear construction including rear bottom-wear; FABRIC/PATTERN resolves UPPER-garment material, embroidery and small construction only unless that image itself shows the trousers/skirt; BOTTOM WEAR / FARSHI (if supplied) is the pixel-level authority for bottom-wear cut, volume, hem, color and print; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion, drape and bottom volume, while a FLAT-LAY resolves outline, construction, panel layout and length only, since flat cloth shows no worn drape. ADDITIONAL supports product truth including bottoms; STYLE controls art direction only.${isSaree ? " For sarees, FULL SAREE FRONT and REAR/BACK DRAPE control their complete worn regions; SAREE BODY/WEAVE controls body colour, weave and motif geometry; FULLY SPREAD PALLU alone controls the pallu boundary and artwork; BORDER/TASSELS controls edge geometry and tassel construction; BLOUSE FRONT/BACK controls only the matching blouse region. Never classify or treat the pallu spread as generic body fabric." : ""}`}
 - Product references may be flat-lay, folded, pinned or shot on a mannequin or dress form. Rebuild the garment as it falls on a live human body, and never render a mannequin, dress form, hanger, clip, pin, prop stand, or the flat background surface in the output.
 ${isSaree ? (isTrueBack
     ? "- SAREE REAR RULE: read the visible pallu fall, border, tassels, weave and blouse-back only from the direct rear image. Never mirror or extend a front-only design into the back."
@@ -406,24 +418,27 @@ ${isTrueBack ? `REAR PRODUCT GEOMETRY LOCK:
 - The SAREE BORDER / TASSELS DETAIL image is the sole authority for upper/lower border widths, border motifs, and tassel construction.
 - Reproduce all motifs at their stated physical scale relative to the body or pallu. Do not enlarge, simplify, stylize, redraw, or "clean up" a motif.
 - Keep every accent colour inside the print and embroidery. Small secondary-colour details within a motif field are part of this product's identity, not noise to average away.
-- If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it.` : `PRINT AND EMBROIDERY GEOMETRY LOCK - the difference between photographing THIS garment and inventing a similar one:
+- If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it.`     : `PRINT AND EMBROIDERY GEOMETRY LOCK - the difference between photographing THIS garment and inventing a similar one:
 Pattern geometry: ${patternGeometryJson}
 Embroidery geometry: ${embroideryGeometryJson}
-- The FABRIC / PATTERN DETAIL image is the pixel-level authority for motif shape, motif scale, spacing, orientation and embroidery construction. Read the geometry off that image rather than reproducing a generic version of the same craft or style.
+- The FABRIC / PATTERN DETAIL image is the pixel-level authority for UPPER-garment motif shape, motif scale, spacing, orientation and embroidery construction only. Read that geometry off that image rather than reproducing a generic version of the same craft or style. It is NOT the authority for bottom-wear print unless the image itself clearly shows the trousers/skirt.
 - Reproduce motifs at the stated physical scale relative to the body. Do not enlarge, simplify, stylize, redraw or "clean up" a motif, and do not reduce a dense print to fewer, larger shapes.
-- Keep the print's orientation, repeat interval and density identical, including where panels differ - body, sleeves, yoke, bottom wear and dupatta each keep their own stated treatment.
+- Keep the print's orientation, repeat interval and density identical, including where panels differ - body, sleeves, yoke, bottom wear and dupatta each keep their own stated treatment. Never copy kurta/upper embroidery scale onto the bottoms.
 - Keep every accent colour inside the print. Small secondary-colour details within a motif field are part of this product's identity, not noise to average away.
 - Reproduce embroidery as the same internal geometry: same lattice or motif structure, same count and rhythm of repeated units, same borders, same coverage area, and the same relationship to the neckline, tie, drawstring and tassel.
 - If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".`)}
 
-${hasBottomWear ? `LOCKED BOTTOM WEAR ARCHITECTURE & SILHOUETTE - HIGHEST FIDELITY:
-Bottom wear specification: ${boundedText(bottomWear, 800)}
-- MANDATORY SILHOUETTE PRESERVATION: You MUST render the EXACT bottom wear cut, silhouette, leg volume, pleat architecture, and hem construction described above and shown in the product references across ALL poses.
+${hasBottomWear ? `LOCKED BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT - HIGHEST FIDELITY:
+Bottom wear specification: ${boundedText(bottomWear, 1_200)}
+${hasBottomReference ? "- A dedicated BOTTOM WEAR / FARSHI image is in the reference manifest. That image is the pixel-level authority for bottom-wear cut, volume, hem, fabric color, and print. Copy it literally onto the worn trousers/skirt." : "- Read bottom-wear cut, volume, hem, fabric color, and print from FRONT, BACK, MANNEQUIN, and ADDITIONAL product images where the trousers/skirt are visible. Do not invent a simpler palazzo or a solid/plain bottom."}
+- MANDATORY SILHOUETTE PRESERVATION: You MUST render the EXACT bottom wear cut, silhouette, leg volume, two-leg structure, pleat/gather architecture, and hem construction described above and shown in the product references across ALL poses.
 - ABSOLUTE PROHIBITION ON SILHOUETTE SUBSTITUTION:
-  * If the bottom wear is Farshi / Farshi Pajama, palazzo, or wide-leg pants: The legs MUST fall straight and wide to the floor with deep front box pleats and a broad hem band. You are STRICTLY FORBIDDEN from rendering dhoti pants, tulip pants, harem pants, Afghani salwars, or any pants that taper inwards or gather into an ankle cuff.
+  * If the bottom wear is Farshi / Farsi / Farshi Pajama: These are extremely voluminous floor-length trousers with TWO DISTINCT LEGS, heavy vertical pleating or gathers from the waist/hip, and architectural volume that flares and may trail or pool at the floor. You are STRICTLY FORBIDDEN from rendering palazzo, plain wide-leg pants, a lehenga/skirt (one circular flare with no leg split), dhoti pants, tulip pants, harem pants, Afghani salwars, or any pants that taper or gather into an ankle cuff. Do not flatten the volume.
+  * If the bottom wear is palazzo: The legs MUST fall wide without farshi-level pooling or a skirt merge. Do NOT substitute farshi, lehenga, dhoti, tulip, harem, or ankle-cuffed salwar.
   * If the bottom wear is cigarette pants / straight trousers: The legs must fall straight and tailored; do NOT flare into palazzos or gather into salwars.
   * If the bottom wear is a sharara or gharara: Flare must occur at or below the knee as designed; do NOT substitute regular pants.
-- COLOR & PATTERN ACCURACY: The base fabric color, sheen, metallic boota/sprigs/motifs, and hem border of the bottom wear must match the product references exactly.` : (!isSaree ? `- BOTTOM WEAR FIDELITY: Keep the exact bottom wear cut, silhouette, color, and fabric shown in the product references. Never substitute dhoti pants, tulip pants, or tapered salwars unless explicitly proven by the references.` : "")}
+- COLOR & PRINT TRANSFER: Copy the exact base fabric color, sheen, and motif geometry of the bottom wear from the bottom-visible product references. Large-scale metallic florals/bootas must remain large-scale metallic florals/bootas at the same physical size and density. You are STRICTLY FORBIDDEN from rendering the bottoms as solid/undecorated color, as faint dots/speckles, or as a miniaturized micro-print when the references show bold motifs. Never use the kurta/upper FABRIC / PATTERN DETAIL close-up as the bottom print.
+${farshiBottom ? "- FARSHI / FARSI HARD LOCK: Keep two visible trouser legs, extreme structured volume, and the exact gold/silver floral (or other recorded) motif field from the bottom-wear evidence. A pretty magenta palazzo or a skirt-like flare is a failed generation even if the white kurta and model face are perfect." : ""}` : (!isSaree ? `- BOTTOM WEAR FIDELITY: Keep the exact bottom wear cut, silhouette, color, fabric, and print shown in the product references. Never substitute dhoti pants, tulip pants, palazzo, lehenga, or tapered salwars unless explicitly proven by the references.` : "")}
 
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
 ${creativeJson}
@@ -466,6 +481,11 @@ ${correction ? `
 CORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:
 ${correction}
 - Address this correction completely and literally. Do not change anything else that was working.` : ""}
+${fashionKnowledge ? `
+FASHION KNOWLEDGE (SEEDED CUT/PRINT GUIDANCE, SUBORDINATE TO PRODUCT REFERENCES):
+${fashionKnowledge}
+- Valid only when the current product references confirm this bottom garment. Product references ALWAYS override this guidance.
+` : ""}
 ${learnings ? `
 CONTINUOUS LEARNING ADVISORY (APPROVED, REFERENCE-SCOPED GUIDANCE):
 ${learnings}
@@ -490,7 +510,7 @@ PROHIBITED UNRELATED CHANGES:
 ${rules.map((rule) => `- ${rule}`).join("\n")}
 - Never complete, mirror, continue, relocate, add or remove decoration for symmetry.
 - Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
-- ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION: It is strictly forbidden to alter or replace the bottom wear cut, silhouette, or construction (e.g., never substitute dhoti pants, tulip pants, harem pants, or balloon salwars with ankle cuffs when Farshi, palazzo, or wide-leg pants are specified). Customers buy the complete set and expect the exact silhouette, color, and motif pattern shown in the product references.
+- ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION: It is strictly forbidden to alter or replace the bottom wear cut, silhouette, volume, or print (e.g., never substitute palazzo, lehenga/skirt, dhoti pants, tulip pants, harem pants, or balloon salwars when Farshi / Farsi pajama is specified; never drop large gold/silver florals into solid color or tiny dots). Customers buy the complete set and expect the exact silhouette, color, and motif pattern shown in the product references.
 - Never change the backdrop wall color, texture, floor, or lighting from what was established in Pose 1.
 - Never add random background props (brass urlis, urns, flower petals, pedestals) not present in Pose 1.
 ${args.pose.id === "back" ? "- DUPATTA REAR VISIBILITY LOCK: If wearing a dupatta or shawl, it must be draped forward over arms or in front. The back of the kurti/dress must be completely visible and never covered by the dupatta." : ""}

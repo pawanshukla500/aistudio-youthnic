@@ -829,6 +829,7 @@ export function Planning() {
                             ["front", "Front product *", focusVariant.frontUrl],
                             ["back", "Back product *", focusVariant.backUrl],
                             ["fabric_pattern", "Fabric / pattern", focusVariant.fabricPatternUrl],
+                            ["bottom", "Bottom wear / farshi", focusVariant.bottomUrl],
                             ["additional_product", "Additional product", focusVariant.additionalProductUrl],
                           ]).map(([role, label, url]) => (
                             <label key={role as string} className="group cursor-pointer">

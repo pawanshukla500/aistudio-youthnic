@@ -419,11 +419,53 @@ Deno.test("composeGenerationPrompt locks bottom wear architecture and strictly p
     references: [{ role: "front" }],
   });
 
-  assertStringIncludes(prompt, "LOCKED BOTTOM WEAR ARCHITECTURE & SILHOUETTE - HIGHEST FIDELITY:");
+  assertStringIncludes(prompt, "LOCKED BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT - HIGHEST FIDELITY:");
   assertStringIncludes(prompt, "Farshi Pajama with wide flared straight legs");
   assertStringIncludes(prompt, "ABSOLUTE PROHIBITION ON SILHOUETTE SUBSTITUTION:");
-  assertStringIncludes(prompt, "STRICTLY FORBIDDEN from rendering dhoti pants, tulip pants, harem pants, Afghani salwars");
+  assertStringIncludes(prompt, "STRICTLY FORBIDDEN from rendering palazzo, plain wide-leg pants, a lehenga/skirt");
   assertStringIncludes(prompt, "ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION:");
+  assertStringIncludes(prompt, "FARSHI / FARSI HARD LOCK:");
+  assertStringIncludes(prompt, "Never use the kurta/upper FABRIC / PATTERN DETAIL close-up as the bottom print");
+});
+
+Deno.test("composeGenerationPrompt treats a dedicated bottom reference as print authority and does not flatten farshi into palazzo", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "FARSHI-KURTI-SET",
+    productDetails: "Kurti set with magenta farshi pajama",
+    pose: {
+      id: "full_front",
+      title: "Hero Stance",
+      poseNumber: 1,
+      description: "Full body hero",
+      cameraAngle: "straight",
+      framing: "full",
+      bodyPosition: "standing",
+      handPlacement: "sides",
+      expression: "confident",
+      highlightedDetails: ["farshi volume", "gold floral"],
+      productVisibilityRules: ["complete bottom wear visible"],
+      purpose: "hero",
+      consistencyNotes: "locked",
+      prompt: "Show complete farshi kurti set.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "ivory white",
+        bottomWearDetails: "Farsi / Farshi Pajama, magenta silk, bold large-scale gold floral bootas; NOT palazzo, NOT lehenga, NOT solid magenta",
+      },
+    },
+    references: [{ role: "front" }, { role: "fabric_pattern" }, { role: "bottom" }],
+    fashionKnowledge: "- Farshi pajama keeps two distinct legs and large gold florals from the bottom reference.",
+  });
+
+  assertStringIncludes(prompt, "BOTTOM WEAR / FARSHI");
+  assertStringIncludes(prompt, "pixel-level authority for bottom-wear cut, volume, hem, fabric color, and print");
+  assertStringIncludes(prompt, "FABRIC / PATTERN DETAIL image is the pixel-level authority for UPPER-garment");
+  assertStringIncludes(prompt, "STRICTLY FORBIDDEN from rendering the bottoms as solid/undecorated color, as faint dots/speckles");
+  assertStringIncludes(prompt, "FASHION KNOWLEDGE (SEEDED CUT/PRINT GUIDANCE, SUBORDINATE TO PRODUCT REFERENCES):");
+  assertEquals(prompt.includes("If the bottom wear is Farshi / Farshi Pajama, palazzo, or wide-leg pants"), false);
 });
 
 Deno.test("true-back pose preserves bottom wear architecture without leaking front decoration", () => {
@@ -462,7 +504,7 @@ Deno.test("true-back pose preserves bottom wear architecture without leaking fro
 
   // Verify bottom wear details survive in rear product core and bottom wear section
   assertStringIncludes(prompt, "Farshi Pajama with wide flared straight legs");
-  assertStringIncludes(prompt, "LOCKED BOTTOM WEAR ARCHITECTURE & SILHOUETTE - HIGHEST FIDELITY:");
+  assertStringIncludes(prompt, "LOCKED BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT - HIGHEST FIDELITY:");
   // Verify front detail does not leak
   assertEquals(prompt.includes("front-lace-should-not-leak"), false);
 });
