@@ -27,8 +27,12 @@ Studio analyze/plan **honors** `organization_ai_model_policies` purpose
 `product_truth`. Product-truth hops use a **50s** per-provider timeout (Gemini
 Flash completions are often 30–37s; the previous 28s abort killed them). The
 runtime chain is **Muse Spark 1.3 → Luna → Terra → Gemini 3.8 Flash**, with
-thinking forced to `low`. Each hop writes its own `ai_runs` row **before the next
-hop starts** (so a later timeout still leaves Meta rows). After four consecutive
+thinking forced to `low`. A stored fallback that is not already in that chain
+is appended last so it cannot steal hop budget from Terra/Gemini. Each hop is
+capped by the remaining gateway budget even if the provider adapter ignores
+`timeoutMs`. Product-truth hops do not retry the same route. Each hop writes
+its own `ai_runs` row **before the next hop starts** (so a later timeout still
+leaves Meta rows). After four consecutive
 successful Luna/Terra/Gemini analyses — or when the stored primary has zero
 completions and another approved model already has four in the recent window —
 the Edge Function auto-promotes that model (`audit_logs.action = ai_model_policies.auto_promoted`).

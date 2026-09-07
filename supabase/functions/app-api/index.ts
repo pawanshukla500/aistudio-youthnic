@@ -1390,9 +1390,22 @@ async function visionJson(
       purpose: policy.purpose,
       gatewayBudgetMs: visionGatewayBudgetMs(),
       invoke: async (route, timeoutMs) => {
+        // Product-truth hops already fail over Muse → Luna → Terra → Gemini.
+        // A same-route retry would reuse the full hop timeout and starve later
+        // providers. QA still retries once, sharing the remaining hop budget.
+        if (policy.purpose === "product_truth") {
+          return await invokeVisionRoute(policy, route, parts, timeoutMs);
+        }
+        const hopStarted = Date.now();
         for (let attempt = 1; attempt <= 2; attempt += 1) {
+          const remainingMs = Math.max(0, timeoutMs - (Date.now() - hopStarted));
+          if (remainingMs < 8_000) {
+            throw Object.assign(new Error("The selected vision provider timed out."), {
+              name: "TimeoutError",
+            });
+          }
           try {
-            return await invokeVisionRoute(policy, route, parts, timeoutMs);
+            return await invokeVisionRoute(policy, route, parts, remainingMs);
           } catch (error) {
             const providerError = asVisionProviderError(error, route);
             if (

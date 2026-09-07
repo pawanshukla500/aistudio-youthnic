@@ -281,6 +281,8 @@ export const VISION_ROUTE_PROMOTION_THRESHOLD = 4;
  * Remaining hops after the selected primary. Order is Luna → Terra → Gemini
  * Flash → Muse so a Muse primary becomes Muse → Luna → Terra → Gemini, and a
  * Gemini primary (interim Studio policy) still fails over to Luna then Terra.
+ * A stored fallback that is not already in this chain is appended last so it
+ * cannot consume hop budget before Terra/Gemini.
  */
 export const PRODUCT_TRUTH_FAILOVER_CHAIN: readonly NormalizedAiModelRoute[] = [
   CHEAP_OPENAI_VISION_ROUTE,
@@ -335,9 +337,38 @@ export function productTruthRouteChain(
     chain.push(next);
   };
   push(primary);
-  push(existingFallback);
   for (const hop of PRODUCT_TRUTH_FAILOVER_CHAIN) push(hop);
+  push(existingFallback);
   return chain;
+}
+
+export function visionHopTimeoutError(
+  message = "The selected vision provider timed out.",
+) {
+  return Object.assign(new Error(message), { name: "TimeoutError" });
+}
+
+/**
+ * Enforce the hop budget even when `invoke` ignores `timeoutMs` (Qwen has no
+ * AbortSignal; a hanging fetch would otherwise stall every later fallback).
+ */
+export async function invokeWithHopTimeout<T>(
+  invoke: () => Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const work = Promise.resolve().then(invoke);
+  work.catch(() => {});
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(visionHopTimeoutError()), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 export function remainingVisionTimeoutMs(args: {
@@ -466,7 +497,10 @@ export async function runVisionProviderChain<T>(args: {
       continue;
     }
     try {
-      const value = await args.invoke(route, timeoutMs);
+      const value = await invokeWithHopTimeout(
+        () => args.invoke(route, timeoutMs),
+        timeoutMs,
+      );
       await emit({
         provider: route.provider as AiProvider,
         model: route.model,

@@ -20,6 +20,7 @@ import {
   productTruthRouteChain,
   promotionFallbackRoute,
   remainingVisionTimeoutMs,
+  invokeWithHopTimeout,
   runVisionProviderChain,
   shouldContinueVisionFallback,
   shouldRetrySameVisionRoute,
@@ -493,6 +494,34 @@ Deno.test("product-truth failover is Muse then Luna then Terra then Gemini Flash
       "meta:muse-spark-1.3:low",
     ],
   );
+  assertEquals(
+    productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE, {
+      provider: "qwen",
+      model: "qwen3.8-max",
+      thinkingLevel: "none",
+    }).map((route) => `${route.provider}:${route.model}`),
+    [
+      "meta:muse-spark-1.3",
+      "openai:gpt-5.6-luna",
+      "openai:gpt-5.6-terra",
+      "gemini:gemini-3.8-flash",
+      "qwen:qwen3.8-max",
+    ],
+  );
+  assertEquals(
+    productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE, {
+      provider: "gemini",
+      model: "gemini-3.1-pro",
+      thinkingLevel: "high",
+    }).map((route) => `${route.provider}:${route.model}`),
+    [
+      "meta:muse-spark-1.3",
+      "openai:gpt-5.6-luna",
+      "openai:gpt-5.6-terra",
+      "gemini:gemini-3.8-flash",
+      "gemini:gemini-3.1-pro",
+    ],
+  );
 });
 
 Deno.test("product-truth timeout budget stays at 45-55s and still reserves failover slices", () => {
@@ -559,6 +588,22 @@ Deno.test("timeout on Muse fails over to Luna then Terra and logs every hop", as
     "gpt-5.6-terra:completed:3",
   ]);
   assertEquals(rows.filter((row) => row.status === "failed").length, 2);
+});
+
+Deno.test("hop timeout is enforced when invoke ignores timeoutMs", async () => {
+  const started = Date.now();
+  let rejected = false;
+  try {
+    await invokeWithHopTimeout(
+      () => new Promise((resolve) => setTimeout(resolve, 2_000)),
+      40,
+    );
+  } catch (error) {
+    rejected = true;
+    assertEquals((error as { name?: string }).name, "TimeoutError");
+  }
+  assertEquals(rejected, true);
+  assert(Date.now() - started < 500);
 });
 
 Deno.test("failed hops are persisted before the next provider is invoked", async () => {
