@@ -11,12 +11,23 @@ const ANALYZE_OPERATIONS = new Set([
   "analysis.analyzeReferences",
 ]);
 
+/** Must cover VISION_GATEWAY_BUDGET_MS so Muse timeout can still start hop 2. */
+export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
+
 export const ANALYZE_GATEWAY_CUT_MESSAGE =
   "Analysis was interrupted before fallback providers could finish. Retry Analyze — Gemini Flash runs first so a typical run completes in about 30 seconds.";
 
+export function isAnalyzeInvokeOperation(operation: string) {
+  return ANALYZE_OPERATIONS.has(operation);
+}
+
+export function appApiInvokeTimeoutMs(operation: string): number | undefined {
+  return isAnalyzeInvokeOperation(operation) ? STUDIO_ANALYZE_TIMEOUT_MS : undefined;
+}
+
 /**
  * Map supabase.functions.invoke failures. A 504 / client disconnect is the
- * 60s Studio invoke window, not "the selected vision provider timed out".
+ * invoke window, not "the selected vision provider timed out".
  */
 export function functionInvokeErrorMessage(args: {
   operation: string;

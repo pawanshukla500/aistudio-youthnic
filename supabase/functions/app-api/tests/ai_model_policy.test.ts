@@ -462,9 +462,9 @@ Deno.test("product-truth analyze clamps Admin high thinking to low for Muse and 
     }),
     "low",
   );
-  assertEquals(PRODUCT_TRUTH_TIMEOUT_MS, 34_000);
-  assertEquals(PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS, 18_000);
-  assertEquals(STUDIO_INVOKE_BUDGET_MS, 55_000);
+  assertEquals(PRODUCT_TRUTH_TIMEOUT_MS, 40_000);
+  assertEquals(PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS, 25_000);
+  assertEquals(STUDIO_INVOKE_BUDGET_MS, 140_000);
 });
 
 Deno.test("product-truth failover is Gemini Flash then Luna then Muse last", () => {
@@ -532,7 +532,7 @@ Deno.test("product-truth failover is Gemini Flash then Luna then Muse last", () 
   );
 });
 
-Deno.test("product-truth hop budget fits the 60s Studio invoke window", () => {
+Deno.test("product-truth hop budget matches the 140s Studio analyze timeout", () => {
   assertEquals(productTruthGatewayBudgetMs(145_000), STUDIO_INVOKE_BUDGET_MS);
   assertEquals(productTruthGatewayBudgetMs(), STUDIO_INVOKE_BUDGET_MS);
   assertEquals(
@@ -543,6 +543,8 @@ Deno.test("product-truth hop budget fits the 60s Studio invoke window", () => {
     productTruthHopTimeoutMs({ provider: "meta", model: "muse-spark-1.3" }),
     PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS,
   );
+  assert(PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS >= 20_000);
+  assert(PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS <= 25_000);
   assertEquals(
     productTruthHopTimeoutMs({ provider: "gemini", model: "gemini-3.8-flash" }),
     PRODUCT_TRUTH_TIMEOUT_MS,
@@ -566,7 +568,7 @@ Deno.test("product-truth hop budget fits the 60s Studio invoke window", () => {
     route: FAST_PRODUCT_TRUTH_ROUTE,
   });
   assertEquals(museIfFirst, PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS);
-  assert(museIfFirst <= 20_000);
+  assert(museIfFirst <= 25_000);
 
   const afterGeminiTimeout = remainingVisionTimeoutMs({
     purpose: "product_truth",
@@ -624,14 +626,14 @@ Deno.test("timeout on hop-1 still invokes hop-2 and later hops", async () => {
   ]);
 });
 
-Deno.test("60s gateway budget still runs hop-2 after a full hop-1 timeout", async () => {
+Deno.test("60s leftover gateway still runs hop-2 after a full hop-1 timeout", async () => {
   const routes = productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE);
   let clock = 0;
   const invoked: Array<{ model: string; timeoutMs: number; at: number }> = [];
   const result = await runVisionProviderChain({
     routes,
     purpose: "product_truth",
-    gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
+    gatewayBudgetMs: 60_000,
     now: () => clock,
     invoke: async (route, timeoutMs) => {
       invoked.push({ model: route.model, timeoutMs, at: clock });
@@ -654,11 +656,62 @@ Deno.test("60s gateway budget still runs hop-2 after a full hop-1 timeout", asyn
     "gemini-3.8-flash",
     "gpt-5.6-luna",
   ]);
-  assertEquals(invoked[0].timeoutMs, PRODUCT_TRUTH_TIMEOUT_MS);
-  assert(invoked[1].timeoutMs >= 10_000);
-  assert(invoked[0].timeoutMs + invoked[1].timeoutMs <= STUDIO_INVOKE_BUDGET_MS);
-  assert(clock <= STUDIO_INVOKE_BUDGET_MS);
+  assert(invoked[0].timeoutMs <= PRODUCT_TRUTH_TIMEOUT_MS);
+  assert(invoked[1].timeoutMs >= 8_000);
+  assert(invoked[0].timeoutMs + invoked[1].timeoutMs <= 60_000);
   assertEquals(result.route.model, "gpt-5.6-luna");
+});
+
+Deno.test("Muse timeout still invokes hop-2 and logs both hops", async () => {
+  const routes = [
+    FAST_PRODUCT_TRUTH_ROUTE,
+    CHEAP_OPENAI_VISION_ROUTE,
+    FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+  ];
+  const events: string[] = [];
+  let clock = 0;
+  const result = await runVisionProviderChain({
+    routes,
+    purpose: "product_truth",
+    gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
+    now: () => clock,
+    invoke: async (route, timeoutMs) => {
+      events.push(`invoke:${route.model}`);
+      if (route.model === "muse-spark-1.3") {
+        assert(timeoutMs <= PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS);
+        clock += timeoutMs;
+        throw Object.assign(new Error("The selected vision provider timed out."), {
+          name: "TimeoutError",
+        });
+      }
+      clock += 1_000;
+      return { ok: true, model: route.model };
+    },
+    classify: (route, error) =>
+      classifyVisionProviderFailure(route.provider, {
+        name: (error as { name?: string }).name,
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    onAttempt: (attempt) => {
+      events.push(`log:${attempt.model}:${attempt.outcome}:${attempt.attemptNumber}`);
+    },
+  });
+  assertEquals(events, [
+    "invoke:muse-spark-1.3",
+    "log:muse-spark-1.3:failed:1",
+    "invoke:gpt-5.6-luna",
+    "log:gpt-5.6-luna:completed:2",
+  ]);
+  assertEquals(result.route.model, "gpt-5.6-luna");
+  assertEquals(
+    visionAttemptTelemetryRows(result.attempts).map((row) =>
+      `${row.model}:${row.status}:${row.attemptNumber}`
+    ),
+    [
+      "muse-spark-1.3:failed:1",
+      "gpt-5.6-luna:completed:2",
+    ],
+  );
 });
 
 Deno.test("hop timeout is enforced when invoke ignores timeoutMs", async () => {

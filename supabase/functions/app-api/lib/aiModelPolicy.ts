@@ -236,8 +236,8 @@ export function defaultThinkingLevel(
 
 /**
  * Gemini 3.8 Flash is the Studio analyze primary: live multi-image completions
- * average ~27s, which fits the 60s invoke window. Muse Spark remains allowed
- * and is still attempted last. Luna is the cheap OpenAI fallback — never Sol.
+ * average ~27s. Muse Spark remains allowed and is attempted last at ≤25s.
+ * Luna is the cheap OpenAI fallback — never Sol.
  */
 export const FAST_PRODUCT_TRUTH_ROUTE = {
   provider: "meta",
@@ -264,31 +264,31 @@ export const OPENAI_TERRA_VISION_ROUTE = {
 } as const satisfies NormalizedAiModelRoute;
 
 /**
- * Studio Analyze uses `supabase.functions.invoke("app-api")` with no custom
- * AbortSignal. That path is killed at ~60s (API gateway / client disconnect),
- * even though hosted Edge idle timeout is 150s. A 50s Muse first hop therefore
- * leaves zero wall time for Luna/Terra/Gemini — which is why v145 logged only
- * `attempt_number=1` at ~50011ms and showed the timeout banner.
+ * Studio Analyze uses `supabase.functions.invoke("app-api")`. Without an
+ * explicit client timeout the browser/SDK aborts around 55–60s, which kills
+ * the Edge isolate right after a ~50s Muse hop — so hop 2 never starts and
+ * `ai_runs` shows only Muse `attempt_number=1` at ~50011ms.
  *
- * Product-truth must finish inside this invoke window. Gemini Flash completes
- * live multi-image analyze in ~27s (tail ~30–37s). Muse/Terra/Sol cannot be
- * first hops at 50s.
+ * The Studio client now waits `STUDIO_ANALYZE_TIMEOUT_MS` (140s), matching
+ * `VISION_GATEWAY_BUDGET_MS`. Product-truth still must not give Muse a 50s
+ * first hop: Gemini Flash (~27s live) runs first, Muse is capped at 25s and
+ * runs last so a Muse-first org policy cannot brick Analyze.
  */
-export const STUDIO_INVOKE_BUDGET_MS = 55_000;
-export const PRODUCT_TRUTH_TIMEOUT_MS = 34_000;
-export const PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS = 18_000;
+export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
+export const STUDIO_INVOKE_BUDGET_MS = STUDIO_ANALYZE_TIMEOUT_MS;
+export const PRODUCT_TRUTH_TIMEOUT_MS = 40_000;
+export const PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS = 25_000;
 export const VISION_PROVIDER_TIMEOUT_MS = 50_000;
 export const VISION_GATEWAY_BUDGET_MS = 145_000;
-export const VISION_GATEWAY_RESERVE_MS = 3_000;
+export const VISION_GATEWAY_RESERVE_MS = 5_000;
 export const PRODUCT_TRUTH_MIN_SLICE_MS = 10_000;
 export const VISION_HOP_MIN_MS = 8_000;
 export const VISION_ROUTE_PROMOTION_THRESHOLD = 4;
 
 /**
- * Studio product-truth hops, in invoke-safe order: Gemini Flash first (proven
- * ~27s completions), Luna, then Muse last. Stored Muse/Terra primaries are
- * still attempted, but never as a 50s first hop. Terra/Sol are omitted from
- * the default hops — they cannot finish inside the 60s invoke window.
+ * Studio product-truth hops: Gemini Flash first (proven ~27s completions),
+ * Luna, then Muse last at ≤25s. Stored Muse primaries are still attempted,
+ * never as a 50s first hop. Terra/Sol are omitted from default hops.
  */
 export const PRODUCT_TRUTH_FAILOVER_CHAIN: readonly NormalizedAiModelRoute[] = [
   FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
@@ -350,13 +350,14 @@ export function productTruthHopTimeoutMs(
 }
 
 /**
- * Cap product-truth at the Studio invoke window even when
- * `VISION_GATEWAY_BUDGET_MS` is still set to the old 145s Edge budget.
+ * Cap product-truth at the Studio client wait even when
+ * `VISION_GATEWAY_BUDGET_MS` is 145s. Returning after the client has
+ * disconnected still drops hop 2.
  */
 export function productTruthGatewayBudgetMs(configured?: number) {
   const value = Number.isFinite(configured) && (configured as number) >= 20_000
     ? Math.round(configured as number)
-    : STUDIO_INVOKE_BUDGET_MS;
+    : VISION_GATEWAY_BUDGET_MS;
   return Math.min(value, STUDIO_INVOKE_BUDGET_MS);
 }
 
@@ -376,7 +377,7 @@ export function productTruthRouteChain(
     chain.push(next);
   };
   // Gemini Flash first regardless of stored Muse/Luna primary so a 50s Muse
-  // hop cannot consume the entire 60s invoke window.
+  // hop cannot consume the client wait (or a leftover 60s gateway).
   for (const hop of PRODUCT_TRUTH_FAILOVER_CHAIN) push(hop);
   push(primary);
   push(existingFallback);
@@ -429,7 +430,7 @@ export function remainingVisionTimeoutMs(args: {
     args.gatewayBudgetMs - args.elapsedMs - VISION_GATEWAY_RESERVE_MS,
   );
   if (remainingWall <= 0) return 0;
-  // Product-truth Studio invoke dies at ~60s. Do not starve Gemini to reserve
+  // Product-truth Studio client now waits 140s. Do not starve Gemini to reserve
   // slices for later hops — later hops only run if this one fails fast.
   if (args.purpose === "product_truth") {
     return Math.min(preferred, remainingWall);
@@ -494,7 +495,7 @@ export async function runVisionProviderChain<T>(args: {
   now?: () => number;
   /**
    * Fired after each hop is finished, before the next hop starts. Studio uses
-   * this to persist Muse/Luna failures immediately so a later 60s abort still
+   * this to persist Muse/Luna failures immediately so a later abort still
    * leaves Meta rows in `ai_runs`.
    */
   onAttempt?: (attempt: VisionHopAttempt) => Promise<void> | void;
@@ -706,8 +707,8 @@ export type FastProductTruthPreference = {
 /**
  * Prefer Gemini Flash for product-truth analysis when the stored primary is a
  * slow OpenAI reasoning route. Expensive Sol is never kept as fallback; Luna is
- * the cheap OpenAI option. Gemini first keeps Studio Analyze inside the 60s
- * invoke window.
+ * the cheap OpenAI option. Gemini first plus a 140s client wait keeps Analyze
+ * from dying on a Muse-first org policy.
  */
 export function preferFastProductTruthRoute(
   primary: NormalizedAiModelRoute,

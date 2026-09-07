@@ -1399,8 +1399,9 @@ async function visionJson(
       purpose: policy.purpose,
       gatewayBudgetMs: visionGatewayBudgetMs(policy.purpose),
       invoke: async (route, timeoutMs) => {
-        // Product-truth hops already fail over Gemini → Luna → Muse inside the
-        // 60s Studio invoke window. A same-route retry would starve later hops.
+        // Product-truth hops already fail over Gemini → Luna → Muse. Studio
+        // waits 140s so a Muse timeout can still start hop 2. A same-route
+        // retry would starve later hops.
         if (policy.purpose === "product_truth") {
           return await invokeVisionRoute(policy, route, parts, timeoutMs);
         }

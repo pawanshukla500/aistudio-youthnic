@@ -1,8 +1,17 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   ANALYZE_GATEWAY_CUT_MESSAGE,
+  STUDIO_ANALYZE_TIMEOUT_MS,
+  appApiInvokeTimeoutMs,
   functionInvokeErrorMessage,
 } from "../../../../src/lib/errors.ts";
+
+Deno.test("Studio analyze client timeout is at least 140s", () => {
+  assertEquals(STUDIO_ANALYZE_TIMEOUT_MS, 140_000);
+  assertEquals(appApiInvokeTimeoutMs("studio.analyze"), 140_000);
+  assertEquals(appApiInvokeTimeoutMs("analysis.analyzeReferences"), 140_000);
+  assertEquals(appApiInvokeTimeoutMs("studio.queue"), undefined);
+});
 
 Deno.test("analyze 504 does not claim the selected vision provider timed out", () => {
   assertEquals(

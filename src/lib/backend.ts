@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "./supabase";
 import { resolveCatalogAssetUrl } from "./catalogStorage";
 import { visibleGenerationDetailedStatus } from "./generationStatus";
-import { functionInvokeErrorMessage } from "./errors";
+import { functionInvokeErrorMessage, appApiInvokeTimeoutMs } from "./errors";
 
 export type Id<_Table extends string> = string;
 export type BackendEndpoint = string;
@@ -50,7 +50,17 @@ function messageFromFunctionError(error: unknown) {
 }
 
 export async function invokeAppApi<T = unknown>(operation: string, args: Record<string, unknown> = {}): Promise<T> {
-  const { data, error } = await supabase.functions.invoke("app-api", { body: { operation, args } });
+  const timeoutMs = appApiInvokeTimeoutMs(operation);
+  const invokeOptions: {
+    body: { operation: string; args: Record<string, unknown> };
+    timeout?: number;
+    signal?: AbortSignal;
+  } = { body: { operation, args } };
+  if (timeoutMs) {
+    invokeOptions.timeout = timeoutMs;
+    invokeOptions.signal = AbortSignal.timeout(timeoutMs);
+  }
+  const { data, error } = await supabase.functions.invoke("app-api", invokeOptions);
   if (error) {
     const fallbackMessage = messageFromFunctionError(error);
     const context = (error as { context?: Response }).context;
