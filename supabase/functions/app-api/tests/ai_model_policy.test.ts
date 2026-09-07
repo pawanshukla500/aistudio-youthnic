@@ -7,6 +7,8 @@ import {
   defaultImageGenerationRoute,
   defaultThinkingLevel,
   FAST_PRODUCT_TRUTH_ROUTE,
+  CHEAP_OPENAI_VISION_ROUTE,
+  geminiThinkingConfig,
   normalizeAiModelRoute,
   preferFastProductTruthRoute,
   preferFastProductTruthThinking,
@@ -70,8 +72,8 @@ Deno.test("vision registry keeps image generation on approved OpenAI image model
   );
 });
 
-Deno.test("OpenAI Terra and Sol are approved only for structured visual analysis and QA", () => {
-  for (const model of ["gpt-5.6-terra", "gpt-5.6-sol"]) {
+Deno.test("OpenAI Luna, Terra, and Sol are approved only for structured visual analysis and QA", () => {
+  for (const model of ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]) {
     assertEquals(
       validateAiModelRoute(
         { provider: "openai", model, thinkingLevel: "high" },
@@ -141,20 +143,38 @@ Deno.test("Meta Muse Spark accepts supported reasoning values and rejects none",
     assertEquals(
       validateAiModelRoute({
         provider: "meta",
-        model: "muse-spark-1.2",
+        model: "muse-spark-1.3",
         thinkingLevel,
       }, "product_truth"),
       {
         valid: true,
-        route: { provider: "meta", model: "muse-spark-1.2", thinkingLevel },
+        route: { provider: "meta", model: "muse-spark-1.3", thinkingLevel },
       },
     );
   }
+  assertEquals(
+    validateAiModelRoute({
+      provider: "meta",
+      model: "muse-spark-1.3",
+      thinkingLevel: "max",
+    }, "product_truth").valid,
+    true,
+  );
   assertThrows(
     () =>
       assertAllowedAiModelRoute({
         provider: "meta",
-        model: "muse-spark-1.2",
+        model: "muse-spark-1.3-contributor",
+        thinkingLevel: "max",
+      }, "product_truth"),
+    Error,
+    "does not support max thinking",
+  );
+  assertThrows(
+    () =>
+      assertAllowedAiModelRoute({
+        provider: "meta",
+        model: "muse-spark-1.3",
         thinkingLevel: "none",
       }, "qa"),
     Error,
@@ -204,6 +224,15 @@ Deno.test("transient provider failures may retry/fallback, but invalid product i
   assertEquals(invalid.retryable, false);
   assertEquals(invalid.fallbackEligible, false);
   assert(invalid.message.includes("invalid or unsupported"));
+
+  const missingModel = classifyVisionProviderFailure("gemini", {
+    status: 404,
+    message: "models/gemini-3.8-flash is not found for API version v1beta",
+  });
+  assertEquals(missingModel.code, "provider_unavailable");
+  assertEquals(missingModel.retryable, false);
+  assertEquals(missingModel.fallbackEligible, true);
+  assertEquals(shouldRetrySameVisionRoute(missingModel), false);
 });
 
 Deno.test("abort and truncated JSON are timeout/incomplete so Flash fallback can run", () => {
@@ -237,7 +266,7 @@ Deno.test("abort and truncated JSON are timeout/incomplete so Flash fallback can
   assertEquals(missingSecret.fallbackEligible, false);
 });
 
-Deno.test("product-truth defaults to fast thinking and reroutes slow GPT to Gemini Flash", () => {
+Deno.test("product-truth defaults to fast thinking and reroutes slow GPT to Muse Spark 1.3", () => {
   assertEquals(
     defaultThinkingLevel({ provider: "openai" }, "product_truth", {
       strictJson: true,
@@ -265,11 +294,7 @@ Deno.test("product-truth defaults to fast thinking and reroutes slow GPT to Gemi
   });
   assertEquals(preferred.rerouted, true);
   assertEquals(preferred.route, FAST_PRODUCT_TRUTH_ROUTE);
-  assertEquals(preferred.fallback, {
-    provider: "openai",
-    model: "gpt-5.6-sol",
-    thinkingLevel: "high",
-  });
+  assertEquals(preferred.fallback, CHEAP_OPENAI_VISION_ROUTE);
   assertEquals(
     preferFastProductTruthRoute({
       provider: "gemini",
@@ -291,6 +316,14 @@ Deno.test("product-truth defaults to fast thinking and reroutes slow GPT to Gemi
       provider: "gemini",
       model: "gemini-3.6-flash",
       thinkingLevel: "high",
+    }),
+    "low",
+  );
+  assertEquals(
+    preferFastProductTruthThinking({
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+      thinkingLevel: "medium",
     }),
     "low",
   );
@@ -320,6 +353,42 @@ Deno.test("product-truth defaults to fast thinking and reroutes slow GPT to Gemi
 });
 
 Deno.test("Gemini 3.8 Flash and Gemini 3.1 Pro are approved for visual analysis and QA", () => {
+  assertEquals(
+    allowedModelsForPurpose("gemini", "product_truth").includes("gemini-3.8-flash"),
+    true,
+  );
+  assertEquals(
+    allowedModelsForPurpose("gemini", "product_truth").includes("gemini-3.6-flash"),
+    true,
+  );
+  assertEquals(
+    allowedModelsForPurpose("gemini", "product_truth").includes("gemini-2.5-flash"),
+    true,
+  );
+  assertEquals(
+    allowedModelsForPurpose("meta", "product_truth"),
+    ["muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.3-contributor"],
+  );
+  assertEquals(
+    allowedModelsForPurpose("openai", "product_truth"),
+    ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+  );
+  assertEquals(
+    validateAiModelRoute({
+      provider: "meta",
+      model: "muse-spark-1.2",
+      thinkingLevel: "low",
+    }, "qa").valid,
+    true,
+  );
+  assertEquals(
+    geminiThinkingConfig("gemini-3.8-flash", "low"),
+    { thinkingLevel: "low" },
+  );
+  assertEquals(
+    geminiThinkingConfig("gemini-2.5-flash", "low"),
+    { thinkingBudget: 0 },
+  );
   assertEquals(
     validateAiModelRoute(
       { provider: "gemini", model: "gemini-3.8-flash", thinkingLevel: "high" },
