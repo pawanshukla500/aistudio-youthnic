@@ -303,7 +303,7 @@ async function maybePromoteProvenVisionRoute(
 ) {
   if (policy.purpose !== "product_truth" || policy.source !== "organization") return;
   const winner = attempts.find((attempt) => attempt.outcome === "completed");
-  if (!winner || !["gpt-5.6-luna", "gpt-5.6-terra"].includes(winner.model)) return;
+  if (!winner) return;
   const { data, error } = await service.from("ai_runs")
     .select("provider, model, status, created_at")
     .eq("organization_id", orgId)
@@ -1364,7 +1364,11 @@ function asVisionProviderError(error: unknown, route: NormalizedAiModelRoute) {
   });
 }
 
-async function visionJson(policy: VisionPolicy, parts: JsonRecord[]): Promise<VisionResult> {
+async function visionJson(
+  policy: VisionPolicy,
+  parts: JsonRecord[],
+  options?: { onAttempt?: (attempt: VisionHopAttempt) => Promise<void> },
+): Promise<VisionResult> {
   const routes = policy.purpose === "product_truth"
     ? (policy.fallbacks?.length
       ? [
@@ -1405,6 +1409,7 @@ async function visionJson(policy: VisionPolicy, parts: JsonRecord[]): Promise<Vi
         throw new Error("No approved vision provider route is available.");
       },
       classify: (route, error) => asVisionProviderError(error, route).failure,
+      onAttempt: options?.onAttempt,
     });
     return {
       ...chained.value,
@@ -1496,10 +1501,8 @@ async function analyze(request: Request, args: JsonRecord) {
       referenceCount: references.length,
       roles: references.map((reference) => reference.role),
     };
-    try {
-      result = await visionJson(policy, parts);
-    } catch (error) {
-      const attempts = error instanceof VisionProviderError ? error.attempts : [];
+    const persistFailedHop = async (attempt: VisionAttempt) => {
+      if (attempt.outcome !== "failed") return;
       await recordVisionHopRuns({
         organizationId: orgId,
         runKind: "product_reference_analysis",
@@ -1507,9 +1510,13 @@ async function analyze(request: Request, args: JsonRecord) {
         fingerprint,
         inputSummary: analysisInputSummary,
         policy,
-        attempts,
-        error,
+        attempts: [attempt],
       });
+    };
+    try {
+      result = await visionJson(policy, parts, { onAttempt: persistFailedHop });
+    } catch (error) {
+      const attempts = error instanceof VisionProviderError ? error.attempts : [];
       if (!attempts.length) {
         const failure = visionFailureRecord(error, policy);
         await recordAiRun({
@@ -1539,15 +1546,6 @@ async function analyze(request: Request, args: JsonRecord) {
     }, { onConflict: "org_key,cache_kind,cache_key" });
     const calculated = extractVisionUsageAndCost(result.raw, result.policy.provider, result.policy.model);
     const winner = result.attempts.find((attempt) => attempt.outcome === "completed");
-    await recordVisionHopRuns({
-      organizationId: orgId,
-      runKind: "product_reference_analysis",
-      purpose: policy.purpose,
-      fingerprint,
-      inputSummary: analysisInputSummary,
-      policy,
-      attempts: result.attempts,
-    });
     await recordAiRun({
       organization_id: orgId, job_id: "", run_kind: "product_reference_analysis", model: result.policy.model, provider: result.policy.provider,
       purpose: policy.purpose, thinking_level: result.policy.thinkingLevel,
@@ -4645,6 +4643,7 @@ async function analyzeCatalogVariant(
   variant: JsonRecord,
   references: ReferenceInput[],
   suppliedPolicy?: VisionPolicy,
+  onAttempt?: (attempt: VisionHopAttempt) => Promise<void>,
 ) {
   const settings = (batch.generation_settings || {}) as JsonRecord;
   const category = catalogVariantCategory(batch, variant);
@@ -4673,7 +4672,7 @@ async function analyzeCatalogVariant(
           }),
         },
       ];
-      const result = await visionJson(policy, parts);
+      const result = await visionJson(policy, parts, { onAttempt });
       const merged = mergeVariantColorways(baseAnalysis, result.json, String(variant.sku_name || ""));
       const normalized = applyCatalogMemory(batch, merged);
 
@@ -4721,7 +4720,7 @@ async function analyzeCatalogVariant(
     fashionKnowledge: await fashionKnowledgeBrief(String(batch.organization_id), category),
     analysisLearning: await analysisLearningBrief(String(batch.organization_id), category),
   }) });
-  const result = await visionJson(policy, parts);
+  const result = await visionJson(policy, parts, { onAttempt });
   const normalized = normalizeAnalysis(result.json, category);
 
   // Store baseAnalysis into catalog_memory so subsequent SKUs reuse it
@@ -5151,8 +5150,22 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
   }
   const started = Date.now();
   await service.from("planning_requests").update({ analysis_status: "analyzing", updated_at: new Date().toISOString() }).eq("id", variant.id);
+  const persistFailedHop = async (attempt: VisionAttempt) => {
+    if (attempt.outcome !== "failed") return;
+    await recordVisionHopRuns({
+      organizationId: String(batch.organization_id),
+      runKind: "catalog_product_preflight",
+      purpose: hashes.policy.purpose,
+      fingerprint: hashes.fingerprint,
+      inputSummary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role) },
+      policy: hashes.policy,
+      attempts: [attempt],
+      planningRequestId: String(variant.id),
+      batchId,
+    });
+  };
   try {
-    const analysis = await analyzeCatalogVariant(batch as JsonRecord, variant as JsonRecord, references, hashes.policy);
+    const analysis = await analyzeCatalogVariant(batch as JsonRecord, variant as JsonRecord, references, hashes.policy, persistFailedHop);
     const normalized = analysis.normalized;
     const now = new Date().toISOString();
     const detectedSaree = String(normalized.productIdentity.garmentFamily || "").trim().toLowerCase() === "saree";
@@ -5160,17 +5173,6 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
     if (missingDetectedSareeEvidence.length) {
       const message = sareeReferenceRequirementMessage(missingDetectedSareeEvidence);
       const calculatedIncomplete = extractVisionUsageAndCost({ usage: analysis.usage }, analysis.policy.provider, analysis.policy.model);
-      await recordVisionHopRuns({
-        organizationId: String(batch.organization_id),
-        runKind: "catalog_product_preflight",
-        purpose: analysis.policy.purpose,
-        fingerprint: hashes.fingerprint,
-        inputSummary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), isColorwayDelta: analysis.isColorwayDelta },
-        policy: hashes.policy,
-        attempts: analysis.attempts,
-        planningRequestId: String(variant.id),
-        batchId,
-      });
       await Promise.all([
         service.from("planning_requests").update({
           category: "saree",
@@ -5200,17 +5202,6 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
       return { processed: false, reason: "saree_references_incomplete", requestId: variant.id, missing: missingDetectedSareeEvidence };
     }
     const calculated = extractVisionUsageAndCost({ usage: analysis.usage }, analysis.policy.provider, analysis.policy.model);
-    await recordVisionHopRuns({
-      organizationId: String(batch.organization_id),
-      runKind: "catalog_product_preflight",
-      purpose: analysis.policy.purpose,
-      fingerprint: hashes.fingerprint,
-      inputSummary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), isColorwayDelta: analysis.isColorwayDelta },
-      policy: hashes.policy,
-      attempts: analysis.attempts,
-      planningRequestId: String(variant.id),
-      batchId,
-    });
     await Promise.all([
       service.from("planning_requests").update({
         analysis_status: "ready", analysis_fingerprint: hashes.fingerprint, analysis_updated_at: now,
@@ -5246,18 +5237,6 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
     return { processed: true, requestId: variant.id, fingerprint: hashes.fingerprint };
   } catch (error) {
     const attempts = error instanceof VisionProviderError ? error.attempts : [];
-    await recordVisionHopRuns({
-      organizationId: String(batch.organization_id),
-      runKind: "catalog_product_preflight",
-      purpose: hashes.policy.purpose,
-      fingerprint: hashes.fingerprint,
-      inputSummary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role) },
-      policy: hashes.policy,
-      attempts,
-      planningRequestId: String(variant.id),
-      batchId,
-      error,
-    });
     if (!attempts.length) {
       const failure = visionFailureRecord(error, hashes.policy);
       await recordAiRun({

@@ -414,6 +414,12 @@ export async function runVisionProviderChain<T>(args: {
   invoke: (route: NormalizedAiModelRoute, timeoutMs: number) => Promise<T>;
   classify: (route: NormalizedAiModelRoute, error: unknown) => VisionProviderFailure;
   now?: () => number;
+  /**
+   * Fired after each hop is finished, before the next hop starts. Studio uses
+   * this to persist Muse/Luna failures immediately so a later 60s abort still
+   * leaves Meta rows in `ai_runs`.
+   */
+  onAttempt?: (attempt: VisionHopAttempt) => Promise<void> | void;
 }): Promise<{ value: T; route: NormalizedAiModelRoute; attempts: VisionHopAttempt[] }> {
   const now = args.now || Date.now;
   const started = now();
@@ -423,6 +429,15 @@ export async function runVisionProviderChain<T>(args: {
   if (!args.routes.length) {
     throw new Error("No approved vision provider route is available.");
   }
+
+  const emit = async (attempt: VisionHopAttempt) => {
+    attempts.push(attempt);
+    try {
+      await args.onAttempt?.(attempt);
+    } catch {
+      // Telemetry must never hide a successful later hop.
+    }
+  };
 
   for (let index = 0; index < args.routes.length; index += 1) {
     const route = args.routes[index];
@@ -439,7 +454,7 @@ export async function runVisionProviderChain<T>(args: {
         name: "TimeoutError",
         message: "The selected vision provider timed out.",
       });
-      attempts.push({
+      await emit({
         provider: route.provider as AiProvider,
         model: route.model,
         thinkingLevel: route.thinkingLevel,
@@ -452,7 +467,7 @@ export async function runVisionProviderChain<T>(args: {
     }
     try {
       const value = await args.invoke(route, timeoutMs);
-      attempts.push({
+      await emit({
         provider: route.provider as AiProvider,
         model: route.model,
         thinkingLevel: route.thinkingLevel,
@@ -464,7 +479,7 @@ export async function runVisionProviderChain<T>(args: {
     } catch (error) {
       const failure = args.classify(route, error);
       lastFailure = failure;
-      attempts.push({
+      await emit({
         provider: route.provider as AiProvider,
         model: route.model,
         thinkingLevel: route.thinkingLevel,
@@ -504,42 +519,85 @@ export type VisionPromotionRun = {
   status: string;
 };
 
+const PROMOTABLE_PRODUCT_TRUTH_ROUTES: Record<string, NormalizedAiModelRoute> = {
+  "gpt-5.6-luna": CHEAP_OPENAI_VISION_ROUTE,
+  "gpt-5.6-terra": OPENAI_TERRA_VISION_ROUTE,
+  "gemini-3.8-flash": FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+  "gemini-3.6-flash": {
+    provider: "gemini",
+    model: "gemini-3.6-flash",
+    thinkingLevel: "low",
+  },
+  "gemini-2.5-flash": {
+    provider: "gemini",
+    model: "gemini-2.5-flash",
+    thinkingLevel: "low",
+  },
+};
+
+function isSameVisionRoute(
+  left: { provider: string; model: string },
+  right: { provider: string; model: string },
+) {
+  return text(left.provider) === text(right.provider) &&
+    text(left.model) === text(right.model);
+}
+
+/**
+ * Promote a proven product-truth model from live `ai_runs` completions.
+ * Consecutive newest-first streak wins; if the stored primary has zero
+ * completions in the window, the promotable model with the most completions
+ * is used instead (Gemini Flash already has dozens of live successes).
+ */
 export function evaluateVisionRoutePromotion(args: {
   primary: Pick<NormalizedAiModelRoute, "provider" | "model">;
   recentSuccessfulRuns: VisionPromotionRun[];
   threshold?: number;
 }): NormalizedAiModelRoute | null {
   const threshold = args.threshold ?? VISION_ROUTE_PROMOTION_THRESHOLD;
-  const promotable = new Set(["gpt-5.6-luna", "gpt-5.6-terra"]);
   const recent = args.recentSuccessfulRuns.filter((run) =>
     run.status === "completed"
   );
   if (!recent.length) return null;
   const candidate = recent[0];
-  if (
-    text(candidate.provider) === text(args.primary.provider) &&
-    text(candidate.model) === text(args.primary.model)
-  ) {
-    return null;
-  }
-  if (!promotable.has(text(candidate.model))) return null;
-  let streak = 0;
-  for (const run of recent) {
-    if (
-      text(run.model) === text(candidate.model) &&
-      text(run.provider) === text(candidate.provider)
-    ) {
-      streak += 1;
-      continue;
+  if (!isSameVisionRoute(candidate, args.primary)) {
+    const consecutiveRoute = PROMOTABLE_PRODUCT_TRUTH_ROUTES[text(candidate.model)];
+    if (consecutiveRoute) {
+      let streak = 0;
+      for (const run of recent) {
+        if (
+          text(run.model) === text(candidate.model) &&
+          text(run.provider) === text(candidate.provider)
+        ) {
+          streak += 1;
+          continue;
+        }
+        break;
+      }
+      if (streak >= threshold) {
+        return withFastProductTruthThinking(consecutiveRoute);
+      }
     }
-    break;
   }
-  if (streak < threshold) return null;
-  return withFastProductTruthThinking(
-    text(candidate.model) === "gpt-5.6-terra"
-      ? OPENAI_TERRA_VISION_ROUTE
-      : CHEAP_OPENAI_VISION_ROUTE,
-  );
+
+  const primaryCount = recent.filter((run) =>
+    isSameVisionRoute(run, args.primary)
+  ).length;
+  if (primaryCount > 0) return null;
+  const counts = new Map<string, { count: number; route: NormalizedAiModelRoute }>();
+  for (const run of recent) {
+    const route = PROMOTABLE_PRODUCT_TRUTH_ROUTES[text(run.model)];
+    if (!route || isSameVisionRoute(run, args.primary)) continue;
+    const key = `${text(run.provider)}:${text(run.model)}`;
+    const current = counts.get(key);
+    counts.set(key, { count: (current?.count || 0) + 1, route });
+  }
+  let best: { count: number; route: NormalizedAiModelRoute } | null = null;
+  for (const entry of counts.values()) {
+    if (entry.count < threshold) continue;
+    if (!best || entry.count > best.count) best = entry;
+  }
+  return best ? withFastProductTruthThinking(best.route) : null;
 }
 
 export function promotionFallbackRoute(
@@ -549,6 +607,9 @@ export function promotionFallbackRoute(
     return withFastProductTruthThinking(OPENAI_TERRA_VISION_ROUTE);
   }
   if (text(promoted.model) === "gpt-5.6-terra") {
+    return withFastProductTruthThinking(CHEAP_OPENAI_VISION_ROUTE);
+  }
+  if (text(promoted.provider) === "gemini") {
     return withFastProductTruthThinking(CHEAP_OPENAI_VISION_ROUTE);
   }
   return withFastProductTruthThinking(CHEAP_OPENAI_VISION_ROUTE);
@@ -905,13 +966,16 @@ export function classifyVisionProviderFailure(
     /invalid[_\s-]*(?:api\s*)?key|unauthori[sz]ed|forbidden|authentication|is not configured in the supabase edge function/
       .test(detail)
   ) {
+    const missingSecret = /is not configured in the supabase edge function/.test(detail);
     return failure(
       provider,
       "provider_authentication_failed",
       status,
       false,
-      false,
-      "The selected vision provider is not authorized. An administrator must verify its server-side secret.",
+      missingSecret,
+      missingSecret
+        ? "The selected vision provider is not configured. A configured fallback can be used."
+        : "The selected vision provider is not authorized. An administrator must verify its server-side secret.",
     );
   }
 

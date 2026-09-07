@@ -274,7 +274,7 @@ Deno.test("abort and truncated JSON are timeout/incomplete so Flash fallback can
     message: "GEMINI_API_KEY is not configured in the Supabase Edge Function.",
   });
   assertEquals(missingSecret.code, "provider_authentication_failed");
-  assertEquals(missingSecret.fallbackEligible, false);
+  assertEquals(missingSecret.fallbackEligible, true);
 });
 
 Deno.test("product-truth defaults to fast thinking and reroutes slow GPT to Muse Spark 1.3", () => {
@@ -561,6 +561,43 @@ Deno.test("timeout on Muse fails over to Luna then Terra and logs every hop", as
   assertEquals(rows.filter((row) => row.status === "failed").length, 2);
 });
 
+Deno.test("failed hops are persisted before the next provider is invoked", async () => {
+  const routes = productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE);
+  const events: string[] = [];
+  await runVisionProviderChain({
+    routes,
+    purpose: "product_truth",
+    gatewayBudgetMs: 145_000,
+    invoke: async (route) => {
+      events.push(`invoke:${route.model}`);
+      if (route.model !== "gemini-3.8-flash") {
+        throw Object.assign(new Error("The signal has been aborted"), {
+          name: "TimeoutError",
+        });
+      }
+      return { ok: true };
+    },
+    classify: (route, error) =>
+      classifyVisionProviderFailure(route.provider, {
+        name: (error as { name?: string }).name,
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    onAttempt: (attempt) => {
+      events.push(`log:${attempt.model}:${attempt.outcome}`);
+    },
+  });
+  assertEquals(events, [
+    "invoke:muse-spark-1.3",
+    "log:muse-spark-1.3:failed",
+    "invoke:gpt-5.6-luna",
+    "log:gpt-5.6-luna:failed",
+    "invoke:gpt-5.6-terra",
+    "log:gpt-5.6-terra:failed",
+    "invoke:gemini-3.8-flash",
+    "log:gemini-3.8-flash:completed",
+  ]);
+});
+
 Deno.test("auto-promotion requires four consecutive Luna or Terra successes", () => {
   const luna = {
     provider: "openai" as const,
@@ -612,8 +649,45 @@ Deno.test("auto-promotion requires four consecutive Luna or Terra successes", ()
         { provider: "gemini", model: "gemini-3.8-flash", status: "completed" },
         luna,
         luna,
-        luna,
       ],
+    }),
+    null,
+  );
+});
+
+Deno.test("Gemini Flash live completions promote over a Muse primary with zero successes", () => {
+  const gemini = {
+    provider: "gemini" as const,
+    model: "gemini-3.8-flash",
+    status: "completed",
+  };
+  assertEquals(
+    evaluateVisionRoutePromotion({
+      primary: FAST_PRODUCT_TRUTH_ROUTE,
+      recentSuccessfulRuns: [gemini, gemini, gemini],
+    }),
+    null,
+  );
+  assertEquals(
+    evaluateVisionRoutePromotion({
+      primary: FAST_PRODUCT_TRUTH_ROUTE,
+      recentSuccessfulRuns: Array.from({ length: 12 }, () => gemini),
+    }),
+    FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+  );
+  assertEquals(
+    promotionFallbackRoute(FAST_PRODUCT_TRUTH_GEMINI_ROUTE),
+    CHEAP_OPENAI_VISION_ROUTE,
+  );
+  const museWin = {
+    provider: "meta" as const,
+    model: "muse-spark-1.3",
+    status: "completed",
+  };
+  assertEquals(
+    evaluateVisionRoutePromotion({
+      primary: FAST_PRODUCT_TRUTH_ROUTE,
+      recentSuccessfulRuns: [museWin, ...Array.from({ length: 11 }, () => gemini)],
     }),
     null,
   );
