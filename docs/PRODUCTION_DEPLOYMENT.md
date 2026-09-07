@@ -24,32 +24,40 @@ GitHub URL redirect. Do not ship another GitHub-URL stub entrypoint.
 ### Live Product Truth policy (order2 / `cyygmyiqgdzgeoayxbro`)
 
 Studio analyze/plan **honors** `organization_ai_model_policies` purpose
-`product_truth`. It does not call OpenAI GPT for garment analysis when that
-row is Gemini. Live routing as of 2026-09-07:
+`product_truth`. Product-truth hops use a **50s** per-provider timeout (Gemini
+Flash completions are often 30–37s; the previous 28s abort killed them). The
+runtime chain is **Muse Spark 1.3 → Luna → Terra → Gemini 3.8 Flash**, with
+thinking forced to `low`. A stored fallback that is not already in that chain
+is appended last so it cannot steal hop budget from Terra/Gemini. Each hop is
+capped by the remaining gateway budget even if the provider adapter ignores
+`timeoutMs`. Product-truth hops do not retry the same route. Each hop writes
+its own `ai_runs` row **before the next hop starts** (so a later timeout still
+leaves Meta rows). After four consecutive
+successful Luna/Terra/Gemini analyses — or when the stored primary has zero
+completions and another approved model already has four in the recent window —
+the Edge Function auto-promotes that model (`audit_logs.action = ai_model_policies.auto_promoted`).
+Live `cyygmyiqgdzgeoayxbro` already has dozens of Gemini Flash completions, so
+Gemini is eligible immediately after this deploy.
 
-| purpose | primary | fallback |
+Hosted Supabase **request idle timeout is 150s**. That is enough for a 50s
+primary hop plus Luna/Terra/Gemini failover. The CLI has no `--max-duration`
+flag; do not add one. Optional secret `VISION_GATEWAY_BUDGET_MS` (default
+`145000`) budgets remaining time across hops so a later provider still runs.
+
+Recommended stored policy (thinking `low` is also enforced in code):
+
+| purpose | primary | stored fallback |
 | --- | --- | --- |
-| `product_truth` (analyze + pose plan) | `gemini` / `gemini-3.8-flash` | `gemini-3.6-flash` |
-| `qa` | `gemini` / `gemini-3.8-flash` | `gemini-3.6-flash` |
-| `image_generation` (paid poses) | `openai` / `gpt-image-2` | none |
+| `product_truth` | `meta` / `muse-spark-1.3` (`low`) | `openai` / `gpt-5.6-luna` (`low`) |
+| `qa` | same | same |
+| `image_generation` | `openai` / `gpt-image-2` | none |
 
-Live `ai_runs` for `product_reference_analysis` in the last 12h show `gemini`
-/ `gemini-3.8-flash`, **status failed**, empty `error_message`, and **30–45s
-latency**. That matches production `AbortSignal.timeout(45_000)` on
-`geminiJson`, not a bad model id. Empty `error_message` is because failed
-analyze inserts omitted that column (it defaults to `''`).
-
-This release still honors stored Gemini rows, but the recommended production
-route is now **Muse Spark 1.3 Standard** with **GPT 5.6 Luna** fallback.
-Contributor Muse SKUs train on prompts and are not the default.
-
-Apply after this Edge Function is live (`META_MODEL_API_KEY` must be set).
-This updates every organization in project `cyygmyiqgdzgeoayxbro`
-(typically the single Youthnic org). Leave `image_generation` on `gpt-image-2`.
-Do not select `muse-spark-1.3-contributor` unless the org opts into training.
+An interim Gemini Flash primary is safe: the 50s timeout covers 30–37s Flash
+completions, and Luna/Terra still run if Flash times out.
 
 ```sql
 -- Product truth + QA: Muse Spark 1.3 Standard, cheap OpenAI Luna fallback.
+-- Code still fails over Muse → Luna → Terra → Gemini Flash and clamps thinking to low.
 -- Do not use muse-spark-1.3-contributor unless the org opts into training.
 update public.organization_ai_model_policies
 set
@@ -60,7 +68,6 @@ set
   fallback_provider = 'openai',
   fallback_model = 'gpt-5.6-luna',
   fallback_reasoning = 'low',
-  revision = revision + 1,
   updated_at = now()
 where purpose in ('product_truth', 'qa');
 ```
@@ -69,9 +76,9 @@ Leave `image_generation` on `gpt-image-2`. Do not put secrets in SQL or in
 the repo. Required Edge secrets: `META_MODEL_API_KEY`, `OPENAI_API_KEY`,
 `GEMINI_API_KEY`.
 
-After a Studio Analyze, `ai_runs.provider` should be `meta` / `muse-spark-1.3`
-(or `openai` / `gpt-5.6-luna` if Muse failed over). Failed rows now store
-`error_message`.
+After a Studio Analyze, `ai_runs` contains **one row per hop**. A Muse timeout
+then Luna success looks like `meta` / `muse-spark-1.3` **failed** plus
+`openai` / `gpt-5.6-luna` **completed**. Failed rows store `error_message`.
 
 Configure server-only Edge secrets. Never add their values to Vite variables or GitHub build arguments.
 
