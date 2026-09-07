@@ -212,6 +212,29 @@ export type StudioPose = {
   enabled: boolean;
 };
 
+const STANDALONE_BOTTOM_WEAR = /^(none|n\/a|not applicable|standalone|not visible)(\b|[.\s-]|$)/i;
+const FARSHI_BOTTOM_WEAR = /\bfarshi\b|\bfarsi\b/;
+
+export function recordedBottomWearDetails(productIdentity: unknown): string {
+  const product = productIdentity && typeof productIdentity === "object" && !Array.isArray(productIdentity)
+    ? productIdentity as Record<string, unknown>
+    : {};
+  return String(product.bottomWearDetails ?? product.bottom_wear_details ?? "").trim();
+}
+
+export function hasRecordedBottomWear(productIdentity: unknown): boolean {
+  const details = recordedBottomWearDetails(productIdentity);
+  return Boolean(details && !STANDALONE_BOTTOM_WEAR.test(details));
+}
+
+export function isFarshiBottomWear(detailsOrProduct: unknown): boolean {
+  const details = typeof detailsOrProduct === "string"
+    ? detailsOrProduct
+    : recordedBottomWearDetails(detailsOrProduct);
+  const classification = details.toLowerCase().split(/\bnot\b/)[0] || "";
+  return FARSHI_BOTTOM_WEAR.test(classification);
+}
+
 export function getPoseSlots(garmentFamily: string): readonly StudioPose[] {
   const isSaree = garmentFamily === "saree";
 
@@ -225,7 +248,7 @@ export function getPoseSlots(garmentFamily: string): readonly StudioPose[] {
       expression: "Playful, warm, confident Gen-Z energy while keeping the same face and hairstyle throughout the set",
       productVisibilityRules: [
         "front construction unobstructed",
-        "exact authentic bottom wear cut and silhouette strictly preserved (e.g. Farshi/palazzo/straight pant must never be altered into dhoti/salwar)",
+        "exact authentic bottom wear cut, volume, and print strictly preserved (farshi must never flatten into palazzo/lehenga/skirt; large motifs must never become solid or dots)",
         "complete bottom wear visible from waist to hem",
         "no garment detail hidden by hands or hair",
       ],
@@ -235,7 +258,7 @@ export function getPoseSlots(garmentFamily: string): readonly StudioPose[] {
       highlightedDetails: ["front construction", "overall silhouette", "complete outfit"],
       primaryReference: "front",
       purpose: "Primary e-commerce listing image",
-      prompt: "Create a straight-on full-body front hero image. Show the complete outfit, preserving the authentic bottom wear silhouette (exact cut, leg width, box pleats, and hem band) and footwear, with a natural premium e-commerce stance.",
+      prompt: "Create a straight-on full-body front hero image. Show the complete outfit, preserving the authentic bottom wear silhouette (exact cut, volume, two distinct legs, pleating, and hem) plus the exact bottom-wear print and footwear, with a natural premium e-commerce stance.",
       enabled: true,
     },
     {
@@ -250,7 +273,7 @@ export function getPoseSlots(garmentFamily: string): readonly StudioPose[] {
         : [
           "front and side construction remain readable",
           "silhouette is not compressed",
-          "authentic bottom wear cut and leg volume strictly preserved - never tapered or puffed into dhoti",
+          "authentic bottom wear cut, leg volume, and print strictly preserved - never flattened into palazzo/lehenga or tapered into dhoti",
           "bottom wear remains unchanged and visible",
         ],
       consistencyNotes: "Use Pose 1 only as the model and shoot anchor; preserve the original product references as garment truth",
@@ -277,7 +300,7 @@ export function getPoseSlots(garmentFamily: string): readonly StudioPose[] {
           "dupatta or shawl draped forward over arms/front only - back of kurti/dress must be 100% visible and unobstructed",
           "hair swept forward or in an updo - back neckline, ties, and rear details completely unobstructed",
           "never infer back details from the front",
-          "exact bottom wear cut and silhouette visible from rear - legs straight/wide as specified, never gathered into cuffs",
+          "exact bottom wear cut, volume, and print visible from rear - never flattened, never a skirt, never gathered into cuffs",
           "exact same backdrop wall, floor, and lighting from Pose 1 - zero new props",
         ],
       consistencyNotes: "Keep the exact same model identity, hair, accessories, footwear, exact bottom wear, and identical studio set/backdrop wall from Pose 1 while showcasing the authoritative back",
@@ -981,10 +1004,11 @@ REFERENCE AUTHORITY (highest to lowest):
 2. Region-specific SAREE PRODUCT references (when supplied) - FULL FRONT DRAPE, REAR/BACK DRAPE, BODY/WEAVE DETAIL, FULLY SPREAD PALLU, BORDER/TASSELS and BLOUSE references are each authoritative for their named physical region. A pallu-spread image is pallu truth, never a generic fabric image.
 3. FRONT PRODUCT - legacy authoritative front product design.
 4. BACK PRODUCT - legacy authoritative back design; never infer the back from the front.
-5. FABRIC / PATTERN DETAIL - legacy high-priority truth for body weave, texture, print, embroidery, stitching, trims, and construction; it does not prove pallu artwork.
+5. FABRIC / PATTERN DETAIL - legacy high-priority truth for UPPER-garment weave, texture, print, embroidery, stitching, trims, and construction; it does not prove pallu artwork and does not prove bottom-wear print unless the image itself shows the trousers/skirt.
 6. MANNEQUIN / FLAT-LAY SHOT - on a mannequin or dress form, authoritative for worn shape, fit, proportion and drape; laid flat, authoritative for outline, construction, panel layout and length only, since flat cloth shows no worn drape.
-7. ADDITIONAL PRODUCT - another source of product truth.
-8. STYLE REFERENCE - creative direction only. Never copy its garment, product color, bottoms, logos, or accessories.
+7. BOTTOM WEAR / FARSHI - when supplied, pixel-level authority for the trousers/skirt cut, volume, hem, color and print. Never copy upper-garment embroidery onto this panel.
+8. ADDITIONAL PRODUCT - another source of product truth, including supporting bottom-wear evidence.
+9. STYLE REFERENCE - creative direction only. Never copy its garment, product color, bottoms, logos, or accessories.
 
 Product references are frequently flat-lay, folded, pinned, or shot on a mannequin or dress form. Read the garment through that presentation: infer how each panel, hem, sleeve and closure behaves once it is worn on a live human body, and record that in the profile. The mannequin, dress form, hanger, clips, pins and the flat surface are photography apparatus, never part of the product - never describe them as garment features and never let them appear in the pose plan.
 
@@ -996,11 +1020,11 @@ User product notes: ${args.productDetails}
 Requested model direction: ${args.modelDirection || "one consistent professional adult fashion model"}
 Requested scene direction: ${args.sceneDirection || "derive one consistent commercial scene from style references"}
 
-PRINT AND EMBROIDERY GEOMETRY - the part that decides whether the output is this SKU or a lookalike. A sentence like "pink bandhani print with gold embroidery" is not enough to rebuild a garment, so measure the geometry from the highest-resolution image available (normally FABRIC / PATTERN DETAIL) and fill patternGeometry and embroideryGeometry concretely:
+PRINT AND EMBROIDERY GEOMETRY - the part that decides whether the output is this SKU or a lookalike. A sentence like "pink bandhani print with gold embroidery" is not enough to rebuild a garment, so measure the geometry from the highest-resolution image available (normally FABRIC / PATTERN DETAIL for the UPPER garment only) and fill patternGeometry and embroideryGeometry concretely:
 - patternGeometry.scale: motif size relative to a body landmark, e.g. "each bandhani dot cluster is roughly 8-10 mm, about one fingernail width; the diagonal band repeats about every 4 cm".
 - patternGeometry.orientation and repeat: the direction bands or motifs run (vertical, diagonal at roughly 45 degrees, chevron, mirrored at the centre front) and how often the unit repeats.
 - patternGeometry.density: how much ground fabric shows between motifs.
-- patternGeometry.placementByPanel: one entry per panel - body front, body back, sleeves, yoke, bottom wear, dupatta - stating how the pattern sits on that panel, because sleeves and body frequently differ.
+- patternGeometry.placementByPanel: one entry per panel - body front, body back, sleeves, yoke, bottom wear, dupatta - stating how the pattern sits on that panel, because sleeves and body frequently differ. FABRIC / PATTERN DETAIL often shows only kurta/upper embroidery or a small swatch - NEVER copy that scale, density, or motif inventory onto the bottom wear. Read bottom-wear print from FRONT, BACK, MANNEQUIN, ADDITIONAL, and BOTTOM WEAR images where the trousers/skirt are actually visible.
 - patternGeometry.accentColors: the small secondary colours inside the print that are easy to lose, e.g. "orange and yellow dots inside the pink bandhani field".
 - patternGeometry.motifInventory: name each distinct motif shape once.
 - embroideryGeometry.geometry and motifStructure: the actual internal construction, e.g. "square yoke panel of nested diamond lattice, each diamond about 2 cm, filled with a single floral sprig, bordered by a double scalloped gold line".
@@ -1008,30 +1032,31 @@ PRINT AND EMBROIDERY GEOMETRY - the part that decides whether the output is this
 - embroideryGeometry.necklineRelation: exactly how the embroidery meets the neckline and where any tie, drawstring or tassel sits relative to it.
 Anything you genuinely cannot measure goes in uncertaintyNotes - never guess a geometry.
 
-BOTTOM WEAR ARCHITECTURE & SILHOUETTE (MANDATORY FOR SUITS, SETS, & CO-ORDS):
-When the product is a multi-piece outfit (kurti/kurta set, salwar suit, co-ord set, lehenga, Indo-western), the customer buys the complete set and expects the EXACT bottom wear cut, silhouette, color, and pattern shown in the product references. NEVER gloss over bottom wear with generic words like "matching pants". You MUST inspect the bottom wear in the references (FRONT PRODUCT, MANNEQUIN / FLAT-LAY, ADDITIONAL) and record an exhaustive, specific specification in 'productIdentity.bottomWearDetails':
-1. EXACT CUT & CLASSIFICATION: Explicitly classify the cut:
-   - "Farshi / Farshi Pajama / Farshi Salwar": Wide-legged flared straight trousers falling cleanly from hip/waist to floor, featuring deep inverted front box pleats and a wide structured hem border band (typically 3 to 4 inches wide).
-   - "Palazzo": Wide straight or flared trousers without box pleats.
+BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT (MANDATORY FOR SUITS, SETS, & CO-ORDS):
+When the product is a multi-piece outfit (kurti/kurta set, salwar suit, co-ord set, lehenga, Indo-western), the customer buys the complete set and expects the EXACT bottom wear cut, silhouette, color, and pattern shown in the product references. NEVER gloss over bottom wear with generic words like "matching pants". You MUST inspect the bottom wear in FRONT PRODUCT, BACK PRODUCT, MANNEQUIN / FLAT-LAY, ADDITIONAL PRODUCT, and BOTTOM WEAR / FARSHI references (if supplied) and record an exhaustive, specific specification in 'productIdentity.bottomWearDetails'. FABRIC / PATTERN DETAIL is NOT authority for bottoms unless that image itself shows the trousers/skirt.
+1. EXACT CUT & CLASSIFICATION: Explicitly classify the cut from the worn silhouette in the references, not from a generic ethnic-wear prior:
+   - "Farshi / Farsi / Farshi Pajama": Extremely voluminous floor-length trousers with TWO DISTINCT LEGS (never a lehenga or circular skirt). Heavy vertical pleating or gathering from the waist/hip creates architectural volume that flares and often trails or pools at the floor. Do NOT require a specific hem-band width to classify as Farshi - classify from volume, two-leg structure, and floor-trailing drape. Distinct from Palazzo (simpler wide-leg, less volume, no floor trail) and from Sharara (flare starts at or below the knee).
+   - "Palazzo": Wide straight or softly flared trousers without farshi-level volume or floor-trailing pools; typically hangs as a simpler wide-leg.
    - "Straight Trousers / Cigarette Pants": Narrow straight tailored cut ending at the ankle, with side slits or plain hem.
    - "Sharara": Fitted from waist to knee, flaring out dramatically from the knee down.
    - "Gharara": Ruched/gathered below the knee with decorative gote/piping, flaring out below.
    - "Patiala / Salwar": Traditional pleated volume draped into narrow ankle cuff (poncha).
    - "Churidar": Fitted closely to calf and ankle with fabric gathers/rings (churis) at the ankle.
-   - "Skirt / Lehenga": Full-length circular or pleated flare.
-2. WAIST & PLEATING ARCHITECTURE: Document pleat structure: e.g., "deep front inverted box pleats running vertically down each leg", "flat waistband with elasticated back", "knife pleats", or "gather-free tailored waist".
-3. LEG VOLUME & SILHOUETTE: Describe the leg profile from hip to hem: e.g., "straight wide leg with generous volume that does NOT taper or balloon inwards at the ankles".
-4. HEMLINE & BORDER FINISH: Document the hem finish: e.g., "broad 3 to 4 inch horizontal hem band/border with clean straight hemline", "scalloped lace hem", "metallic zari border", or "plain turned hem".
-5. FABRIC, COLOR & MOTIF GEOMETRY: Record the bottom wear fabric, base color, sheen, and pattern/motifs: e.g., "fuchsia / magenta pink silk with evenly spaced metallic gold floral motifs/sprigs and matching hem band". If bottom wear fabric/color differs from the kurta, describe it explicitly.
+   - "Skirt / Lehenga": Full-length circular or pleated flare with NO separate trouser legs.
+2. WAIST & PLEATING ARCHITECTURE: Document pleat structure: e.g., "deep front inverted box pleats running vertically down each leg", "dense gathers from a fitted waistband", "knife pleats", or "gather-free tailored waist".
+3. LEG VOLUME & SILHOUETTE: Describe the leg profile from hip to hem, including whether fabric trails/pools at the floor. Farshi must be described as extreme volume with two visible legs, not as "wide-leg pants".
+4. HEMLINE & BORDER FINISH: Document the hem finish actually visible: e.g., "broad 3 to 4 inch horizontal hem band", "plain turned hem", "metallic zari border". Do not invent a hem band.
+5. FABRIC, COLOR & MOTIF GEOMETRY: Record bottom-wear fabric, base color, sheen, AND print as its own geometry - motif shape inventory, physical scale relative to the leg (e.g. "each gold floral is roughly palm-sized, scattered not micro-dotted"), density, metallic color, and orientation. Example: "magenta/raspberry silk with bold large-scale metallic gold/silver floral bootas scattered across both legs; NOT solid magenta; NOT tiny speckles". If the kurta is embroidered white and the bottoms have a large gold floral, those are TWO different treatments - never merge them.
 6. EXPLICIT NEGATIVE CONSTRAINTS (WHAT IT IS NOT):
-   - For Farshi / Palazzo: Explicitly state "NOT dhoti pants, NOT tulip pants, NOT tapered at ankle, NOT gathered into an ankle cuff, NOT balloon/harem pants, NOT churidar".
+   - For Farshi / Farsi pajama: Explicitly state "NOT palazzo, NOT plain wide-leg, NOT lehenga, NOT skirt, NOT dhoti pants, NOT tulip pants, NOT tapered at ankle, NOT gathered into an ankle cuff, NOT balloon/harem pants, NOT churidar". Also state "NOT solid/undecorated" when motifs are visible, and "NOT micro-dot/speckle print" when motifs are large-scale.
+   - For Palazzo: Explicitly state "NOT farshi, NOT lehenga, NOT dhoti pants, NOT tulip pants, NOT tapered at ankle".
    - For Straight Pants: Explicitly state "NOT palazzo, NOT flared, NOT dhoti pants, NOT salwar".
 If the SKU is a standalone upper garment (e.g. single kurti, standalone dress, saree), explicitly state "none - standalone garment".
 
 Build a precise Product Identity Profile. Perform a rigorous geographic evidence audit for construction, closures and decoration placement. Break the garment into specific physical regions. For stitched garments use (e.g. front neckline, front chest/yoke, front body, front hem, center back, back neckline, back body, back hem, left side construction, right side construction, left sleeve/armhole, right sleeve/armhole, waist, bottom wear front, bottom wear back, bottom wear hem). For sarees use (e.g. inner pallu, outer pallu, pallu border, body upper border, body lower border, chest drape, front pleats, waist tuck, unstitched blouse piece).
   For each region, record its evidence in garmentEvidence:
   - region: the physical location.
-  - sourceRole: the exact role from the manifest that proves this observation (for example "front", "back", "saree_back_drape", "fabric_pattern", or "saree_pallu_spread"). Never leave it blank for a confirmed observation.
+  - sourceRole: the exact role from the manifest that proves this observation (for example "front", "back", "bottom", "saree_back_drape", "fabric_pattern", or "saree_pallu_spread"). Never leave it blank for a confirmed observation.
   - state: "confirmed" (clearly visible in an authoritative reference), "confirmed_absent" (clearly proven to not exist there), or "unknown" (not visually proven either way).
 - visibleConstruction: explicitly what construction (seams, slits, folds) is proven there.
 - visibleDecoration: explicitly what trim, lace, embroidery, or print is proven there.
@@ -1083,7 +1108,7 @@ sareeTruth: Record exact base and secondary colours; fabric family; weave/lattic
 sareeDrapePlan: Choose a baseDrapeFamily (e.g., "shoulder-side/open-pallu" or "shoulder-side/pleated-pallu"), frontPleatTreatment, palluShoulderPlacement, handInteraction, borderVisibility, and poseSpecificDrapeState (e.g. how the angled pose shows the pallu fall).
 
 posePlan: Design 5 distinct poses (full_front, angled, back, creative, closeup). For each, specify the cameraAngle, framing, bodyPosition, handPlacement, expression, and write a detailed photorealistic 'prompt' that combines these elements with the product and model identity.
-CRITICAL: Every individual 'prompt' MUST be completely self-contained. The image generator does not see the other poses. You MUST explicitly describe the model's exact face, hair, skin tone, makeup, styling, bottom wear (exact cut, leg volume, pleating, hem width, and color), footwear, and the exact studio/scene background and lighting inside EVERY SINGLE 'prompt' string. NEVER use phrases like "consistent with previous poses", "same as full_front", or "locked scene" inside the 'prompt' string itself.
+CRITICAL: Every individual 'prompt' MUST be completely self-contained. The image generator does not see the other poses. You MUST explicitly describe the model's exact face, hair, skin tone, makeup, styling, bottom wear (exact cut, leg volume, two-leg vs skirt structure, pleating, hem, color, AND print/motif scale), footwear, and the exact studio/scene background and lighting inside EVERY SINGLE 'prompt' string. NEVER use phrases like "consistent with previous poses", "same as full_front", or "locked scene" inside the 'prompt' string itself.
 
 Across all five, ONLY pose, angle, framing, and expression may change. Exact product, colors, pattern, bottom wear, face, hairstyle, makeup, accessories, footwear, scene, lighting, shadows, camera/lens feel, and color treatment remain locked.
 
@@ -1097,7 +1122,7 @@ export const CONSISTENCY_RULES = [
   "Keep the same model face, skin tone, hair, body proportions, makeup, accessories, and footwear across all five poses.",
   "Every face must be photorealistic and anatomically correct: natural skin texture with visible pores, correctly shaped and aligned eyes with realistic catchlights, and naturally aligned teeth. Never render a distorted, warped, blurred, or plastic/waxy/mirror-symmetric \"AI face\".",
   "Keep exact garment colors, fabric, texture, pattern scale and placement, print, embroidery, logos, stitching, trims, buttons, zippers, pockets, fit, silhouette, and length.",
-  "Keep the exact bottom wear cut, silhouette, pleats, hem width, fabric, and pattern shown in product references across all poses. Never substitute bottom wear styles (e.g., never substitute dhoti pants or salwars for farshi or palazzo pants).",
+  "Keep the exact bottom wear cut, silhouette, volume, pleats, hem, fabric, color, and print shown in product references across all poses. Never substitute farshi/farsi pajama with palazzo, lehenga/skirt, dhoti, or salwar, and never drop or miniaturize the bottom-wear motifs.",
   "Use the back product image as the sole authority for the back pose.",
   "Style references control only background, lighting, composition, camera, mood, and creative treatment.",
   "Never add text, random logos, extra layers, duplicate people, or unreferenced garment elements.",
@@ -1117,7 +1142,8 @@ export const CONSISTENCY_RULES = [
 // it, so cache reuse would reintroduce front-to-back hallucinations.
 // v16 ensures unobstructed rear garment visibility (dupatta forward drape) and strict backdrop continuity.
 // v17 adds dedicated bottom-wear architecture and silhouette fidelity locks (preventing farshi/palazzo from falling back to dhoti/salwar).
-export const ANALYSIS_VERSION = "generation-session-v17-bottom-wear-fidelity";
+// v18 separates farshi from palazzo/lehenga, locks bottom-wear print transfer off the upper-garment fabric close-up, and adds an optional dedicated bottom reference role.
+export const ANALYSIS_VERSION = "generation-session-v18-bottom-print-silhouette";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

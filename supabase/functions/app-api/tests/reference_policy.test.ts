@@ -126,6 +126,21 @@ Deno.test("Pose 1 cannot become a saree anchor before strict verification", () =
   assertEquals(canUsePoseOneAnchor("dress", "passed"), true);
 });
 
+Deno.test("full-body selection ranks dedicated bottom-wear evidence ahead of upper fabric close-ups", () => {
+  const selected = selectReferences([
+    { role: "model_identity", hash: "model" },
+    { role: "front", hash: "front" },
+    { role: "back", hash: "back" },
+    { role: "fabric_pattern", hash: "fabric" },
+    { role: "bottom", hash: "bottom" },
+    { role: "mannequin", hash: "mannequin" },
+  ], [], "full_front", "kurta_or_kurti_set");
+  const roles = selected.map((reference) => reference.role);
+  assertEquals(roles.indexOf("bottom") < roles.indexOf("fabric_pattern"), true);
+  assertStringIncludes(roleLabel("bottom"), "BOTTOM WEAR / FARSHI");
+  assertStringIncludes(roleLabel("fabric_pattern"), "UPPER-garment");
+});
+
 Deno.test("Studio and Bulk/Catalog share the same region-aware readiness policy", () => {
   const references = [
     { role: "front", downloadUrl: "front.jpg" },

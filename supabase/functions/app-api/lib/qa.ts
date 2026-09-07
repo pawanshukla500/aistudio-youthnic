@@ -1,4 +1,4 @@
-import { parseJsonResponse, type JsonRecord } from "./profiles.ts";
+import { parseJsonResponse, hasRecordedBottomWear, type JsonRecord } from "./profiles.ts";
 import { isDirectBackProductRole } from "./referencePolicy.ts";
 
 const GENERIC_CHECK_KEYS = [
@@ -65,7 +65,7 @@ function rearOnlyQaProductIdentity(value: unknown) {
   };
 }
 
-function qaKeys(garmentFamily = "", poseType = "") {
+function qaKeys(garmentFamily = "", poseType = "", hasBottomWear = false) {
   const isSaree = garmentFamily.toLowerCase() === "saree";
   // A front/back score matters for every pose, but it becomes an SKU-critical
   // gate only when the output claims to be the true rear. This avoids making
@@ -74,6 +74,11 @@ function qaKeys(garmentFamily = "", poseType = "") {
   const genericCriticalChecks = poseType === "back"
     ? [...GENERIC_CRITICAL_CHECKS, "front_back_design"]
     : [...GENERIC_CRITICAL_CHECKS];
+  // Full-body frames must fail when recorded bottoms lose their print or cut.
+  // Close-ups often crop the trousers out, so bottom_wear stays non-critical there.
+  if (hasBottomWear && poseType !== "closeup") {
+    genericCriticalChecks.push("bottom_wear");
+  }
   return {
     checkKeys: isSaree ? [...GENERIC_CHECK_KEYS, ...SAREE_CHECK_KEYS] : [...GENERIC_CHECK_KEYS],
     criticalChecks: isSaree ? [...genericCriticalChecks, ...SAREE_CRITICAL_CHECKS] : genericCriticalChecks,
@@ -116,7 +121,8 @@ export function buildPoseQaPrompt(args: {
   productIdentity: unknown; creativeDirection: unknown; modelIdentity: unknown;
   garmentFamily: string; consistencyRules: string[]; hasApprovedAnchor: boolean; hasModelReference: boolean; referenceManifest: string[];
 }) {
-  const { checkKeys, isSaree } = qaKeys(args.garmentFamily, args.poseType);
+  const hasBottomWear = hasRecordedBottomWear(args.productIdentity);
+  const { checkKeys, isSaree } = qaKeys(args.garmentFamily, args.poseType, hasBottomWear);
   const qaProductIdentity = args.poseType === "back" ? rearOnlyQaProductIdentity(args.productIdentity) : args.productIdentity;
   const exampleChecks = Object.fromEntries(checkKeys.map((key) => [key, "pass"]));
   const exampleScores = Object.fromEntries(checkKeys.map((key) => [key, 100]));
@@ -144,8 +150,10 @@ ${args.hasModelReference
       : "This is Pose 1. It must establish one specific, photorealistic, naturally beautiful adult face and a realistic, coherent shoot anchor."}
 
 PRODUCT FIDELITY - the failure mode that matters most here is a garment that reads as the same style but is not the same SKU. Judge it against the product references, not against your sense of what such a garment usually looks like:
-- pattern_geometry: compare motif shape, motif scale relative to the body, spacing, orientation, repeat interval and density against the FABRIC / PATTERN DETAIL and FRONT references, panel by panel. Fail it when motifs are enlarged, simplified, redrawn, reduced to fewer larger shapes, re-angled, made denser or sparser, or when accent colours inside the print are missing - even when the print type and colour family are right.
+- pattern_geometry: compare motif shape, motif scale relative to the body, spacing, orientation, repeat interval and density PANEL BY PANEL. Upper-garment motifs against the FABRIC / PATTERN DETAIL and FRONT references. Bottom-wear motifs against FRONT, BACK, MANNEQUIN, ADDITIONAL, and BOTTOM WEAR / FARSHI references where the trousers/skirt are visible - never against an upper-only fabric close-up. Fail it when motifs are enlarged, simplified, redrawn, reduced to fewer larger shapes, re-angled, made denser or sparser, or when accent colours inside the print are missing - even when the print type and colour family are right. A perfect kurta with missing or miniaturized bottom print is still a fail.
+- print_pattern: fail when a recorded bottom print is replaced by solid color, faint dots/speckles, or a different motif family, even if the upper garment matches.
 - embroidery_geometry: compare the internal construction - lattice or motif structure, the count and rhythm of repeated units, borders, coverage area relative to the garment, and the relationship to neckline, tie, drawstring and tassel. Fail it when the embroidery is a different arrangement of the same craft, when unit count or shape changes, or when its coverage grows or shrinks.
+- bottom_wear: when a separate bottom garment is recorded, this is SKU-critical on full-body poses. Compare cut, volume, two-leg vs skirt structure, pleating, hem, fabric color, AND print/motif scale against the bottom-visible product references. Fail if Farshi/farsi pajama is flattened into palazzo, plain wide-leg, lehenga/skirt, dhoti, tulip, or ankle-cuffed salwar. Fail if two distinct trouser legs merge into a single circular skirt flare. Fail if large-scale florals/bootas become solid color, faint dots, speckles, or micro-print. A high face/kurta score cannot rescue a wrong bottom.
 - side_construction: verify side seams, slits, and closures strictly against the references. Fail if a side slit, opening, or side trim is invented where it wasn't explicitly proven.
 - trim_location: verify that trim (lace, border, piping) only appears exactly where proven. Fail if, for example, hem trim extends vertically up a side seam.
 - unknown_region_invention: fail if any explicitly "unknown" or unproven region contains invented product-defining construction or decoration. UNKNOWN DOES NOT MEAN INFER. Unknown means plain base fabric without unproven decoration.
@@ -184,8 +192,9 @@ Return STRICT JSON only:
 ${JSON.stringify({ pass: true, score: 100, checks: exampleChecks, scores: exampleScores, failed: [], reason: "short evidence-based verdict", correction: "specific correction for every failed field" })}`;
 }
 
-export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?: string; poseType?: string } = {}) {
-  const { checkKeys, criticalChecks } = qaKeys(options.garmentFamily, options.poseType);
+export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown } = {}) {
+  const hasBottomWear = options.hasBottomWear ?? hasRecordedBottomWear(options.productIdentity);
+  const { checkKeys, criticalChecks } = qaKeys(options.garmentFamily, options.poseType, hasBottomWear);
   const checks = raw.checks && typeof raw.checks === "object" ? raw.checks as JsonRecord : {};
   const rawScores = raw.scores && typeof raw.scores === "object" ? raw.scores as JsonRecord : {};
   const failed = new Set<string>();
@@ -282,7 +291,7 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
   };
 }
 
-export function parseQaResponse(text: string, options: { garmentFamily?: string; poseType?: string } = {}) {
+export function parseQaResponse(text: string, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown } = {}) {
   return normalizePoseQaResult(parseJsonResponse(text), options);
 }
 

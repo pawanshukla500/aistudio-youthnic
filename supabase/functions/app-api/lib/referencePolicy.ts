@@ -4,6 +4,7 @@ export const PRODUCT_REFERENCE_ROLES = [
   "front",
   "back",
   "fabric_pattern",
+  "bottom",
   "mannequin",
   "additional_product",
   "saree_front_drape",
@@ -137,7 +138,8 @@ export function roleLabel(role: string) {
     model_identity: "MODEL FACE REFERENCE - exact face, hair, skin tone and body-proportion truth; any garment in this image is unrelated and must not influence the SKU",
     front: "FRONT PRODUCT - legacy authoritative front product truth",
     back: "BACK PRODUCT - legacy authoritative rear design and construction",
-    fabric_pattern: "FABRIC / PATTERN DETAIL - legacy high-priority body texture, weave, print and construction truth",
+    fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority UPPER-garment texture, weave, print and embroidery truth; not bottom-wear print unless this image itself shows the trousers/skirt",
+    bottom: "BOTTOM WEAR / FARSHI - pixel-level authority for the trousers/skirt cut, volume, hem, fabric color and print; never copy upper-garment embroidery onto this panel",
     mannequin: "MANNEQUIN / FLAT-LAY SHOT - exact garment shape and construction truth; never reproduce the apparatus",
     additional_product: "ADDITIONAL PRODUCT PHOTO - supporting product truth",
     saree_front_drape: "FULL SAREE FRONT DRAPE - authoritative complete front drape, body, pleats, upper/lower borders and blouse-front truth",
@@ -157,6 +159,7 @@ const canonicalOrder = [
   "model_identity",
   "saree_front_drape",
   "front",
+  "bottom",
   "saree_back_drape",
   "back",
   "saree_body_detail",
@@ -185,8 +188,8 @@ function preferredProductOrder(poseType: string, garmentFamily: string) {
     return ["saree_front_drape", "front", "saree_body_detail", "fabric_pattern", "saree_pallu_spread", "saree_border_tassels", "saree_back_drape", "back", "saree_blouse_front", "saree_blouse_back_piece", "mannequin", "additional_product"];
   }
   if (poseType === "back") return ["back"];
-  if (poseType === "closeup") return ["fabric_pattern", "front", "back", "mannequin", "additional_product"];
-  return ["front", "back", "mannequin", "fabric_pattern", "additional_product"];
+  if (poseType === "closeup") return ["fabric_pattern", "front", "bottom", "back", "mannequin", "additional_product"];
+  return ["front", "bottom", "back", "mannequin", "fabric_pattern", "additional_product"];
 }
 
 export function selectReferences<T extends ReferenceLike>(

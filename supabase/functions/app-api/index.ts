@@ -1404,7 +1404,7 @@ async function validatePose(args: {
       ? [...baseParts, { text: "INDEPENDENT RECHECK: disregard prior numeric scores, re-inspect each critical region separately, and return newly reasoned evidence-based scores." }]
       : baseParts;
     const result = await visionJson(policy, parts);
-    return { result, qa: parseQaResponse(result.text, { garmentFamily, poseType: args.pose.id }) };
+    return { result, qa: parseQaResponse(result.text, { garmentFamily, poseType: args.pose.id, productIdentity: args.session.productIdentity }) };
   };
 
   const complex = ["saree", "lehenga", "suit", "multi-piece"].some((family) => garmentFamily.toLowerCase().includes(family));
@@ -4017,7 +4017,7 @@ async function setVariantReferencesOperation(request: Request, args: JsonRecord)
   if (!variant) throw new Error("Colourway not found.");
   const roleArgs: Array<[string, string, string, readonly string[]]> = [
     ["frontReferenceId", "front_image_url", "front_image_path", ["front"]], ["backReferenceId", "back_image_url", "back_image_path", ["back"]],
-    ["fabricPatternReferenceId", "", "", ["fabric_pattern"]], ["additionalProductReferenceId", "", "", ["additional_product"]],
+    ["fabricPatternReferenceId", "", "", ["fabric_pattern"]], ["bottomReferenceId", "", "", ["bottom"]], ["additionalProductReferenceId", "", "", ["additional_product"]],
     ["sareeFrontDrapeReferenceId", "front_image_url", "front_image_path", ["saree_front_drape"]], ["sareeBackDrapeReferenceId", "back_image_url", "back_image_path", ["saree_back_drape"]],
     ["sareeBodyDetailReferenceId", "", "", ["saree_body_detail"]], ["sareePalluSpreadReferenceId", "", "", ["saree_pallu_spread"]],
     ["sareeBorderTasselsReferenceId", "", "", ["saree_border_tassels"]], ["sareeBlouseFrontReferenceId", "", "", ["saree_blouse_front"]], ["sareeBlouseBackPieceReferenceId", "", "", ["saree_blouse_back_piece"]],

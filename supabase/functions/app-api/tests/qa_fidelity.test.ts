@@ -97,3 +97,65 @@ Deno.test("a true-back front_back_design score below 90 fails, while 90-94 requi
   assertEquals(review.outcome, "requires_human_review");
   assertEquals(review.automaticallyVerified, false);
 });
+
+Deno.test("missing or miniaturized bottom print fails QA even when face and kurta score high", () => {
+  const prompt = buildPoseQaPrompt({
+    poseNumber: 1,
+    poseType: "full_front",
+    poseTitle: "Hero",
+    poseDirection: { id: "full_front", title: "Hero" },
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      bottomWearDetails: "Farshi pajama, magenta silk, bold large-scale gold floral bootas; NOT palazzo, NOT solid",
+    },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: false,
+    hasModelReference: false,
+    referenceManifest: ["IMAGE 1: Front product", "IMAGE 2: Fabric / pattern detail", "IMAGE 3: Bottom wear / farshi"],
+  });
+  assertStringIncludes(prompt, "bottom_wear: when a separate bottom garment is recorded, this is SKU-critical");
+  assertStringIncludes(prompt, "large-scale florals/bootas become solid color, faint dots");
+  assertStringIncludes(prompt, "Farshi/farsi pajama is flattened into palazzo");
+  assertStringIncludes(prompt, "never against an upper-only fabric close-up");
+
+  const keys = [...genericCritical, "bottom_wear"];
+  const result = normalizePoseQaResult({
+    pass: true,
+    score: 97,
+    checks: Object.fromEntries(keys.map((key) => [key, key === "bottom_wear" ? "fail" : "pass"])),
+    scores: Object.fromEntries(keys.map((key) => [key, key === "bottom_wear" ? 40 : 98])),
+    failed: ["bottom_wear"],
+    reason: "Bottoms are solid magenta palazzo; gold florals missing.",
+    correction: "Rebuild the farshi pajama print and volume from the bottom-wear reference.",
+  }, {
+    garmentFamily: "kurta_or_kurti_set",
+    poseType: "full_front",
+    hasBottomWear: true,
+  });
+
+  assertEquals(result.pass, false);
+  assertEquals(result.outcome, "rejected_by_qa");
+  assert(result.failed.includes("bottom_wear"));
+  assert(result.productFidelity > 90, "A high kurta/face average must not hide a failed bottom.");
+});
+
+Deno.test("close-up QA does not treat bottom_wear as critical when trousers are cropped out", () => {
+  const result = normalizePoseQaResult({
+    pass: true,
+    score: 98,
+    checks: Object.fromEntries(genericCritical.map((key) => [key, "pass"])),
+    scores: Object.fromEntries(genericCritical.map((key) => [key, 98])),
+    failed: [],
+    reason: "Close-up matches face and kurta embroidery.",
+    correction: "",
+  }, {
+    garmentFamily: "kurta_or_kurti_set",
+    poseType: "closeup",
+    hasBottomWear: true,
+  });
+  assertEquals(result.pass, true);
+  assertEquals(result.automaticallyVerified, true);
+});

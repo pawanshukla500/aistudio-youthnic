@@ -12,7 +12,8 @@ const genericProductSlots: Array<{
 }> = [
   { id: "front", label: "Upload Front", description: "Click or drop image", required: true },
   { id: "back", label: "Upload Back", description: "Click or drop image", required: true },
-  { id: "fabric_pattern", label: "Upload Fabric / Pattern Detail", description: "Click or drop image", required: false },
+  { id: "fabric_pattern", label: "Upload Fabric / Pattern Detail", description: "Upper garment embroidery or fabric close-up", required: false },
+  { id: "bottom", label: "Upload Bottom Wear / Farshi", description: "Trousers/skirt cut, volume and print — optional but locks bottoms", required: false },
   { id: "mannequin", label: "Upload Mannequin / Flat-lay Shot", description: "Dress form or flat-lay — sets worn shape and drape", required: false },
   { id: "additional_product", label: "Upload Additional Product Photo", description: "Click or drop image", required: false },
 ];
@@ -128,7 +129,7 @@ export function ProductReferences({
 }) {
   const productSlots = saree ? sareeProductSlots : genericProductSlots;
   const legacyCandidates = saree
-    ? (["saree_front_drape", "saree_back_drape", "fabric_pattern", "mannequin", "additional_product"] as ProductReferenceRole[])
+    ? (["saree_front_drape", "saree_back_drape", "fabric_pattern", "mannequin", "additional_product", "bottom"] as ProductReferenceRole[])
       .flatMap((role) => references[role] ? [{ role, reference: references[role]! }] : [])
     : [];
   return (

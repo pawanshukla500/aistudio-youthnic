@@ -2,9 +2,13 @@ import {
   assertEquals,
   assertThrows,
 } from "jsr:@std/assert@1";
+import { assertStringIncludes } from "jsr:@std/assert@1";
 import {
   ANALYSIS_VERSION,
   assertSareeGenerationReady,
+  buildCombinedAnalysisPrompt,
+  hasRecordedBottomWear,
+  isFarshiBottomWear,
   normalizeAnalysis,
   sareeAnalysisIssues,
 } from "../lib/profiles.ts";
@@ -54,7 +58,32 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v17-bottom-wear-fidelity");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v18-bottom-print-silhouette");
+});
+
+Deno.test("analysis prompt distinguishes farshi from palazzo and does not take bottom print from upper fabric close-ups", () => {
+  const prompt = buildCombinedAnalysisPrompt({
+    skuName: "FARSHI-SET",
+    category: "kurta set",
+    productDetails: "white kurta with magenta farshi pajama",
+    modelDirection: "",
+    sceneDirection: "",
+    referenceManifest: [
+      { number: 1, role: "front" },
+      { number: 2, role: "fabric_pattern" },
+      { number: 3, role: "bottom" },
+    ],
+  });
+  assertStringIncludes(prompt, "Farshi / Farsi / Farshi Pajama");
+  assertStringIncludes(prompt, "TWO DISTINCT LEGS");
+  assertStringIncludes(prompt, "NOT palazzo, NOT plain wide-leg, NOT lehenga");
+  assertStringIncludes(prompt, "FABRIC / PATTERN DETAIL is NOT authority for bottoms");
+  assertStringIncludes(prompt, "BOTTOM WEAR / FARSHI");
+  assertEquals(hasRecordedBottomWear({ bottomWearDetails: "Farshi Pajama, magenta gold floral" }), true);
+  assertEquals(hasRecordedBottomWear({ bottomWearDetails: "none - standalone garment" }), false);
+  assertEquals(hasRecordedBottomWear({ bottomWearDetails: "Not visible in the supplied references" }), false);
+  assertEquals(isFarshiBottomWear("Farsi pajama with large gold florals"), true);
+  assertEquals(isFarshiBottomWear("Palazzo pants, solid magenta; NOT farshi"), false);
 });
 
 Deno.test("root-level sareeTruth and sareeDrapePlan survive canonical normalization", () => {
