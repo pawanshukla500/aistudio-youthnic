@@ -212,7 +212,10 @@ export type StudioPose = {
   enabled: boolean;
 };
 
-const STANDALONE_BOTTOM_WEAR = /^(none|n\/a|not applicable|standalone|not visible)(\b|[.\s-]|$)/i;
+const ABSENT_BOTTOM_WEAR =
+  /^(unknown|unproven|none|n\/a|na|n\.a\.?|not applicable|standalone|not visible|not recorded|not specified|no bottom(?:s)?(?:\s+wear)?|no trousers?|no pants?)(\b|[.\s-]|$)/i;
+const BOTTOM_GARMENT_CLASS =
+  /\b(?:farshi|farsi|pajama|pyjama|palazzo|trousers?|pants?|sharara|gharara|salwar|patiala|churidar|skirt|lehenga|leggings?|dhoti|culottes?|shorts?)\b/i;
 const FARSHI_BOTTOM_WEAR = /\bfarshi\b|\bfarsi\b/;
 
 export function recordedBottomWearDetails(productIdentity: unknown): string {
@@ -224,7 +227,13 @@ export function recordedBottomWearDetails(productIdentity: unknown): string {
 
 export function hasRecordedBottomWear(productIdentity: unknown): boolean {
   const details = recordedBottomWearDetails(productIdentity);
-  return Boolean(details && !STANDALONE_BOTTOM_WEAR.test(details));
+  if (!details || ABSENT_BOTTOM_WEAR.test(details)) return false;
+
+  const firstNegative = details.search(/\b(?:not|without|no)\b/i);
+  const positivePortion = (firstNegative === -1 ? details : details.slice(0, firstNegative)).trim();
+  if (!positivePortion) return false;
+
+  return BOTTOM_GARMENT_CLASS.test(positivePortion);
 }
 
 export function isFarshiBottomWear(detailsOrProduct: unknown): boolean {

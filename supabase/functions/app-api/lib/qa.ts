@@ -27,6 +27,8 @@ const GENERIC_CRITICAL_CHECKS: readonly string[] = [
 
 const SAREE_CRITICAL_CHECKS: readonly string[] = [...SAREE_CHECK_KEYS];
 
+const QA_BOTTOM_WEAR_CRITICAL_POSES = new Set(["full_front", "angled", "back"]);
+
 // Listing-grade gates are intentionally attribute-level: 90-94 needs a human,
 // and anything below 90 fails even when the weighted average remains high.
 const AUTO_PASS_FLOOR = 95;
@@ -74,9 +76,10 @@ function qaKeys(garmentFamily = "", poseType = "", hasBottomWear = false) {
   const genericCriticalChecks = poseType === "back"
     ? [...GENERIC_CRITICAL_CHECKS, "front_back_design"]
     : [...GENERIC_CRITICAL_CHECKS];
-  // Full-body frames must fail when recorded bottoms lose their print or cut.
-  // Close-ups often crop the trousers out, so bottom_wear stays non-critical there.
-  if (hasBottomWear && poseType !== "closeup") {
+  // Only head-to-toe catalog frames must fail when recorded bottoms lose print
+  // or cut. Creative is a "full or three-quarter editorial crop" and closeup is
+  // face-to-chest/waist, so both routinely omit trousers.
+  if (hasBottomWear && QA_BOTTOM_WEAR_CRITICAL_POSES.has(poseType)) {
     genericCriticalChecks.push("bottom_wear");
   }
   return {
@@ -153,7 +156,7 @@ PRODUCT FIDELITY - the failure mode that matters most here is a garment that rea
 - pattern_geometry: compare motif shape, motif scale relative to the body, spacing, orientation, repeat interval and density PANEL BY PANEL. Upper-garment motifs against the FABRIC / PATTERN DETAIL and FRONT references. Bottom-wear motifs against FRONT, BACK, MANNEQUIN, ADDITIONAL, and BOTTOM WEAR / FARSHI references where the trousers/skirt are visible - never against an upper-only fabric close-up. Fail it when motifs are enlarged, simplified, redrawn, reduced to fewer larger shapes, re-angled, made denser or sparser, or when accent colours inside the print are missing - even when the print type and colour family are right. A perfect kurta with missing or miniaturized bottom print is still a fail.
 - print_pattern: fail when a recorded bottom print is replaced by solid color, faint dots/speckles, or a different motif family, even if the upper garment matches.
 - embroidery_geometry: compare the internal construction - lattice or motif structure, the count and rhythm of repeated units, borders, coverage area relative to the garment, and the relationship to neckline, tie, drawstring and tassel. Fail it when the embroidery is a different arrangement of the same craft, when unit count or shape changes, or when its coverage grows or shrinks.
-- bottom_wear: when a separate bottom garment is recorded, this is SKU-critical on full-body poses. Compare cut, volume, two-leg vs skirt structure, pleating, hem, fabric color, AND print/motif scale against the bottom-visible product references. Fail if Farshi/farsi pajama is flattened into palazzo, plain wide-leg, lehenga/skirt, dhoti, tulip, or ankle-cuffed salwar. Fail if two distinct trouser legs merge into a single circular skirt flare. Fail if large-scale florals/bootas become solid color, faint dots, speckles, or micro-print. A high face/kurta score cannot rescue a wrong bottom.
+- bottom_wear: when a separate bottom garment is recorded, this is SKU-critical on full_front, angled, and back. Creative three-quarter editorial crops and close-ups stay non-critical because they often omit trousers. Compare cut, volume, two-leg vs skirt structure, pleating, hem, fabric color, AND print/motif scale against the bottom-visible product references. Fail if Farshi/farsi pajama is flattened into palazzo, plain wide-leg, lehenga/skirt, dhoti, tulip, or ankle-cuffed salwar. Fail if two distinct trouser legs merge into a single circular skirt flare. Fail if large-scale florals/bootas become solid color, faint dots, speckles, or micro-print. A high face/kurta score cannot rescue a wrong bottom.
 - side_construction: verify side seams, slits, and closures strictly against the references. Fail if a side slit, opening, or side trim is invented where it wasn't explicitly proven.
 - trim_location: verify that trim (lace, border, piping) only appears exactly where proven. Fail if, for example, hem trim extends vertically up a side seam.
 - unknown_region_invention: fail if any explicitly "unknown" or unproven region contains invented product-defining construction or decoration. UNKNOWN DOES NOT MEAN INFER. Unknown means plain base fabric without unproven decoration.

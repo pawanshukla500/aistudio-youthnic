@@ -129,7 +129,7 @@ export function ProductReferences({
 }) {
   const productSlots = saree ? sareeProductSlots : genericProductSlots;
   const legacyCandidates = saree
-    ? (["saree_front_drape", "saree_back_drape", "fabric_pattern", "mannequin", "additional_product", "bottom"] as ProductReferenceRole[])
+    ? (["saree_front_drape", "saree_back_drape", "fabric_pattern", "mannequin", "additional_product"] as ProductReferenceRole[])
       .flatMap((role) => references[role] ? [{ role, reference: references[role]! }] : [])
     : [];
   return (

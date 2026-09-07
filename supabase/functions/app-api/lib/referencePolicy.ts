@@ -217,40 +217,40 @@ export function selectReferences<T extends ReferenceLike>(
   const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
   const style = references.filter((reference) => reference.role === "style_reference");
   const product = order.flatMap((role) => references.filter((reference) => reference.role === role));
-  // A SKU can have several full-drape or close-up photos. Taking all photos from
-  // the first role before moving to the next one can exhaust the provider limit
-  // and silently remove the only pallu/back/body reference. Protect one image
-  // from every available saree evidence region first, then spend remaining slots
-  // on useful duplicates. Legacy aliases satisfy the same region so old sessions
-  // retain the same guarantee.
-  const protectedSareeGroups = [
-    ["saree_front_drape", "front"],
-    ["saree_back_drape", "back"],
-    ["saree_body_detail", "fabric_pattern"],
-    ["saree_pallu_spread"],
-    ["saree_border_tassels"],
-    ["saree_blouse_front"],
-    ["saree_blouse_back_piece"],
-  ];
+  // A SKU can have several photos of one region. Taking every image from an
+  // early role (many bottoms, many fronts) can exhaust the provider limit and
+  // silently drop the only back or mannequin. Protect one image from each
+  // required evidence region first, then spend remaining slots on duplicates.
+  // Saree aliases share a region so legacy sessions keep the same guarantee.
+  // Back-pose sole-rear authority is handled by the early return above.
+  const protectedRoleGroups = normalizedFamily === "saree"
+    ? [
+      ["saree_front_drape", "front"],
+      ["saree_back_drape", "back"],
+      ["saree_body_detail", "fabric_pattern"],
+      ["saree_pallu_spread"],
+      ["saree_border_tassels"],
+      ["saree_blouse_front"],
+      ["saree_blouse_back_piece"],
+    ]
+    : [
+      ["front"],
+      ["bottom"],
+      ["back"],
+      ["mannequin"],
+    ];
   const protectedProduct: T[] = [];
-  if (normalizedFamily === "saree") {
-    for (const roles of protectedSareeGroups) {
-      // Choose the representative according to this pose's authority order,
-      // rather than the generic group order. For a true back pose this makes
-      // the direct rear/back source the first product image sent to the model.
-      const match = order.flatMap((role) => roles.includes(role)
-        ? references.filter((reference) => reference.role === role)
-        : []).at(0);
-      if (match) protectedProduct.push(match);
-    }
-    const roleRank = new Map(order.map((role, index) => [role, index]));
-    protectedProduct.sort((left, right) => (roleRank.get(left.role) ?? 99) - (roleRank.get(right.role) ?? 99));
+  for (const roles of protectedRoleGroups) {
+    const match = order.flatMap((role) => roles.includes(role)
+      ? references.filter((reference) => reference.role === role)
+      : []).at(0);
+    if (match) protectedProduct.push(match);
   }
+  const roleRank = new Map(order.map((role, index) => [role, index]));
+  protectedProduct.sort((left, right) => (roleRank.get(left.role) ?? 99) - (roleRank.get(right.role) ?? 99));
   const protectedSet = new Set(protectedProduct);
   const remainingProduct = product.filter((reference) => !protectedSet.has(reference));
-  const productPriority = normalizedFamily === "saree"
-    ? [...protectedProduct, ...remainingProduct]
-    : product;
+  const productPriority = [...protectedProduct, ...remainingProduct];
   const anchor = approved.slice(0, 1);
   const priority = poseType === "back"
     ? [...productPriority, ...model, ...anchor]

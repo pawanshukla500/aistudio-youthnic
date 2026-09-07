@@ -159,3 +159,21 @@ Deno.test("close-up QA does not treat bottom_wear as critical when trousers are 
   assertEquals(result.pass, true);
   assertEquals(result.automaticallyVerified, true);
 });
+
+Deno.test("creative editorial QA does not treat bottom_wear as critical when trousers can be cropped out", () => {
+  const result = normalizePoseQaResult({
+    pass: true,
+    score: 98,
+    checks: Object.fromEntries(genericCritical.map((key) => [key, "pass"])),
+    scores: Object.fromEntries(genericCritical.map((key) => [key, 98])),
+    failed: [],
+    reason: "Creative three-quarter crop matches face and kurta.",
+    correction: "",
+  }, {
+    garmentFamily: "kurta_or_kurti_set",
+    poseType: "creative",
+    hasBottomWear: true,
+  });
+  assertEquals(result.pass, true);
+  assertEquals(result.automaticallyVerified, true);
+});

@@ -141,6 +141,24 @@ Deno.test("full-body selection ranks dedicated bottom-wear evidence ahead of upp
   assertStringIncludes(roleLabel("fabric_pattern"), "UPPER-garment");
 });
 
+Deno.test("non-saree selection reserves front, bottom, back, and mannequin before duplicate bottoms fill the cap", () => {
+  const references = [
+    { role: "model_identity", hash: "model" },
+    { role: "front", hash: "front" },
+    ...Array.from({ length: 16 }, (_, index) => ({ role: "bottom", hash: `bottom-${index}` })),
+    { role: "back", hash: "back" },
+    { role: "mannequin", hash: "mannequin" },
+  ];
+  const selected = selectReferences(references, [], "full_front", "kurta_or_kurti_set");
+  const roles = selected.map((reference) => reference.role);
+
+  assertEquals(selected.length, MAX_IMAGE_REFERENCES);
+  for (const required of ["front", "bottom", "back", "mannequin"]) {
+    assert(roles.includes(required), `${required} must be protected from truncation.`);
+  }
+  assertEquals(selected.some((reference) => reference.hash === "back"), true);
+});
+
 Deno.test("Studio and Bulk/Catalog share the same region-aware readiness policy", () => {
   const references = [
     { role: "front", downloadUrl: "front.jpg" },

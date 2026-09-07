@@ -83,8 +83,13 @@ Deno.test("analysis prompt distinguishes farshi from palazzo and does not take b
   assertStringIncludes(prompt, "FASHION KNOWLEDGE (SEEDED CUT/PRINT GUIDANCE, SUBORDINATE TO PRODUCT REFERENCES):");
   assertStringIncludes(prompt, "copy large metallic florals");
   assertEquals(hasRecordedBottomWear({ bottomWearDetails: "Farshi Pajama, magenta gold floral" }), true);
+  assertEquals(hasRecordedBottomWear({ bottomWearDetails: "straight-cut palazzo pants" }), true);
   assertEquals(hasRecordedBottomWear({ bottomWearDetails: "none - standalone garment" }), false);
   assertEquals(hasRecordedBottomWear({ bottomWearDetails: "Not visible in the supplied references" }), false);
+  assertEquals(hasRecordedBottomWear({ bottomWearDetails: "unknown" }), false);
+  assertEquals(hasRecordedBottomWear({ bottomWearDetails: "Unknown" }), false);
+  assertEquals(hasRecordedBottomWear({ bottomWearDetails: "No bottom wear" }), false);
+  assertEquals(hasRecordedBottomWear({ bottomWearDetails: "No bottom wear recorded" }), false);
   assertEquals(isFarshiBottomWear("Farsi pajama with large gold florals"), true);
   assertEquals(isFarshiBottomWear("Palazzo pants, solid magenta; NOT farshi"), false);
 });
