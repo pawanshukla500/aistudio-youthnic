@@ -1920,6 +1920,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
       creativeDirection: {
         ...(sessionData.creativeDirection as Record<string, unknown> || {}),
         scene: jobData.backgroundStyle,
+        ...(jobData.backgroundStyle ? { backgroundStyle: jobData.backgroundStyle, studioEnvironment: jobData.backgroundStyle } : {}),
       },
       modelIdentity: {
         ...(sessionData.modelIdentity as Record<string, unknown> || {}),

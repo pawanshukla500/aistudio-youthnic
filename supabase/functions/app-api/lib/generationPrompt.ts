@@ -232,6 +232,7 @@ function detectPoseCategory(text: string) {
   const t = text.toLowerCase();
   if (/\b(back|rear|behind|posterior)\b/.test(t) || t.includes("back view") || t.includes("true back") || t.includes("rear full")) return "back";
   if (/side|profile|lateral|three\.quarter|3\.4/.test(t)) return "side";
+  if (/\b(sit|sitting|seated)\b/.test(t)) return "sitting";
   if (/back|rear|behind|posterior/.test(t)) return "back";
   if (/front|hero|straight|facing/.test(t)) return "front";
   if (/walk|motion|step|stride|movement|dynamic/.test(t)) return "dynamic";
@@ -268,6 +269,14 @@ function poseCategoryRules(category: string) {
 - FRONT HERO POSE: Model squarely facing the camera.
 - Ensure the front construction and neckline are perfectly symmetrical and visible.
 - Stance should be grounded and confident.`,
+    sitting: `
+- SEATED / SITTING EDITORIAL POSE:
+- The model is gracefully and elegantly seated (e.g. on a minimal studio bench, architectural plinth/cube, minimal chair, or sleek studio step matching the set).
+- MANDATORY GARMENT & BOTTOM-WEAR READABILITY:
+  * Both legs, trousers/farshi/skirt/pleats, hemline, and footwear must remain clearly visible and beautifully arranged - never tucked away, crumpled, obscured, or hidden behind props.
+  * The upper garment silhouette, neckline, embroidery, and sleeve details must remain fully displayed and untangled.
+  * Posture should be poised, relaxed, and editorial (e.g. slight angle to camera, back straight or gentle lean, legs gracefully placed to showcase garment volume and footwear).
+- Ensure the seating furniture/plinth strictly matches the studio aesthetic and does NOT introduce cluttered pre-shoot props.`,
     dynamic: `
 - DYNAMIC POSE: Show active movement (walking, stepping, spinning).
 - Fabric must show realistic motion lines, flare, and weight shift.
@@ -329,9 +338,17 @@ export function composeGenerationPrompt(args: {
   const manifest = promptReferences.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
   const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
+  const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
   const faceVisible = !isTrueBack;
+  const isPose4 = args.pose.id === "creative" || args.pose.poseNumber === 4;
+  const sittingRegex = /\b(sit|sitting|seated)\b/i;
+  const poseText = `${args.pose.id} ${args.pose.title || ""} ${args.pose.bodyPosition || ""} ${args.pose.prompt || ""} ${args.pose.description || ""}`;
+  const userNotes = String(args.productDetails || "");
+  const creativeText = `${creative.composition || ""} ${creative.modelStyling || ""} ${creative.editorialCommercialFeel || ""}`;
+  const isSittingDemanded = sittingRegex.test(poseText) || sittingRegex.test(userNotes) || sittingRegex.test(creativeText);
+
   const allowedDelta = [
-    `pose/body position: ${boundedText(args.pose.bodyPosition, 360)}`,
+    `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step matching the set; complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(args.pose.bodyPosition, 360)}`,
     `camera angle: ${boundedText(args.pose.cameraAngle, 360)}`,
     `framing: ${boundedText(args.pose.framing, 360)}`,
     `expression: ${boundedText(args.pose.expression, 360)}`,
@@ -343,7 +360,9 @@ export function composeGenerationPrompt(args: {
   const visibilityRules = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
   const poseCategory = (isTrueBack || args.pose.id === "back")
     ? "back"
-    : detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || ""));
+    : (isPose4 && isSittingDemanded)
+      ? "sitting"
+      : detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || "") + " " + (args.pose.bodyPosition || ""));
   const categoryRules = poseCategoryRules(poseCategory);
   const evidenceLines = promptEvidence.slice(0, 16).map((entry) => {
     const row = objectValue(entry);
@@ -367,6 +386,7 @@ ${manifest}
 
 EDIT GOAL:
 Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${boundedText(args.pose.title, 160)}. The finished image must look like the same real professional photoshoot as the other four images.
+Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE (if supplied) or the clean commercial studio direction. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
 
 LOCKED SUBJECT - MUST NOT CHANGE:
 ${modelJson}
@@ -395,7 +415,7 @@ ${sareeDrapePlanJson}`) : ""}
 User notes: ${isTrueBack ? "Non-authoritative for rear construction. The direct uploaded back product image remains the sole product source." : boundedText(args.productDetails, 1_200)}
 Reference authority: ${isTrueBack
     ? "The one direct uploaded BACK / SAREE REAR-BACK DRAPE image in the manifest is the sole visual product authority. Do not derive rear construction from a front, pallu, body detail, border, blouse, mannequin, model, style, or generated image."
-    : `original product images always outrank generated anchors and style references. FRONT controls front construction and, when bottoms are visible, bottom-wear cut and print; BACK solely controls rear construction including rear bottom-wear; FABRIC/PATTERN resolves UPPER-garment material, embroidery and small construction only unless that image itself shows the trousers/skirt; BOTTOM WEAR / FARSHI (if supplied) is the pixel-level authority for bottom-wear cut, volume, hem, color and print; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion, drape and bottom volume, while a FLAT-LAY resolves outline, construction, panel layout and length only, since flat cloth shows no worn drape. ADDITIONAL supports product truth including bottoms; STYLE controls art direction only.${isSaree ? " For sarees, FULL SAREE FRONT and REAR/BACK DRAPE control their complete worn regions; SAREE BODY/WEAVE controls body colour, weave and motif geometry; FULLY SPREAD PALLU alone controls the pallu boundary and artwork; BORDER/TASSELS controls edge geometry and tassel construction; BLOUSE FRONT/BACK controls only the matching blouse region. Never classify or treat the pallu spread as generic body fabric." : ""}`}
+    : `original product images always outrank generated anchors and style references. FRONT controls front construction and, when bottoms are visible, bottom-wear cut and print; BACK solely controls rear construction including rear bottom-wear; FABRIC/PATTERN resolves UPPER-garment material, embroidery and small construction only unless that image itself shows the trousers/skirt; BOTTOM WEAR / FARSHI (if supplied) is the pixel-level authority for bottom-wear cut, volume, hem, color and print; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion, drape and bottom volume, while a FLAT-LAY resolves outline, construction, panel layout and length only, since flat cloth shows no worn drape. ADDITIONAL supports product truth including bottoms; STYLE controls art direction, photoshoot backdrop, room architecture, flooring, props, and lighting only - STYLE REFERENCE is the SOLE AUTHORITY for the photoshoot environment, never product identity. Product reference backgrounds must be 100% discarded.${isSaree ? " For sarees, FULL SAREE FRONT and REAR/BACK DRAPE control their complete worn regions; SAREE BODY/WEAVE controls body colour, weave and motif geometry; FULLY SPREAD PALLU alone controls the pallu boundary and artwork; BORDER/TASSELS controls edge geometry and tassel construction; BLOUSE FRONT/BACK controls only the matching blouse region. Never classify or treat the pallu spread as generic body fabric." : ""}`}
 - Product references may be flat-lay, folded, pinned or shot on a mannequin or dress form. Rebuild the garment as it falls on a live human body, and never render a mannequin, dress form, hanger, clip, pin, prop stand, or the flat background surface in the output.
 ${isSaree ? (isTrueBack
     ? "- SAREE REAR RULE: read the visible pallu fall, border, tassels, weave and blouse-back only from the direct rear image. Never mirror or extend a front-only design into the back."
@@ -447,6 +467,8 @@ ${farshiBottom ? "- FARSHI / FARSI HARD LOCK: Keep two visible trouser legs, ext
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
 ${creativeJson}
 - Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, camera height and distance, depth of field and colour grade. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
+- ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS: Never reproduce the background, wall, arches, urns, pots, plants, steps, or environment visible behind the garment in the product reference photos (front, back, bottom, mannequin). The photoshoot set must come exclusively from the STYLE REFERENCE (or Pose 1 anchor / studio specification).
+- BACKDROP AND SET CONTINUITY ACROSS ALL POSES: The exact same photoshoot set (wall color, wall finish, floor, lighting, and any props established by the style reference / Pose 1) must remain identical across all 5 poses without drift or forgetting context.
 ${hasApprovedAnchor
   ? `- SET & BACKDROP HARD LOCK TO APPROVED POSE 1:
   * Rebuild the EXACT SAME physical room and backdrop set from Pose 1: identical wall color, wall plaster/paint finish, texture, architectural elements, floor surface, and carpet/rug.
@@ -481,6 +503,13 @@ Visibility rules: ${visibilityRules}
 Purpose: ${boundedText(args.pose.purpose, 420)}
 Consistency notes: ${boundedText(args.pose.consistencyNotes, 600)}
 ${categoryRules ? `POSE CATEGORY RULES (${poseCategory.toUpperCase()}):\n${categoryRules}` : ""}
+${isPose4 && isSittingDemanded ? `
+SEATED EDITORIAL POSE REQUIREMENT (POSE 4):
+- The style reference or product requirements specifically demand an elegant seated pose for this frame.
+- Model must be seated gracefully on a minimal studio bench, architectural plinth/cube, or clean studio step that seamlessly matches the set.
+- Both legs, bottom wear (farshi/trousers/pleats), hemline, and footwear MUST remain fully visible, untangled, and unbunched.
+- Posture must be upright, poised, and relaxed editorial - showcasing garment fit and draping without wrinkling or obscuring key details.
+` : ""}
 ${correction ? `
 CORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:
 ${correction}
@@ -515,6 +544,7 @@ ${rules.map((rule) => `- ${rule}`).join("\n")}
 - Never complete, mirror, continue, relocate, add or remove decoration for symmetry.
 - Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
 - ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION: It is strictly forbidden to alter or replace the bottom wear cut, silhouette, volume, or print (e.g., never substitute palazzo, lehenga/skirt, dhoti pants, tulip pants, harem pants, or balloon salwars when Farshi / Farsi pajama is specified; never drop large gold/silver florals into solid color or tiny dots). Customers buy the complete set and expect the exact silhouette, color, and motif pattern shown in the product references.
+- STRICT PROHIBITION ON COPYING PRE-SHOOT BACKGROUNDS: Never copy or reproduce pre-shoot background walls, terracotta arches, urns, clay pots, plants, courtyard structures, or outdoor scenery from the product reference images into the generated image.
 - Never change the backdrop wall color, texture, floor, or lighting from what was established in Pose 1.
 - Never add random background props (brass urlis, urns, flower petals, pedestals) not present in Pose 1.
 ${(args.pose.id === "back" || isTrueBack) ? `- DUPATTA REAR VISIBILITY LOCK: If wearing a dupatta, scarf, stole, or shawl, it MUST be draped forward over both arms or held in front. The entire back of the kurti/dress (neckline, back panel, embroidery, seams, darts, and hem) must be 100% visible and NEVER covered or obstructed by the dupatta.

@@ -58,7 +58,7 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v18-bottom-print-silhouette");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v19-style-backdrop-sitting-pose");
 });
 
 Deno.test("analysis prompt distinguishes farshi from palazzo and does not take bottom print from upper fabric close-ups", () => {
