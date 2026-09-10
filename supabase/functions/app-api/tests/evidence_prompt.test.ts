@@ -510,3 +510,134 @@ Deno.test("true-back pose preserves bottom wear architecture without leaking fro
   // Verify front detail does not leak
   assertEquals(prompt.includes("front-lace-should-not-leak"), false);
 });
+
+Deno.test("composeGenerationPrompt enforces style reference backdrop authority and strictly prohibits pre-shoot backgrounds", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "KAPOOR-KURTI-SET",
+    productDetails: "Magenta kurti with cream farshi pajama",
+    pose: {
+      id: "full_front",
+      title: "Front Hero View",
+      poseNumber: 1,
+      description: "Square front hero",
+      cameraAngle: "eye level",
+      framing: "full",
+      bodyPosition: "straight",
+      handPlacement: "relaxed",
+      expression: "confident",
+      highlightedDetails: ["neckline", "farshi cut"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "hero",
+      consistencyNotes: "locked",
+      prompt: "Full front hero pose.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "magenta",
+        bottomWearDetails: "cream farshi pajama",
+      },
+      creativeDirection: {
+        backgroundStyle: "Minimalist brutalist sandstone plinth with warm directional sunlight",
+        studioEnvironment: "Warm architectural minimalist set",
+      },
+    },
+    references: [
+      { role: "model_identity" },
+      { role: "front" },
+      { role: "bottom" },
+      { role: "back" },
+      { role: "fabric_pattern" },
+      { role: "style_reference" },
+    ],
+  });
+
+  // Verify style reference authority
+  assertStringIncludes(prompt, "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, props, composition, mood, and lighting");
+  assertStringIncludes(prompt, "Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE");
+  // Verify pre-shoot background prohibition
+  assertStringIncludes(prompt, "STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos");
+  assertStringIncludes(prompt, "ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS");
+  assertStringIncludes(prompt, "STRICT PROHIBITION ON COPYING PRE-SHOOT BACKGROUNDS");
+});
+
+Deno.test("composeGenerationPrompt enforces seated editorial pose for Pose 4 when demanded", () => {
+  // Test case 1: user notes demand sitting pose
+  const promptWithSittingNotes = composeGenerationPrompt({
+    skuName: "EDITORIAL-SITTING-SET",
+    productDetails: "Kurti set with sit pose required on wooden bench",
+    pose: {
+      id: "creative",
+      title: "Playful Editorial Swirl",
+      poseNumber: 4,
+      description: "Creative fashion pose",
+      cameraAngle: "editorial",
+      framing: "full",
+      bodyPosition: "creative movement",
+      handPlacement: "expressive",
+      expression: "chic",
+      highlightedDetails: ["movement", "drape"],
+      productVisibilityRules: ["all visible"],
+      purpose: "editorial",
+      consistencyNotes: "locked",
+      prompt: "Creative pose showing garment flow.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "fuchsia",
+        bottomWearDetails: "farshi pajama",
+      },
+      creativeDirection: {
+        backgroundStyle: "Minimalist studio with sleek bench",
+      },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+
+  assertStringIncludes(promptWithSittingNotes, "POSE CATEGORY RULES (SITTING):");
+  assertStringIncludes(promptWithSittingNotes, "SEATED / SITTING EDITORIAL POSE:");
+  assertStringIncludes(promptWithSittingNotes, "SEATED EDITORIAL POSE REQUIREMENT (POSE 4):");
+  assertStringIncludes(promptWithSittingNotes, "Elegant seated editorial pose on a minimal studio bench");
+
+  // Test case 2: sitting is NOT demanded -> keeps dynamic/playful editorial movement
+  const promptWithoutSitting = composeGenerationPrompt({
+    skuName: "DYNAMIC-MOVEMENT-SET",
+    productDetails: "Kurti set with wide farshi pants",
+    pose: {
+      id: "creative",
+      title: "Playful Editorial Swirl",
+      poseNumber: 4,
+      description: "Dynamic walking motion and swirl",
+      cameraAngle: "editorial",
+      framing: "full",
+      bodyPosition: "controlled walking movement",
+      handPlacement: "expressive",
+      expression: "chic",
+      highlightedDetails: ["swirl", "drape"],
+      productVisibilityRules: ["all visible"],
+      purpose: "editorial",
+      consistencyNotes: "locked",
+      prompt: "Playful walking motion and garment swirl.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "fuchsia",
+        bottomWearDetails: "farshi pajama",
+      },
+      creativeDirection: {
+        backgroundStyle: "Clean architectural studio",
+      },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+
+  assertStringIncludes(promptWithoutSitting, "POSE CATEGORY RULES (DYNAMIC):");
+  assertStringIncludes(promptWithoutSitting, "DYNAMIC POSE: Show active movement");
+  assertEquals(promptWithoutSitting.includes("SEATED EDITORIAL POSE REQUIREMENT (POSE 4):"), false);
+});
+

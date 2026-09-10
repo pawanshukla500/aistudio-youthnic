@@ -325,23 +325,24 @@ export function getPoseSlots(garmentFamily: string): readonly StudioPose[] {
       id: "creative",
       title: "Creative Gen-Z Fashion Pose",
       framing: "3:4 portrait with a garment-appropriate full or three-quarter body editorial crop",
-      bodyPosition: "Use controlled movement selected for this category and construction, with anatomically natural posture and a readable silhouette",
+      bodyPosition: "Use controlled movement selected for this category and construction, or an elegant seated posture if the style reference or product demands a sitting pose, with anatomically natural posture and a readable silhouette",
       handPlacement: "Expressive but intentional; hands must not cover the garment's key selling features or change its apparent shape",
       expression: "Current, effortlessly cool Gen-Z editorial expression while retaining the exact same recognizable model face and hairstyle",
       productVisibilityRules: isSaree
-        ? ["product remains the visual subject", "creative movement highlights fabric fluidity and pallu", "no prop or limb hides key drape features"]
+        ? ["product remains the visual subject", "creative movement highlights fabric fluidity and pallu", "no prop or limb hides key drape features", "if seated, drape and pleats remain clean and readable"]
         : [
           "product remains the visual subject",
           "no prop or limb hides key construction",
           "creative movement does not alter bottom wear cut, leg volume, fit, or silhouette",
+          "if seated on a bench or architectural step, both trouser legs and footwear remain visible, unbunched, and fully displayed",
         ],
       consistencyNotes: "Borrow only art direction from style references; garment, bottom wear, footwear, accessories, model, and shoot continuity remain locked",
-      description: "A current, expressive Gen-Z fashion pose that follows the selected creative direction without hiding the garment.",
+      description: "A current, expressive Gen-Z fashion pose that follows the selected creative direction (standing editorial movement or seated pose if demanded by the style reference/product) without hiding the garment.",
       cameraAngle: "Product-appropriate editorial angle",
       highlightedDetails: isSaree ? ["fabric movement", "fluidity", "creative direction"] : ["movement", "silhouette", "creative direction"],
       primaryReference: "front",
       purpose: "Campaign and social-commerce storytelling",
-      prompt: "Create a bold, playful, scroll-stopping Gen-Z fashion pose suited to this exact product category, with genuine attitude and movement. Preserve the complete product while borrowing only mood, composition, and lighting from style references.",
+      prompt: "Create a bold, playful, scroll-stopping Gen-Z fashion pose suited to this exact product category (or an elegant seated editorial pose on a minimal studio bench/step if the style reference shows a sitting pose), with genuine attitude and movement. Preserve the complete product, bottom wear silhouette, and footwear while borrowing only mood, composition, and lighting from style references.",
       enabled: true,
     },
     {
@@ -1083,6 +1084,7 @@ Crucial Evidence Rules:
   Fill detailPlacementMap with only source-supported region-specific hard locks and absenceConstraints with negative product facts as well for backward compatibility.
 
 SCENE AUTHORITY: when a STYLE REFERENCE image is supplied, that image defines the shoot. Describe what it actually shows - wall colour and finish, floor or ground surface, every prop and its placement, plant or furniture presence, light direction and quality, camera height and distance, depth of field, colour grade - concretely enough to rebuild that set from the description alone. Never replace it with a generic "clean premium studio backdrop": a plain seamless-paper description when the reference shows a styled set is a failure of this analysis. A requested scene direction refines mood, styling and props on top of the referenced set; it does not replace the referenced backdrop. Only when no style reference is supplied does the requested scene direction define the scene by itself.
+CRITICAL NEGATIVE RULE FOR SCENE & BACKGROUND: Product reference images (FRONT, BACK, BOTTOM, FABRIC, MANNEQUIN) frequently show the garment in an existing pre-shoot studio, outdoor location, archway, courtyard, terracotta pots/urns, plants, or furniture. You are STRICTLY FORBIDDEN from describing, extracting, or incorporating ANY background elements, walls, arches, urns, pots, plants, or furniture from the PRODUCT reference images into creativeDirection or backgroundStyle! The photoshoot scene MUST BE DERIVED 100% FROM THE STYLE REFERENCE (if supplied) or designed as a fresh, clean, elegant, neutral fashion studio.
 
 Build a Creative Direction Profile from style references, but never allow style to alter the product. Lock one lens family, camera height, perspective, exposure, white balance, color grade, light direction, shadow behavior, set geometry, and time-of-day so the results read as contact sheets from one real professional shoot. In realismRules, explicitly require natural skin texture with visible pores, anatomically correct and naturally shaped eyes and teeth, and no synthetic AI artifacts.
 
@@ -1116,7 +1118,9 @@ Create exactly five product-specific camera setups in one coherent commercial co
 - full_front: square, unobstructed head-to-toe hero; establishes face/hair/styling/footwear/scene/lighting anchor with playful, confident Gen-Z energy.
 - angled: best side or three-quarter orientation for THIS garment; for stitched garments, reveal side construction; for sarees, reveal drape depth and pallu fall. Show existing slits or pockets only when references prove they exist; never invent, extend, or extrapolate decoration into unknown side regions.
 - back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees. For outfits with a dupatta or shawl, the dupatta must be draped forward over arms or front so the rear garment (neckline, back panel, embroidery, hem) is 100% unobstructed and visible. The studio set, backdrop wall, lighting, and model identity must strictly match the other poses.
-- creative: playful, scroll-stopping Gen-Z editorial movement tailored to this garment while keeping product completely readable. For sarees, use safe pallu movement tailored to its fabric physics.
+- creative:
+  * CONDITIONAL SITTING POSE: Look carefully at the STYLE REFERENCE image (if provided) and user product notes. If the style reference depicts a sitting/seated pose OR if the user product notes/direction demand a sitting pose: design this 4th pose as an elegant, graceful SEATED EDITORIAL POSE (e.g. seated on a minimal studio bench, architectural plinth/step, or clean prop matching the set). The seated pose MUST keep the garment, bottom wear, hemline, and footwear completely visible and beautifully draped, never crumpled or hidden.
+  * OTHERWISE (if neither the style reference nor product notes demand sitting): design this 4th pose with playful, scroll-stopping Gen-Z editorial movement tailored to this garment (e.g. a playful dynamic walk, swirl, or light motion) while keeping the complete product readable. For sarees, use safe pallu movement tailored to its fabric physics.
 - closeup: a genuine zoomed-in face-to-chest or face-to-waist shot (never a repeat of the full-body hero framing) pairing a beautiful, cute, Gen-Z-style face with a genuine, natural expression AND one sharp, clearly visible real product detail (embroidery, neckline, drape, print, or fabric texture).
 
 If the garmentFamily is "saree", you MUST also generate sareeTruth and sareeDrapePlan inside the JSON root.
@@ -1140,7 +1144,8 @@ export const CONSISTENCY_RULES = [
   "Keep exact garment colors, fabric, texture, pattern scale and placement, print, embroidery, logos, stitching, trims, buttons, zippers, pockets, fit, silhouette, and length.",
   "Keep the exact bottom wear cut, silhouette, volume, pleats, hem, fabric, color, and print shown in product references across all poses. Never substitute farshi/farsi pajama with palazzo, lehenga/skirt, dhoti, or salwar, and never drop or miniaturize the bottom-wear motifs.",
   "Use the back product image as the sole authority for the back pose.",
-  "Style references control only background, lighting, composition, camera, mood, and creative treatment.",
+  "Style references control background, lighting, composition, camera, mood, and creative treatment. When a style reference is provided, it is the sole authority for the photoshoot backdrop environment and architecture.",
+  "Product reference images are for the garment only: never copy or reproduce pre-shoot background walls, arches, urns, pots, plants, or furniture from product references into the generated images.",
   "Never add text, random logos, extra layers, duplicate people, or unreferenced garment elements.",
   "Treat detailPlacementMap and absenceConstraints as hard locks: never relocate, mirror, extend, add, or remove a garment detail.",
   "Keep the identical studio backdrop wall color, texture, flooring, and lighting established in Pose 1 across all poses 2-5 without adding new props (no brass urlis, urns, flower petals, or altered staircases).",
@@ -1159,7 +1164,8 @@ export const CONSISTENCY_RULES = [
 // v16 ensures unobstructed rear garment visibility (dupatta forward drape) and strict backdrop continuity.
 // v17 adds dedicated bottom-wear architecture and silhouette fidelity locks (preventing farshi/palazzo from falling back to dhoti/salwar).
 // v18 separates farshi from palazzo/lehenga, locks bottom-wear print transfer off the upper-garment fabric close-up, and adds an optional dedicated bottom reference role.
-export const ANALYSIS_VERSION = "generation-session-v18-bottom-print-silhouette";
+// v19 enforces style reference backdrop authority, prohibits pre-shoot backgrounds from product images, and adds conditional sitting pose for pose 4.
+export const ANALYSIS_VERSION = "generation-session-v19-style-backdrop-sitting-pose";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

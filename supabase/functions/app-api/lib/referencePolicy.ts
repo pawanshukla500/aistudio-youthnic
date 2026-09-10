@@ -135,22 +135,22 @@ export function missingRequiredReferenceLabels(references: ReferenceLike[], garm
 
 export function roleLabel(role: string) {
   const labels: Record<string, string> = {
-    model_identity: "MODEL FACE REFERENCE - exact face, hair, skin tone and body-proportion truth; any garment in this image is unrelated and must not influence the SKU",
-    front: "FRONT PRODUCT - legacy authoritative front product truth",
-    back: "BACK PRODUCT - legacy authoritative rear design and construction",
-    fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority UPPER-garment texture, weave, print and embroidery truth; not bottom-wear print unless this image itself shows the trousers/skirt",
-    bottom: "BOTTOM WEAR / FARSHI - pixel-level authority for the trousers/skirt cut, volume, hem, fabric color and print; never copy upper-garment embroidery onto this panel",
-    mannequin: "MANNEQUIN / FLAT-LAY SHOT - exact garment shape and construction truth; never reproduce the apparatus",
-    additional_product: "ADDITIONAL PRODUCT PHOTO - supporting product truth",
-    saree_front_drape: "FULL SAREE FRONT DRAPE - authoritative complete front drape, body, pleats, upper/lower borders and blouse-front truth",
-    saree_back_drape: "SAREE REAR / BACK DRAPE - authoritative rear drape, pallu fall and blouse-back truth",
-    saree_body_detail: "SAREE BODY / WEAVE CLOSE-UP - pixel-level body colour, weave/lattice, transparency, shine, motif geometry, orientation, repeat and density truth",
-    saree_pallu_spread: "FULLY SPREAD PALLU - sole authority for the pallu starting boundary, artwork, motif inventory, scale, orientation, repeat, density and edge construction",
-    saree_border_tassels: "SAREE BORDER / TASSELS DETAIL - authoritative upper/lower border widths, construction, colours, motif geometry, tassel colour, construction and spacing",
-    saree_blouse_front: "SAREE BLOUSE FRONT - authoritative blouse colour, fabric, front construction, neckline and sleeves",
-    saree_blouse_back_piece: "SAREE BLOUSE BACK OR UNSTITCHED PIECE - authoritative back construction, ties, closures, or proof that only an unstitched blouse piece exists",
-    approved_pose: "APPROVED POSE 1 - model, styling and shoot-continuity anchor only; original product references always outrank its garment",
-    style_reference: "STYLE REFERENCE ONLY - background, composition, mood and lighting; never product identity",
+    model_identity: "MODEL FACE REFERENCE - exact face, hair, skin tone and body-proportion truth; any garment or background in this image is unrelated and must not influence the SKU or set",
+    front: "FRONT PRODUCT - authoritative front garment design and construction ONLY. Pre-shoot background, walls, arches, urns, pots, plants, floor, and location in this image MUST BE 100% DISCARDED; never reproduce them",
+    back: "BACK PRODUCT - authoritative rear garment construction and design ONLY. Pre-shoot background, walls, and setting MUST BE 100% DISCARDED",
+    fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority UPPER-garment texture, weave, print and embroidery truth; not bottom-wear print unless this image itself shows the trousers/skirt; background must be ignored",
+    bottom: "BOTTOM WEAR / FARSHI - pixel-level authority for the trousers/skirt cut, volume, hem, fabric color and print; never copy upper-garment embroidery onto this panel; pre-shoot floor and background must be ignored",
+    mannequin: "MANNEQUIN / FLAT-LAY SHOT - exact garment shape and construction truth; never reproduce the apparatus or background surface",
+    additional_product: "ADDITIONAL PRODUCT PHOTO - supporting product truth; background must be ignored",
+    saree_front_drape: "FULL SAREE FRONT DRAPE - authoritative complete front drape, body, pleats, upper/lower borders and blouse-front truth; background must be ignored",
+    saree_back_drape: "SAREE REAR / BACK DRAPE - authoritative rear drape, pallu fall and blouse-back truth; background must be ignored",
+    saree_body_detail: "SAREE BODY / WEAVE CLOSE-UP - pixel-level body colour, weave/lattice, transparency, shine, motif geometry, orientation, repeat and density truth; background ignored",
+    saree_pallu_spread: "FULLY SPREAD PALLU - sole authority for the pallu starting boundary, artwork, motif inventory, scale, orientation, repeat, density and edge construction; background ignored",
+    saree_border_tassels: "SAREE BORDER / TASSELS DETAIL - authoritative upper/lower border widths, construction, colours, motif geometry, tassel colour, construction and spacing; background ignored",
+    saree_blouse_front: "SAREE BLOUSE FRONT - authoritative blouse colour, fabric, front construction, neckline and sleeves; background ignored",
+    saree_blouse_back_piece: "SAREE BLOUSE BACK OR UNSTITCHED PIECE - authoritative back construction, ties, closures, or proof that only an unstitched blouse piece exists; background ignored",
+    approved_pose: "APPROVED POSE 1 - model, styling, room, backdrop wall, flooring, lighting, and shoot-continuity anchor; original product references always outrank its garment",
+    style_reference: "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, props, composition, mood, and lighting; never product identity or garment",
   };
   return labels[role] || role.toUpperCase();
 }
