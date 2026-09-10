@@ -232,7 +232,7 @@ function detectPoseCategory(text: string) {
   const t = text.toLowerCase();
   if (/\b(back|rear|behind|posterior)\b/.test(t) || t.includes("back view") || t.includes("true back") || t.includes("rear full")) return "back";
   if (/side|profile|lateral|three\.quarter|3\.4/.test(t)) return "side";
-  if (/\b(sit|sitting|seated|bench|chair|stool|couch|sofa|plinth|floor)\b/.test(t)) return "sitting";
+  if (/\b(sit|sitting|seated)\b/.test(t)) return "sitting";
   if (/back|rear|behind|posterior/.test(t)) return "back";
   if (/front|hero|straight|facing/.test(t)) return "front";
   if (/walk|motion|step|stride|movement|dynamic/.test(t)) return "dynamic";
@@ -341,12 +341,11 @@ export function composeGenerationPrompt(args: {
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
   const faceVisible = !isTrueBack;
   const isPose4 = args.pose.id === "creative" || args.pose.poseNumber === 4;
-  const sittingRegex = /\b(sit|sitting|seated|bench|chair|stool|couch|sofa|plinth)\b/i;
+  const sittingRegex = /\b(sit|sitting|seated)\b/i;
   const poseText = `${args.pose.id} ${args.pose.title || ""} ${args.pose.bodyPosition || ""} ${args.pose.prompt || ""} ${args.pose.description || ""}`;
   const userNotes = String(args.productDetails || "");
-  const creativeText = `${creative.composition || ""} ${creative.modelStyling || ""} ${creative.propUsage || ""} ${creative.editorialCommercialFeel || ""}`;
-  const sceneText = hasStyleReference ? `${creative.backgroundStyle || ""} ${creative.studioEnvironment || ""}` : "";
-  const isSittingDemanded = sittingRegex.test(poseText) || sittingRegex.test(userNotes) || sittingRegex.test(creativeText) || sittingRegex.test(sceneText);
+  const creativeText = `${creative.composition || ""} ${creative.modelStyling || ""} ${creative.editorialCommercialFeel || ""}`;
+  const isSittingDemanded = sittingRegex.test(poseText) || sittingRegex.test(userNotes) || sittingRegex.test(creativeText);
 
   const allowedDelta = [
     `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step matching the set; complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(args.pose.bodyPosition, 360)}`,
