@@ -15,7 +15,7 @@ export function OutputSettings({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const set = <K extends keyof OutputOptions>(key: K, next: OutputOptions[K]) => onChange({ ...value, [key]: next });
-  const activeModel = value.model || orgModel || "gpt-image-2.5-sunburst";
+  const activeModel = value.model || orgModel || "gpt-image-2.5-flare-2026-09-08";
 
   return (
     <div className="w-full">
@@ -56,11 +56,14 @@ export function OutputSettings({
               onChange={(event) => set("model", event.target.value as OutputOptions["model"])}
               className="h-10 w-full rounded-md border border-outline-variant bg-white px-3 text-sm outline-none focus:border-primary"
             >
-              <option value="gpt-image-2.5-sunburst">
-                GPT Image 2.5 Sunburst (High Fidelity & Character Memory){orgModel === "gpt-image-2.5-sunburst" ? " · Active Org Route" : ""}
+              <option value="gpt-image-2.5-flare-2026-09-08">
+                GPT Image 2.5 Flare (2026-09-08 Snapshot · Default){orgModel === "gpt-image-2.5-flare-2026-09-08" ? " · Active Org Route" : ""}
               </option>
               <option value="gpt-image-2.5-flare">
                 GPT Image 2.5 Flare (High Speed & Low Latency){orgModel === "gpt-image-2.5-flare" ? " · Active Org Route" : ""}
+              </option>
+              <option value="gpt-image-2.5-sunburst">
+                GPT Image 2.5 Sunburst (High Fidelity & Character Memory){orgModel === "gpt-image-2.5-sunburst" ? " · Active Org Route" : ""}
               </option>
               <option value="gpt-image-2">
                 GPT Image 2 (Legacy Production){orgModel === "gpt-image-2" ? " · Active Org Route" : ""}

@@ -37,18 +37,33 @@ import {
 Deno.test("vision registry keeps image generation on approved OpenAI image models", () => {
   assertEquals(DEFAULT_IMAGE_GENERATION_ROUTE, {
     provider: "openai",
-    model: "gpt-image-2.5-sunburst",
+    model: "gpt-image-2.5-flare-2026-09-08",
     thinkingLevel: "none",
   });
   assertEquals(defaultImageGenerationRoute(), DEFAULT_IMAGE_GENERATION_ROUTE);
   assertEquals(allowedModelsForPurpose("openai", "image_generation"), [
-    "gpt-image-2.5-sunburst",
+    "gpt-image-2.5-flare-2026-09-08",
     "gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst",
     "gpt-image-2",
     "gpt-image-1.5",
     "gpt-image-1",
     "gpt-image-1-mini",
   ]);
+  assertEquals(
+    validateAiModelRoute(
+      { provider: "openai", model: "gpt-image-2.5-flare-2026-09-08" },
+      "image_generation",
+    ),
+    {
+      valid: true,
+      route: {
+        provider: "openai",
+        model: "gpt-image-2.5-flare-2026-09-08",
+        thinkingLevel: "none",
+      },
+    },
+  );
   assertEquals(
     validateAiModelRoute(
       { provider: "openai", model: "gpt-image-2.5-sunburst" },
@@ -298,6 +313,19 @@ Deno.test("abort and truncated JSON are timeout/incomplete so Flash fallback can
   });
   assertEquals(missingSecret.code, "provider_authentication_failed");
   assertEquals(missingSecret.fallbackEligible, true);
+
+  const connectionError = classifyVisionProviderFailure("gemini", {
+    message: "error sending request for url (https://generativelanguage.googleapis.com/...): connection closed before message completed",
+  });
+  assertEquals(connectionError.code, "provider_unavailable");
+  assertEquals(connectionError.fallbackEligible, true);
+
+  const unexpectedFailure = classifyVisionProviderFailure("gemini", {
+    message: "An unexpected internal error occurred on upstream vision gateway",
+  });
+  assertEquals(unexpectedFailure.code, "provider_request_failed");
+  assertEquals(unexpectedFailure.fallbackEligible, true);
+  assert(shouldContinueVisionFallback(unexpectedFailure, 2));
 });
 
 Deno.test("product-truth defaults to fast thinking and reroutes slow GPT to Gemini Flash", () => {
@@ -653,6 +681,32 @@ Deno.test("timeout on hop-1 still invokes hop-2 and later hops", async () => {
     "gemini-3.8-flash:failed:1",
     "gpt-5.6-luna:completed:2",
   ]);
+});
+
+Deno.test("unclassified provider request failure on hop-1 fails over to hop-2 instead of aborting", async () => {
+  const routes = productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE);
+  const invoked: string[] = [];
+  const result = await runVisionProviderChain({
+    routes,
+    purpose: "product_truth",
+    gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
+    now: Date.now,
+    invoke: async (route) => {
+      invoked.push(`${route.provider}:${route.model}`);
+      if (route.model === "gemini-3.8-flash") {
+        throw new Error("Internal provider gateway error");
+      }
+      return { ok: true, model: route.model };
+    },
+    classify: (route, error) =>
+      classifyVisionProviderFailure(route.provider, {
+        message: error instanceof Error ? error.message : String(error),
+      }),
+  });
+  assertEquals(invoked[0], "gemini:gemini-3.8-flash");
+  assertEquals(invoked[1], "openai:gpt-5.6-luna");
+  assertEquals(result.route.model, "gpt-5.6-luna");
+  assertEquals(result.value, { ok: true, model: "gpt-5.6-luna" });
 });
 
 Deno.test("60s leftover gateway still runs hop-2 after a full hop-1 timeout", async () => {

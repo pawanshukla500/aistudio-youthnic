@@ -36,7 +36,7 @@ const REQUIRED_POSE_COUNT = 5;
 const AUTO_ANALYZE_DELAY_MS = 900;
 
 const defaultOptions: OutputOptions = {
-  model: "gpt-image-2.5-sunburst",
+  model: "gpt-image-2.5-flare-2026-09-08",
   modelIdentity: "Same adult South Asian female fashion model across every pose",
   aspectRatio: "3:4",
   imageSize: "2K",
