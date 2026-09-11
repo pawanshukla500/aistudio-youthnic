@@ -1,0 +1,92 @@
+---
+title: "Regenerate & Retry"
+description: "How to regenerate individual poses, refine generation prompts, and retry failed renders without losing your session."
+---
+
+# Regenerate & Retry
+
+In high-volume e-commerce production, you frequently want to fine-tune a single shot without re-rendering the entire 5-pose catalog. Youthnic AI Studio provides surgical regeneration and automated error retry capabilities.
+
+```mermaid
+graph TD
+    A[Review 5 Generated Poses] --> B{Are all 5 satisfactory?}
+    B -- Yes --> C[Export Full Catalog]
+    B -- No: 1 pose needs tweak --> D[Click Regenerate on Target Tile]
+    D --> E[Adjust Prompt / Pose Guidance]
+    E --> F[Re-render Single Image (1 Credit)]
+    F --> C
+```
+
+---
+
+## Regenerating a Single Pose
+
+If four of your photoshoots are perfect but Pose 4 (Editorial) needs a different posture or camera angle:
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: Mouse hovering over Pose 4 tile showing action buttons (Regenerate, Inspect, Download, Delete).
+Exact UI Section: Hover overlay on single image tile.
+Recommended Crop: 380x480
+Recommended Dimensions: 380x480
+Filename: studio-tile-hover-actions.webp]
+
+<Steps>
+  <Step title="Hover & Click Regenerate">
+    Hover over the image tile you wish to replace and click the **Regenerate** circular arrow icon.
+  </Step>
+  <Step title="Choose Regeneration Mode">
+    Select between:
+    - **Quick Variation (New Seed)**: Keeps all parameters identical and rolls a new random latent seed. Ideal when you just want a slightly different facial expression or hand placement.
+    - **Directed Revision**: Opens the prompt drawer allowing you to append custom guidance (e.g. *"Model seated on sandstone bench, holding dupatta gracefully with left hand"*).
+  </Step>
+  <Step title="Confirm & Render (1 Credit)">
+    Click **Confirm Regeneration**. The single tile transitions back to the rendering state while preserving the other 4 completed images.
+  </Step>
+</Steps>
+
+<Tip>
+Regenerating a single pose only consumes **1 credit**, saving both cost and GPU rendering time.
+</Tip>
+
+---
+
+## Retrying a Failed Pose
+
+Occasionally, an image generation may fail due to an upstream AI provider timeout, high network latency, or an automatic QA score rejection.
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: Pose 3 card displaying an error state with message 'Provider Timeout (Upstream GPU Worker Unreachable)' and a prominent 'Retry Generation' button.
+Exact UI Section: Failed image tile card.
+Recommended Crop: 400x450
+Recommended Dimensions: 400x450
+Filename: studio-failed-pose-retry.webp]
+
+When a failure occurs:
+- The tile displays a red error badge with the exact cause (e.g. `Anatomy Check Failed` or `Worker Timeout`).
+- **No credit is charged** for the failed render.
+- Click **Retry Generation**. The orchestrator routes the request to an alternate secondary fallback model provider automatically.
+
+---
+
+## Iterative History on Single Tiles
+
+Youthnic maintains a mini-version history for each pose tile:
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: Tile version history carousel showing 'Version 1' and 'Version 2' with thumbnail toggle dots.
+Exact UI Section: Bottom edge of image tile.
+Recommended Crop: 350x120
+Recommended Dimensions: 350x120
+Filename: studio-tile-version-history.webp]
+
+If you regenerate Pose 2 and realize you preferred the initial version, you can click the **Version History dots** (`v1`, `v2`, `v3`) at the bottom of the card to roll back to any earlier render at zero extra cost.
+
+---
+
+## Next Steps
+
+- Learn about all export formats in [Download Images](/studio/download-images).
+- Scale up to multi-garment collections with [Catalog Production](/catalog-production/overview).

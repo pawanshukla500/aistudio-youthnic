@@ -1,0 +1,71 @@
+---
+title: "Environment Variables Reference"
+description: "Reference guide for configuring client-side and server-side environment variables for Youthnic AI Studio."
+---
+
+# Environment Variables Reference
+
+Youthnic AI Studio relies on environment variables to manage database connectivity, object storage endpoints, and multi-model AI provider credentials.
+
+---
+
+## Client-Side Variables (Vite Frontend)
+
+These variables are prefixed with `VITE_` and bundled into the browser client at build time:
+
+```bash
+# Supabase Authentication & Database Gateway
+VITE_SUPABASE_URL="https://your-project.supabase.co"
+VITE_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+# Core Application API Endpoint
+VITE_API_BASE_URL="https://api.aistudio.youthnic.com"
+
+# Public Storage CDN Host
+VITE_CDN_BASE_URL="https://cdn.youthnic.com"
+
+# Environment Identifier
+VITE_APP_ENV="production"
+```
+
+---
+
+## Server-Side Variables (Backend & Workers)
+
+These secrets are strictly maintained within secure server containers or cloud secret managers:
+
+```bash
+# Database Privileged Access
+SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+DATABASE_URL="postgresql://postgres:password@db.supabase.co:5432/postgres"
+
+# AI Provider API Keys
+GEMINI_API_KEY="AIzaSyD..."
+OPENAI_API_KEY="sk-proj-..."
+FAL_KEY="fal_live_..."
+
+# Asynchronous Task Queue (Redis)
+REDIS_URL="rediss://default:password@your-redis-cluster:6379"
+
+# Object Storage Credentials (GCS / S3)
+STORAGE_BUCKET_NAME="youthnic-production-assets"
+STORAGE_REGION="asia-south1"
+
+# Application Encryption Secrets
+SESSION_SECRET="your-32-byte-crypto-random-hex"
+WEBHOOK_SIGNING_SECRET="whsec_..."
+```
+
+---
+
+## Security Best Practices
+
+<Warning>
+**Never commit `.env` or `.env.production` files to version control.** Always inject secrets dynamically using Google Cloud Secret Manager, AWS Secrets Manager, or Doppler during CI/CD pipeline execution.
+</Warning>
+
+---
+
+## Next Steps
+
+- Review infrastructure deployment procedures in [Deployment Guide](/developer/deployment-guide).

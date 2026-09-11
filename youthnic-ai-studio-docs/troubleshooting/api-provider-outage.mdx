@@ -1,0 +1,54 @@
+---
+title: "API Provider Outage & Failover"
+description: "How to handle third-party AI provider interruptions, check system status, and activate fallback routes."
+---
+
+# API Provider Outage & Failover
+
+---
+
+## Problem
+
+During studio generation or vision analysis:
+- Multiple jobs fail simultaneously across different users with error codes: *"502 Bad Gateway"*, *"503 Service Unavailable"*, or *"Upstream AI Provider Rate Limit Exceeded"*.
+- Generation times spike from standard 50 seconds to 180+ seconds before timing out.
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: Banner alert across top of Studio: 'Upstream Provider Interruption: Google Cloud Vision API is experiencing elevated latency. Fallback routing active.'
+Exact UI Section: Top global system banner.
+Recommended Crop: 1200x120
+Recommended Dimensions: 1200x120
+Filename: troubleshooting-provider-outage-banner.webp]
+
+---
+
+## Possible Causes
+
+1. **Global Cloud Outage**: Upstream model providers (Google Cloud, OpenAI, Fal.ai) experiencing region-wide incidents.
+2. **Rate Limit Throttling**: A high-concurrency overnight batch dispatched more than 50 simultaneous requests, momentarily saturating API quotas.
+3. **GPU Cluster Node Rebalancing**: Automatic cloud infrastructure migration of GPU worker instances.
+
+---
+
+## How to Fix
+
+<Steps>
+  <Step title="Check the Live Status Page">
+    Visit [status.youthnic.com](https://status.youthnic.com) or check [System Health](/admin/system-health) to verify if an incident is declared for specific model providers.
+  </Step>
+  <Step title="Allow Automated Failover (Wait 60 Seconds)">
+    Youthnic's circuit breaker automatically reroutes new requests to healthy backup clusters within 60 seconds. Relaunching your shoot after 1 minute will route through the secondary engine.
+  </Step>
+  <Step title="Switch to Sequential Generation for Large Batches">
+    If launching a batch during provider rate limiting, choose **Sequential Generation** instead of *Generate Now*. This queues colourways one-by-one, staying well within rate ceilings.
+  </Step>
+</Steps>
+
+---
+
+## When to Contact Administrator
+
+Contact your workspace administrator if:
+- Production is urgently blocked and an admin needs to manually force-switch the default diffusion provider in [AI Routing & Models](/admin/ai-routing-models).
+- Credits were deducted during an outage without automatic refund.

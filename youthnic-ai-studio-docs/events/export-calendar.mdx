@@ -1,0 +1,77 @@
+---
+title: "Export & Share Calendar"
+description: "How to export the marketing calendar to Excel, CSV, iCal feeds, or schedule automated email digests for merchandising teams."
+---
+
+# Export & Share Calendar
+
+Merchandising teams, factory sample managers, and marketing agencies often need access to the event calendar in external tools like Excel, Google Calendar, Notion, or Asana.
+
+Youthnic AI Studio provides multi-format export and sharing capabilities.
+
+---
+
+## 1. Export to Excel (.xlsx) & CSV
+
+Click the **Export** button on the Events header bar:
+
+[SCREENSHOT REQUIRED:
+Page: Events (/events)
+Exact State: Export dropdown menu open showing options: 'Excel Spreadsheet (.xlsx)', 'Comma Separated Values (.csv)', 'iCal Calendar Subscription (.ics)'.
+Exact UI Section: Export menu dropdown.
+Recommended Crop: 380x300
+Recommended Dimensions: 380x300
+Filename: events-export-menu-dropdown.webp]
+
+<CardGroup cols={2}>
+  <Card title="Excel Spreadsheet (.xlsx)" icon="file-excel">
+    Formatted workbook complete with color-coded category headers, date formulas, state tags, and recommended lead times. Perfect for quarterly merchandising review meetings.
+  </Card>
+  <Card title="Raw CSV (.csv)" icon="file-csv">
+    Clean comma-delimited data structure ready for direct import into project management tools like Monday.com, Jira, or ClickUp.
+  </Card>
+</CardGroup>
+
+### Export Columns Included
+
+- `Event ID` & `Event Title`
+- `Category` (Festival / Marketplace Sale / Regional Holiday / Custom)
+- `Start Date` & `End Date`
+- `States / Regions Covered`
+- `Recommended Lead Time (Days)`
+- `Production Deadline Date`
+- `Associated Catalog Campaigns`
+
+---
+
+## 2. Sync with Google Calendar & Outlook (iCal)
+
+Subscribe to real-time calendar updates directly inside Google Calendar, Apple Calendar, or Microsoft Outlook:
+
+<Steps>
+  <Step title="Click iCal Subscription">
+    Select **Sync with iCal / Google Calendar** from the Export menu.
+  </Step>
+  <Step title="Copy Secure Feed URL">
+    Copy your workspace's private webcal URL (`webcal://aistudio.youthnic.com/api/v1/events/calendar.ics?token=...`).
+  </Step>
+  <Step title="Subscribe in Calendar Client">
+    In Google Calendar, click **Other Calendars > From URL**, paste the link, and subscribe. Newly added festivals and custom brand milestones will appear on your personal calendar automatically.
+  </Step>
+</Steps>
+
+---
+
+## 3. Email Calendar Digest
+
+Schedule an automated weekly or monthly calendar digest:
+- **Recipients**: Add team member email addresses or distribution lists (e.g. `merchandising@yourbrand.com`).
+- **Cadence**: Every Monday at 9:00 AM.
+- **Content**: Highlights all events occurring in the next 30 days and alerts the team to upcoming catalog production deadlines.
+
+---
+
+## Next Steps
+
+- Transition from event schedules to collection production in [Planning Overview](/planning/overview).
+- Track studio generation metrics in [Dashboard](/dashboard/overview).

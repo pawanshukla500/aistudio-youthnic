@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Bell, Calendar as CalendarIcon, CalendarDays, ChevronLeft, ChevronRight, History, LayoutDashboard, Loader2, LogOut, Menu, Pencil, Shield, Wand2, X } from "lucide-react";
+import { Bell, BookOpen, Calendar as CalendarIcon, CalendarDays, ChevronLeft, ChevronRight, History, LayoutDashboard, Loader2, LogOut, Menu, Pencil, Shield, Wand2, X } from "lucide-react";
 import { api, useMutation, useQuery } from "../../lib/backend";
 import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
 import { useWorkspace } from "../../lib/WorkspaceContext";
@@ -104,6 +104,20 @@ export function Layout() {
               {collapsed && !mobileNavOpen && item.badge ? <span className="absolute right-2.5 top-2 h-2 w-2 rounded-full bg-primary" /> : null}
             </NavLink>
           ))}
+          <NavLink
+            to="/docs"
+            onClick={() => setMobileNavOpen(false)}
+            title={collapsed ? "Documentation" : undefined}
+            className={navClass}
+          >
+            <BookOpen className="h-5 w-5 shrink-0" />
+            {(!collapsed || mobileNavOpen) && <span>Documentation</span>}
+            {(!collapsed || mobileNavOpen) && (
+              <span className="ml-auto rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">
+                v2.4
+              </span>
+            )}
+          </NavLink>
           {canAdmin && (
             <>
               <div className="mx-3 my-4 border-t border-outline-variant/50" />

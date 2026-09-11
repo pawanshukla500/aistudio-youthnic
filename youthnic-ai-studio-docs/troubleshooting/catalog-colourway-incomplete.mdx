@@ -1,0 +1,57 @@
+---
+title: "Catalog Colourway Incomplete & Preflight Errors"
+description: "How to resolve preflight inspection errors that prevent launching multi-SKU batch catalog generation."
+---
+
+# Catalog Colourway Incomplete & Preflight Errors
+
+---
+
+## Problem
+
+When attempting to click **Generate Catalog** or **Schedule Generation** inside a catalog campaign:
+- The generate button is grayed out or displays an error banner: *"Batch Generation Blocked: 4 Colourways Have Unresolved Preflight Errors"*.
+- Certain colourway cards display red warning icons and cannot be selected.
+
+[SCREENSHOT REQUIRED:
+Page: Catalog Production (/planning?tab=catalogs)
+Exact State: Preflight error notification banner showing 'Generation Blocked: SKU-204-MST is missing a Front Reference Image. Please resolve before batch execution.'
+Exact UI Section: Top catalog preflight notification banner.
+Recommended Crop: 900x180
+Recommended Dimensions: 900x180
+Filename: troubleshooting-preflight-blocked-banner.webp]
+
+---
+
+## Possible Causes
+
+1. **Missing Mandatory Front Reference**: One or more colourway cards do not have a front garment photo uploaded.
+2. **Severe Resolution Rejection**: An uploaded photo is under 800px wide, failing the minimum optical preflight threshold.
+3. **Color Dye-Lot Swatch Conflict**: An uploaded photo has a primary optical color that drastically contradicts the SKU's assigned color name (e.g. uploaded photo is bright red, but SKU is labeled *"Forest Green"*).
+4. **Pending Creative Lead Approval**: The campaign requires creative sign-off, which has not yet been granted.
+
+---
+
+## How to Fix
+
+<Steps>
+  <Step title="Filter by Incomplete Cards">
+    Click the **Incomplete** pill on the filter toolbar to isolate the defective colourways.
+  </Step>
+  <Step title="Upload Missing Reference Photos">
+    Drag and drop the missing front or back photo onto the highlighted dropzones.
+  </Step>
+  <Step title="Update Conflicting Color Names">
+    If the garment photo is correct but the SKU color tag was mistyped, edit the colourway label to match the true garment shade.
+  </Step>
+  <Step title="Execute Partial Batch (Workaround)">
+    If physical sample photos for the remaining 4 colourways will not arrive until tomorrow: check the boxes only for the **Ready** colourways and click **Generate Selected**. This renders all ready SKUs immediately without waiting for the incomplete cards.
+  </Step>
+</Steps>
+
+---
+
+## When to Contact Administrator
+
+Contact your administrator if:
+- All cards display green checkmarks, but generation remains locked due to an unapproved approval gate where the designated approver is unavailable. An admin can grant emergency sign-off.

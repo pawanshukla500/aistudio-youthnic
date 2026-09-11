@@ -1,0 +1,88 @@
+---
+title: "Recommended Product Images"
+description: "Best practices for photographing and uploading product reference images for maximum garment fidelity."
+---
+
+# Recommended Product Images
+
+The visual fidelity of your AI-generated fashion catalog depends directly on the quality, lighting, and angles of the product reference images you upload. 
+
+Youthnic AI Studio does not require professional model shoots as input; flat-lays, ghost mannequin shots, and simple studio supplier photos work remarkably well when following these guidelines.
+
+---
+
+## 1. What Makes an Ideal Product Reference?
+
+<CardGroup cols={2}>
+  <Card title="Even, Diffused Lighting" icon="sun">
+    Shoot garments under neutral, diffused white light (5000K–5500K). Avoid heavy harsh shadows, yellow ambient bulbs, or strong lens flares that distort fabric dye colors.
+  </Card>
+  <Card title="High Contrast Background" icon="expand">
+    Place the garment on a plain white, light gray, or neutral floor/table. While Youthnic AI automatically segments and discards background noise, high contrast speeds up edge detection.
+  </Card>
+  <Card title="Unobstructed Silhouette" icon="arrows-maximize">
+    Lay the garment out completely flat. Ensure sleeves, hemline borders, side slits, and necklines are fully spread rather than folded or bunched up.
+  </Card>
+  <Card title="High Resolution (Minimum 1200px)" icon="camera">
+    Upload photos with a minimum resolution of 1200 x 1600 pixels. Close-up fabric details should resolve individual weave threads and embroidery borders clearly.
+  </Card>
+</CardGroup>
+
+---
+
+## 2. Guidelines by Reference Role
+
+### Role 1: Front Product (`front`)
+- **What it governs**: Primary garment silhouette, neckline shape (round, V-neck, sweetheart, boat neck), front yoke embroidery, sleeve length, and hemline finish.
+- **Best format**: Square, eye-level flat-lay or front-facing ghost mannequin shot.
+- **Important**: Make sure the front neckline ties or drawstrings are neatly laid out.
+
+### Role 2: Back Product (`back`)
+- **What it governs**: The sole authority for rear construction—back neckline depth, keyhole closures, zip placement, rear darts, and back hem.
+- **Best format**: True rear flat-lay with the back facing the camera completely.
+- **Important**: If shooting an outfit that includes a dupatta, **do not drape the dupatta across the back**. The back panel must be 100% visible from neck to hem.
+
+### Role 3: Bottom Wear (`bottom`)
+- **What it governs**: Leg volume, two-leg separation, pleat gathers, flare silhouette, and metallic prints for trousers, farshi pajamas, palazzos, or skirts.
+- **Best format**: Lay out the trousers with both legs spread slightly so the AI detects two distinct legs rather than mistaking them for a single lehenga/skirt.
+- **Critical**: For complex ethnic cuts like **Farshi Pajama**, ensure the voluminous vertical pleats and hem lace are fully visible.
+
+### Role 4: Fabric / Pattern Detail (`fabric_pattern`)
+- **What it governs**: Upper-garment microtexture, weave structure, zari shine, and print repeat density.
+- **Best format**: Zoomed-in macro shot (10–20 cm away) focused on the most detailed embroidery or print motif.
+
+### Role 5: Style Reference (`style_reference`)
+- **What it governs**: Photoshoot studio architecture, room plaster color, floor surface, lighting direction, and editorial mood.
+- **Important**: The AI borrows *only* the environment, mood, and lighting from this photo. The model's face and garment in the style reference are ignored.
+
+### Role 6: Model Face Reference (`model_identity`)
+- **What it governs**: Exact model bone structure, eye shape and color, lips, skin tone, natural pores, and hair color.
+- **Best format**: Clean portrait or headshot with neutral or gentle expression and unobstructed facial features.
+
+---
+
+## 3. What to Avoid
+
+<Warning>
+**Common Image Pitfalls That Degrade AI Quality:**
+1. **Low Resolution or Blurry Photos**: Under 800px width prevents the vision compiler from reading embroidery lattices.
+2. **Heavy Color Filters / Presets**: Social media filters shift fabric hues (e.g. turning crimson red into magenta).
+3. **Cropped Key Details**: Avoid cutting off the hemline, sleeve cuffs, or bottom pants in front photos.
+4. **Wrinkled / Crushed Fabric**: Steam or press garments before flat-lay photography to prevent wrinkles from being interpreted as garment seams.
+</Warning>
+
+---
+
+## Supported File Formats & Limits
+
+- **Supported File Types**: `.jpg`, `.jpeg`, `.png`, `.webp`
+- **Maximum File Size**: 25 MB per image
+- **Maximum Reference Images**: Up to 8 references per single-SKU photoshoot (or up to 16 for specialized saree drape breakdowns)
+
+---
+
+## Next Steps
+
+<Card title="Launch Your First Photoshoot" icon="wand-magic-sparkles" href="/getting-started/create-first-photoshoot">
+  Put your images into action and generate your first 5-pose catalog.
+</Card>

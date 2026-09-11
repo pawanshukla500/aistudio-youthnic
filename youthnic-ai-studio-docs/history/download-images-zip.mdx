@@ -1,0 +1,73 @@
+---
+title: "Download Images & ZIP Archives"
+description: "How to re-download past photoshoot assets, export bulk multi-job archives, and generate direct CDN links."
+---
+
+# Download Images & ZIP Archives
+
+All assets generated across your workspace are stored on high-speed cloud CDN infrastructure with permanent retention. You can re-download images or entire photoshoot ZIPs at any point in the future.
+
+---
+
+## 1. Single Photoshoot ZIP Export
+
+From the History list or inside any individual generation detail view:
+
+[SCREENSHOT REQUIRED:
+Page: Generation History (/history)
+Exact State: History card hover state showing 'Download ZIP' button and resolution dropdown.
+Exact UI Section: Quick export button on history card.
+Recommended Crop: 400x200
+Recommended Dimensions: 400x200
+Filename: history-card-download-zip.webp]
+
+Click **Download ZIP** to immediately trigger browser download of the standard 5-pose archive:
+- Includes all 5 poses named by SKU.
+- Includes `manifest.json` with color hex codes and prompt parameters.
+- Free of charge (0 credits consumed).
+
+---
+
+## 2. Multi-Photoshoot Bulk Compilation
+
+If your e-commerce manager needs to download assets for 20 different styles generated over the past month:
+
+[SCREENSHOT REQUIRED:
+Page: Generation History (/history)
+Exact State: Checkbox mode active in History. 12 photoshoots selected. Bottom floating action bar displays 'Export 12 Selected Photoshoots (60 Images) as Master ZIP'.
+Exact UI Section: History bulk export action bar.
+Recommended Crop: 950x160
+Recommended Dimensions: 950x160
+Filename: history-bulk-selection-export.webp]
+
+<Steps>
+  <Step title="Select Checkboxes">
+    Select the checkboxes on the target generation cards, or click **Select All in View**.
+  </Step>
+  <Step title="Click Master ZIP Export">
+    Click **Export Selected (.ZIP)** on the floating bottom bar.
+  </Step>
+  <Step title="Choose Naming Preset">
+    Select folder nesting syntax:
+    - `Group by SKU Folder` (Subfolder for each SKU)
+    - `Flat Listing Folder` (All files in root, prefixed with SKU)
+  </Step>
+  <Step title="Download Archive">
+    Youthnic's backend compiles the multi-gigabyte ZIP in seconds and streams it to your browser.
+  </Step>
+</Steps>
+
+---
+
+## 3. Direct CDN Links for E-Commerce Feeds
+
+You do not need to download and manually re-upload images to Shopify or WooCommerce. Every image in History has a public, high-speed CDN URL:
+- Click the **Copy CDN Link** icon on any image thumbnail.
+- Paste the URL directly into your Shopify CSV, Magento feed, or Amazon flat file upload spreadsheet.
+
+---
+
+## Next Steps
+
+- Handle occasional failed jobs in [Failed Generations & Retry](/history/failed-generations-retry).
+- Filter historical data in [Filter & Search History](/history/filter-search-history).

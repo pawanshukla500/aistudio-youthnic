@@ -1,0 +1,78 @@
+---
+title: "Roles & Permissions (RBAC)"
+description: "Comprehensive guide to role-based access control, default system roles, and custom permission sets."
+---
+
+# Roles & Permissions (RBAC)
+
+Youthnic AI Studio implements an enterprise **Role-Based Access Control (RBAC)** architecture. This ensures employees and external contributors have exactly the privileges needed to perform their job without risking unauthorized generation spend or accidental data deletion.
+
+---
+
+## Role Permission Matrix
+
+[SCREENSHOT REQUIRED:
+Page: Administration (/admin/roles-permissions)
+Exact State: RBAC permission matrix table showing green checkmarks and red crosses across 5 default roles and 16 granular permissions.
+Exact UI Section: Roles & Permissions matrix table.
+Recommended Crop: 1200x650
+Recommended Dimensions: 1200x650
+Filename: admin-rbac-matrix-table.webp]
+
+| Permission Area | Admin | Lead Merchandiser | Stylist / Creative | Studio Operator | Read-Only Viewer |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Studio: Launch Generation** | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **Studio: Regenerate Poses** | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **Catalog: Create Campaign** | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Catalog: Approve Styling** | ✅ | ✅ | ✅ | ❌ | ❌ |
+| **Catalog: Batch Generate** | ✅ | ✅ | ❌ | ✅ | ❌ |
+| **Planning: Create Plan** | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Planning: Sign-Off State** | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Events: Add Custom Event** | ✅ | ✅ | ✅ | ❌ | ❌ |
+| **Export: Full-Res 4K ZIP** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Billing: View Costs & Quotas**| ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Admin: Manage Users & RBAC**| ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Admin: Configure AI Routing**| ✅ | ❌ | ❌ | ❌ | ❌ |
+
+---
+
+## Default System Roles
+
+<AccordionGroup>
+  <Accordion title="1. Workspace Admin" icon="crown">
+    Full superuser authority. Unrestricted access to all studio workflows, financial billing, credit purchases, AI model routing policies, audit logs, and user provisioning.
+  </Accordion>
+
+  <Accordion title="2. Lead Merchandiser" icon="briefcase">
+    Manages seasonal collections, sets SKU quotas, links marketing calendar events to production plans, and gives commercial sign-off on completed catalog batches.
+  </Accordion>
+
+  <Accordion title="3. Stylist & Creative Lead" icon="wand-magic-sparkles">
+    Curates model personas, sets architectural lighting schemes, reviews AI garment analysis outputs, and acts as the approval gate for campaign styling.
+  </Accordion>
+
+  <Accordion title="4. Studio Operator" icon="camera">
+    Day-to-day execution role. Uploads reference photos, tags semantic roles (front, back, fabric), executes 5-pose photoshoots, and downloads finished assets.
+  </Accordion>
+
+  <Accordion title="5. Read-Only Viewer" icon="eye">
+    Designed for marketplace catalog uploaders, external copywriters, or retail partners who only need to view historical generations and download approved assets.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Creating Custom Roles
+
+Enterprise plans can create bespoke role definitions:
+1. Click **+ Create Custom Role** in the top right.
+2. Enter a role name (e.g. *"Contract Retoucher"*).
+3. Toggle individual permissions on or off across Studio, Catalogs, Planning, and Downloads.
+4. Save and assign to specific freelance contributors.
+
+---
+
+## Next Steps
+
+- Automate recurring jobs in [Automation & Reports](/admin/automation-reports).
+- Control multi-model infrastructure in [AI Routing & Models](/admin/ai-routing-models).

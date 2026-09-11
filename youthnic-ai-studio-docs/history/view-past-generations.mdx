@@ -1,0 +1,60 @@
+---
+title: "View Past Generations"
+description: "How to open previous photoshoots, inspect all 5 poses in 4K resolution, and examine historical prompt parameters."
+---
+
+# View Past Generations
+
+Clicking any item in the History archive opens the **Generation Detail View**, giving you complete insight into how that specific photoshoot was configured and rendered.
+
+---
+
+## The Generation Detail View
+
+<Frame caption="Live Generation Detail View on Youthnic AI Studio History — showing SKU saree with all 5 poses, Clone Session, View references, and ZIP download">
+  <img src="/images/history-live-5poses.png" alt="History Generation Detail View" />
+</Frame>
+
+---
+
+## What You Can Inspect
+
+<Tabs>
+  <Tab title="1. The 5 Generated Poses">
+    View all 5 catalog perspectives (Hero, 45°, Rear, Editorial, Detail) in high resolution. Click any image to launch the 4K inspection lightbox with 400% zoom loupe.
+  </Tab>
+  <Tab title="2. Source Reference Photos">
+    Examine the original physical garment photos (front, back, fabric swatches) that were uploaded for this photoshoot to verify fidelity.
+  </Tab>
+  <Tab title="3. Creative & Model Parameters">
+    Inspect the exact model persona (`Aanya`), set backdrop (`Jaipur Sandstone Gallery`), lighting preset, and accessory choices used for the shoot.
+  </Tab>
+  <Tab title="4. Technical Latents & Seeds">
+    View the generative model name, random seed integer, CFG guidance scale, and positive/negative prompt text used during diffusion synthesis.
+  </Tab>
+</Tabs>
+
+---
+
+## Cloning to Studio for New Variations
+
+If you want to produce new variations of a past photoshoot (for example, keeping the same garment but changing the model to a Caucasian persona for international export):
+
+[SCREENSHOT REQUIRED:
+Page: Generation History (/history)
+Exact State: Mouse hovering over the 'Clone to Studio' button in the generation detail header bar.
+Exact UI Section: Clone to Studio action button.
+Recommended Crop: 350x120
+Recommended Dimensions: 350x120
+Filename: history-clone-to-studio-button.webp]
+
+1. Click **Clone to Studio** in the top action bar.
+2. Youthnic opens a new session in Studio with all reference photos, extracted garment taxonomy, and parameters pre-loaded.
+3. Modify only the target parameters and re-render.
+
+---
+
+## Next Steps
+
+- Inspect the AI node pipeline in [Inspect Generation Flow](/history/inspect-generation-flow).
+- Re-download assets in [Download Images & ZIP](/history/download-images-zip).

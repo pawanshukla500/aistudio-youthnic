@@ -1,0 +1,78 @@
+---
+title: "SKU Details & Metadata"
+description: "How to configure product SKU identifiers, marketplace taxonomy, and garment metadata in Youthnic AI Studio."
+---
+
+# SKU Details & Metadata
+
+Configuring structured SKU details ensures your generated photoshoots seamlessly integrate into your warehouse, ERP, and e-commerce listing workflows.
+
+---
+
+## SKU Configuration Card
+
+In the top section of Studio, configure the following commercial fields:
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: SKU Details panel filled with product code 'YN-KURTI-508', title, and taxonomy dropdowns selected.
+Exact UI Section: SKU Details metadata panel.
+Recommended Crop: 900x280
+Recommended Dimensions: 900x280
+Filename: studio-sku-details-panel.webp]
+
+<CardGroup cols={2}>
+  <Card title="Product SKU (Mandatory)" icon="barcode">
+    Your company's unique stock-keeping unit (e.g. `YN-ANARKALI-RED-001`). Used in export file naming, history searches, and analytics tracking.
+  </Card>
+  <Card title="Product Title" icon="heading">
+    Customer-facing listing title (e.g. *"Ruby Red Pure Georgette Anarkali Gown with Zardozi Embroidery"*).
+  </Card>
+  <Card title="Category Hierarchy" icon="sitemap">
+    Select primary department (Women / Men / Kids), main category (Ethnic / Western), and garment type.
+  </Card>
+  <Card title="Target Marketplace" icon="store">
+    Select Amazon, Myntra, Nykaa, Ajio, or Shopify to apply automated framing, aspect ratio, and margin standards.
+  </Card>
+</CardGroup>
+
+---
+
+## File Naming Conventions
+
+When you export generated catalog photos or download ZIP archives, Youthnic automatically applies a predictable, marketplace-ready naming syntax:
+
+```bash
+# Standard Single Generation Export Syntax
+[SKU]_[POSE_INDEX]_[POSE_TYPE].[EXTENSION]
+
+# Examples:
+YN-KURTI-508_01_hero.webp
+YN-KURTI-508_02_three-quarter.webp
+YN-KURTI-508_03_back.webp
+YN-KURTI-508_04_editorial.webp
+YN-KURTI-508_05_detail.webp
+```
+
+If your e-commerce platform requires a custom naming pattern (such as `[SKU]-front.jpg` for Shopify or `[SKU]_f.jpg` for Amazon), you can customize the pattern in [Admin Settings](/admin/overview).
+
+---
+
+## Metadata Injection in Exports
+
+All generated image files exported from Youthnic AI Studio include embedded EXIF/IPTC metadata:
+- **Image Description**: Complete product name, detected fabric, and color hex values.
+- **Copyright**: Organization legal name specified in your workspace settings.
+- **Software**: `Youthnic AI Studio v2.4`.
+- **Keywords / Tags**: Extracted fashion taxonomy tags (e.g. *Anarkali*, *Silk*, *Zari*, *Festive*, *Jaipur*).
+
+<Tip>
+Embedded metadata helps improve your brand's organic Google Images search visibility and automatic tagging inside enterprise Digital Asset Management (DAM) systems like Bynder or Cloudinary.
+</Tip>
+
+---
+
+## Next Steps
+
+- Trigger [AI Product Analysis](/studio/ai-product-analysis) to extract visual attributes from your references.
+- Review the [Product Identity Profile](/studio/product-identity-profile) to verify detected details.

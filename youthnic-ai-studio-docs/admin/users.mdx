@@ -1,0 +1,72 @@
+---
+title: "Users Management"
+description: "How to invite, edit, assign roles, and manage user accounts within your organization workspace."
+---
+
+# Users Management
+
+The **Users** console (`/admin/users`) allows administrators to provision new team members, assign organizational roles, manage team memberships, and deactivate accounts.
+
+---
+
+## The Users Directory
+
+[SCREENSHOT REQUIRED:
+Page: Administration (/admin/users)
+Exact State: Users directory table showing 14 users with columns: Name, Email, Role, Team, Status (Active/Disabled), Last Active, and Actions.
+Exact UI Section: Users table view.
+Recommended Crop: 1200x600
+Recommended Dimensions: 1200x600
+Filename: admin-users-table-view.webp]
+
+---
+
+## Inviting a New User
+
+Click the **+ Invite User** button in the top right corner:
+
+[SCREENSHOT REQUIRED:
+Page: Administration (/admin/users)
+Exact State: 'Invite New User' modal open with fields for Full Name, Corporate Email, Assigned Role dropdown, and Team checkboxes.
+Exact UI Section: Invite User modal dialog.
+Recommended Crop: 550x500
+Recommended Dimensions: 550x500
+Filename: admin-invite-user-modal.webp]
+
+<Steps>
+  <Step title="Enter Contact Details">
+    Enter the user's full name and corporate email address.
+  </Step>
+  <Step title="Assign Initial Role">
+    Select the appropriate permission tier:
+    - `Workspace Admin`
+    - `Lead Merchandiser`
+    - `Stylist & Creative Lead`
+    - `Studio Operator`
+    - `Read-Only Viewer`
+  </Step>
+  <Step title="Assign to Teams">
+    Optionally assign the user to one or more department teams (e.g. *Festive Ethnic Wear* or *Western Pret*).
+  </Step>
+  <Step title="Send Invitation">
+    Click **Send Invitation**. The user receives a secure link to create their password and set up two-factor authentication (2FA).
+  </Step>
+</Steps>
+
+---
+
+## Editing & Managing User Accounts
+
+Click the three-dot action menu `...` on any user row:
+- **Edit Details**: Update job title, role, or team assignments.
+- **Reset Password**: Sends an immediate password reset link to the user's verified email address.
+- **Force Sign-Out**: Terminates all active browser sessions immediately (useful if a laptop is lost).
+- **Disable Account**: Temporarily revokes login access without deleting the user's past generation history or created campaigns.
+- **Re-Enable Account**: Restores login credentials and permissions with a single click.
+
+---
+
+## Next Steps
+
+- Organize users into departmental groups in [Teams Management](/admin/teams).
+- Review permission definitions in [Roles & Permissions](/admin/roles-permissions).

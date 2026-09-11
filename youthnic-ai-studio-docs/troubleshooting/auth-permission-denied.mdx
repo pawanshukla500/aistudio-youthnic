@@ -1,0 +1,57 @@
+---
+title: "Authentication & Permission Denied"
+description: "How to resolve session token expiry, login redirect loops, and 403 Permission Denied errors."
+---
+
+# Authentication & Permission Denied
+
+---
+
+## Problem
+
+When navigating within Youthnic AI Studio or clicking an action button:
+- A full-screen or toast error appears: *"403 Forbidden: You do not have permission to perform this action"* or *"Access Denied"*.
+- The browser repeatedly redirects back to the login page (`/login`) despite entering valid credentials.
+- Action buttons (like **Generate Photoshoot** or **Approve Campaign**) appear disabled with a padlock tooltip.
+
+[SCREENSHOT REQUIRED:
+Page: Any page (/studio or /admin)
+Exact State: Access Denied modal popover displaying 'Permission Denied: Your account role (Read-Only Viewer) cannot trigger image generation jobs. Contact your workspace admin.'
+Exact UI Section: Permission Denied modal dialog.
+Recommended Crop: 500x320
+Recommended Dimensions: 500x320
+Filename: troubleshooting-permission-denied-modal.webp]
+
+---
+
+## Possible Causes
+
+1. **Expired Session Token**: Authentication JWTs expire automatically after 7 days of inactivity for enterprise security compliance.
+2. **Insufficient RBAC Role**: Your user account is assigned the `Read-Only Viewer` role, which permits inspecting images and downloading files but restricts rendering.
+3. **Department Team Isolation**: You are attempting to access a catalog campaign belonging to another department team (e.g. Western team member opening a Bridal campaign) where team privacy is enforced.
+4. **Browser Third-Party Cookie / Local Storage Blocking**: Strict ad-blockers or privacy extensions blocking the Supabase authentication cookie.
+
+---
+
+## How to Fix
+
+<Steps>
+  <Step title="Hard Sign Out & Re-Login">
+    Click your user avatar in the bottom left corner, select **Sign Out**, and log back in. This requests a fresh authentication token with updated role permissions.
+  </Step>
+  <Step title="Disable Aggressive Privacy Extensions">
+    Ensure ad-blockers (such as uBlock Origin or Privacy Badger) have `*.youthnic.com` whitelisted so authentication tokens can persist in local storage.
+  </Step>
+  <Step title="Verify Your Current Role">
+    Navigate to your profile settings. Check your assigned role: if you are an active catalog operator but your role displays *Viewer*, request a role update from your administrator.
+  </Step>
+</Steps>
+
+---
+
+## When to Contact Administrator
+
+Contact your workspace administrator if:
+- You need your account upgraded from `Viewer` to `Studio Operator` or `Lead Merchandiser`.
+- You were recently added to a new department team but cannot view their campaigns.
+- Your account is locked due to repeated incorrect password attempts.

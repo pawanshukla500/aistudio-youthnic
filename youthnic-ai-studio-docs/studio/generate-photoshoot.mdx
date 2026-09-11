@@ -1,0 +1,73 @@
+---
+title: "Generate Photoshoot"
+description: "How to launch the AI photoshoot generation pipeline, credit consumption rules, and pre-flight validation."
+---
+
+# Generate Photoshoot
+
+Once your reference images are analyzed, creative direction is set, and the five-pose catalog plan is configured, you are ready to render the photoshoot.
+
+---
+
+## Pre-Flight Check
+
+Before clicking the generate button, Youthnic AI Studio executes an automated **Pre-Flight Validation** to prevent wasted credits:
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: Pre-flight check checklist popover showing all green checks (Front photo valid, AI analysis completed, SKU set, Credit balance sufficient).
+Exact UI Section: Top right header pre-flight popover.
+Recommended Crop: 380x280
+Recommended Dimensions: 380x280
+Filename: studio-preflight-check-passed.webp]
+
+The pre-flight check validates:
+1. **Front Reference Presence**: Ensures at least one valid front image is assigned.
+2. **Product Analysis Status**: Verifies that AI analysis has extracted the garment identity.
+3. **SKU Uniqueness**: Warns if the SKU has already been generated in the current workspace to avoid overwriting previous assets.
+4. **Credit Balance**: Confirms your organization has sufficient credits to fulfill the enabled poses.
+
+---
+
+## Launching Generation
+
+Click the primary action button in the top right sticky header:
+
+<Frame>
+  **Generate Photoshoot (5 Credits)**
+</Frame>
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: Top right sticky bar showing credit badge 'Balance: 420 Credits' and primary button 'Generate Photoshoot (5 Credits)'.
+Exact UI Section: Top sticky action bar.
+Recommended Crop: 500x120
+Recommended Dimensions: 500x120
+Filename: studio-generate-button-credits.webp]
+
+---
+
+## Credit Consumption Rules
+
+| Operation | Credits Consumed | Notes |
+| :--- | :--- | :--- |
+| **Standard 5-Pose Photoshoot** | 5 Credits | 1 credit per enabled pose. |
+| **Partial Photoshoot (e.g. 3 Poses)** | 3 Credits | Disabled poses are excluded from billing. |
+| **Single Image Regeneration** | 1 Credit | Re-rendering a single pose consumes 1 credit. |
+| **Failed Image Generation** | **0 Credits** | If an image fails due to server timeout or fails automated QA checks, the credit is automatically refunded immediately. |
+
+---
+
+## Multi-Provider Orchestration Under the Hood
+
+When generation begins, Youthnic's backend AI router selects the optimal generative model based on the garment complexity and your organization's admin policy:
+- **Ultra-Fine Embroidery & Zari**: Routed to high-parameter vision conditioning pipelines with specular texture locks.
+- **Complex Drapery (Sarees / Lehengas)**: Dispatched to specialized spatial pose guidance adapters.
+- **Concurrency**: All enabled poses render simultaneously in parallel workers, reducing total turnaround time to under 60–90 seconds.
+
+---
+
+## Next Steps
+
+- Track real-time rendering in [Generation Progress](/studio/generation-progress).
+- Inspect automated scorecards in [Quality Validation](/studio/quality-validation).

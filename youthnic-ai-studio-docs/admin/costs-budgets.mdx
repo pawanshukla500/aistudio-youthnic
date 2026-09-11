@@ -1,0 +1,70 @@
+---
+title: "Costs & Budgets Administration"
+description: "How to manage organization credit packages, allocate department budgets, set auto-recharge rules, and view invoices."
+---
+
+# Costs & Budgets Administration
+
+The **Costs & Budgets** console (`/admin/costs-budgets`) provides financial controllers with the tools required to track, predict, and cap spending on AI visual production across all teams.
+
+---
+
+## The Billing & Credits Console
+
+[SCREENSHOT REQUIRED:
+Page: Administration (/admin/costs-budgets)
+Exact State: Billing overview showing current credit balance '4,850 Credits Remaining', active plan 'Enterprise Scale', and department budget allocation bar charts.
+Exact UI Section: Billing & Credits dashboard card.
+Recommended Crop: 1200x550
+Recommended Dimensions: 1200x550
+Filename: admin-billing-overview-card.webp]
+
+---
+
+## 1. Credit Allocation & Team Quotas
+
+Admins can divide total organization credits into departmental pools:
+
+| Department Team | Allocated Monthly Credits | Spent This Month | Remaining Balance | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **Bridal & Festive** | 2,500 Credits | 1,850 Credits (74%) | 650 Credits | Normal |
+| **Western Ready-to-Wear**| 1,500 Credits | 1,420 Credits (95%) | 80 Credits | Amber Warning |
+| **Men's Ethnic Wear** | 1,000 Credits | 410 Credits (41%) | 590 Credits | Normal |
+| **Core E-Commerce Ops** | 2,000 Credits | 1,120 Credits (56%) | 880 Credits | Normal |
+
+<Tip>
+When a team reaches 100% of its quota, operators are notified to request a budget extension from the administrator. Production does not automatically freeze unless hard enforcement is enabled.
+</Tip>
+
+---
+
+## 2. Automated Credit Auto-Recharge
+
+To prevent overnight catalog batches from stopping midway through execution:
+
+[SCREENSHOT REQUIRED:
+Page: Administration (/admin/costs-budgets)
+Exact State: Auto-Recharge modal showing toggle active: 'When balance drops below 500 Credits, automatically purchase 2,500 Credits package using corporate card'.
+Exact UI Section: Auto-Recharge configuration modal.
+Recommended Crop: 550x380
+Recommended Dimensions: 550x380
+Filename: admin-auto-recharge-modal.webp]
+
+- **Threshold Level**: Trigger purchase when balance falls below X credits (e.g. 500 Credits).
+- **Recharge Amount**: Automatically add a pre-approved credit tier.
+- **Monthly Limit**: Enforces a maximum number of auto-recharges per billing cycle (e.g. Max 3 times per month).
+
+---
+
+## 3. Invoice History & Tax Invoices
+
+Download official GST/VAT compliant tax invoices for your corporate accounting team:
+- Click **Invoices & Receipts** to access itemized monthly PDF statements.
+- Includes SKU counts, compute hours, and payment method transaction IDs.
+
+---
+
+## Next Steps
+
+- Inspect infrastructure performance in [System Health](/admin/system-health).
+- Resolve operational errors in [Troubleshooting Overview](/troubleshooting/overview).

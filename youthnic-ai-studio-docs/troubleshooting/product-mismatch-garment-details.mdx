@@ -1,0 +1,59 @@
+---
+title: "Product Mismatch & Garment Details Lost"
+description: "How to correct color shifts, altered necklines, missing embroidery, or silhouette drift in generated AI photos."
+---
+
+# Product Mismatch & Garment Details Lost
+
+---
+
+## Problem
+
+The generated image renders a complete fashion model, but the physical garment details do not match the real product:
+- **Color Shift**: A navy blue garment is rendered as royal electric blue, or emerald green looks olive.
+- **Altered Neckline**: A distinct V-neck or sweetheart neckline is rendered as a standard round neck.
+- **Lost Embroidery / Zari**: Micro-gotapatti borders, sequins, or floral prints are smudged or omitted entirely.
+- **Incorrect Drape / Silhouette**: An A-line kurti is rendered as a bodycon dress.
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: Studio split-comparison view showing reference garment on left with intricate gotapatti border, and generated output on right with border partially blurred.
+Exact UI Section: Lightbox split-view comparison mode.
+Recommended Crop: 900x550
+Recommended Dimensions: 900x550
+Filename: troubleshooting-garment-mismatch-compare.webp]
+
+---
+
+## Possible Causes
+
+1. **Ambient Lighting Conflict**: Selecting a heavy *"Golden Hour"* or high-contrast dramatic sunset lighting preset casts warm yellow light across the entire image, shifting garment hues.
+2. **Missing Fabric / Detail Reference**: Intricate embroidery was only visible in a distant full-body shot without a dedicated macro close-up.
+3. **Product Identity Profile Unverified**: The AI vision analysis misclassified the fabric or neckline, and the user did not correct it before clicking generate.
+4. **Pose 4 Seated vs. Walking Ambiguity**: The style reference contained a seated lifestyle setting, causing Pose 4 to render seated when an active walking hemline flare was desired.
+
+---
+
+## How to Fix
+
+<Steps>
+  <Step title="Lock the Exact Hex Code">
+    Open the **Product Identity Profile** card. Click the **Primary Color Swatch** and enter the exact sRGB hex code from your physical fabric swatch (e.g. `#5B1E31`). Click the **Padlock Icon** to enforce strict color adherence.
+  </Step>
+  <Step title="Switch to High-Key Neutral Lighting">
+    Change the Creative Direction lighting preset to **High-Key Commercial Studio** or **Soft North Daylight**. Neutral 5500K daylight ensures true color rendition on marketplace feeds.
+  </Step>
+  <Step title="Upload a Dedicated Macro Swatch">
+    Drop a high-resolution 1:1 macro photo of the embroidery into the **Fabric / Pattern Reference** slot (`fabric_pattern`). This forces the attention layers to focus on stitch-level texture.
+  </Step>
+  <Step title="Explicitly Direct Pose 4">
+    If Pose 4 rendered as a seated shot and you wanted a walking shot: click **Edit Pose 4**, change the posture setting from `Auto-Detect` to `Force Walking Motion`, and regenerate that single pose for 1 credit.
+  </Step>
+</Steps>
+
+---
+
+## When to Contact Administrator
+
+Contact your administrator if:
+- Fine metallic threads (gold/silver zari) consistently render as flat yellow/gray paint, indicating that the workspace AI routing policy needs to be upgraded to the **Quality Priority** model tier in [Admin Settings](/admin/ai-routing-models).

@@ -1,10 +1,19 @@
 import { useState } from "react";
-import { ArrowRight, CheckCircle2, Eye, EyeOff, Images, Loader2, LockKeyhole, ShieldCheck, Sparkles } from "lucide-react";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { ArrowRight, BookOpen, CheckCircle2, Eye, EyeOff, Images, Loader2, LockKeyhole, ShieldCheck, Sparkles } from "lucide-react";
 import { getErrorMessage } from "../../lib/errors";
 import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
 
-export function Login() {
+interface LoginProps {
+  redirect?: string;
+}
+
+export function Login({ redirect }: LoginProps) {
   const { signIn } = useFirebaseAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const targetRedirect = redirect || searchParams.get("redirect") || "";
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -17,6 +26,9 @@ export function Login() {
     setSubmitting(true);
     try {
       await signIn(email, password);
+      if (targetRedirect && targetRedirect !== "/") {
+        navigate(targetRedirect, { replace: true });
+      }
     } catch (reason) {
       setError(getErrorMessage(reason, "Could not sign in."));
     } finally {
@@ -50,16 +62,27 @@ export function Login() {
             <div className="grid h-12 w-12 place-items-center rounded-2xl bg-soft-blush text-primary"><LockKeyhole className="h-5 w-5" /></div>
             <p className="mt-7 text-[11px] font-bold uppercase tracking-[0.2em] text-primary">Private workspace</p>
             <h2 className="mt-2 font-syne text-3xl font-bold tracking-tight text-on-surface">Welcome back</h2>
-            <p className="mt-2 text-sm leading-6 text-secondary">Sign in with the account created by your studio administrator.</p>
+            {targetRedirect && (
+              <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs font-medium text-primary">
+                Please sign in to access your requested studio workspace ({targetRedirect}).
+              </div>
+            )}
 
             <form onSubmit={submit} className="mt-8 space-y-5">
               <label className="block text-sm font-semibold text-on-surface">Email address<input autoFocus required type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" className="mt-2 h-12 w-full rounded-xl border border-outline-variant bg-white px-4 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10" /></label>
               <label className="block text-sm font-semibold text-on-surface">Password<span className="relative mt-2 block"><input required type={showPassword ? "text" : "password"} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" className="h-12 w-full rounded-xl border border-outline-variant bg-white px-4 pr-12 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-secondary transition hover:bg-surface-container hover:text-on-surface">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></span></label>
               {error && <div role="alert" className="rounded-xl border border-danger/15 bg-danger-surface px-4 py-3 text-sm font-medium text-danger">{error}</div>}
               <button disabled={submitting} type="submit" className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-bold text-white shadow-lg shadow-primary/20 transition hover:-translate-y-px hover:bg-primary/90 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60">{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}{submitting ? "Signing in…" : "Sign in to Studio"}</button>
-              
             </form>
-            <div className="mt-7 flex items-start gap-3 rounded-xl bg-surface-container-low p-4"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" /><p className="text-xs leading-5 text-secondary">Firebase secures your account and session. Supabase row-level security enforces organization roles and permissions.</p></div>
+
+            <div className="mt-6 flex flex-col items-center gap-3 border-t border-outline-variant/30 pt-4">
+              <Link to="/docs" className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline">
+                <BookOpen className="h-3.5 w-3.5" />
+                <span>Explore Public Documentation & Guides</span>
+              </Link>
+            </div>
+
+            <div className="mt-4 flex items-start gap-3 rounded-xl bg-surface-container-low p-4"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" /><p className="text-xs leading-5 text-secondary">Firebase secures your account and session. Supabase row-level security enforces organization roles and permissions.</p></div>
           </div>
         </section>
       </div>

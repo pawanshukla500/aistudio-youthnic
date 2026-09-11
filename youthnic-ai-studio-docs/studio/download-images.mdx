@@ -1,0 +1,84 @@
+---
+title: "Download Generated Images"
+description: "How to inspect in 4K resolution, download individual image files, and export bulk ZIP packages organized by SKU."
+---
+
+# Download Generated Images
+
+Once your photoshoot passes quality review, you can export assets in multiple formats tailored for web performance or high-dpi print production.
+
+---
+
+## High-Resolution Lightbox Inspection
+
+Click any completed image tile to open the **4K Studio Lightbox**:
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: High-resolution Lightbox modal open with a 4K image displayed. Loupe zoom cursor magnifying the collar stitching at 400%.
+Exact UI Section: Fullscreen Lightbox viewer with zoom controls.
+Recommended Crop: 1400x900
+Recommended Dimensions: 1400x900
+Filename: studio-lightbox-4k-inspection.webp]
+
+The Lightbox features:
+- **Pan & 400% Zoom Loupe**: Inspect micro-embroidery, zari threads, and facial realism down to individual pixels.
+- **Side-by-Side Reference Compare**: Toggle a split-screen slider comparing the generated model against your original physical garment photo.
+- **EXIF & Colorimetry Inspector**: View the embedded color profile, aspect ratio, and prompt metadata.
+
+---
+
+## Exporting Individual Images
+
+From either the Lightbox or the tile hover menu, click **Download**:
+
+<CardGroup cols={3}>
+  <Card title="Optimized WebP (Recommended)" icon="bolt">
+    Lossless 4K WebP format. Up to 70% smaller file size than JPEG with identical visual quality. Perfect for fast-loading Shopify and custom e-commerce storefronts.
+  </Card>
+  <Card title="High-Res JPEG" icon="image">
+    Standard sRGB JPEG (Quality 95). Fully compliant with strict marketplace upload requirements on Amazon, Myntra, Nykaa, and Ajio.
+  </Card>
+  <Card title="Uncompressed PNG" icon="file-image">
+    Lossless 24-bit PNG with embedded alpha channels where background cutout was requested.
+  </Card>
+</CardGroup>
+
+---
+
+## Bulk ZIP Package Export
+
+To download the entire 5-pose catalog photoshoot at once, click the **Export All Assets (.ZIP)** button in the top action bar:
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: Export options modal open with checkboxes for file formats (WebP, JPEG, Metadata JSON) and a progress indicator building the ZIP archive.
+Exact UI Section: Bulk Export modal dialog.
+Recommended Crop: 500x380
+Recommended Dimensions: 500x380
+Filename: studio-bulk-export-modal.webp]
+
+The downloaded ZIP archive is structured with clean, ERP-friendly naming:
+
+```bash
+YN-ANARKALI-RED-001_photoshoot.zip
+├── YN-ANARKALI-RED-001_01_hero.webp
+├── YN-ANARKALI-RED-001_02_three-quarter.webp
+├── YN-ANARKALI-RED-001_03_back.webp
+├── YN-ANARKALI-RED-001_04_editorial.webp
+├── YN-ANARKALI-RED-001_05_detail.webp
+└── metadata.json   # Contains SKU, fabric attributes, and QA scores
+```
+
+---
+
+## Permanent Cloud Storage & History
+
+Every photoshoot generated in Studio is automatically backed up to your organization's cloud storage. You can access and re-download assets at any time from [Generation History](/history/overview) without spending additional credits.
+
+---
+
+## Next Steps
+
+- Explore [Catalog Production](/catalog-production/overview) to automate multi-SKU collections.
+- Review past shoots in [Generation History](/history/overview).

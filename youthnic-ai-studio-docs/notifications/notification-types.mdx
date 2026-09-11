@@ -1,0 +1,67 @@
+---
+title: "Notification Types"
+description: "Detailed catalog of all automated notification triggers across generation, planning, events, and system administration."
+---
+
+# Notification Types
+
+Youthnic AI Studio categorizes automated alerts into four functional streams to help you prioritize urgent creative approvals and production blockers.
+
+---
+
+## 1. Generation Notifications
+
+Triggered by the GPU rendering orchestrator and automated QA validation pipeline:
+
+| Alert Title | Trigger Event | Priority | Recommended Action |
+| :--- | :--- | :--- | :--- |
+| **Photoshoot Completed** | All 5 poses finished rendering and passed QA validation. | Normal | Open in Studio to inspect or export ZIP bundle. |
+| **Catalog Batch Finished** | An entire multi-SKU catalog campaign concluded rendering. | High | Download the master ZIP or publish assets to marketplace feeds. |
+| **QA Score Defect Warning** | One or more poses scored below the 70-point threshold. | High | Review the flagged image in Studio and trigger a single-tile retry. |
+| **Worker Render Timeout** | Upstream cloud GPU worker timed out; job was auto-refunded. | Urgent | Click the notification to retry using an alternate AI route. |
+
+[SCREENSHOT REQUIRED:
+Page: Notifications Center (/notifications)
+Exact State: Generation notification card showing 'Photoshoot for SKU YN-204-WNE Completed (Score 98/100)' with action link 'View Photoshoot'.
+Exact UI Section: Generation notification card.
+Recommended Crop: 600x160
+Recommended Dimensions: 600x160
+Filename: notifications-generation-card.webp]
+
+---
+
+## 2. Planning & Approval Notifications
+
+Triggered by changes in seasonal collection roadmaps and team review gates:
+
+- **Plan Submitted for Review**: Notifies creative leads when a merchandiser finishes staging a collection and requests budget/aesthetic approval.
+- **Styling Approved**: Notifies studio operators that a campaign has been unlocked for batch generation.
+- **Changes Requested**: Alerts stylists when a creative director requests changes to accessories or footwear with inline annotations.
+- **Milestone Overdue**: Warns when physical sample arrivals are overdue based on the production schedule.
+
+---
+
+## 3. Event & Marketing Notifications
+
+Triggered by approaching festival dates and marketplace lead-time milestones:
+
+- **Lead-Time Window Closing**: Alerts merchandisers when a major festival (e.g. *Durga Puja*) is 30 days away and linked catalog production has not yet commenced.
+- **Marketplace Listing Freeze Alert**: Warns 14 days before a mega-sale (e.g. *Amazon GIF*) when marketplace catalog ingestion will lock.
+- **Event Date Update**: Notifies the team if an external marketplace sale date shifts.
+
+---
+
+## 4. System & Billing Notifications
+
+Administrative alerts affecting workspace access and credit balances:
+
+- **Low Credit Balance Alert**: Fires when remaining organization credits fall below 15% of monthly allocation.
+- **Provider Failover Activated**: Notifies admins if the system automatically rerouted generation traffic due to an upstream model provider outage.
+- **Role / Permission Updated**: Informs users when their workspace role or team membership changes.
+
+---
+
+## Next Steps
+
+- Explore administrative controls in [Administration Overview](/admin/overview).
+- Review security and access in [Users & Permissions](/admin/users).

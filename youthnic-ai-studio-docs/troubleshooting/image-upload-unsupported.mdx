@@ -1,0 +1,56 @@
+---
+title: "Image Upload & Unsupported Files"
+description: "How to resolve file upload errors, unsupported image format warnings, and file size rejections in Studio."
+---
+
+# Image Upload & Unsupported Files
+
+---
+
+## Problem
+
+When dragging and dropping image files into the Studio or Catalog upload areas:
+- The upload drops fail silently, or a red error alert appears: *"File Type Not Supported"*, *"File Exceeds 25MB Limit"*, or *"Invalid Image Dimension"*.
+- The upload tile remains blank, or a broken image placeholder icon is displayed.
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: Upload dropzone displaying a red error toast 'Upload Failed: HEIC format is not supported. Please convert to JPEG or PNG.'
+Exact UI Section: Product Photos upload dropzone error state.
+Recommended Crop: 500x320
+Recommended Dimensions: 500x320
+Filename: troubleshooting-upload-unsupported-error.webp]
+
+---
+
+## Possible Causes
+
+1. **Unsupported Proprietary Container Formats**: You uploaded an Apple Live Photo container (`.heic`, `.heif`), camera raw format (`.cr2`, `.nef`, `.arw`), or a PDF document.
+2. **File Size Greater Than 25 MB**: Studio enforces a 25 MB per-file limit to ensure rapid browser uploads and worker processing.
+3. **Corrupted EXIF or CMYK Color Profile**: Images exported in CMYK (print color space) rather than sRGB (web color space) cannot be processed by web browser canvases.
+4. **Resolution Out of Bounds**: The image is larger than 8192 x 8192 px or smaller than 400 x 400 px.
+
+---
+
+## How to Fix
+
+<Steps>
+  <Step title="Convert HEIC / RAW to PNG or JPEG">
+    - **Mac**: Open the photo in Preview, choose **File > Export**, and select **PNG** or **JPEG**.
+    - **Windows**: Use the Photos app or an online image converter to save as sRGB JPEG.
+    - **iPhone Settings**: To prevent future HEIC uploads, navigate on your phone to **Settings > Camera > Formats** and select **Most Compatible** (forces standard JPEG).
+  </Step>
+  <Step title="Resize Files Exceeding 25 MB">
+    If you have ultra-high-resolution RAW camera exports exceeding 25 MB, resize them to 3000 x 4000 px at 90% JPEG quality. This provides more than enough detail for AI vision conditioning while keeping file size under 6 MB.
+  </Step>
+  <Step title="Ensure sRGB Color Space">
+    Ensure your graphics software (Photoshop / Lightroom) exports using the **sRGB IEC61966-2.1** color profile rather than Adobe RGB or CMYK.
+  </Step>
+</Steps>
+
+---
+
+## When to Contact Administrator
+
+Contact your administrator if:
+- Standard PNG or JPEG files under 5 MB fail with network errors like `413 PAYLOAD_TOO_LARGE` or `502 BAD_GATEWAY`, which indicates an upstream corporate firewall or proxy issue.

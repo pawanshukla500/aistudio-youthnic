@@ -1,0 +1,80 @@
+---
+title: "Failed Generations & Retry"
+description: "How to locate failed jobs, inspect system error codes, and trigger direct retries from History without re-uploading assets."
+---
+
+# Failed Generations & Retry
+
+While Youthnic AI Studio maintains a >97% generation success rate, intermittent cloud GPU provider outages or automated quality score rejections can occasionally cause a job to fail. 
+
+The **Failed Generations** filter in History allows you to isolate, diagnose, and retry these jobs with zero credit loss.
+
+```mermaid
+graph LR
+    A[History Archive] -->|Filter by 'Failed'| B[Isolated Failed Jobs]
+    B --> C[Inspect Diagnostic Error Code]
+    C --> D[Verify Automated Credit Refund]
+    D --> E[Click 'Retry Job' (Routes to Healthy Worker)]
+    E --> F[Successful Render & Merged into History]
+```
+
+---
+
+## Locating Failed Jobs
+
+In the History filter toolbar, click the **Status** dropdown and select **Failed / Incomplete**:
+
+[SCREENSHOT REQUIRED:
+Page: Generation History (/history?status=failed)
+Exact State: History grid filtered by 'Status: Failed' showing 2 failed job cards with red error borders and clear retry buttons.
+Exact UI Section: Filtered history view.
+Recommended Crop: 1100x480
+Recommended Dimensions: 1100x480
+Filename: history-failed-jobs-grid.webp]
+
+---
+
+## Understanding Failure Reasons
+
+Click **View Error Details** on any failed card:
+
+<AccordionGroup>
+  <Accordion title="GPU_WORKER_TIMEOUT (504)" icon="clock">
+    The cloud GPU node handling the latent diffusion pass experienced a hardware disconnect or exceeded the 180-second timeout ceiling.
+    <br/>**Resolution**: Safe to retry immediately; will dispatch to an alternate healthy node.
+  </Accordion>
+
+  <Accordion title="QA_SCORE_DEFECTIVE (422)" icon="user-xmark">
+    The rendered image failed automated quality validation (e.g. anatomical hand defect or color shift) on both its initial pass and automatic retry.
+    <br/>**Resolution**: Open in Studio to inspect reference photos; adjusting prompt guidance slightly will resolve the ambiguity.
+  </Accordion>
+
+  <Accordion title="REFERENCE_IMAGE_CORRUPT (400)" icon="triangle-exclamation">
+    One of the source uploaded photos contained corrupted JPEG headers or an unsupported color profile.
+    <br/>**Resolution**: Re-upload the source reference in standard sRGB PNG/JPEG.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## 1-Click Retry Execution
+
+Click the red **Retry Generation** button on the card:
+
+[SCREENSHOT REQUIRED:
+Page: Generation History (/history)
+Exact State: Retry confirmation modal open showing 'Retry Job YN-LEH-04. 0 Credits required (Refunded on initial failure).'
+Exact UI Section: Retry confirmation modal dialog.
+Recommended Crop: 500x300
+Recommended Dimensions: 500x300
+Filename: history-retry-modal-zero-credits.webp]
+
+- **Credit Exemption**: If credits were refunded upon initial failure, re-running the job consumes the original credit allocation without penalties.
+- **Provider Fallback**: The retry automatically reroutes the task to an alternate backup provider if the primary provider reported downtime.
+
+---
+
+## Next Steps
+
+- Master search techniques in [Filter & Search History](/history/filter-search-history).
+- Review notification preferences in [Notifications Overview](/notifications/overview).

@@ -32,3 +32,11 @@ gha-creds-*.json
 
 # Supabase CLI local link cache
 supabase/.temp/
+
+# Scratch files
+scratch/
+
+# IDE Agent configuration
+.agents/
+
+

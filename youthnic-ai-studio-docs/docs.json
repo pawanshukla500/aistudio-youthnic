@@ -1,0 +1,214 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Youthnic AI Studio",
+  "colors": {
+    "primary": "#b00055",
+    "light": "#e02d7d",
+    "dark": "#7b003a"
+  },
+  "favicon": "/images/favicon.svg",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Introduction",
+        "pages": [
+          "introduction/what-is-youthnic-ai-studio",
+          "introduction/who-is-it-for",
+          "introduction/main-capabilities",
+          "introduction/product-workflow",
+          "introduction/product-tour"
+        ]
+      },
+      {
+        "group": "Getting Started",
+        "pages": [
+          "getting-started/overview",
+          "getting-started/login-access",
+          "getting-started/understanding-the-interface",
+          "getting-started/create-first-photoshoot",
+          "getting-started/recommended-product-images",
+          "getting-started/first-generation-walkthrough"
+        ]
+      },
+      {
+        "group": "Studio",
+        "pages": [
+          "studio/overview",
+          "studio/start-a-photoshoot",
+          "studio/upload-product-images",
+          "studio/reference-roles",
+          "studio/sku-details",
+          "studio/ai-product-analysis",
+          "studio/product-identity-profile",
+          "studio/creative-direction",
+          "studio/styling-recommendations",
+          "studio/pose-planning",
+          "studio/generate-photoshoot",
+          "studio/generation-progress",
+          "studio/quality-validation",
+          "studio/regenerate-retry",
+          "studio/download-images"
+        ]
+      },
+      {
+        "group": "Catalog Production",
+        "pages": [
+          "catalog-production/overview",
+          "catalog-production/create-catalog",
+          "catalog-production/colourways-skus",
+          "catalog-production/upload-references",
+          "catalog-production/shared-styling-model",
+          "catalog-production/ai-analysis-preflight",
+          "catalog-production/styling-approval",
+          "catalog-production/ready-incomplete-colourways",
+          "catalog-production/generate-catalog",
+          "catalog-production/production-tracking",
+          "catalog-production/retry-failed-colourway",
+          "catalog-production/download-results"
+        ]
+      },
+      {
+        "group": "Events & Marketing Calendar",
+        "pages": [
+          "events/overview",
+          "events/calendar-views",
+          "events/event-types-states",
+          "events/search-filter-events",
+          "events/ai-event-research",
+          "events/add-custom-event",
+          "events/lead-time-deadlines",
+          "events/plan-catalog-from-event",
+          "events/export-calendar"
+        ]
+      },
+      {
+        "group": "Planning",
+        "pages": [
+          "planning/overview",
+          "planning/create-plan",
+          "planning/product-planning",
+          "planning/catalog-planning",
+          "planning/event-driven-planning",
+          "planning/production-schedule",
+          "planning/generation-schedule",
+          "planning/plan-status-workflow"
+        ]
+      },
+      {
+        "group": "Dashboard",
+        "pages": [
+          "dashboard/overview",
+          "dashboard/generation-health-volume",
+          "dashboard/active-jobs-live-progress",
+          "dashboard/token-usage-telemetry",
+          "dashboard/ai-costs-organization-spend",
+          "dashboard/analytics-14-day",
+          "dashboard/recent-activity"
+        ]
+      },
+      {
+        "group": "Generation History",
+        "pages": [
+          "history/overview",
+          "history/view-past-generations",
+          "history/inspect-generation-flow",
+          "history/download-images-zip",
+          "history/failed-generations-retry",
+          "history/filter-search-history"
+        ]
+      },
+      {
+        "group": "Notifications",
+        "pages": [
+          "notifications/overview",
+          "notifications/notification-types"
+        ]
+      },
+      {
+        "group": "Administration",
+        "pages": [
+          "admin/overview",
+          "admin/users",
+          "admin/teams",
+          "admin/roles-permissions",
+          "admin/automation-reports",
+          "admin/ai-routing-models",
+          "admin/costs-budgets",
+          "admin/system-health"
+        ]
+      },
+      {
+        "group": "Troubleshooting",
+        "pages": [
+          "troubleshooting/overview",
+          "troubleshooting/product-analysis-failed",
+          "troubleshooting/image-upload-unsupported",
+          "troubleshooting/generation-failed-stuck",
+          "troubleshooting/product-mismatch-garment-details",
+          "troubleshooting/failed-quality-check",
+          "troubleshooting/catalog-colourway-incomplete",
+          "troubleshooting/auth-permission-denied",
+          "troubleshooting/api-provider-outage"
+        ]
+      },
+      {
+        "group": "FAQ",
+        "pages": [
+          "faq/general",
+          "faq/product-images-references",
+          "faq/garment-fidelity-styling",
+          "faq/catalogs-batches",
+          "faq/billing-costs"
+        ]
+      },
+      {
+        "group": "Release Notes",
+        "pages": [
+          "changelog/release-notes"
+        ]
+      },
+      {
+        "group": "Developer Reference",
+        "pages": [
+          "developer/architecture-overview",
+          "developer/api-endpoints",
+          "developer/environment-variables",
+          "developer/deployment-guide"
+        ]
+      }
+    ]
+  },
+  "logo": {
+    "light": "/images/logo-light.png",
+    "dark": "/images/logo-dark.png"
+  },
+  "background": {
+    "color": {
+      "light": "#faf8f5",
+      "dark": "#0d0c11"
+    }
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Studio App",
+        "href": "https://aistudio.youthnic.shop"
+      },
+      {
+        "label": "Contact Support",
+        "href": "mailto:returnorders@vbexports.co.in"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Launch Studio",
+      "href": "https://aistudio.youthnic.shop"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/pawanshukla500/aistudio-youthnic"
+    }
+  }
+}

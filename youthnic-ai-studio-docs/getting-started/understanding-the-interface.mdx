@@ -1,0 +1,92 @@
+---
+title: "Understanding the Interface"
+description: "A tour of the navigation bar, sidebar modules, status chips, and common UI elements in Youthnic AI Studio."
+---
+
+# Understanding the Interface
+
+Youthnic AI Studio features a clean, high-density editorial layout designed for rapid catalog operations.
+
+<Frame caption="Global application shell displaying Youthnic AI Studio navigation, active workspace, breadcrumb, user profile, and operations dashboard">
+  <img src="/images/dashboard-live-overview.png" alt="Youthnic AI Studio Interface Overview" />
+</Frame>
+
+---
+
+## Global Navigation Structure
+
+The user interface is organized into three primary regions:
+
+```text
++---------------------------------------------------------------------------------------+
+|  LOGO  [Search / Breadcrumb]                     [Org Switcher v] [Bell 🔔] [Avatar]   |  <- Top Bar
++------------+--------------------------------------------------------------------------+
+|  Sidebar   |                                                                          |
+|            |                                                                          |
+| Dashboard  |                                                                          |
+| Studio     |                          MAIN WORKSPACE                                  |
+| Planning   |                       (Context-Specific View)                            |
+| Events     |                                                                          |
+| History    |                                                                          |
+| Admin ⚙️   |                                                                          |
++------------+--------------------------------------------------------------------------+
+```
+
+### 1. Left Navigation Sidebar
+Provides one-click access to all core modules. The sidebar automatically hides items your account does not have permission to view:
+
+- **Dashboard (`/dashboard`)**: Operations telemetry, generation volume, active queue indicator, and 14-day token/cost analytics.
+- **Studio (`/studio`)**: The single-SKU AI photoshoot canvas. Upload references, review garment analysis, tweak styling, and generate 5 commercial poses.
+- **Planning (`/planning`)**: Enterprise batch management, seasonal roadmaps, multi-colourway creation, and the 5-stage Catalog Production Kanban board.
+- **Events (`/events`)**: Festive and marketplace roadmap with 100+ Indian regional events, AI research briefs, and 1-click catalog planning.
+- **History (`/history`)**: Permanent audit trail of all previous generation jobs, high-res downloads, and interactive DAG workflow flowcharts.
+- **Notifications (`/notifications`)**: Alert center for completed jobs, QA notices, planning deadlines, and budget warnings.
+- **Administration (`/admin`)**: Visible only to authorized Organization Admins. Manages users, teams, RBAC roles, AI routing policies, and budgets.
+
+[VIDEO REQUIRED:
+Title: Navigation Tour & Workspace Switching
+Duration: 15 seconds
+Record: Clicking organization switcher, moving from Dashboard -> Studio -> Planning.
+Suggested Filename: `videos/getting-started/navigation-tour.mp4`]
+
+---
+
+## 2. Top Header Bar
+
+- **Active Organization Switcher**: Click to switch your current brand context between subsidiaries or client brands.
+- **Notifications Bell**: Displays an active badge counter when new generation completions, QA issues, or planning milestone alerts require your attention.
+- **User Profile Menu**: View your signed-in email address, assigned roles, and access the **Sign Out** button.
+
+---
+
+## 3. Universal Status Chips
+
+Throughout Studio, Planning, and History, you will see standardized status indicators:
+
+| Status Badge | Color Scheme | Meaning |
+| :--- | :--- | :--- |
+| **`Ready`** | Gray / Slate | References are uploaded, preflight passed; waiting for generation trigger. |
+| **`Queued`** | Amber / Yellow | The job has entered the backend generation queue; worker will pick it up immediately. |
+| **`Processing` / `Generating`** | Blue (with animated spinner) | AI vision compilers and image generation models are actively creating images. |
+| **`Automatically Verified`** | Green (with checkmark) | The generated image passed automated vision QA against product references. |
+| **`Unverified`** | Orange | Image generated successfully, but automated QA flagged potential ambiguity for human review. |
+| **`Failed` / `Blocked`** | Red | Generation halted due to missing reference assets, unsupported format, or provider failure. |
+
+---
+
+## Responsive Layouts & Dark Mode Support
+
+Youthnic AI Studio automatically scales from high-resolution studio monitors (4K / ultrawide) down to laptops. The UI is built using curated modern neutral palettes (`#faf8f5` light background with `#b00055` signature magenta accents) optimized for color accuracy during fashion inspections.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Image Reference Guidelines" icon="images" href="/getting-started/recommended-product-images">
+    Ensure your reference photos produce the highest fidelity results.
+  </Card>
+  <Card title="Create Your First Photoshoot" icon="sparkles" href="/getting-started/create-first-photoshoot">
+    Start your first photoshoot in the Studio.
+  </Card>
+</CardGroup>
