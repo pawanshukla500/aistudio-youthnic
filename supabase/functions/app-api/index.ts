@@ -1868,11 +1868,21 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     queuedReferences,
     isSareeReferenceSet(queuedReferences, queuedGarmentFamily) ? "saree" : queuedGarmentFamily,
   );
-  // The organization policy is authoritative. Older Studio clients may still
-  // send `model`; retain that field in the request contract but never let it
-  // override the reviewed server-side route.
   const imageGenerationPolicy = await resolveImageGenerationPolicy(workspace.organization.id);
-  const model = imageGenerationPolicy.model;
+  const requestedModel = String(args.model || "").trim();
+  let model = imageGenerationPolicy.model;
+  if (requestedModel) {
+    try {
+      const validated = assertAllowedAiModelRoute({
+        provider: "openai",
+        model: requestedModel,
+        thinkingLevel: "none",
+      }, "image_generation");
+      model = validated.model;
+    } catch {
+      model = imageGenerationPolicy.model;
+    }
+  }
   const quality = ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : "medium";
   const jobId = `job_${crypto.randomUUID()}`;
   const now = new Date().toISOString();
@@ -5501,11 +5511,21 @@ async function queueCatalogVariantGeneration(
   const sessionId = `session_${crypto.randomUUID()}`;
   const jobId = `job_${crypto.randomUUID()}`;
   const queuedAt = new Date().toISOString();
-  // Catalog uses the same tenant-controlled final-image policy as Studio.
-  // `generationSettings.model` remains readable for legacy imports but cannot
-  // override the configured provider/model pair.
   const imageGenerationPolicy = await resolveImageGenerationPolicy(String(batch.organization_id));
-  const model = imageGenerationPolicy.model;
+  const requestedModel = String(generationSettings.model || "").trim();
+  let model = imageGenerationPolicy.model;
+  if (requestedModel) {
+    try {
+      const validated = assertAllowedAiModelRoute({
+        provider: "openai",
+        model: requestedModel,
+        thinkingLevel: "none",
+      }, "image_generation");
+      model = validated.model;
+    } catch {
+      model = imageGenerationPolicy.model;
+    }
+  }
   const quality = ["low", "medium", "high"].includes(String(generationSettings.quality)) ? String(generationSettings.quality) : "medium";
   const sessionData = {
     skuId: String(variant.request_code || variant.id),
