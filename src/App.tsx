@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Layout } from "./components/ui/Layout";
 import { Dashboard } from "./features/dashboard/Dashboard";
 import { Studio } from "./features/studio/Studio";
@@ -50,6 +50,15 @@ function AppRoutes() {
   );
 }
 
+function StudioAuthBarrier({ user }: { user: unknown }) {
+  const location = useLocation();
+  if (!user) {
+    const isRoot = location.pathname === "/" || location.pathname === "";
+    return <Login redirect={isRoot ? undefined : `${location.pathname}${location.search}`} />;
+  }
+  return <AppRoutes />;
+}
+
 export default function App() {
   const { user, isLoading } = useFirebaseAuth();
   if (isLoading) {
@@ -63,7 +72,7 @@ export default function App() {
         <Route path="/docs/*" element={<DocsPortal user={user} />} />
 
         {/* AI Studio Routes - strictly protected behind authentication */}
-        <Route path="/*" element={user ? <AppRoutes /> : <Login />} />
+        <Route path="/*" element={<StudioAuthBarrier user={user} />} />
       </Routes>
     </BrowserRouter>
   );

@@ -74,7 +74,7 @@ export function DocsPortal({ user }: DocsPortalProps) {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
     for (const g of DOCS_GROUPS) {
-      initial[g.group] = g.group === currentPage.group || true; // keep all open or active open
+      initial[g.group] = g.group === currentPage.group;
     }
     return initial;
   });
@@ -82,6 +82,13 @@ export function DocsPortal({ user }: DocsPortalProps) {
   const toggleGroup = (group: string) => {
     setOpenGroups((prev) => ({ ...prev, [group]: !prev[group] }));
   };
+
+  // Keep active category expanded when navigating
+  useEffect(() => {
+    if (currentPage?.group) {
+      setOpenGroups((prev) => ({ ...prev, [currentPage.group]: true }));
+    }
+  }, [currentPage?.group]);
 
   // Keyboard shortcut Ctrl+K / Cmd+K / Slash
   useEffect(() => {

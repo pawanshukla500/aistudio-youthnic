@@ -65,17 +65,19 @@ function parseFrontmatterAndHeadings(content) {
   }
 
   // Extract headings for Table of Contents
+  const normalizedBody = body.replace(/\r\n/g, '\n');
   const headings = [];
-  const lines = body.split('\n');
+  const lines = normalizedBody.split('\n');
   for (const line of lines) {
-    const h2Match = line.match(/^##\s+(.+)$/);
+    const trimmedLine = line.trim();
+    const h2Match = trimmedLine.match(/^##\s+(.+)$/);
     if (h2Match) {
       const text = h2Match[1].replace(/<[^>]*>/g, '').trim();
       const id = text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
       headings.push({ level: 2, text, id });
       continue;
     }
-    const h3Match = line.match(/^###\s+(.+)$/);
+    const h3Match = trimmedLine.match(/^###\s+(.+)$/);
     if (h3Match) {
       const text = h3Match[1].replace(/<[^>]*>/g, '').trim();
       const id = text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
@@ -83,7 +85,7 @@ function parseFrontmatterAndHeadings(content) {
     }
   }
 
-  return { title, description, body, headings };
+  return { title, description, body: normalizedBody, headings };
 }
 
 const docPages = [];

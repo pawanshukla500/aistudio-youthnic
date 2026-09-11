@@ -21,10 +21,12 @@ interface DocsContentProps {
 export function DocsContent({ content, title, description, group }: DocsContentProps) {
   const [modalImage, setModalImage] = useState<{ src: string; caption?: string } | null>(null);
 
-  // Pre-process and render sections
-  const renderedElements = renderMarkdownElements(content, (src, caption) => {
-    setModalImage({ src, caption });
-  });
+  // Pre-process and render sections with useMemo for high performance
+  const renderedElements = React.useMemo(() => {
+    return renderMarkdownElements(content, (src, caption) => {
+      setModalImage({ src, caption });
+    });
+  }, [content]);
 
   return (
     <div className="mx-auto max-w-4xl py-6">
@@ -196,6 +198,20 @@ function renderMarkdownElements(
             )}
           </div>
         );
+      } else {
+        // Fallback: If no image src was found, don't silently drop content.
+        const cleanInner = frameBlock
+          .replace(/<\/?Frame[^>]*>/gi, "")
+          .replace(/<img[^>]*>/gi, "")
+          .trim();
+        if (cleanInner || caption) {
+          elements.push(
+            <div key={key++} className="my-4 rounded-xl border border-outline-variant/50 bg-surface-container-low p-4 text-xs text-secondary">
+              {caption && <div className="font-semibold text-on-surface mb-1">{caption}</div>}
+              {cleanInner && <p>{parseInlineFormatting(cleanInner)}</p>}
+            </div>
+          );
+        }
       }
       continue;
     }
@@ -470,10 +486,13 @@ function parseInlineFormatting(text: string): React.ReactNode {
     }
     const linkText = match[1];
     const linkHref = match[2];
+    const isExternal = linkHref.startsWith("http://") || linkHref.startsWith("https://") || linkHref.startsWith("mailto:");
     parts.push(
       <a
         key={`link-${match.index}`}
         href={linkHref}
+        target={isExternal ? "_blank" : undefined}
+        rel={isExternal ? "noopener noreferrer" : undefined}
         className="font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
       >
         {linkText}

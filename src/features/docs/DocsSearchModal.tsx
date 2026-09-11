@@ -8,6 +8,22 @@ interface DocsSearchModalProps {
   onSelect: (slug: string) => void;
 }
 
+// Precompute normalized search index at module load time for optimal search performance
+interface SearchIndexEntry extends DocPage {
+  lowerTitle: string;
+  lowerGroup: string;
+  lowerDesc: string;
+  lowerContent: string;
+}
+
+const SEARCH_INDEX: SearchIndexEntry[] = Object.values(DOCS_PAGES).map((page) => ({
+  ...page,
+  lowerTitle: page.title.toLowerCase(),
+  lowerGroup: page.group.toLowerCase(),
+  lowerDesc: page.description.toLowerCase(),
+  lowerContent: page.content.toLowerCase(),
+}));
+
 export function DocsSearchModal({ isOpen, onClose, onSelect }: DocsSearchModalProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<DocPage[]>([]);
@@ -23,32 +39,36 @@ export function DocsSearchModal({ isOpen, onClose, onSelect }: DocsSearchModalPr
     }
   }, [isOpen]);
 
-  // Handle live search
+  // Debounced search over pre-indexed search entries
   useEffect(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) {
+    const trimmed = query.trim().toLowerCase();
+    if (!trimmed) {
       setResults([]);
       return;
     }
 
-    const pages = Object.values(DOCS_PAGES);
-    const matched = pages.filter((page) => {
-      const matchTitle = page.title.toLowerCase().includes(q);
-      const matchGroup = page.group.toLowerCase().includes(q);
-      const matchDesc = page.description.toLowerCase().includes(q);
-      const matchContent = page.content.toLowerCase().includes(q);
-      return matchTitle || matchGroup || matchDesc || matchContent;
-    });
+    const timer = setTimeout(() => {
+      const matched = SEARCH_INDEX.filter((item) => {
+        return (
+          item.lowerTitle.includes(trimmed) ||
+          item.lowerGroup.includes(trimmed) ||
+          item.lowerDesc.includes(trimmed) ||
+          item.lowerContent.includes(trimmed)
+        );
+      });
 
-    // Sort exact title/group matches first
-    matched.sort((a, b) => {
-      const aTitle = a.title.toLowerCase().includes(q) ? 1 : 0;
-      const bTitle = b.title.toLowerCase().includes(q) ? 1 : 0;
-      return bTitle - aTitle;
-    });
+      // Prioritize title and group matches
+      matched.sort((a, b) => {
+        const aTitleMatch = a.lowerTitle.includes(trimmed) ? 2 : a.lowerGroup.includes(trimmed) ? 1 : 0;
+        const bTitleMatch = b.lowerTitle.includes(trimmed) ? 2 : b.lowerGroup.includes(trimmed) ? 1 : 0;
+        return bTitleMatch - aTitleMatch;
+      });
 
-    setResults(matched.slice(0, 15));
-    setSelectedIndex(0);
+      setResults(matched.slice(0, 15));
+      setSelectedIndex(0);
+    }, 120);
+
+    return () => clearTimeout(timer);
   }, [query]);
 
   // Handle keyboard events
