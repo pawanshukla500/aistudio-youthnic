@@ -2,6 +2,17 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
 import type { OutputOptions } from "../types";
 
+const MODEL_OPTIONS: Array<{ id: OutputOptions["model"]; label: string }> = [
+  { id: "gpt-image-2.5-flare-2026-09-08", label: "GPT Image 2.5 Flare (2026-09-08 Snapshot · Default)" },
+  { id: "gpt-image-2.5-flare", label: "GPT Image 2.5 Flare (High Speed & Low Latency)" },
+  { id: "gpt-image-2.5-sunburst", label: "GPT Image 2.5 Sunburst (High Fidelity & Character Memory)" },
+  { id: "gpt-image-2", label: "GPT Image 2 (Standard Production)" },
+  { id: "gpt-image-1.5", label: "GPT Image 1.5 (Legacy)" },
+  { id: "gpt-image-1", label: "GPT Image 1 (Legacy)" },
+  { id: "gpt-image-1-mini", label: "GPT Image 1 Mini (Legacy Cost-Optimized)" },
+  { id: "reve-2.1-image", label: "Reve 2.1 Image" },
+];
+
 export function OutputSettings({
   value,
   onChange,
@@ -56,21 +67,16 @@ export function OutputSettings({
               onChange={(event) => set("model", event.target.value as OutputOptions["model"])}
               className="h-10 w-full rounded-md border border-outline-variant bg-white px-3 text-sm outline-none focus:border-primary"
             >
-              <option value="gpt-image-2.5-flare-2026-09-08">
-                GPT Image 2.5 Flare (2026-09-08 Snapshot · Default){orgModel === "gpt-image-2.5-flare-2026-09-08" ? " · Active Org Route" : ""}
-              </option>
-              <option value="gpt-image-2.5-flare">
-                GPT Image 2.5 Flare (High Speed & Low Latency){orgModel === "gpt-image-2.5-flare" ? " · Active Org Route" : ""}
-              </option>
-              <option value="gpt-image-2.5-sunburst">
-                GPT Image 2.5 Sunburst (High Fidelity & Character Memory){orgModel === "gpt-image-2.5-sunburst" ? " · Active Org Route" : ""}
-              </option>
-              <option value="gpt-image-2">
-                GPT Image 2 (Legacy Production){orgModel === "gpt-image-2" ? " · Active Org Route" : ""}
-              </option>
-              <option value="reve-2.1-image">
-                Reve 2.1 Image{orgModel === "reve-2.1-image" ? " · Active Org Route" : ""}
-              </option>
+              {MODEL_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}{orgModel === opt.id ? " · Active Org Route" : ""}
+                </option>
+              ))}
+              {!MODEL_OPTIONS.some((opt) => opt.id === activeModel) && (
+                <option value={activeModel}>
+                  {activeModel}{orgModel === activeModel ? " · Active Org Route" : ""}
+                </option>
+              )}
             </select>
             <p className="mt-1.5 text-[11px] leading-4 text-secondary">
               {value.model && orgModel && value.model !== orgModel
