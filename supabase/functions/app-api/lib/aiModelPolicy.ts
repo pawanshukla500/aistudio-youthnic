@@ -58,7 +58,7 @@ export type AiRouteValidationOptions = {
  */
 export const DEFAULT_IMAGE_GENERATION_ROUTE = {
   provider: "openai",
-  model: "gpt-image-2.5-sunburst",
+  model: "gpt-image-2.5-flare-2026-09-08",
   thinkingLevel: "none",
 } as const satisfies NormalizedAiModelRoute;
 
@@ -101,8 +101,9 @@ export const AI_MODEL_REGISTRY: Registry = {
     qa: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
     qa_escalation: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
     image_generation: [
-      "gpt-image-2.5-sunburst",
+      "gpt-image-2.5-flare-2026-09-08",
       "gpt-image-2.5-flare",
+      "gpt-image-2.5-sunburst",
       "gpt-image-2",
       "gpt-image-1.5",
       "gpt-image-1",
@@ -743,8 +744,9 @@ export function preferFastProductTruthRoute(
 
 export function aiModelDisplayLabel(model: string): string {
   const labels: Record<string, string> = {
-    "gpt-image-2.5-sunburst": "GPT Image 2.5 Sunburst · high-fidelity/memory (recommended)",
+    "gpt-image-2.5-flare-2026-09-08": "GPT Image 2.5 Flare (2026-09-08 · Default)",
     "gpt-image-2.5-flare": "GPT Image 2.5 Flare · fast/high-volume",
+    "gpt-image-2.5-sunburst": "GPT Image 2.5 Sunburst · high-fidelity/memory",
     "gpt-image-2": "GPT Image 2 · standard",
     "gpt-image-1.5": "GPT Image 1.5",
     "gpt-image-1": "GPT Image 1",
@@ -779,11 +781,14 @@ export function aiModelHelpText(model: string): string {
   if (text(model) === "gpt-5.6-luna") {
     return "Luna is the cost-efficient GPT 5.6 vision fallback (~$0.20 / 1M input, $1.20 / 1M output). Prefer it over Sol.";
   }
-  if (text(model) === "gpt-image-2.5-sunburst") {
-    return "Sunburst is OpenAI's flagship precision model with enhanced character and garment latent memory, superior fabric detail, and cross-pose identity consistency.";
+  if (text(model) === "gpt-image-2.5-flare-2026-09-08") {
+    return "Pinned default snapshot of GPT Image 2.5 Flare released on 2026-09-08. OpenAI's fastest model for high-quality everyday catalog image generation.";
   }
   if (text(model) === "gpt-image-2.5-flare") {
     return "Flare is OpenAI's speed-optimized model offering up to 50% lower latency for rapid iterations and high-volume catalog production at identical token pricing.";
+  }
+  if (text(model) === "gpt-image-2.5-sunburst") {
+    return "Sunburst is OpenAI's flagship precision model with enhanced character and garment latent memory, superior fabric detail, and cross-pose identity consistency.";
   }
   if (text(model) === "gpt-image-2") {
     return "GPT Image 2 is OpenAI's previous-generation image synthesis model.";
@@ -796,6 +801,8 @@ export function preferredModelId(
   models: readonly string[],
 ): string {
   if (!models.length) return "";
+  if (provider === "openai" && models.includes("gpt-image-2.5-flare-2026-09-08")) return "gpt-image-2.5-flare-2026-09-08";
+  if (provider === "openai" && models.includes("gpt-image-2.5-flare")) return "gpt-image-2.5-flare";
   if (provider === "openai" && models.includes("gpt-image-2.5-sunburst")) return "gpt-image-2.5-sunburst";
   if (provider === "openai" && models.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
   if (provider === "meta" && models.includes("muse-spark-1.3")) return "muse-spark-1.3";
@@ -1063,7 +1070,7 @@ export function classifyVisionProviderFailure(
 
   if (
     [401, 403].includes(status || 0) ||
-    /invalid[_\s-]*(?:api\s*)?key|unauthori[sz]ed|forbidden|authentication|is not configured in the supabase edge function/
+    /invalid[_\s-]*(?:api\s*)?key|unauthori[sz]ed|forbidden|authentication|permission[_\s-]*denied|is not configured in the supabase edge function/
       .test(detail)
   ) {
     const missingSecret = /is not configured in the supabase edge function/.test(detail);
@@ -1072,10 +1079,10 @@ export function classifyVisionProviderFailure(
       "provider_authentication_failed",
       status,
       false,
-      missingSecret,
+      true,
       missingSecret
         ? "The selected vision provider is not configured. A configured fallback can be used."
-        : "The selected vision provider is not authorized. An administrator must verify its server-side secret.",
+        : `The selected vision provider (${provider}) is not authorized. An administrator must verify its server-side secret.`,
     );
   }
 
@@ -1123,7 +1130,7 @@ export function classifyVisionProviderFailure(
 
   if (
     (status !== null && status >= 500) ||
-    /network\s+error|fetch\s+failed|service\s+unavailable|temporar(?:y|ily)\s+unavailable/
+    /network\s+error|fetch\s+failed|error\s+sending\s+request|connection\s+(?:closed|reset|refused)|broken\s+pipe|dns\s+error|failed\s+to\s+lookup|econnreset|econnrefused|etimedout|client\s+error|socket\s+error|stream\s+error|dispatch\s+error|service\s+unavailable|temporar(?:y|ily)\s+unavailable/
       .test(detail)
   ) {
     return failure(
@@ -1141,8 +1148,8 @@ export function classifyVisionProviderFailure(
     "provider_request_failed",
     status,
     false,
-    false,
-    "The vision provider could not complete this request. Review the provider configuration and request details.",
+    true,
+    "The selected vision provider could not complete this request. The request can use a configured fallback; review provider configuration and product references if all routes fail.",
   );
 }
 
