@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Bell, Calendar as CalendarIcon, CalendarDays, ChevronLeft, ChevronRight, History, LayoutDashboard, Loader2, LogOut, Menu, Pencil, Shield, Wand2, X } from "lucide-react";
+import { Bell, BookOpen, Calendar as CalendarIcon, CalendarDays, ChevronLeft, ChevronRight, ExternalLink, History, LayoutDashboard, Loader2, LogOut, Menu, Pencil, Shield, Wand2, X } from "lucide-react";
 import { api, useMutation, useQuery } from "../../lib/backend";
 import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
 import { useWorkspace } from "../../lib/WorkspaceContext";
@@ -104,6 +104,22 @@ export function Layout() {
               {collapsed && !mobileNavOpen && item.badge ? <span className="absolute right-2.5 top-2 h-2 w-2 rounded-full bg-primary" /> : null}
             </NavLink>
           ))}
+          <a
+            href="https://docs.aistudio.youthnic.shop"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setMobileNavOpen(false)}
+            title={collapsed ? "Documentation" : undefined}
+            className={`relative flex items-center gap-3 rounded-xl px-4 py-3 text-[14px] font-medium text-secondary transition hover:bg-paper-canvas hover:text-on-surface ${collapsed ? "lg:justify-center lg:gap-0 lg:px-0" : ""}`}
+          >
+            <BookOpen className="h-5 w-5 shrink-0" />
+            {(!collapsed || mobileNavOpen) && (
+              <>
+                <span>Documentation</span>
+                <ExternalLink className="ml-auto h-3.5 w-3.5 text-secondary/50" />
+              </>
+            )}
+          </a>
           {canAdmin && (
             <>
               <div className="mx-3 my-4 border-t border-outline-variant/50" />

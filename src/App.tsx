@@ -50,6 +50,12 @@ function AppRoutes() {
 }
 
 export default function App() {
+  // Allow direct public navigation to docs portal without requiring login
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/docs")) {
+    window.location.href = "https://docs.aistudio.youthnic.shop";
+    return null;
+  }
+
   const { user, isLoading } = useFirebaseAuth();
   if (isLoading) {
     return <div className="flex h-screen items-center justify-center bg-[#f7f3f0]"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>;
