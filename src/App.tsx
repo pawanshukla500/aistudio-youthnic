@@ -9,6 +9,7 @@ import { GenerationFlowPage } from "./features/history/generation-flow/Generatio
 import { Admin } from "./features/admin/Admin";
 import { Notifications } from "./features/notifications/Notifications";
 import { Login } from "./features/auth/Login";
+import { DocsPortal } from "./features/docs/DocsPortal";
 import { useWorkspace } from "./lib/WorkspaceContext";
 import { useFirebaseAuth } from "./lib/FirebaseAuthContext";
 
@@ -50,19 +51,21 @@ function AppRoutes() {
 }
 
 export default function App() {
-  // Allow direct public navigation to docs portal without requiring login
-  if (typeof window !== "undefined" && window.location.pathname.startsWith("/docs")) {
-    window.location.href = "https://docs.aistudio.youthnic.shop";
-    return null;
-  }
-
   const { user, isLoading } = useFirebaseAuth();
   if (isLoading) {
     return <div className="flex h-screen items-center justify-center bg-[#f7f3f0]"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>;
   }
   return (
     <BrowserRouter>
-      {user ? <AppRoutes /> : <Login />}
+      <Routes>
+        {/* Public Documentation Portal - accessible to anyone without login */}
+        <Route path="/docs" element={<DocsPortal user={user} />} />
+        <Route path="/docs/*" element={<DocsPortal user={user} />} />
+
+        {/* AI Studio Routes - strictly protected behind authentication */}
+        <Route path="/*" element={user ? <AppRoutes /> : <Login />} />
+      </Routes>
     </BrowserRouter>
   );
 }
+
