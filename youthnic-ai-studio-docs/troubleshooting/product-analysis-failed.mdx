@@ -1,0 +1,61 @@
+---
+title: "Product Analysis Failed"
+description: "How to resolve errors when AI Product Analysis fails to extract garment taxonomy or returns empty attribute fields."
+---
+
+# Product Analysis Failed
+
+---
+
+## Problem
+
+When clicking **Analyze Garment** in the Studio or running **Batch Preflight** in Catalog Production:
+- The progress spinner runs for 15+ seconds and then displays a red error badge: *"Garment Vision Analysis Failed: Optical Parser Timeout"* or *"Unable to Detect Primary Garment Silhouette"*.
+- The **Product Identity Profile** remains empty or displays question mark badges `?` across fabric, color, and neckline fields.
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: Product Identity Profile card showing error state banner 'Analysis Failed: Unable to isolate garment silhouette from background' with a 'Retry Analysis' button.
+Exact UI Section: Failed Product Identity Profile card.
+Recommended Crop: 600x380
+Recommended Dimensions: 600x380
+Filename: troubleshooting-analysis-failed-error.webp]
+
+---
+
+## Possible Causes
+
+1. **Severe Motion Blur or Low Resolution**: The uploaded photo is under 800px wide or exhibits heavy lens blur, preventing the optical model from identifying seam lines or fabric weave.
+2. **Cluttered or Distracting Background**: The garment photo was shot in a chaotic factory setting with other clothing piles, machinery, or complex patterns in the frame that confuse foreground separation.
+3. **Extreme Low-Light or Underexposure**: The photo is so dark that shadow clipping obscures whether the garment is navy, black, or deep purple.
+4. **Unsupported Role Mapping**: No image was assigned the mandatory `Front` reference role.
+
+---
+
+## How to Fix
+
+<Steps>
+  <Step title="Verify Role Assignment">
+    Ensure at least one uploaded photo has the dropdown selector set strictly to **Front Reference**. If only `fabric_pattern` or `style_reference` is uploaded, analysis cannot determine the garment silhouette.
+  </Step>
+  <Step title="Crop Extraneous Background Clutter">
+    If the garment was photographed against a busy factory background, crop the image tightly around the garment before uploading, or use our automated background remover tool in the upload card.
+  </Step>
+  <Step title="Ensure Even White Balance">
+    Upload a photo captured under neutral, diffused light where the true fabric color and neckline cut are clearly visible.
+  </Step>
+  <Step title="Click 'Retry Analysis'">
+    Click **Analyze Garment** again. If the issue was a temporary vision API timeout, the second pass will typically succeed within 4–6 seconds.
+  </Step>
+  <Step title="Manual Attribute Fallback">
+    If you cannot re-shoot the garment immediately, click **Manual Override** inside the Product Identity card and manually select the silhouette, fabric type, and color hex code from the taxonomy dropdowns.
+  </Step>
+</Steps>
+
+---
+
+## When to Contact Administrator
+
+Contact your workspace administrator or Youthnic technical support if:
+- Analysis fails repeatedly across multiple different high-resolution photos that previously worked.
+- The error message displays `500 INTERNAL_VISION_ROUTER_ERROR` or `UPSTREAM_QUOTA_EXHAUSTED`.

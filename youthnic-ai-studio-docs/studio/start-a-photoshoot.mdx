@@ -1,0 +1,79 @@
+---
+title: "Start a Photoshoot"
+description: "How to initialize, configure, and organize a new AI photoshoot session in the Studio."
+---
+
+# Start a Photoshoot
+
+Starting a new photoshoot session creates a dedicated staging environment in Youthnic AI Studio. It binds your SKU, marketplace export presets, and source images into a single stateful job.
+
+---
+
+## Initializing the Session
+
+Navigate to **Studio** (`/studio`). If a previous session was in progress, click **New Photoshoot** in the top navigation bar to reset the workspace to a clean slate.
+
+<Frame caption="Initializing a photoshoot in Youthnic AI Studio — showing SKU inputs, Ethnic / fusion category selector, Output settings, and Generate controls">
+  <img src="/images/studio-live-workspace.png" alt="Studio Session Initialization" />
+</Frame>
+
+---
+
+## 1. Enter SKU and Identity Metadata
+
+Enter your product's unique identifiers in the header:
+
+<Steps>
+  <Step title="SKU Code">
+    Enter your catalog style code (e.g. `YN-LEH-2026-04`). All generated images and exported ZIP bundles will automatically prefix filenames with this SKU.
+  </Step>
+  <Step title="Product Name">
+    Provide a descriptive commercial title (e.g. *"Emerald Green Velvet Embroidered Bridal Lehenga"*). This title assists the AI vision engine during attribute validation.
+  </Step>
+  <Step title="Category Selection">
+    Choose the primary category and subcategory from the dropdown. This pre-tunes the pose library and drape physics:
+    - *Ethnic Wear → Saree / Lehenga / Anarkali / Kurta Set*
+    - *Western Wear → Maxi Dress / Mini Dress / Co-ord Set / Blazer*
+    - *Fusion Wear → Indo-Western Gown / Cape Set*
+  </Step>
+</Steps>
+
+---
+
+## 2. Choose Marketplace Framing Preset
+
+Select your target e-commerce channel from the **Export Preset** dropdown:
+
+| Marketplace Preset | Aspect Ratio | Dimensions | Framing Guidelines |
+| :--- | :--- | :--- | :--- |
+| **Amazon Fashion** | 4:5 | 2000 x 2500 px | Clean neutral background, 85% garment canvas fill, upright posture. |
+| **Myntra Standard** | 4:5 | 2048 x 2560 px | Editorial studio setting, head-to-toe crop, 10% headroom margin. |
+| **Nykaa Fashion** | 3:4 | 1800 x 2400 px | Warm luxury daylight, dewy beauty focus, refined accessorizing. |
+| **Ajio / Reliance** | 3:4 | 1800 x 2400 px | High-contrast editorial backdrop, contemporary footwear styling. |
+| **Shopify / Instagram** | 1:1 or 9:16 | 2048 x 2048 px | Square product card or vertical mobile-first story format. |
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: Marketplace preset selector dropdown opened showing aspect ratios and channel logos.
+Exact UI Section: Preset dropdown menu.
+Recommended Crop: 350x400
+Recommended Dimensions: 350x400
+Filename: studio-marketplace-presets-dropdown.webp]
+
+---
+
+## 3. Session Auto-Save & Recovery
+
+Youthnic automatically synchronizes your current photoshoot configuration to local browser storage and cloud session cache every 5 seconds.
+
+<Note>
+If you accidentally close your tab or lose internet connectivity, navigating back to `/studio` will prompt you to **Resume Previous Session** with all uploaded photos, styling configurations, and extracted attributes intact.
+</Note>
+
+---
+
+## Next Steps
+
+With your session initialized, proceed to:
+- [Upload Product Images](/studio/upload-product-images) to upload reference photos.
+- [Reference Roles](/studio/reference-roles) to assign front, back, fabric, and styling tags.

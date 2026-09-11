@@ -1,0 +1,53 @@
+---
+title: "Release Notes"
+description: "Chronological log of customer-facing feature releases, UI improvements, and model upgrades in Youthnic AI Studio."
+---
+
+# Release Notes
+
+Stay up to date with new features, model upgrades, and workflow improvements introduced across Youthnic AI Studio.
+
+---
+
+## September 2026 — v2.4 Release
+
+### Catalog Production
+- **Multi-SKU Smart-Match Ingestion**: Upload folders of hundreds of garment photos; filenames like `SKU-001_front.jpg` now automatically map to their respective colourway cards.
+- **Sequential Overnight Generation**: Added a dedicated queue mode that renders colourway-by-colourway during off-peak hours with automated failure pauses.
+- **Master Manifest CSV Export**: Bulk catalog ZIP downloads now include a listing manifest spreadsheet pre-populated with public CDN image links, color hexes, and detected fabric composition for easy Shopify, Amazon, and Myntra uploads.
+
+### Studio & Vision Conditioning
+- **Enhanced Pose 4 Context-Aware Logic**: Improved editorial pose synthesis to automatically detect lifestyle style references and render poised seated poses on authentic sandstone settees when appropriate.
+- **Saree Component Decoupling**: Upgraded Saree Mode to decouple pallu, pleat, and blouse reference embeddings, eliminating pattern bleed across vertical drape gathers.
+- **Unobstructed Rear Pose Prompt Rule**: Pose 3 now strictly pins dupattas and stoles forward over the left shoulder, guaranteeing zero obstruction of back neck embroidery and tassel ties.
+
+### Dashboard & Analytics
+- **14-Day Rolling Analytics**: Visual charts tracking daily image volume, quality score trajectory, and hourly activity heatmaps.
+- **Real-Time Token Telemetry**: Full transparency into vision tokens, prompt synthesis tokens, and diffusion latency steps.
+
+---
+
+## August 2026 — v2.3 Release
+
+### Events & Marketing Calendar
+- **Interactive Calendar Views**: Switch between Month Grid, Timeline (Gantt), and High-Density Table views.
+- **AI Event Research**: Instant cultural background research, nine-day color palettes, and historical sales velocity timelines for over 150 Indian festivals and marketplace sales.
+- **1-Click Plan Catalog from Event**: Initialize pre-seeded catalog campaigns directly from festive calendar milestones with automatically calculated lead-time deadlines.
+
+### Administration & Security
+- **Multi-Provider AI Routing**: Added dynamic provider routing allowing admins to prioritize between Quality Priority, Cost Priority, or Speed Priority across Google Gemini, OpenAI, and custom GPU clusters.
+- **Granular RBAC Matrix**: Introduced five dedicated system roles (Admin, Lead Merchandiser, Stylist/Creative, Studio Operator, Read-Only Viewer) and custom role creation.
+- **Department Quotas**: Allocate credit budgets directly to specific division teams (e.g. Bridal vs. Western) with auto-recharge triggers.
+
+---
+
+## July 2026 — v2.2 Release
+
+### Studio
+- **Five-Pose E-Commerce Standard**: Standardized the 5-shot catalog plan (Front Hero, Three-Quarter, Rear View, Editorial, Detail Close-Up) with one-click aspect ratio presets for Myntra (4:5), Nykaa (3:4), and Amazon (4:5).
+- **Automated Quality Assurance Engine**: Introduced real-time optical scoring across anatomical hand/finger counts, facial symmetry, and delta-E colorimetric adherence.
+- **Single-Pose Regeneration**: Re-render individual poses for 1 credit while preserving the other 4 completed images on the canvas.
+
+### Core Platform
+- **4K Studio Lightbox**: Pan and 400% zoom loupe inspection for micro-embroidery, gotapatti borders, and sequin textures.
+- **Automated Credit Refund System**: Immediate 100% refund of credits if a GPU worker times out or an image fails quality validation.

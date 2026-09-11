@@ -1,0 +1,59 @@
+---
+title: "Generation Failed or Stuck"
+description: "How to resolve renders that stall indefinitely at 0%, time out on GPU workers, or return generation failure codes."
+---
+
+# Generation Failed or Stuck
+
+---
+
+## Problem
+
+After clicking **Generate Photoshoot**:
+- One or more pose tiles remain stuck in the `Queued` or `Generating (0%)` state for longer than 3 minutes.
+- A red error banner appears on the tile: *"Generation Failed: GPU Worker Timeout (504)"* or *"Worker Interrupted"*.
+- The generation timer continues counting up past 180 seconds without producing pixels.
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: Studio canvas with Tile 1 and 2 completed, but Tile 3 showing a stuck spinner at 0% with elapsed timer '03:42' and an amber warning alert.
+Exact UI Section: Stuck generation tile on Studio canvas.
+Recommended Crop: 400x480
+Recommended Dimensions: 400x480
+Filename: troubleshooting-generation-stuck-tile.webp]
+
+---
+
+## Possible Causes
+
+1. **Temporary Cloud GPU Cluster Spike**: Heavy global traffic or provider autoscaling delays during peak hours.
+2. **WebSocket / Network Disconnect**: Your local internet connection experienced a micro-drop, causing the browser to lose the live WebSocket event stream from the worker.
+3. **Complex Multi-Layer Conditioning Conflict**: Uploading contradictory references (e.g. tagging an image as both a `front` garment and a `style_reference`) that causes the latent sampler to fail convergence.
+4. **Safety Filter Trigger**: A reference photo inadvertently triggered automated safety guardrails.
+
+---
+
+## How to Fix
+
+<Steps>
+  <Step title="Check Browser Network Connection">
+    Check the small connection status dot in the Studio footer. If it shows amber or red, refresh the browser page (`Ctrl + R` / `Cmd + R`). Your session state will reload automatically.
+  </Step>
+  <Step title="Click 'Retry Failed Pose'">
+    Hover over the failed or stuck tile and click the circular **Retry** icon. This drops the stale worker task and assigns the render to a fresh GPU node.
+  </Step>
+  <Step title="Verify Credit Refund">
+    Check your credit counter in the top bar. Youthnic automatically refunds credits for any failed or timed-out pose. If a pose failed, 1 credit was immediately returned to your balance.
+  </Step>
+  <Step title="Review Prompt & Reference Roles">
+    Verify that your reference photos have clean semantic roles assigned. Avoid uploading identical images to multiple conflicting slots.
+  </Step>
+</Steps>
+
+---
+
+## When to Contact Administrator
+
+Contact your administrator or support if:
+- All generations fail consistently across all users in your organization workspace.
+- The error displays `INSUFFICIENT_ORGANIZATION_CREDITS` or `PROVIDER_CIRCUIT_BREAKER_TRIPPED`.

@@ -1,0 +1,75 @@
+---
+title: "Generation Health & Volume"
+description: "How to monitor pipeline reliability, failure rates, automated QA scores, and total generation volume."
+---
+
+# Generation Health & Volume
+
+Maintaining high asset quality across thousands of AI-generated photos requires continuous health monitoring. The **Generation Health & Volume** widgets track reliability metrics to ensure operational efficiency.
+
+---
+
+## Generation Health Metrics
+
+Located in the top left card of the Dashboard:
+
+[SCREENSHOT REQUIRED:
+Page: Dashboard (/dashboard)
+Exact State: Generation Health card showing circular gauge at 96.8% Success Rate, with micro-stats for First-Pass QA and Auto-Retries.
+Exact UI Section: Generation Health widget.
+Recommended Crop: 550x380
+Recommended Dimensions: 550x380
+Filename: dashboard-generation-health-widget.webp]
+
+<CardGroup cols={3}>
+  <Card title="System Success Rate" icon="circle-check">
+    **97.2%**
+    <br/>Percentage of jobs that successfully completed rendering without worker crashes or timeouts.
+  </Card>
+  <Card title="First-Pass QA Score" icon="award">
+    **94.6%**
+    <br/>Percentage of images that achieved an automated quality score of 85+ on their very first generation attempt.
+  </Card>
+  <Card title="Auto-Retry Rate" icon="rotate">
+    **2.8%**
+    <br/>Renders that required an automatic secondary retry to resolve minor edge artifacts or hand coherence.
+  </Card>
+</CardGroup>
+
+---
+
+## Defect Breakdown by Category
+
+Hover over the health breakdown donut chart to analyze why images were flagged by the automated QA engine:
+
+[SCREENSHOT REQUIRED:
+Page: Dashboard (/dashboard)
+Exact State: Donut chart breakdown showing defect causes: Hand/Anatomy 52%, Garment Delta-E 28%, Edge Artifacts 14%, Missing Trims 6%.
+Exact UI Section: Quality Defect Breakdown popover.
+Recommended Crop: 450x320
+Recommended Dimensions: 450x320
+Filename: dashboard-defect-breakdown-donut.webp]
+
+- **Anatomical Coherence**: Unnatural finger flexion or facial asymmetry.
+- **Colorimetry Deviation ($\Delta E > 6.0$)**: Garment hue shifted due to high-contrast warm studio lighting.
+- **Silhouette Distortion**: Ruffle flares or hemline drape not matching reference photo geometry.
+
+---
+
+## Generation Volume Breakdown
+
+Track output volume across multiple operational time horizons:
+
+| Time Window | Total Images Rendered | Average Turnaround / Shoot | Credits Consumed |
+| :--- | :--- | :--- | :--- |
+| **Last 24 Hours** | 185 Images | 52 seconds | 185 Credits |
+| **Last 7 Days** | 1,240 Images | 58 seconds | 1,240 Credits |
+| **Month to Date** | 4,890 Images | 55 seconds | 4,890 Credits |
+| **All-Time Lifetime** | 42,150 Images | 54 seconds | 42,150 Credits |
+
+---
+
+## Next Steps
+
+- Inspect active renders in [Active Jobs & Live Progress](/dashboard/active-jobs-live-progress).
+- Deep dive into GPU token analytics in [Token Usage Telemetry](/dashboard/token-usage-telemetry).

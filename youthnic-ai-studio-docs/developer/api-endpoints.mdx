@@ -1,0 +1,118 @@
+---
+title: "API Endpoints Reference"
+description: "REST API reference for programmatically uploading garments, triggering 5-pose generations, and subscribing to completion webhooks."
+---
+
+# API Endpoints Reference
+
+Enterprise customers can integrate Youthnic AI Studio directly into existing warehouse management, PIM (Product Information Management), or custom ERP systems via our REST API.
+
+---
+
+## Authentication
+
+All API requests require an organization API key passed via the `Authorization` header:
+
+```bash
+Authorization: Bearer yn_live_98a72b14c5d...
+```
+
+Generate API keys in [Admin > Configuration](/admin/overview).
+
+---
+
+## 1. Analyze Garment Reference Photos
+
+Submit raw garment image URLs to extract fashion taxonomy and color swatches.
+
+`POST /api/v1/studio/analyze`
+
+```bash
+curl -X POST https://api.youthnic.com/v1/studio/analyze \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sku": "YN-ANARKALI-204",
+    "images": [
+      {
+        "url": "https://storage.yourbrand.com/samples/yn-204-front.jpg",
+        "role": "front"
+      },
+      {
+        "url": "https://storage.yourbrand.com/samples/yn-204-back.jpg",
+        "role": "back"
+      }
+    ]
+  }'
+```
+
+---
+
+## 2. Launch Photoshoot Generation
+
+Dispatches a complete 5-pose photoshoot to the GPU worker cluster.
+
+`POST /api/v1/studio/generate`
+
+```bash
+curl -X POST https://api.youthnic.com/v1/studio/generate \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sku": "YN-ANARKALI-204-WNE",
+    "model_persona_id": "model_aanya_south_asian",
+    "backdrop_preset": "jaipur_sandstone_courtyard",
+    "lighting_preset": "soft_north_daylight",
+    "marketplace_preset": "myntra_standard_4_5",
+    "pose_plan": [1, 2, 3, 4, 5],
+    "webhook_url": "https://yourbrand.com/api/webhooks/youthnic"
+  }'
+```
+
+### Response (`202 Accepted`)
+
+```json
+{
+  "job_id": "job_987410_yn",
+  "status": "queued",
+  "sku": "YN-ANARKALI-204-WNE",
+  "estimated_duration_seconds": 55,
+  "credits_allocated": 5
+}
+```
+
+---
+
+## 3. Webhook Delivery Payload
+
+When rendering completes, Youthnic delivers an HTTP `POST` payload to your `webhook_url`:
+
+```json
+{
+  "event": "photoshoot.completed",
+  "job_id": "job_987410_yn",
+  "sku": "YN-ANARKALI-204-WNE",
+  "qa_score": 96.4,
+  "images": [
+    {
+      "pose_index": 1,
+      "pose_type": "hero",
+      "url": "https://cdn.youthnic.com/exports/yn-204-01.webp",
+      "dimensions": "2048x2560"
+    },
+    {
+      "pose_index": 2,
+      "pose_type": "three_quarter",
+      "url": "https://cdn.youthnic.com/exports/yn-204-02.webp",
+      "dimensions": "2048x2560"
+    }
+  ]
+}
+```
+
+---
+
+## Next Steps
+
+- Inspect system configuration in [Environment Variables](/developer/environment-variables).
+- Learn about hosting in [Deployment Guide](/developer/deployment-guide).

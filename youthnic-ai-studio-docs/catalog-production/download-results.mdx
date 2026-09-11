@@ -1,0 +1,83 @@
+---
+title: "Download Catalog Results"
+description: "How to export complete multi-SKU catalog packages, folder structures, and listing manifest spreadsheets."
+---
+
+# Download Catalog Results
+
+When all colourways in your campaign reach the **Completed** state, you can export the entire collection in an enterprise-ready archive structured for immediate marketplace upload.
+
+---
+
+## 1. Multi-SKU Archive Structure
+
+Click **Export Entire Catalog (.ZIP)** on the catalog production toolbar:
+
+[SCREENSHOT REQUIRED:
+Page: Catalog Production (/planning?tab=catalogs)
+Exact State: Catalog export modal open showing folder tree preview, format choices (WebP / JPEG), and Manifest CSV checkbox selected.
+Exact UI Section: Catalog export configuration dialog.
+Recommended Crop: 650x520
+Recommended Dimensions: 650x520
+Filename: catalog-export-modal-folder-tree.webp]
+
+The exported ZIP archive creates an organized directory structure grouped by parent style and child colourway SKUs:
+
+```bash
+Diwali_Festive_Collection_2026.zip
+│
+├── manifest.csv                   # Master catalog listing spreadsheet
+├── YN-ANARKALI-204-WNE/           # Wine Burgundy Colourway
+│   ├── YN-ANARKALI-204-WNE_01_hero.webp
+│   ├── YN-ANARKALI-204-WNE_02_three-quarter.webp
+│   ├── YN-ANARKALI-204-WNE_03_back.webp
+│   ├── YN-ANARKALI-204-WNE_04_editorial.webp
+│   ├── YN-ANARKALI-204-WNE_05_detail.webp
+│   └── colourway_meta.json
+│
+├── YN-ANARKALI-204-EMR/           # Emerald Green Colourway
+│   ├── YN-ANARKALI-204-EMR_01_hero.webp
+│   ├── YN-ANARKALI-204-EMR_02_three-quarter.webp
+│   ├── YN-ANARKALI-204-EMR_03_back.webp
+│   ├── YN-ANARKALI-204-EMR_04_editorial.webp
+│   ├── YN-ANARKALI-204-EMR_05_detail.webp
+│   └── colourway_meta.json
+│
+└── YN-ANARKALI-204-MST/           # Mustard Gold Colourway
+    ├── ...
+```
+
+---
+
+## 2. Master Listing Manifest Spreadsheet
+
+Included in every export is an auto-generated `manifest.csv` containing all commercial and technical metadata:
+
+| Column | Example Value | Description |
+| :--- | :--- | :--- |
+| `parent_sku` | `YN-ANARKALI-204` | Parent collection style code |
+| `child_sku` | `YN-ANARKALI-204-WNE` | Unique colourway SKU |
+| `color_name` | `Wine Burgundy` | Commercial color description |
+| `color_hex` | `#5B1E31` | Exact optical hex code |
+| `hero_image_url` | `https://cdn.youthnic.com/exports/yn-204-01.webp` | CDN direct link for marketplace CSV upload |
+| `qa_score` | `98` | Automated quality assurance score |
+| `fabric_composition` | `Pure Silk Georgette with Zardozi` | Detected textile composition |
+
+<Tip>
+You can copy column URLs directly into Myntra, Nykaa, or Shopify listing upload sheets without manual re-hosting.
+</Tip>
+
+---
+
+## 3. Direct Cloud Storage & Webhook Sync
+
+Enterprise accounts can configure automatic synchronization:
+- **Amazon S3 / Google Cloud Storage**: Push raw files directly into your company's private cloud bucket upon generation completion.
+- **Shopify API**: Push newly generated images directly into corresponding Shopify product variant media galleries.
+
+---
+
+## Next Steps
+
+- Align future catalog drops with festive dates in [Events & Marketing Calendar](/events/overview).
+- Plan your seasonal pipeline in [Planning](/planning/overview).

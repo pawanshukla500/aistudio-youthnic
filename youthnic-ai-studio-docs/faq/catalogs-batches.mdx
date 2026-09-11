@@ -1,0 +1,28 @@
+---
+title: "Catalogs & Batches FAQ"
+description: "Frequently asked questions regarding multi-SKU campaigns, shared styling across colourways, batch scheduling, and bulk exports."
+---
+
+# Catalogs & Batches FAQ
+
+<AccordionGroup>
+  <Accordion title="Can multiple colourways use the exact same model and lighting?" icon="users">
+    **Yes.** This is the primary purpose of [Catalog Production](/catalog-production/overview). By setting up a catalog campaign, all child colourways inherit the exact same model persona, demographic features, backdrop architecture, camera distance, and lighting temperature. When customers toggle between color swatches on your website, the presentation is 100% consistent.
+  </Accordion>
+
+  <Accordion title="Can I generate multiple SKUs in bulk using a spreadsheet?" icon="file-csv">
+    **Yes.** You can upload a CSV spreadsheet containing hundreds of SKUs, parent style codes, color names, and fabric descriptions. You can then use **Smart-Match** to drop a folder of photos that automatically map to corresponding SKUs based on filename patterns (e.g. `SKU-001_front.jpg`).
+  </Accordion>
+
+  <Accordion title="Can catalog generation runs be scheduled for overnight execution?" icon="clock">
+    **Yes.** From the Generate Catalog dropdown, select **Schedule Generation**. You can schedule heavy batches (30 to 100+ colourways) to render during off-peak night hours (e.g. 11:00 PM – 6:00 AM IST) with automatic queue throttling and morning delivery digests.
+  </Accordion>
+
+  <Accordion title="Can images be downloaded in bulk organized by SKU?" icon="folder-tree">
+    **Yes.** Clicking **Export Entire Catalog (.ZIP)** downloads a structured archive containing individual subfolders named by child SKU, alongside a master `manifest.csv` spreadsheet containing direct public CDN URLs, color hex codes, and product metadata ready for marketplace import.
+  </Accordion>
+
+  <Accordion title="What happens if 2 colourways fail in a batch of 50?" icon="rotate-right">
+    You do **not** have to re-render the successful 48 colourways. Youthnic isolates the 2 failed cards on the production board. You can inspect the diagnostic error, click **Retry Colourway**, and only those 2 items re-render and merge into the finished catalog.
+  </Accordion>
+</AccordionGroup>

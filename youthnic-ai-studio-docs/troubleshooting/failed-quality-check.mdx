@@ -1,0 +1,56 @@
+---
+title: "Failed Quality Validation Check"
+description: "How to handle images flagged by automated QA scorecards for anatomical defects, hand coherence, or color shifts."
+---
+
+# Failed Quality Validation Check
+
+---
+
+## Problem
+
+After generation completes:
+- An image tile displays an amber warning badge `Needs Review` (Score 70–84) or a red badge `Defective` (Score under 70).
+- The image exhibits anatomical anomalies (e.g. six fingers on one hand, unnatural wrist curvature, asymmetrical eyes) or severe garment edge fringing.
+
+[SCREENSHOT REQUIRED:
+Page: Studio (/studio)
+Exact State: Completed photoshoot canvas showing Pose 2 flagged with red badge 'QA Score: 64/100 (Anatomy Alert: Right hand finger count anomalous)'.
+Exact UI Section: Flagged image tile on Studio canvas.
+Recommended Crop: 420x480
+Recommended Dimensions: 420x480
+Filename: troubleshooting-qa-failed-badge.webp]
+
+---
+
+## Possible Causes
+
+1. **Complex Hand-to-Body Occlusion**: Poses where the model rests her hand inside a draped lehenga pocket or grasps a sheer organza dupatta fold can cause finger keypoint ambiguity during diffusion.
+2. **Extreme Perspective / Low Angle Distortion**: Extreme wide-angle camera framing that stretches peripheral limbs.
+3. **Artifact Bleed from Low-Res Reference**: Heavy compression noise in the source photo propagating into the generated model's skin texture.
+
+---
+
+## How to Fix
+
+<Steps>
+  <Step title="Click the QA Badge to Inspect Defects">
+    Click the red or amber badge on the image tile. The **QA Diagnostic Popover** highlights the exact defective zone with a bounding box (e.g. *"Right hand keypoint score: 58/100"*).
+  </Step>
+  <Step title="Use Quick Inpaint / Face & Hand Fix">
+    Click the **Fix Anatomy** icon on the tile hover menu. The system runs an isolated 4-second latent inpainting pass targeted strictly at the hand or face, correcting anatomy without altering the garment or background.
+  </Step>
+  <Step title="Regenerate with Directed Prompt Feedback">
+    If inpainting is insufficient, click **Regenerate**, choose **Directed Revision**, and type: *"Model hands relaxed naturally by side, clear five fingers visible"*. Re-render for 1 credit.
+  </Step>
+  <Step title="Manual Approval Override">
+    If the QA engine flagged an artistic background shadow as a defect but the model and garment look commercially flawless to your eye, click **Approve Override** to mark the image as ready for export.
+  </Step>
+</Steps>
+
+---
+
+## When to Contact Administrator
+
+Contact your administrator if:
+- More than 15% of all generated images are scoring below 70 across different garments, suggesting a need to recalibrate the QA vision model sensitivity threshold in [Admin Settings](/admin/ai-routing-models).

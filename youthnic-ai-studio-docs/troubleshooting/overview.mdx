@@ -1,0 +1,58 @@
+---
+title: "Troubleshooting Overview"
+description: "Directory of solutions, error codes, and recovery steps for common issues encountered in Youthnic AI Studio."
+---
+
+# Troubleshooting Overview
+
+Encountering an unexpected error during image upload, garment analysis, or photoshoot generation can disrupt production deadlines. This section provides structured diagnostic guides for identifying causes and applying immediate fixes.
+
+---
+
+## Standard Troubleshooting Format
+
+Every troubleshooting guide in this section is structured around four clear diagnostic steps:
+1. **Problem**: What symptoms are visible in the UI or generation canvas.
+2. **Possible Cause**: The technical or optical reason behind the failure.
+3. **How to Fix**: Step-by-step actions you can take immediately to resolve the issue.
+4. **When to Contact Administrator**: Circumstances requiring IT or workspace admin intervention.
+
+---
+
+## Quick Navigation Index
+
+<CardGroup cols={2}>
+  <Card title="Product Analysis Failed" icon="magnifying-glass" href="/troubleshooting/product-analysis-failed">
+    AI vision engine cannot extract garment taxonomy or returns empty color swatches.
+  </Card>
+  <Card title="Image Upload & Unsupported Files" icon="file-circle-xmark" href="/troubleshooting/image-upload-unsupported">
+    Files fail to upload, display format errors, or trigger resolution warnings.
+  </Card>
+  <Card title="Generation Failed or Stuck" icon="spinner" href="/troubleshooting/generation-failed-stuck">
+    Renders hang indefinitely at 0%, time out, or throw GPU worker errors.
+  </Card>
+  <Card title="Garment Mismatch / Details Lost" icon="shirt" href="/troubleshooting/product-mismatch-garment-details">
+    Generated image alters neckline cuts, misplaces embroidery, or shifts fabric colors.
+  </Card>
+  <Card title="Failed Quality Validation Check" icon="shield-xmark" href="/troubleshooting/failed-quality-check">
+    Automated QA score falls below 70 due to hand coherence, facial symmetry, or edge artifacts.
+  </Card>
+  <Card title="Catalog Colourway Incomplete" icon="layer-group" href="/troubleshooting/catalog-colourway-incomplete">
+    Preflight errors prevent launching batch generation across multi-SKU campaigns.
+  </Card>
+  <Card title="Authentication & Permission Denied" icon="lock" href="/troubleshooting/auth-permission-denied">
+    Login loops, expired session tokens, or RBAC permission errors.
+  </Card>
+  <Card title="API Provider Outage & Failover" icon="server" href="/troubleshooting/api-provider-outage">
+    Handling upstream AI service interruptions and checking system status.
+  </Card>
+</CardGroup>
+
+---
+
+## Immediate Emergency Checklist
+
+If you encounter unexpected behavior:
+- **Refresh Session**: Press `Ctrl + Shift + R` (`Cmd + Shift + R` on Mac) to clear stale cached state. Your session will automatically restore via local auto-save.
+- **Inspect System Health**: Check [status.youthnic.com](https://status.youthnic.com) or the [System Health](/admin/system-health) console to verify whether cloud workers are operational.
+- **Verify Credits**: Ensure your organization has not exhausted its monthly credit quota.

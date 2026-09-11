@@ -1,0 +1,67 @@
+---
+title: "Retry Failed Colourway"
+description: "How to isolate, diagnose, and retry individual failed colourways without re-running entire catalog batches."
+---
+
+# Retry Failed Colourway
+
+In a batch of 50 colourways, 48 may render flawlessly while 2 encounter an upstream GPU timeout or fail automated anatomy validation. Youthnic AI Studio ensures you never have to re-render the successful 48 items to fix the remaining 2.
+
+```mermaid
+graph TD
+    A[Batch of 50 Colourways] --> B[48 Completed & Validated]
+    A --> C[2 Flagged / Failed]
+    C --> D[Isolate Failed Colourway Cards]
+    D --> E[Inspect Error Log & QA Defect]
+    E --> F[Click 'Retry Colourway' (0 Extra Credits for Failures)]
+    F --> G[Re-render & Join Completed Batch]
+```
+
+---
+
+## Diagnosing Colourway Failure
+
+When a colourway encounters an error, its card on the production board highlights in red with an **Inspection Button**:
+
+[SCREENSHOT REQUIRED:
+Page: Catalog Production (/planning?tab=catalogs)
+Exact State: Failed colourway card highlighted in red border with badge 'Generation Incomplete (Pose 3 Timeout)'.
+Exact UI Section: Failed colourway card.
+Recommended Crop: 450x380
+Recommended Dimensions: 450x380
+Filename: catalog-failed-colourway-card.webp]
+
+Click **Inspect Failure** to view the diagnostic log:
+- **Upstream Worker Timeout**: Temporary cloud GPU disconnect. Automatically retriable.
+- **Garment Delta-E Mismatch**: The generated garment color deviated beyond tolerance from the reference photo.
+- **Anatomy / Pose Coherence**: Detected flawed hand geometry or face distortion.
+
+<Tip>
+If an image fails due to system error or automated QA rejection, **zero credits are charged**. The unused credits are automatically credited back to your account.
+</Tip>
+
+---
+
+## Retrying the Colourway
+
+<Steps>
+  <Step title="Open Error Drawer">
+    Click the **Retry** icon on the failed colourway card.
+  </Step>
+  <Step title="Review or Adjust Conditioning">
+    If the failure was caused by optical blur in the back photo, you can replace the back photo right inside the modal without leaving the catalog.
+  </Step>
+  <Step title="Select Alternate AI Route (Optional)">
+    You can optionally toggle **Route to Fallback AI Provider** to dispatch the job to a secondary model cluster.
+  </Step>
+  <Step title="Click Retry Now">
+    The single colourway re-enters the worker queue. Once rendered, it automatically merges into the completed catalog.
+  </Step>
+</Steps>
+
+---
+
+## Next Steps
+
+- Package and export all finished assets in [Download Catalog Results](/catalog-production/download-results).
+- Explore scheduled drops in [Events & Marketing Calendar](/events/overview).

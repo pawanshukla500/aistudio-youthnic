@@ -1,0 +1,86 @@
+---
+title: "Ready vs. Incomplete Colourways"
+description: "How to filter, organize, and partially launch batch generation while physical samples or reference photos are still arriving."
+---
+
+# Ready vs. Incomplete Colourways
+
+In fast-paced e-commerce production, physical garment samples rarely arrive all at once from the factory. Youthnic AI Studio allows you to start generating photoshoots for **Ready Colourways** immediately while keeping **Incomplete Colourways** staged for later.
+
+```mermaid
+graph TD
+    A[Catalog Campaign: 20 Colourways] --> B[Filter Bar]
+    B --> C[Ready to Render: 14 Colourways]
+    B --> D[Missing Back Photo: 4 Colourways]
+    B --> E[Draft / Missing All Photos: 2 Colourways]
+    C --> F[Launch Partial Batch: 14 Colourways (70 Credits)]
+    D & E --> G[Staged in Workspace Awaiting Assets]
+```
+
+---
+
+## The Readiness Filter Bar
+
+Above the colourway grid, use the segmented filter pills to isolate cards by their operational state:
+
+[SCREENSHOT REQUIRED:
+Page: Catalog Production (/planning?tab=catalogs)
+Exact State: Filter bar showing segmented pills: 'All (24)', 'Ready (18)', 'Incomplete (5)', 'In Progress (0)', 'Completed (1)'.
+Exact UI Section: Colourway readiness filter toolbar.
+Recommended Crop: 900x140
+Recommended Dimensions: 900x140
+Filename: catalog-readiness-filter-pills.webp]
+
+<CardGroup cols={3}>
+  <Card title="Ready (Green)" icon="circle-check">
+    Passed preflight validation, front reference uploaded, styling approved. Eligible for immediate batch execution.
+  </Card>
+  <Card title="Incomplete (Amber)" icon="clock">
+    Missing required front photos or flagged with optical preflight errors. Generation is disabled for these items.
+  </Card>
+  <Card title="Completed (Blue)" icon="square-check">
+    All 5 poses successfully rendered, quality-validated, and available for download.
+  </Card>
+</CardGroup>
+
+---
+
+## Partial Batch Execution
+
+You do not need to wait until every single colorway is ready. You can selectively render available inventory:
+
+[SCREENSHOT REQUIRED:
+Page: Catalog Production (/planning?tab=catalogs)
+Exact State: Checkbox column selected for 12 ready colourways. Floating batch action bar appears at the bottom with button 'Generate Selected (12 Colourways / 60 Credits)'.
+Exact UI Section: Batch action bar at screen bottom.
+Recommended Crop: 950x180
+Recommended Dimensions: 950x180
+Filename: catalog-batch-generate-selected.webp]
+
+<Steps>
+  <Step title="Filter by Ready">
+    Click the **Ready** filter pill to hide all draft or incomplete items.
+  </Step>
+  <Step title="Select Colourways">
+    Check the **Select All Ready** checkbox in the grid header, or manually select specific priority SKUs.
+  </Step>
+  <Step title="Launch Partial Batch">
+    Click **Generate Selected (12 Colourways)**. The system deducts 60 credits and begins rendering immediately without disturbing incomplete cards.
+  </Step>
+</Steps>
+
+---
+
+## Bulk Actions on Staged Colourways
+
+Select multiple colourways using the checkboxes to perform bulk actions:
+- **Bulk Assign Category**: Change the garment archetype for all selected items at once.
+- **Bulk Delete Drafts**: Remove discontinued or cancelled SKUs.
+- **Bulk Request Samples**: Export a checklist of missing reference photos to email to your sampling team or factory.
+
+---
+
+## Next Steps
+
+- Explore generation execution modes in [Generate Catalog](/catalog-production/generate-catalog).
+- Monitor live batch progress in [Production Tracking](/catalog-production/production-tracking).

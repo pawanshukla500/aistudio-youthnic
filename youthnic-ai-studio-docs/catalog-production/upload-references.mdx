@@ -1,0 +1,83 @@
+---
+title: "Upload Product References"
+description: "How to upload and organize physical garment references across multiple colourways in a catalog batch."
+---
+
+# Upload Product References
+
+Managing photo references for dozens of colorways requires structured ingestion. Youthnic AI Studio supports card-by-card drag-and-drop as well as intelligent bulk file matching.
+
+---
+
+## 1. Uploading Directly to Colourway Cards
+
+On the Catalog Production board, each colourway card features dedicated dropzones for required angles:
+
+[SCREENSHOT REQUIRED:
+Page: Catalog Production (/planning?tab=catalogs)
+Exact State: Two adjacent colourway cards on the board. The left card has photos loaded; the right card has an active dropzone with dashed border.
+Exact UI Section: Adjacent colourway cards in catalog grid.
+Recommended Crop: 900x480
+Recommended Dimensions: 900x480
+Filename: catalog-colourway-card-dropzones.webp]
+
+<Steps>
+  <Step title="Drop Front Reference (Mandatory)">
+    Drag the front garment photo into the **Front** tile of the specific colourway. A thumbnail preview appears with a green checkmark.
+  </Step>
+  <Step title="Drop Back Reference (Recommended)">
+    Drag the rear garment photo into the **Back** tile. If a back photo is omitted, the AI uses the shared silhouette to infer the back cut, though uploading a true back shot guarantees 100% seam fidelity.
+  </Step>
+  <Step title="Drop Fabric / Pattern (Optional)">
+    Add a macro swatch shot if the fabric has complex texture or metallic zari threads.
+  </Step>
+</Steps>
+
+---
+
+## 2. Bulk Smart-Match Upload
+
+When you have a folder of hundreds of garment photos named systematically by SKU, you can upload them all in a single batch using **Smart-Match**:
+
+[SCREENSHOT REQUIRED:
+Page: Catalog Production (/planning?tab=catalogs)
+Exact State: Smart-Match upload modal showing 48 files parsed and automatically mapped to 12 colourway SKUs with role badges.
+Exact UI Section: Smart-Match Bulk Upload modal with file mapping list.
+Recommended Crop: 850x580
+Recommended Dimensions: 850x580
+Filename: catalog-smart-match-upload.webp]
+
+### Supported Naming Pattern
+
+Smart-Match automatically assigns roles based on filenames:
+
+```bash
+# General Pattern: [SKU]_[ROLE].[ext]
+YN-ANARKALI-204-MST_front.jpg    --> Mapped to Mustard Gold (Role: Front)
+YN-ANARKALI-204-MST_back.jpg     --> Mapped to Mustard Gold (Role: Back)
+YN-ANARKALI-204-MST_fabric.jpg   --> Mapped to Mustard Gold (Role: Fabric)
+
+YN-ANARKALI-204-NVY_front.png    --> Mapped to Navy Midnight (Role: Front)
+YN-ANARKALI-204-NVY_back.png     --> Mapped to Navy Midnight (Role: Back)
+```
+
+<Tip>
+If your filenames use custom abbreviations (e.g. `_F` for Front or `_B` for Back), you can define custom regex rules in [Admin Settings](/admin/overview).
+</Tip>
+
+---
+
+## Required vs. Optional References
+
+| Reference | Requirement Level | Impact if Omitted |
+| :--- | :--- | :--- |
+| **Front Image** | **Strictly Required** | Colourway cannot be generated without it. |
+| **Back Image** | Highly Recommended | The AI infers back structure from the front and category rules; intricate back tassels or cuts may not match physical garment. |
+| **Fabric Detail** | Optional | Subtle jacquard weaves or metallic luster may be rendered with standard fabric sheen instead of exact micro-texture. |
+
+---
+
+## Next Steps
+
+- Lock consistent styling with [Shared Styling & Model Reference](/catalog-production/shared-styling-model).
+- Run batch validation in [AI Analysis & Preflight](/catalog-production/ai-analysis-preflight).

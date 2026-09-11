@@ -1,0 +1,35 @@
+---
+title: "Garment Fidelity & Styling FAQ"
+description: "Frequently asked questions regarding textile preservation, custom model faces, styling coordination, and five-pose logic."
+---
+
+# Garment Fidelity & Styling FAQ
+
+<AccordionGroup>
+  <Accordion title="How does Youthnic preserve fine garment design and embroidery?" icon="shield-halved">
+    Youthnic does not use generic text-to-image prompts. It utilizes a proprietary multi-layer conditioning pipeline:
+    1. The multi-modal vision engine extracts structural edge maps, neckline depth vectors, and exact sRGB colorimetry swatches.
+    2. A macro texture attention layer locks the weave pattern, metallic specular highlights (zari/gotapatti), and fabric translucency.
+    3. During latent diffusion, spatial ControlNet adapters enforce identical garment boundaries on the model's body across all camera perspectives.
+  </Accordion>
+
+  <Accordion title="Can I regenerate only one image if 4 out of 5 poses are perfect?" icon="rotate">
+    **Yes.** Hover over the specific pose tile you wish to update and click **Regenerate**. You can adjust the prompt or roll a new latent seed. Only that single pose is re-rendered, costing just **1 credit**, while the other 4 completed images remain completely untouched.
+  </Accordion>
+
+  <Accordion title="Why did Pose 4 render a seated model instead of walking?" icon="couch">
+    Pose 4 features context-aware editorial logic:
+    - If your uploaded **Style Reference** contains a seated model,
+    - If the product notes specify relaxed lifestyle wear or kaftans,
+    - Or if the category favors lounging, the AI generates a poised seated shot on a sandstone settee.
+    - To force a walking shot instead: click **Edit Pose 4**, change posture to `Force Walking Motion`, and regenerate for 1 credit.
+  </Accordion>
+
+  <Accordion title="Can I train or upload a custom exclusive model face for my brand?" icon="user-plus">
+    **Yes.** Under Creative Direction, select **Custom Brand Persona**. You can upload 5 to 10 facial reference photos of your contracted model or brand ambassador. Youthnic locks that precise facial morphology, skin tone, and eye shape across all future photoshoots.
+  </Accordion>
+
+  <Accordion title="How does Saree Mode handle pleats and pallu draping?" icon="scroll">
+    When **Saree Mode** is toggled, Youthnic decouples the saree into discrete attention channels: the *Pallu* is routed to the shoulder and back cascade, the *Pleats* are aligned vertically along the waistline, and the *Blouse Piece* informs sleeve cuts and neckline borders, preventing patterns from blending together.
+  </Accordion>
+</AccordionGroup>
