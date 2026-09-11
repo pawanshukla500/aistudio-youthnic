@@ -31,8 +31,10 @@ export function OutputSettings({ value, onChange }: { value: OutputOptions; onCh
         <div className="space-y-5 border-t border-outline-variant/30 bg-white/50 p-5">
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-secondary">Image generation model</label>
-            <select value={value.model || "gpt-image-2"} onChange={(event) => set("model", event.target.value as OutputOptions["model"])} className="h-10 w-full rounded-md border border-outline-variant bg-white px-3 text-sm outline-none focus:border-primary">
-              <option value="gpt-image-2">GPT Image 2 (Default)</option>
+            <select value={value.model || "gpt-image-2.5-sunburst"} onChange={(event) => set("model", event.target.value as OutputOptions["model"])} className="h-10 w-full rounded-md border border-outline-variant bg-white px-3 text-sm outline-none focus:border-primary">
+              <option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst (High Fidelity & Character Memory · Recommended)</option>
+              <option value="gpt-image-2.5-flare">GPT Image 2.5 Flare (High Speed & Low Latency)</option>
+              <option value="gpt-image-2">GPT Image 2 (Legacy)</option>
               <option value="reve-2.1-image">Reve 2.1 Image</option>
             </select>
             <p className="mt-1.5 text-[11px] leading-4 text-secondary">Your organization’s server-side routing is overridden when selecting a specific model here.</p>

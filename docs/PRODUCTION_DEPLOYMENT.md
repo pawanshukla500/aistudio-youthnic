@@ -50,7 +50,7 @@ Recommended stored policy (thinking `low` is also enforced in code):
 | --- | --- | --- |
 | `product_truth` | `meta` / `muse-spark-1.3` (`low`) | `openai` / `gpt-5.6-luna` (`low`) |
 | `qa` | same | same |
-| `image_generation` | `openai` / `gpt-image-2` | none |
+| `image_generation` | `openai` / `gpt-image-2.5-sunburst` | none |
 
 An interim Gemini Flash primary is safe: the 50s timeout covers 30–37s Flash
 completions, and Luna/Terra still run if Flash times out.
@@ -72,7 +72,7 @@ set
 where purpose in ('product_truth', 'qa');
 ```
 
-Leave `image_generation` on `gpt-image-2`. Do not put secrets in SQL or in
+Use `gpt-image-2.5-sunburst` for high-fidelity character memory and garment detail, or `gpt-image-2.5-flare` for 2x faster turnaround at identical token rates. `gpt-image-2` remains supported as legacy fallback. Do not put secrets in SQL or in
 the repo. Required Edge secrets: `META_MODEL_API_KEY`, `OPENAI_API_KEY`,
 `GEMINI_API_KEY`.
 

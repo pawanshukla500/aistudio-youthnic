@@ -58,7 +58,7 @@ export type AiRouteValidationOptions = {
  */
 export const DEFAULT_IMAGE_GENERATION_ROUTE = {
   provider: "openai",
-  model: "gpt-image-2",
+  model: "gpt-image-2.5-sunburst",
   thinkingLevel: "none",
 } as const satisfies NormalizedAiModelRoute;
 
@@ -101,6 +101,8 @@ export const AI_MODEL_REGISTRY: Registry = {
     qa: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
     qa_escalation: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
     image_generation: [
+      "gpt-image-2.5-sunburst",
+      "gpt-image-2.5-flare",
       "gpt-image-2",
       "gpt-image-1.5",
       "gpt-image-1",
@@ -741,7 +743,9 @@ export function preferFastProductTruthRoute(
 
 export function aiModelDisplayLabel(model: string): string {
   const labels: Record<string, string> = {
-    "gpt-image-2": "GPT Image 2 · recommended",
+    "gpt-image-2.5-sunburst": "GPT Image 2.5 Sunburst · high-fidelity/memory (recommended)",
+    "gpt-image-2.5-flare": "GPT Image 2.5 Flare · fast/high-volume",
+    "gpt-image-2": "GPT Image 2 · standard",
     "gpt-image-1.5": "GPT Image 1.5",
     "gpt-image-1": "GPT Image 1",
     "gpt-image-1-mini": "GPT Image 1 Mini",
@@ -775,6 +779,15 @@ export function aiModelHelpText(model: string): string {
   if (text(model) === "gpt-5.6-luna") {
     return "Luna is the cost-efficient GPT 5.6 vision fallback (~$0.20 / 1M input, $1.20 / 1M output). Prefer it over Sol.";
   }
+  if (text(model) === "gpt-image-2.5-sunburst") {
+    return "Sunburst is OpenAI's flagship precision model with enhanced character and garment latent memory, superior fabric detail, and cross-pose identity consistency.";
+  }
+  if (text(model) === "gpt-image-2.5-flare") {
+    return "Flare is OpenAI's speed-optimized model offering up to 50% lower latency for rapid iterations and high-volume catalog production at identical token pricing.";
+  }
+  if (text(model) === "gpt-image-2") {
+    return "GPT Image 2 is OpenAI's previous-generation image synthesis model.";
+  }
   return "";
 }
 
@@ -783,6 +796,7 @@ export function preferredModelId(
   models: readonly string[],
 ): string {
   if (!models.length) return "";
+  if (provider === "openai" && models.includes("gpt-image-2.5-sunburst")) return "gpt-image-2.5-sunburst";
   if (provider === "openai" && models.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
   if (provider === "meta" && models.includes("muse-spark-1.3")) return "muse-spark-1.3";
   if (provider === "gemini" && models.includes("gemini-3.8-flash")) return "gemini-3.8-flash";

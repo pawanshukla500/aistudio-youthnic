@@ -16,6 +16,8 @@ const registry: AdminAiRegistryEntry[] = [
     models: [
       { id: "gpt-5.6-luna", label: "GPT 5.6 Luna", purposes: ["product_truth", "qa"], thinkingLevels: ["none", "low"] },
       { id: "gpt-5.6-sol", label: "GPT 5.6 Sol", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "high"] },
+      { id: "gpt-image-2.5-sunburst", label: "GPT Image 2.5 Sunburst", purposes: ["image_generation"], thinkingLevels: ["none"] },
+      { id: "gpt-image-2.5-flare", label: "GPT Image 2.5 Flare", purposes: ["image_generation"], thinkingLevels: ["none"] },
       { id: "gpt-image-2", label: "GPT Image 2", purposes: ["image_generation"], thinkingLevels: ["none"] },
     ],
   },
@@ -74,5 +76,12 @@ Deno.test("new vision routing prefers Gemini Flash then Luna when both are confi
   assertEquals(
     preferredModelId("openai", modelsForProviderPurpose(registry, "openai", "product_truth")),
     "gpt-5.6-luna",
+  );
+});
+
+Deno.test("preferred image generation model is Sunburst over Flare and legacy GPT Image 2", () => {
+  assertEquals(
+    preferredModelId("openai", modelsForProviderPurpose(registry, "openai", "image_generation")),
+    "gpt-image-2.5-sunburst",
   );
 });
