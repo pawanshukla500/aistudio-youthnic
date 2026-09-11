@@ -1143,17 +1143,13 @@ export function classifyVisionProviderFailure(
     );
   }
 
-  const rawMessage = typeof input.message === "string" ? input.message.trim() : "";
-  const diagnostic = rawMessage && !rawMessage.toLowerCase().includes("the vision provider could not complete")
-    ? rawMessage
-    : "Review the provider configuration and request details.";
   return failure(
     provider,
     "provider_request_failed",
     status,
     false,
     true,
-    `The vision provider could not complete this request (${provider}). ${diagnostic}`,
+    "The selected vision provider could not complete this request. The request can use a configured fallback; review provider configuration and product references if all routes fail.",
   );
 }
 
