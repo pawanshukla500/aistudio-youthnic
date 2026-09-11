@@ -731,6 +731,8 @@ export function Admin() {
             : undefined,
         })),
       });
+      window.dispatchEvent(new Event("supabase-backend-refresh"));
+      window.dispatchEvent(new Event("workspace-refresh"));
       setNotice({ tone: "success", text: "AI model routing policies were saved. New Studio and Catalog jobs will use the configured image-generation model." });
     } catch (reason) {
       setNotice({ tone: "error", text: getErrorMessage(reason, "Could not save AI model policies.") });
@@ -1163,7 +1165,7 @@ export function Admin() {
                         {policy.primaryProvider === "qwen" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Qwen structured vision runs with thinking off so the Product Truth JSON contract remains reliable.</p>}
                         {policy.primaryProvider === "meta" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Muse Spark 1.3 Standard is recommended for fashion product data (~$1.25 / 1M input, $4.25 / 1M output). Contributor is cheaper (~$0.10 / $0.20) but Meta may train on prompts — do not select it unless the organization opts in. Reasoning cannot be turned off.</p>}
                         {primaryModels.find((model) => model.id === policy.primaryModel)?.help && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">{primaryModels.find((model) => model.id === policy.primaryModel)?.help}</p>}
-                        {policy.purpose === "image_generation" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">GPT Image 2 is the default production image model. Gemini, Qwen, and Muse Spark are available only for vision analysis or QA until a separately tested image-generation adapter is added.</p>}
+                        {policy.purpose === "image_generation" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">GPT Image 2.5 (Sunburst and Flare) and GPT Image 2 are supported for production catalog generation. Gemini, Qwen, and Muse Spark are available only for vision analysis or QA until a separately tested image-generation adapter is added.</p>}
                         {policy.repairRequired && <p className="mt-3 rounded-lg border border-warning/25 bg-warning-surface px-3 py-2 text-xs leading-5 text-warning">{policy.repairMessage || "This stored policy needs review. Save the displayed route to repair it."}</p>}
                       </div>
 

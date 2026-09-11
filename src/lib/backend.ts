@@ -37,6 +37,7 @@ export const api = {
   admin: { overview: "admin.overview", upsertTeam: "admin.upsertTeam", updateRolePermissions: "admin.updateRolePermissions", updateAutomationSettings: "admin.updateAutomationSettings", updateAiModelPolicies: "admin.updateAiModelPolicies", probeAiRoute: "admin.probeAiRoute", syncOpenAiUsage: "admin.syncOpenAiUsage" },
   authActions: { createUser: "authActions.createUser", updateMemberAccess: "authActions.updateMemberAccess", deleteMember: "authActions.deleteMember" },
   profile: { update: "profile.update" },
+  ai: { getEffectiveRouting: "ai.routing.effective" },
 } as const;
 
 function refreshBackend() {
@@ -708,6 +709,7 @@ async function queryBackend(endpoint: BackendEndpoint, args: Record<string, any>
     case api.catalog.get: return getCatalog(String(args.catalogId));
     case api.eventIntelligence.roadmap: return roadmap(args);
     case api.admin.overview: return adminOverview(args);
+    case api.ai.getEffectiveRouting: return invokeAppApi("ai.routing.effective", args);
     default: throw new Error(`Unsupported Supabase query: ${endpoint}`);
   }
 }

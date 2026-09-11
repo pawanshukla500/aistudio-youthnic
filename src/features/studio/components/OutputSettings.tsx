@@ -2,9 +2,20 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
 import type { OutputOptions } from "../types";
 
-export function OutputSettings({ value, onChange }: { value: OutputOptions; onChange: (value: OutputOptions) => void }) {
+export function OutputSettings({
+  value,
+  onChange,
+  orgModel,
+  orgModelLabel,
+}: {
+  value: OutputOptions;
+  onChange: (value: OutputOptions) => void;
+  orgModel?: OutputOptions["model"];
+  orgModelLabel?: string;
+}) {
   const [isOpen, setIsOpen] = useState(false);
   const set = <K extends keyof OutputOptions>(key: K, next: OutputOptions[K]) => onChange({ ...value, [key]: next });
+  const activeModel = value.model || orgModel || "gpt-image-2.5-sunburst";
 
   return (
     <div className="w-full">
@@ -19,7 +30,9 @@ export function OutputSettings({ value, onChange }: { value: OutputOptions; onCh
           </div>
           <div>
             <h2 className="text-base font-bold text-on-surface">Output settings</h2>
-            <p className="mt-0.5 text-xs text-secondary">Image generation · {value.model} · {value.aspectRatio} · {value.imageSize} · {value.quality} quality</p>
+            <p className="mt-0.5 text-xs text-secondary">
+              Image generation · {activeModel} · {value.aspectRatio} · {value.imageSize} · {value.quality} quality
+            </p>
           </div>
         </div>
         <div className="text-secondary">
@@ -30,14 +43,39 @@ export function OutputSettings({ value, onChange }: { value: OutputOptions; onCh
       {isOpen && (
         <div className="space-y-5 border-t border-outline-variant/30 bg-white/50 p-5">
           <div>
-            <label className="mb-1.5 block text-xs font-semibold text-secondary">Image generation model</label>
-            <select value={value.model || "gpt-image-2.5-sunburst"} onChange={(event) => set("model", event.target.value as OutputOptions["model"])} className="h-10 w-full rounded-md border border-outline-variant bg-white px-3 text-sm outline-none focus:border-primary">
-              <option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst (High Fidelity & Character Memory · Recommended)</option>
-              <option value="gpt-image-2.5-flare">GPT Image 2.5 Flare (High Speed & Low Latency)</option>
-              <option value="gpt-image-2">GPT Image 2 (Legacy)</option>
-              <option value="reve-2.1-image">Reve 2.1 Image</option>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="block text-xs font-semibold text-secondary">Image generation model</label>
+              {orgModel && (
+                <span className="rounded-md bg-pink-50 px-2 py-0.5 text-[10px] font-bold text-primary">
+                  Admin route: {orgModelLabel || orgModel}
+                </span>
+              )}
+            </div>
+            <select
+              value={activeModel}
+              onChange={(event) => set("model", event.target.value as OutputOptions["model"])}
+              className="h-10 w-full rounded-md border border-outline-variant bg-white px-3 text-sm outline-none focus:border-primary"
+            >
+              <option value="gpt-image-2.5-sunburst">
+                GPT Image 2.5 Sunburst (High Fidelity & Character Memory){orgModel === "gpt-image-2.5-sunburst" ? " · Active Org Route" : ""}
+              </option>
+              <option value="gpt-image-2.5-flare">
+                GPT Image 2.5 Flare (High Speed & Low Latency){orgModel === "gpt-image-2.5-flare" ? " · Active Org Route" : ""}
+              </option>
+              <option value="gpt-image-2">
+                GPT Image 2 (Legacy Production){orgModel === "gpt-image-2" ? " · Active Org Route" : ""}
+              </option>
+              <option value="reve-2.1-image">
+                Reve 2.1 Image{orgModel === "reve-2.1-image" ? " · Active Org Route" : ""}
+              </option>
             </select>
-            <p className="mt-1.5 text-[11px] leading-4 text-secondary">Your organization’s server-side routing is overridden when selecting a specific model here.</p>
+            <p className="mt-1.5 text-[11px] leading-4 text-secondary">
+              {value.model && orgModel && value.model !== orgModel
+                ? `Custom override selected for this session. Organization default set in Administration is ${orgModelLabel || orgModel}.`
+                : orgModel
+                  ? `Using your organization's configured default model (${orgModelLabel || orgModel}) from Administration.`
+                  : "Your organization’s server-side routing is automatically applied unless overridden."}
+            </p>
           </div>
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-secondary">Model identity</label>
