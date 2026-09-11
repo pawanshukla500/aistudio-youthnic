@@ -7336,6 +7336,19 @@ Deno.serve(async (request) => {
       "admin.updateAutomationSettings": () => updateAutomationSettingsOperation(request, args),
       "admin.updateAiModelPolicies": () => updateAiModelPoliciesOperation(request, args),
       "admin.probeAiRoute": () => probeAiRouteOperation(request, args),
+      "ai.routing.effective": async () => {
+        const { workspace } = await workspaceFor(request);
+        const imagePolicy = await resolveImageGenerationPolicy(workspace.organization.id);
+        return {
+          imageGeneration: {
+            provider: imagePolicy.provider,
+            model: imagePolicy.model,
+            thinkingLevel: imagePolicy.thinkingLevel,
+            displayLabel: aiModelDisplayLabel(imagePolicy.model),
+            source: imagePolicy.source,
+          },
+        };
+      },
       "profile.update": () => updateOwnProfileOperation(request, args),
       "usage.sync": () => syncOpenAiUsageOperation(request, args),
       "files.saveReference": () => saveReferenceOperation(request, args),

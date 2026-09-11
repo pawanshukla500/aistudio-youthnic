@@ -374,6 +374,40 @@ Deno.test("the former 30,282-character false preflight block is accepted below t
   );
 });
 
+Deno.test("ultra-long saree session exceeding 33,000 chars raw prompt is compacted safely below 31,500 chars without error", () => {
+  const session = fidelitySareeSession() as any;
+  // Populate 16 extensive regional evidence items to simulate an extensive saree product analysis
+  session.productIdentity.garmentEvidence = Array.from({ length: 16 }, (_, i) => ({
+    region: `region-${i + 1}-detail-zone`,
+    state: "confirmed",
+    sourceRole: "saree_full_front",
+    visibleConstruction: `Complex intricate weave construction with zari inlay for zone ${i + 1}. ` + "texture pattern warp weft ".repeat(15),
+    visibleDecoration: `Rich traditional border motifs with fine metallic zari threadwork for zone ${i + 1}. ` + "peacock floral vine ".repeat(15),
+    closures: "None",
+    explicitlyAbsent: ["None"],
+    uncertainty: "None",
+  }));
+
+  const prompt = composeGenerationPrompt({
+    skuName: "ROYAL-BANARASI-SAREE-HEAVY-WORK",
+    productDetails: "Traditional pure silk saree with heavy zari work across all zones.",
+    pose: sareePose() as any,
+    session,
+    references: [
+      { role: "saree_full_front" },
+      { role: "saree_pallu_spread" },
+      { role: "saree_body_detail" },
+      { role: "saree_border_tassels" },
+    ],
+  });
+
+  assertEquals(prompt.length <= IMAGE_PROMPT_SAFE_CHARS, true);
+  assertEquals(prompt.length <= 31_500, true);
+  assertStringIncludes(prompt, "SAREE TRUTH - CRITICAL:");
+  assertStringIncludes(prompt, "SAREE DRAPE PLAN:");
+  assertStringIncludes(prompt, "Product accuracy is more important than style matching.");
+});
+
 Deno.test("oversized canonical saree truth is blocked locally before a provider request", () => {
   const session = fidelitySareeSession() as any;
   session.productIdentity.sareeTruth.body.baseColor = `olive ${"detail ".repeat(2_000)}`;

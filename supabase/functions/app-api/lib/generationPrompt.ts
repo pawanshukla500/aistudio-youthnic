@@ -41,6 +41,27 @@ function boundedStrings(value: unknown, maxItems = 16, maxChars = 360) {
   return (Array.isArray(value) ? value : []).slice(0, maxItems).map((entry) => boundedText(entry, maxChars));
 }
 
+function cleanObject(input: unknown, depth = 0): unknown {
+  if (depth > 6) return input;
+  if (input === null || input === undefined) return undefined;
+  if (typeof input === "string") {
+    return input.trim() === "" ? undefined : input;
+  }
+  if (Array.isArray(input)) {
+    const cleaned = input
+      .map((item) => cleanObject(item, depth + 1))
+      .filter((item) => item !== undefined && (typeof item !== "string" || item.trim() !== ""));
+    return cleaned.length === 0 ? undefined : cleaned;
+  }
+  if (typeof input === "object") {
+    const entries = Object.entries(input as Record<string, unknown>)
+      .map(([key, value]) => [key, cleanObject(value, depth + 1)])
+      .filter(([, value]) => value !== undefined);
+    return entries.length === 0 ? undefined : Object.fromEntries(entries);
+  }
+  return input;
+}
+
 function compactJson(value: unknown, options: { maxString?: number; maxItems?: number; maxKeys?: number; maxDepth?: number } = {}) {
   const maxString = options.maxString ?? 480;
   const maxItems = options.maxItems ?? 16;
@@ -48,16 +69,23 @@ function compactJson(value: unknown, options: { maxString?: number; maxItems?: n
   const maxDepth = options.maxDepth ?? 5;
   const compact = (input: unknown, depth = 0): unknown => {
     if (typeof input === "string") return boundedText(input, maxString);
-    if (Array.isArray(input)) return input.slice(0, maxItems).map((entry) => compact(entry, depth + 1));
+    if (Array.isArray(input)) {
+      return input
+        .slice(0, maxItems)
+        .map((entry) => compact(entry, depth + 1))
+        .filter((entry) => entry !== undefined && entry !== "" && (typeof entry !== "object" || Object.keys(entry as object).length > 0));
+    }
     if (input && typeof input === "object") {
       if (depth >= maxDepth) return "[nested detail omitted]";
-      return Object.fromEntries(
-        Object.entries(input as JsonRecord).slice(0, maxKeys).map(([key, entry]) => [key, compact(entry, depth + 1)]),
-      );
+      const entries = Object.entries(input as JsonRecord)
+        .map(([key, entry]) => [key, compact(entry, depth + 1)])
+        .filter(([, val]) => val !== undefined && val !== "" && (typeof val !== "object" || Object.keys(val as object).length > 0))
+        .slice(0, maxKeys);
+      return Object.fromEntries(entries);
     }
     return input;
   };
-  return JSON.stringify(compact(value)) ?? "";
+  return JSON.stringify(compact(cleanObject(value))) ?? "{}";
 }
 
 function knownFields(value: unknown, fields: string[]) {
@@ -83,7 +111,7 @@ function canonicalSareeTruth(value: unknown) {
       "hasBlouse", "color", "fabric", "frontConstruction", "backConstruction", "neckline", "sleeves", "ties", "closure", "embroidery", "border", "pattern", "fit", "isUnstitchedPiece",
     ]),
     physics: knownFields(truth.physics, ["weight", "stiffness", "fluidity", "transparency", "shine", "creaseBehavior", "expectedFall"]),
-    regionEvidence: regionEvidence.map((entry) => {
+    regionEvidence: regionEvidence.slice(0, 16).map((entry) => {
       const record = objectValue(entry);
       return {
         ...knownFields(record, ["region", "state", "visibleConstruction", "visibleDecoration", "closures", "explicitlyAbsent", "uncertainty"]),
@@ -109,7 +137,7 @@ function productCore(value: JsonRecord) {
 }
 
 function requiredJsonSection(section: string, value: unknown, maxChars: number) {
-  const json = JSON.stringify(value) ?? "{}";
+  const json = JSON.stringify(cleanObject(value)) ?? "{}";
   if (json.length > maxChars) throw new GenerationPromptBudgetError(section, json.length, maxChars);
   return json;
 }
@@ -213,6 +241,73 @@ function compactOptionalPromptContent(prompt: string) {
     ["\nCONTINUOUS LEARNING ADVISORY (APPROVED, REFERENCE-SCOPED GUIDANCE):", "\n\nPROMPT:"],
     700,
   );
+  return compacted;
+}
+
+export function compactFullPromptSafely(prompt: string): string {
+  if (prompt.length <= IMAGE_PROMPT_SAFE_CHARS) return prompt;
+
+  // Tier 1: Trim optional advisory, learning, user notes, styling, and fashion knowledge
+  let compacted = compactOptionalPromptContent(prompt);
+  if (compacted.length <= IMAGE_PROMPT_SAFE_CHARS) return compacted;
+
+  // Tier 2: Compact evidence lines if garment evidence block is excessively long
+  compacted = compactPromptBlock(
+    compacted,
+    "\nGARMENT TRUTH CONTRACT (EVIDENCE BY REGION):\n",
+    ["\nDetail placement hard locks:\n", "\nNegative-evidence hard locks:\n", "\nCRITICAL EVIDENCE RULES:"],
+    3_500,
+  );
+  if (compacted.length <= IMAGE_PROMPT_SAFE_CHARS) return compacted;
+
+  // Tier 3: Compact reference authority, background set continuity, and prohibited changes boilerplate
+  compacted = compactPromptBlock(
+    compacted,
+    "Reference authority: ",
+    ["\n- Product references may be flat-lay", "\nGARMENT TRUTH CONTRACT"],
+    600,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nLOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:\n",
+    ["\nAPPROVED STYLING PLAN", "\nSTYLING ADDITION", "\nALLOWED DELTA"],
+    1_000,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nREALISTIC INTEGRATION:\n",
+    ["\nPROHIBITED UNRELATED CHANGES:"],
+    800,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nPROHIBITED UNRELATED CHANGES:\n",
+    ["\nProduct accuracy is more important than style matching."],
+    900,
+  );
+  if (compacted.length <= IMAGE_PROMPT_SAFE_CHARS) return compacted;
+
+  // Tier 4: Further compact evidence lines down to 2,000 chars if still over budget
+  compacted = compactPromptBlock(
+    compacted,
+    "\nGARMENT TRUTH CONTRACT (EVIDENCE BY REGION):\n",
+    ["\nDetail placement hard locks:\n", "\nNegative-evidence hard locks:\n", "\nCRITICAL EVIDENCE RULES:"],
+    2_000,
+  );
+  if (compacted.length <= IMAGE_PROMPT_SAFE_CHARS) return compacted;
+
+  // Tier 5: Absolute guarantee / Hard Fail-Safe.
+  // OpenAI hard reject is 32,000 chars. We preserve the beginning up to the closing directive.
+  const closingMarker = "\nProduct accuracy is more important than style matching.";
+  const closingIndex = compacted.lastIndexOf(closingMarker);
+  if (closingIndex > 0) {
+    const closingText = compacted.slice(closingIndex);
+    const budgetForPrefix = IMAGE_PROMPT_SAFE_CHARS - closingText.length - 80;
+    if (budgetForPrefix > 5_000) {
+      compacted = `${compacted.slice(0, budgetForPrefix).trimEnd()}\n\n[Prompt sections safely compacted within provider limits]\n${closingText}`;
+    }
+  }
+
   return compacted;
 }
 
@@ -366,13 +461,25 @@ export function composeGenerationPrompt(args: {
   const categoryRules = poseCategoryRules(poseCategory);
   const evidenceLines = promptEvidence.slice(0, 16).map((entry) => {
     const row = objectValue(entry);
-    return `- Region ${boundedText(row.region, 120).toUpperCase() || "UNKNOWN"}: [State: ${boundedText(row.state, 80)}]
-  Source: ${boundedText(row.sourceRole ?? row.source_role, 80) || "UNRECORDED"}
-  Construction: ${boundedText(row.visibleConstruction, 360) || "None explicitly proven"}
-  Decoration/Trim: ${boundedText(row.visibleDecoration, 360) || "None explicitly proven"}
-  Closures: ${boundedText(row.closures, 240) || "None"}
-  Absent: ${boundedStrings(row.explicitlyAbsent, 12, 180).join(", ") || "None"}
-  Uncertainty: ${boundedText(row.uncertainty, 260) || "None"}`;
+    const lines = [
+      `- Region ${boundedText(row.region, 120).toUpperCase() || "UNKNOWN"}: [State: ${boundedText(row.state, 80)}]`,
+      `  Source: ${boundedText(row.sourceRole ?? row.source_role, 80) || "UNRECORDED"}`,
+      `  Construction: ${boundedText(row.visibleConstruction, 360) || "None explicitly proven"}`,
+      `  Decoration/Trim: ${boundedText(row.visibleDecoration, 360) || "None explicitly proven"}`,
+    ];
+    const closures = String(row.closures || "").trim();
+    if (closures && closures.toLowerCase() !== "none") {
+      lines.push(`  Closures: ${boundedText(closures, 240)}`);
+    }
+    const absentItems = boundedStrings(row.explicitlyAbsent, 12, 180).filter((s) => s && s.toLowerCase() !== "none");
+    if (absentItems.length > 0) {
+      lines.push(`  Absent: ${absentItems.join(", ")}`);
+    }
+    const uncertainty = String(row.uncertainty || "").trim();
+    if (uncertainty && uncertainty.toLowerCase() !== "none") {
+      lines.push(`  Uncertainty: ${boundedText(uncertainty, 260)}`);
+    }
+    return lines.join("\n");
   }).join("\n");
   const bottomWear = recordedBottomWearDetails(product);
   const hasBottomWear = hasRecordedBottomWear(product);
@@ -555,6 +662,6 @@ ${args.pose.id === "closeup" ? "- POSE 5 HARD RULE: this is a genuine ZOOMED-IN 
 Product accuracy is more important than style matching. Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
 
   return assertGenerationPromptWithinLimit(
-    prompt.length > IMAGE_PROMPT_SAFE_CHARS ? compactOptionalPromptContent(prompt) : prompt,
+    prompt.length > IMAGE_PROMPT_SAFE_CHARS ? compactFullPromptSafely(prompt) : prompt,
   );
 }

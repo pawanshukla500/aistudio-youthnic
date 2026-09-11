@@ -100,6 +100,17 @@ export function Studio() {
   const autoAnalyzeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { data: submittedJob, error: _submittedJobError } = useQuery(api.jobs.get, submittedJobId ? { jobId: submittedJobId } : "skip");
   const { data: queuePosition, error: _queuePositionError } = useQuery(api.jobs.getQueuePosition, submittedJobId && submittedJob?.status === "queued" ? { jobId: submittedJobId } : "skip");
+  const { data: effectiveRouting } = useQuery(api.ai.getEffectiveRouting, organization?._id ? { organizationId: organization._id } : "skip");
+
+  const orgModel = (effectiveRouting as any)?.imageGeneration?.model as OutputOptions["model"] | undefined;
+  const orgModelLabel = (effectiveRouting as any)?.imageGeneration?.displayLabel as string | undefined;
+  const userOverrodeModelRef = useRef(false);
+
+  useEffect(() => {
+    if (orgModel && !userOverrodeModelRef.current) {
+      setOptions((prev) => (prev.model === orgModel ? prev : { ...prev, model: orgModel }));
+    }
+  }, [orgModel]);
 
   const allReferences = useMemo(
     () => [...Object.values(productReferences).filter(Boolean), ...(modelReference ? [modelReference] : []), ...styleReferences] as StudioReference[],
@@ -184,6 +195,9 @@ export function Studio() {
   };
 
   const updateOptions = (next: OutputOptions) => {
+    if (next.model !== options.model) {
+      userOverrodeModelRef.current = true;
+    }
     if (
       next.modelIdentity !== options.modelIdentity ||
       next.backgroundStyle !== options.backgroundStyle
@@ -622,7 +636,7 @@ export function Studio() {
           </section>
 
           <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm">
-            <OutputSettings value={options} onChange={updateOptions} />
+            <OutputSettings value={options} onChange={updateOptions} orgModel={orgModel} orgModelLabel={orgModelLabel} />
           </section>
 
           <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all overflow-hidden">
