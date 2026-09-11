@@ -18,7 +18,7 @@ Convex is no longer a runtime dependency of this application.
 | Secure AI calls, administration, generation workers | Supabase Edge Function `app-api` |
 | Scheduled catalog processing and stale-job recovery | Supabase Cron + `pg_net` |
 | Product/reference analysis and five-pose planning | Gemini Vision |
-| Final image generation | OpenAI `gpt-image-2` |
+| Final image generation | OpenAI `gpt-image-2.5-sunburst` (default high-fidelity/memory), `gpt-image-2.5-flare` (high speed), `gpt-image-2` |
 | Consistency validation and retry decisions | Gemini Vision QA |
 
 The frontend sends the current Firebase ID token to Supabase. RLS maps the Firebase UID to `organization_members.firebase_uid`, then enforces organization and permission access.
@@ -31,7 +31,7 @@ The frontend sends the current Firebase ID token to Supabase. RLS maps the Fireb
 4. The analysis and plan are fingerprinted. Changing any reference marks both stale and generation cannot start until they are rebuilt.
 5. A persistent generation session locks the product, model identity, face, hair, styling, scene, lighting, accessories, footwear, ratio, and pose plan.
 6. Supabase claims one generation task at a time. Pose 1 becomes the approved visual anchor for poses 2–5, but original product references always remain the highest-priority source of truth.
-7. Each pose is generated with `gpt-image-2`, checked against the product profile and set identity, and retried automatically when QA fails.
+7. Each pose is generated with `gpt-image-2.5-sunburst` (or user/tenant configured model), checked against the product profile and set identity, and retried automatically when QA fails.
 
 Every new completed image is uploaded to the private `catalog-assets` Supabase Storage bucket before the pose is marked complete. Supabase stores the durable object path, generation status, prompt/QA metadata, provider request ID, reported token usage, and calculated cost. Readers mint short-lived signed URLs; historical Firebase paths remain readable and cleanup is backend-aware during migration. Deleting a job from History removes its database records and generated objects from the recorded backend; stopping a job preserves images that already completed.
 

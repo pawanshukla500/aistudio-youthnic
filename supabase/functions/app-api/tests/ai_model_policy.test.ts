@@ -37,11 +37,13 @@ import {
 Deno.test("vision registry keeps image generation on approved OpenAI image models", () => {
   assertEquals(DEFAULT_IMAGE_GENERATION_ROUTE, {
     provider: "openai",
-    model: "gpt-image-2",
+    model: "gpt-image-2.5-sunburst",
     thinkingLevel: "none",
   });
   assertEquals(defaultImageGenerationRoute(), DEFAULT_IMAGE_GENERATION_ROUTE);
   assertEquals(allowedModelsForPurpose("openai", "image_generation"), [
+    "gpt-image-2.5-sunburst",
+    "gpt-image-2.5-flare",
     "gpt-image-2",
     "gpt-image-1.5",
     "gpt-image-1",
@@ -49,14 +51,28 @@ Deno.test("vision registry keeps image generation on approved OpenAI image model
   ]);
   assertEquals(
     validateAiModelRoute(
-      { provider: "openai", model: "gpt-image-2" },
+      { provider: "openai", model: "gpt-image-2.5-sunburst" },
       "image_generation",
     ),
     {
       valid: true,
       route: {
         provider: "openai",
-        model: "gpt-image-2",
+        model: "gpt-image-2.5-sunburst",
+        thinkingLevel: "none",
+      },
+    },
+  );
+  assertEquals(
+    validateAiModelRoute(
+      { provider: "openai", model: "gpt-image-2.5-flare" },
+      "image_generation",
+    ),
+    {
+      valid: true,
+      route: {
+        provider: "openai",
+        model: "gpt-image-2.5-flare",
         thinkingLevel: "none",
       },
     },

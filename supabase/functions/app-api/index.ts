@@ -385,6 +385,8 @@ type ProviderUsage = {
 };
 
 const IMAGE_TOKEN_RATES: Record<string, { textInput: number; imageInput: number; imageOutput: number }> = {
+  "gpt-image-2.5-sunburst": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
+  "gpt-image-2.5-flare": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
   "gpt-image-2": { textInput: 2.5, imageInput: 20, imageOutput: 50 },
   "gpt-image-1.5": { textInput: 2.5, imageInput: 20, imageOutput: 50 },
   "gpt-image-1": { textInput: 2.5, imageInput: 20, imageOutput: 50 },
@@ -1662,7 +1664,7 @@ async function analyze(request: Request, args: JsonRecord) {
 }
 
 function normalizeImageSize(aspectRatio: string, imageSize: string, model: string) {
-  if (model !== "gpt-image-2") {
+  if (!["gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare"].includes(model)) {
     if (["3:4", "2:3", "4:5", "9:16"].includes(aspectRatio)) return "1024x1536";
     if (["16:9", "3:2"].includes(aspectRatio)) return "1536x1024";
     return "1024x1024";
