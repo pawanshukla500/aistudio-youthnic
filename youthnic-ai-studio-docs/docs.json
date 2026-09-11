@@ -180,8 +180,8 @@
     ]
   },
   "logo": {
-    "light": "/images/logo-light.svg",
-    "dark": "/images/logo-dark.svg"
+    "light": "/images/logo-light.png",
+    "dark": "/images/logo-dark.png"
   },
   "background": {
     "color": {

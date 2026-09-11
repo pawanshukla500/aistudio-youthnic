@@ -2,8 +2,8 @@
   "$schema": "https://mintlify.com/schema.json",
   "name": "Youthnic AI Studio",
   "logo": {
-    "dark": "/images/logo-dark.svg",
-    "light": "/images/logo-light.svg"
+    "dark": "/images/logo-dark.png",
+    "light": "/images/logo-light.png"
   },
   "favicon": "/images/favicon.svg",
   "colors": {
