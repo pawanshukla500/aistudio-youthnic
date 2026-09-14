@@ -273,9 +273,9 @@ export const OPENAI_TERRA_VISION_ROUTE = {
  * `ai_runs` shows only Muse `attempt_number=1` at ~50011ms.
  *
  * The Studio client now waits `STUDIO_ANALYZE_TIMEOUT_MS` (140s), matching
- * `VISION_GATEWAY_BUDGET_MS`. Product-truth still must not give Muse a 50s
- * first hop: Gemini Flash (~27s live) runs first, Muse is capped at 25s and
- * runs last so a Muse-first org policy cannot brick Analyze.
+ * `VISION_GATEWAY_BUDGET_MS`. Product-truth default hops budget standard models
+ * (Gemini Flash, Luna) at 40s and heavier reasoning models (Terra, Muse) at 25s
+ * so subsequent failover hops always have sufficient remaining gateway time.
  */
 export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
 export const STUDIO_INVOKE_BUDGET_MS = STUDIO_ANALYZE_TIMEOUT_MS;
@@ -348,8 +348,13 @@ export function isSlowProductTruthHop(
 }
 
 export function productTruthHopTimeoutMs(
-  route?: Pick<NormalizedAiModelRoute, "provider" | "model"> | null,
-) {
+  providerOrRoute?: AiProvider | Pick<NormalizedAiModelRoute, "provider" | "model"> | null,
+  model?: string,
+): number {
+  if (!providerOrRoute) return PRODUCT_TRUTH_TIMEOUT_MS;
+  const route = typeof providerOrRoute === "string"
+    ? { provider: providerOrRoute, model: model || "" }
+    : providerOrRoute;
   if (isSlowProductTruthHop(route)) return PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS;
   return PRODUCT_TRUTH_TIMEOUT_MS;
 }

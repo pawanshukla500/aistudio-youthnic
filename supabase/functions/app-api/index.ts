@@ -1304,10 +1304,11 @@ async function openAiVisionJson(
     return await openAiResponsesVisionJson(route, parts, timeoutMs);
   } catch (error) {
     const classified = asVisionProviderError(error, route);
-    if (classified.failure.status === 404) {
-      return openAiCompatibleVisionJson(route, parts, "openai", timeoutMs);
+    try {
+      return await openAiCompatibleVisionJson(route, parts, "openai", timeoutMs);
+    } catch {
+      throw classified;
     }
-    throw classified;
   }
 }
 
