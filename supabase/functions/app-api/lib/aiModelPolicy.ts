@@ -238,23 +238,10 @@ export function defaultThinkingLevel(
 }
 
 /**
- * OpenAI Terra is the default Studio analyze and pose writing primary:
- * deep structured visual reasoning, accurate saree drape mapping, and
- * photorealistic 5-pose prompt composition. Luna is the fast, cost-efficient
- * fallback. Gemini 3.8 Flash and Muse Spark are subsequent failovers.
+ * Gemini 3.8 Flash is the Studio analyze primary: live multi-image completions
+ * average ~27s. Muse Spark remains allowed and is attempted last at ≤25s.
+ * Luna is the cheap OpenAI fallback — never Sol.
  */
-export const OPENAI_TERRA_VISION_ROUTE = {
-  provider: "openai",
-  model: "gpt-5.6-terra",
-  thinkingLevel: "low",
-} as const satisfies NormalizedAiModelRoute;
-
-export const CHEAP_OPENAI_VISION_ROUTE = {
-  provider: "openai",
-  model: "gpt-5.6-luna",
-  thinkingLevel: "low",
-} as const satisfies NormalizedAiModelRoute;
-
 export const FAST_PRODUCT_TRUTH_ROUTE = {
   provider: "meta",
   model: "muse-spark-1.3",
@@ -267,7 +254,17 @@ export const FAST_PRODUCT_TRUTH_GEMINI_ROUTE = {
   thinkingLevel: "low",
 } as const satisfies NormalizedAiModelRoute;
 
-export const DEFAULT_PRODUCT_TRUTH_ROUTE = OPENAI_TERRA_VISION_ROUTE;
+export const CHEAP_OPENAI_VISION_ROUTE = {
+  provider: "openai",
+  model: "gpt-5.6-luna",
+  thinkingLevel: "low",
+} as const satisfies NormalizedAiModelRoute;
+
+export const OPENAI_TERRA_VISION_ROUTE = {
+  provider: "openai",
+  model: "gpt-5.6-terra",
+  thinkingLevel: "low",
+} as const satisfies NormalizedAiModelRoute;
 
 /**
  * Studio Analyze uses `supabase.functions.invoke("app-api")`. Without an
