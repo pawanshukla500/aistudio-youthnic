@@ -276,9 +276,9 @@ export const DEFAULT_PRODUCT_TRUTH_ROUTE = OPENAI_TERRA_VISION_ROUTE;
  * `ai_runs` shows only Muse `attempt_number=1` at ~50011ms.
  *
  * The Studio client now waits `STUDIO_ANALYZE_TIMEOUT_MS` (140s), matching
- * `VISION_GATEWAY_BUDGET_MS`. Product-truth default hops start with OpenAI
- * Terra (50s) and Luna (35s) using the same OpenAI API key configured for
- * image generation, with Gemini and Muse as subsequent failover hops.
+ * `VISION_GATEWAY_BUDGET_MS`. Product-truth default hops budget standard models
+ * (Gemini Flash, Luna) at 40s and heavier reasoning models (Terra, Muse) at 25s
+ * so subsequent failover hops always have sufficient remaining gateway time.
  */
 export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
 export const STUDIO_INVOKE_BUDGET_MS = STUDIO_ANALYZE_TIMEOUT_MS;
