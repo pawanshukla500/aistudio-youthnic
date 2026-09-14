@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import { resolveCatalogAssetUrl } from "./catalogStorage";
 import { visibleGenerationDetailedStatus } from "./generationStatus";
 import { functionInvokeErrorMessage, appApiInvokeTimeoutMs } from "./errors";
+import { ANALYSIS_RUN_KINDS, attributeJobCostRuns, rollupSessionCost, type CostRun } from "./sessionCost";
 
 export type Id<_Table extends string> = string;
 export type BackendEndpoint = string;
@@ -370,6 +371,31 @@ async function getJob(jobId: string) {
     });
   }
   mappedPoses.sort((left, right) => left.poseNumber - right.poseNumber);
+  const fingerprint = String(sessionResult.data?.analysis_fingerprint || record(resolvedJob.job_data).analysisFingerprint || "");
+  const runSelect = "id,run_kind,cost_usd,cost_source,job_id,session_id,planning_request_id,input_fingerprint,created_at,status,pose_index";
+  const linkedFilter = [
+    `job_id.eq.${jobId}`,
+    job.session_id ? `session_id.eq.${job.session_id}` : "",
+    job.planning_request_id ? `planning_request_id.eq.${job.planning_request_id}` : "",
+  ].filter(Boolean).join(",");
+  const [linkedRunsResult, fingerprintRunsResult] = await Promise.all([
+    supabase.from("ai_runs").select(runSelect).eq("organization_id", job.org_id).or(linkedFilter),
+    fingerprint
+      ? supabase.from("ai_runs").select(runSelect).eq("organization_id", job.org_id).eq("input_fingerprint", fingerprint).in("run_kind", [...ANALYSIS_RUN_KINDS]).eq("status", "completed").order("created_at", { ascending: false }).limit(8)
+      : Promise.resolve({ data: [] as CostRun[], error: null }),
+  ]);
+  if (linkedRunsResult.error) throw linkedRunsResult.error;
+  if (fingerprintRunsResult.error) throw fingerprintRunsResult.error;
+  const attributedRuns = attributeJobCostRuns({
+    runs: [...(linkedRunsResult.data || []), ...(fingerprintRunsResult.data || [])] as CostRun[],
+    jobId,
+    sessionId: String(job.session_id || ""),
+    planningRequestId: String(job.planning_request_id || ""),
+    analysisFingerprint: fingerprint,
+    sessionCreatedAt: String(sessionResult.data?.created_at || job.created_at || ""),
+  });
+  const costRollup = rollupSessionCost(attributedRuns, Number(job.actual_cost_usd || 0));
+  const actualCost = costRollup.usedAiRuns ? costRollup.totalUsd : Number(job.actual_cost_usd || 0);
   return {
     ...summary,
     model: job.model,
@@ -377,7 +403,17 @@ async function getJob(jobId: string) {
     imageSize: job.image_size,
     quality: job.quality || "medium",
     estimatedCost: Number(job.estimated_cost_usd || 0),
-    actualCost: Number(job.actual_cost_usd || 0),
+    actualCost,
+    poseQa: Boolean(job.pose_qa),
+    costBreakdown: {
+      analysisUsd: costRollup.analysisUsd,
+      generationUsd: costRollup.generationUsd,
+      qaUsd: costRollup.qaUsd,
+      totalUsd: actualCost,
+      qaEnabled: Boolean(job.pose_qa),
+      qaRan: costRollup.qaRunCount > 0,
+      usedAdminRates: costRollup.usedAdminRates,
+    },
     errorMessage: job.error_message || "",
     session: sessionResult.data,
     poses: mappedPoses,

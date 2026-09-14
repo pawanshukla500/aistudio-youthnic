@@ -318,7 +318,19 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         <span className="w-px h-4 bg-outline-variant/50 hidden sm:block"></span>
         <span className="flex items-center gap-1.5"><b className="text-on-surface">Estimated:</b> ${Number(job.estimatedCost || 0).toFixed(2)}</span>
         <span className="w-px h-4 bg-outline-variant/50 hidden sm:block"></span>
-        <span className="flex items-center gap-1.5"><b className="text-on-surface">Actual so far:</b> ${Number(job.actualCost || 0).toFixed(4)}</span>
+        <span className="flex flex-col gap-0.5">
+          <span className="flex items-center gap-1.5"><b className="text-on-surface">Actual so far:</b> ${Number(job.actualCost || 0).toFixed(4)}</span>
+          {job.costBreakdown && (
+            <span className="text-[10px] text-secondary">
+              Analysis ${Number(job.costBreakdown.analysisUsd || 0).toFixed(4)}
+              {" · "}Images ${Number(job.costBreakdown.generationUsd || 0).toFixed(4)}
+              {job.costBreakdown.qaEnabled || job.costBreakdown.qaRan
+                ? ` · QA ${job.costBreakdown.qaRan ? `$${Number(job.costBreakdown.qaUsd || 0).toFixed(4)}` : "unavailable"}`
+                : " · QA off"}
+              {job.costBreakdown.usedAdminRates ? " · OpenAI billed rates" : ""}
+            </span>
+          )}
+        </span>
         
         {visibleError && (
           <>

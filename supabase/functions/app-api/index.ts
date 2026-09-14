@@ -92,6 +92,20 @@ import {
 } from "./catalogProduction.ts";
 import { isoWeekday, previousBusinessDate } from "./lib/catalogHandoffCalendar.ts";
 import { selectCatalogRecipients } from "./lib/catalogRecipientSelection.ts";
+import {
+  ADMIN_RATE_DIMENSION_PREFIX,
+  ANALYSIS_RUN_KINDS,
+  COMPLETIONS_DIMENSION_PREFIX,
+  adminRateSnapshots,
+  deriveAdminRateTable,
+  extractVisionUsageAndCost,
+  parseAdminRateRows,
+  providerUsage,
+  roundUsd,
+  usageCostUsd,
+  type AdminRateTable,
+  type ProviderUsage,
+} from "./lib/providerCost.ts";
 
 const SUPABASE_URL = requiredEnv("SUPABASE_URL");
 const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -212,8 +226,90 @@ function assertCatalogReferenceOwnership(orgId: string, reference: ReferenceInpu
 }
 
 async function recordAiRun(args: JsonRecord) {
-  const { error } = await service.from("ai_runs").insert(args);
-  if (error) console.error(`Failed to record ai_run telemetry: ${error.message}`);
+  const { data, error } = await service.from("ai_runs").insert(args).select("id").maybeSingle();
+  if (error) {
+    console.error(`Failed to record ai_run telemetry: ${error.message}`);
+    return "";
+  }
+  return String(data?.id || "");
+}
+
+let adminRatesCache: { loadedAt: number; rates: AdminRateTable } | null = null;
+const ADMIN_RATES_TTL_MS = 10 * 60_000;
+
+async function currentAdminRates(): Promise<AdminRateTable> {
+  if (adminRatesCache && Date.now() - adminRatesCache.loadedAt < ADMIN_RATES_TTL_MS) return adminRatesCache.rates;
+  const { data, error } = await service.from("openai_usage_daily")
+    .select("dimension_key,usage_date,usage_payload,model")
+    .like("dimension_key", `${ADMIN_RATE_DIMENSION_PREFIX}%`)
+    .order("usage_date", { ascending: false })
+    .limit(400);
+  if (error) {
+    console.error(`Could not load OpenAI admin-derived rates: ${error.message}`);
+    adminRatesCache = { loadedAt: Date.now(), rates: {} };
+    return {};
+  }
+  const rates = parseAdminRateRows((data || []) as Array<{ dimension_key?: string; usage_date?: string; usage_payload?: unknown; model?: string }>);
+  adminRatesCache = { loadedAt: Date.now(), rates };
+  return rates;
+}
+
+async function pricedVisionUsage(raw: JsonRecord, provider: string, model: string) {
+  return extractVisionUsageAndCost(raw, provider, model, await currentAdminRates());
+}
+
+async function attachAiRunsToSession(args: {
+  runIds?: string[];
+  organizationId: string;
+  sessionId: string;
+  planningRequestId?: string;
+  fingerprint?: string;
+}) {
+  const sessionId = String(args.sessionId || "");
+  const planningRequestId = String(args.planningRequestId || "") || null;
+  const ids = (args.runIds || []).filter(Boolean);
+  if (ids.length) {
+    const { error } = await service.from("ai_runs").update({
+      session_id: sessionId,
+      planning_request_id: planningRequestId,
+    }).in("id", ids);
+    if (error) console.error(`Could not attach AI runs to the session: ${error.message}`);
+    return;
+  }
+  if (planningRequestId) {
+    const { error } = await service.from("ai_runs").update({ session_id: sessionId })
+      .eq("organization_id", args.organizationId)
+      .eq("planning_request_id", planningRequestId)
+      .in("run_kind", [...ANALYSIS_RUN_KINDS]);
+    if (error) console.error(`Could not attach planning analysis runs: ${error.message}`);
+    return;
+  }
+  if (args.fingerprint) {
+    const { error } = await service.from("ai_runs").update({
+      session_id: sessionId,
+      planning_request_id: planningRequestId,
+    })
+      .eq("organization_id", args.organizationId)
+      .eq("input_fingerprint", args.fingerprint)
+      .in("run_kind", [...ANALYSIS_RUN_KINDS])
+      .is("session_id", null);
+    if (error) console.error(`Could not attach fingerprint analysis runs: ${error.message}`);
+  }
+}
+
+async function analysisCostUsdFor(args: { organizationId: string; sessionId: string; planningRequestId?: string }) {
+  const filters = [`session_id.eq.${args.sessionId}`];
+  if (args.planningRequestId) filters.push(`planning_request_id.eq.${args.planningRequestId}`);
+  const { data, error } = await service.from("ai_runs")
+    .select("cost_usd,run_kind,session_id,planning_request_id")
+    .eq("organization_id", args.organizationId)
+    .in("run_kind", [...ANALYSIS_RUN_KINDS])
+    .or(filters.join(","));
+  if (error) {
+    console.error(`Could not load analysis cost: ${error.message}`);
+    return 0;
+  }
+  return roundUsd((data || []).reduce((total, row) => total + Number(row.cost_usd || 0), 0));
 }
 
 function visionFailureRecord(error: unknown, policy: {
@@ -263,9 +359,10 @@ async function recordVisionHopRuns(args: {
   error?: unknown;
 }) {
   const hops = visionAttemptTelemetryRows(args.attempts);
+  const ids: string[] = [];
   for (const hop of hops) {
     if (hop.status !== "failed") continue;
-    await recordAiRun({
+    const id = await recordAiRun({
       organization_id: args.organizationId,
       planning_request_id: args.planningRequestId || null,
       batch_id: args.batchId ?? null,
@@ -296,7 +393,9 @@ async function recordVisionHopRuns(args: {
         hop,
       },
     });
+    if (id) ids.push(id);
   }
+  return ids;
 }
 
 async function maybePromoteProvenVisionRoute(
@@ -374,70 +473,6 @@ type ReferenceInput = {
 };
 
 type LoadedReference = ReferenceInput & { blob: Blob; base64: string };
-
-type ProviderUsage = {
-  inputTokens: number;
-  inputTextTokens: number;
-  inputImageTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  providerReported: boolean;
-  raw: JsonRecord;
-};
-
-const IMAGE_TOKEN_RATES: Record<string, { textInput: number; imageInput: number; imageOutput: number }> = {
-  "gpt-image-2.5-flare-2026-09-08": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
-  "gpt-image-2.5-flare": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
-  "gpt-image-2.5-sunburst": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
-  "gpt-image-2": { textInput: 2.5, imageInput: 20, imageOutput: 50 },
-  "gpt-image-1.5": { textInput: 2.5, imageInput: 20, imageOutput: 50 },
-  "gpt-image-1": { textInput: 2.5, imageInput: 20, imageOutput: 50 },
-  "gpt-image-1-mini": { textInput: 0.15, imageInput: 0.15, imageOutput: 0.6 },
-  "reve-2.1-image": { textInput: 2.5, imageInput: 20, imageOutput: 50 },
-};
-
-const GEMINI_PRICING: Record<string, { input: number; output: number; version: string; source: string }> = {
-  "gemini-3.8-flash": { input: 0.15, output: 0.60, version: "2025-01", source: "google_standard_flash" },
-  "gemini-3.6-flash": { input: 0.15, output: 0.60, version: "2024-08", source: "google_standard_flash" },
-  "gemini-2.5-flash": { input: 0.15, output: 0.60, version: "2025-06", source: "google_standard_flash" },
-  "gemini-3.1-pro-preview": { input: 1.25, output: 5.00, version: "2024-08", source: "google_standard_pro" },
-  "gemini-3.1-pro": { input: 1.25, output: 5.00, version: "2024-08", source: "google_standard_pro" },
-};
-
-const OPENAI_VISION_PRICING: Record<string, { input: number; output: number; version: string; source: string }> = {
-  "gpt-5.6-luna": { input: 0.20, output: 1.20, version: "2026-07", source: "openai_standard_luna" },
-  "gpt-5.6-sol": { input: 2.50, output: 10.00, version: "2025-01", source: "openai_standard_sol" },
-  "gpt-5.6-terra": { input: 1.25, output: 5.00, version: "2025-01", source: "openai_standard_terra" },
-};
-
-const META_VISION_PRICING: Record<string, { input: number; output: number; version: string; source: string }> = {
-  "muse-spark-1.3": { input: 1.25, output: 4.25, version: "2026-09", source: "meta_standard_muse" },
-  "muse-spark-1.2": { input: 1.25, output: 4.25, version: "2026-09", source: "meta_standard_muse" },
-  "muse-spark-1.3-contributor": { input: 0.10, output: 0.20, version: "2026-09", source: "meta_contributor_muse" },
-};
-
-function extractVisionUsageAndCost(raw: JsonRecord, provider: string, model: string) {
-  const usageMeta = (raw.usageMetadata || raw.usage || raw) as JsonRecord;
-  const inTok = Number(usageMeta.promptTokenCount ?? usageMeta.prompt_tokens ?? usageMeta.input_tokens ?? 0);
-  const outTok = Number(usageMeta.candidatesTokenCount ?? usageMeta.completion_tokens ?? usageMeta.output_tokens ?? 0);
-  const totalTok = Number(usageMeta.totalTokenCount ?? usageMeta.total_tokens ?? (inTok + outTok));
-  const details = (usageMeta.completion_tokens_details || {}) as JsonRecord;
-  const thoughtsTok = Number(usageMeta.thoughtsTokenCount ?? details.reasoning_tokens ?? 0);
-
-  let pricing: { input: number; output: number; version: string; source: string } | null = null;
-  if (provider === "gemini") {
-    pricing = GEMINI_PRICING[model] || GEMINI_PRICING["gemini-3.8-flash"] || GEMINI_PRICING["gemini-3.6-flash"];
-  } else if (provider === "openai") {
-    pricing = OPENAI_VISION_PRICING[model] || OPENAI_VISION_PRICING["gpt-5.6-luna"];
-  } else if (provider === "meta") {
-    pricing = META_VISION_PRICING[model] || META_VISION_PRICING["muse-spark-1.3"];
-  }
-
-  const costUsd = pricing ? (inTok * pricing.input + outTok * pricing.output) / 1000000 : 0;
-  const costSource = pricing ? `estimated_public_rates_${pricing.version}` : "provider_cost_not_available";
-
-  return { inTok, outTok, totalTok, thoughtsTok, costUsd, costSource, pricing };
-}
 
 type GeminiPurpose = "product_truth" | "shoot_planning" | "qa" | "qa_escalation";
 
@@ -830,42 +865,6 @@ function bytesToBase64(bytes: Uint8Array) {
 async function blobToBase64(blob: Blob): Promise<string> {
   const buffer = await blob.arrayBuffer();
   return bytesToBase64(new Uint8Array(buffer));
-}
-
-function numberValue(value: unknown) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
-}
-
-function providerUsage(value: unknown): ProviderUsage {
-  const raw = value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
-  const details = raw.input_tokens_details && typeof raw.input_tokens_details === "object"
-    ? raw.input_tokens_details as JsonRecord
-    : {};
-  const inputTokens = numberValue(raw.input_tokens);
-  const outputTokens = numberValue(raw.output_tokens);
-  return {
-    inputTokens,
-    inputTextTokens: numberValue(details.text_tokens),
-    inputImageTokens: numberValue(details.image_tokens),
-    outputTokens,
-    totalTokens: numberValue(raw.total_tokens) || inputTokens + outputTokens,
-    providerReported: Boolean(inputTokens || outputTokens || raw.total_tokens),
-    raw,
-  };
-}
-
-function usageCostUsd(model: string, usage: ProviderUsage) {
-  if (!usage.providerReported) return 0;
-  const rates = IMAGE_TOKEN_RATES[model];
-  if (!rates) return 0;
-  const classifiedInput = usage.inputTextTokens + usage.inputImageTokens;
-  const unclassifiedInput = Math.max(0, usage.inputTokens - classifiedInput);
-  return (
-    usage.inputTextTokens * rates.textInput +
-    (usage.inputImageTokens + unclassifiedInput) * rates.imageInput +
-    usage.outputTokens * rates.imageOutput
-  ) / 1_000_000;
 }
 
 function accumulatedUsage(row: JsonRecord, usage: ProviderUsage, requestId: string, costUsd: number) {
@@ -1494,6 +1493,7 @@ async function analyze(request: Request, args: JsonRecord) {
     }
   }
   const started = Date.now();
+  const analysisRunIds: string[] = [];
   if (!normalized) {
     const loaded = await loadAvailableReferences(references, orgId, String(args.category || ""));
     const manifest: Array<{ number: number; role: string }> = [];
@@ -1516,7 +1516,7 @@ async function analyze(request: Request, args: JsonRecord) {
     };
     const persistFailedHop = async (attempt: VisionAttempt) => {
       if (attempt.outcome !== "failed") return;
-      await recordVisionHopRuns({
+      const hopIds = await recordVisionHopRuns({
         organizationId: orgId,
         runKind: "product_reference_analysis",
         purpose: policy.purpose,
@@ -1525,6 +1525,7 @@ async function analyze(request: Request, args: JsonRecord) {
         policy,
         attempts: [attempt],
       });
+      analysisRunIds.push(...hopIds);
     };
     try {
       result = await visionJson(policy, parts, { onAttempt: persistFailedHop });
@@ -1557,9 +1558,9 @@ async function analyze(request: Request, args: JsonRecord) {
       sku_name: String(args.skuName || ""), product_category: String(args.category || ""), payload: normalized,
       expires_at: new Date(Date.now() + 30 * 86400_000).toISOString(), updated_at: new Date().toISOString(),
     }, { onConflict: "org_key,cache_kind,cache_key" });
-    const calculated = extractVisionUsageAndCost(result.raw, result.policy.provider, result.policy.model);
+    const calculated = await pricedVisionUsage(result.raw, result.policy.provider, result.policy.model);
     const winner = result.attempts.find((attempt) => attempt.outcome === "completed");
-    await recordAiRun({
+    const analysisRunId = await recordAiRun({
       organization_id: orgId, job_id: "", run_kind: "product_reference_analysis", model: result.policy.model, provider: result.policy.provider,
       purpose: policy.purpose, thinking_level: result.policy.thinkingLevel,
       attempt_number: winner?.attemptNumber || result.attempts.length || 1,
@@ -1572,8 +1573,10 @@ async function analyze(request: Request, args: JsonRecord) {
       cost_source: calculated.costSource,
       input_tokens: calculated.inTok, input_text_tokens: calculated.inTok, input_image_tokens: 0, output_tokens: calculated.outTok,
       total_tokens: calculated.totalTok, thoughts_token_count: calculated.thoughtsTok,
+      cached_content_token_count: calculated.cachedTok,
       usage_payload: { providerAnalysis: result.raw.usageMetadata || result.raw.usage || {}, attempts: result.attempts },
     });
+    if (analysisRunId) analysisRunIds.push(analysisRunId);
     try {
       await maybePromoteProvenVisionRoute(orgId, policy, result.attempts);
     } catch (error) {
@@ -1649,6 +1652,13 @@ async function analyze(request: Request, args: JsonRecord) {
     product_hash: pHash, reference_hash: rHash, session_data: sessionData,
   });
   if (sessionError) throw new Error(sessionError.message);
+  await attachAiRunsToSession({
+    runIds: analysisRunIds,
+    organizationId: orgId,
+    sessionId,
+    planningRequestId: planningRequest.id,
+    fingerprint,
+  });
   return { sessionId, referenceIds: sessionData.referenceIds, analysisFingerprint: fingerprint, productHash: pHash, referenceHash: rHash, ...normalized, cacheHit, analysisProvider: usedPolicy.provider, analysisModel: usedPolicy.model, analysisThinking: usedPolicy.thinkingLevel };
 }
 
@@ -1714,7 +1724,7 @@ async function generateImage(args: { prompt: string; model: string; size: string
   }
   const requestId = response.headers.get("x-request-id") || "";
   const usage = providerUsage(data.usage);
-  const costUsd = usageCostUsd(args.model, usage);
+  const costUsd = usageCostUsd(args.model, usage, await currentAdminRates());
   const item = Array.isArray(data.data) ? data.data[0] as JsonRecord | undefined : undefined;
   if (!item?.b64_json && !item?.url) throw new Error(`${isReve ? 'Reve' : 'OpenAI'} returned no image data.`);
   if (item.b64_json) {
@@ -1883,12 +1893,17 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
     requestedModel: String(args.model || "").trim() || null,
   };
+  const analysisCostUsd = await analysisCostUsdFor({
+    organizationId: workspace.organization.id,
+    sessionId,
+    planningRequestId: String(session.planning_request_id || ""),
+  });
   const { error: jobError } = await service.from("generation_jobs").insert({
     job_id: jobId, user_id: workspace.user.firebaseUid, user_email: workspace.user.email, org_id: workspace.organization.id,
     status: "queued", readiness_status: "ready", readiness_reasons: [], sku_name: jobData.skuName, session_id: sessionId, job_data: jobData,
     planning_request_id: session.planning_request_id, total_poses: 5, provider: imageGenerationPolicy.provider, model,
     aspect_ratio: String(args.aspectRatio || "3:4"), image_size: String(args.imageSize || "2K"), quality,
-    pose_qa: Boolean(args.poseQa), estimated_cost_usd: 0.25, created_at: now, updated_at: now,
+    pose_qa: Boolean(args.poseQa), estimated_cost_usd: 0.25, actual_cost_usd: analysisCostUsd, created_at: now, updated_at: now,
   });
   if (jobError) throw new Error(jobError.message);
   
@@ -2136,6 +2151,7 @@ async function deferPoseRetry(args: {
   corrections: string[];
   rejectedAttempts: JsonRecord[];
   attemptCost: number;
+  qaCost?: number;
   usage?: ProviderUsage;
   providerRequestId?: string;
   error?: unknown;
@@ -2157,7 +2173,7 @@ async function deferPoseRetry(args: {
     }).eq("session_id", args.job.session_id).eq("generation_id", args.pose.generation_id),
     service.from("generation_jobs").update({
       status: "queued", available_at: availableAt, locked_at: null, lock_expires_at: null,
-      actual_cost_usd: Number(args.job.actual_cost_usd || 0) + args.attemptCost,
+      actual_cost_usd: Number(args.job.actual_cost_usd || 0) + args.attemptCost + Number(args.qaCost || 0),
       input_tokens: Number(args.job.input_tokens || 0) + Number(args.usage?.inputTokens || 0),
       input_text_tokens: Number(args.job.input_text_tokens || 0) + Number(args.usage?.inputTextTokens || 0),
       input_image_tokens: Number(args.job.input_image_tokens || 0) + Number(args.usage?.inputImageTokens || 0),
@@ -2776,6 +2792,7 @@ async function processWorker(request: Request, args: JsonRecord) {
   let lastError = "Generation did not complete.";
   let terminalFailureCode = "pose_consistency_failed";
   let attemptCost = 0;
+  let qaAttemptCost = 0;
   let attemptUsage: ProviderUsage | undefined;
   let providerRequestId = "";
   try {
@@ -2883,7 +2900,8 @@ async function processWorker(request: Request, args: JsonRecord) {
     if (!qaUnavailable && Boolean(job.pose_qa)) {
        const qaUsage = (qa.usageMetadata || {}) as any;
        const policy = (qa as any).policy as VisionPolicy | undefined;
-         const calculated = extractVisionUsageAndCost({ usageMetadata: qaUsage }, policy?.provider || "openai", policy?.model || "gpt-5.6-luna");
+         const calculated = await pricedVisionUsage({ usageMetadata: qaUsage }, policy?.provider || "openai", policy?.model || "gpt-5.6-luna");
+       qaAttemptCost = calculated.costUsd;
        await recordAiRun({
          organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
          job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: policy?.model || "gpt-5.6-luna", provider: policy?.provider || "openai",
@@ -2894,6 +2912,7 @@ async function processWorker(request: Request, args: JsonRecord) {
          input_tokens: calculated.inTok, input_text_tokens: calculated.inTok,
          input_image_tokens: 0, output_tokens: calculated.outTok,
          total_tokens: calculated.totalTok, thoughts_token_count: calculated.thoughtsTok,
+         cached_content_token_count: calculated.cachedTok,
          usage_payload: { providerQa: qaUsage, attempts: (qa as any).visionAttempts || [] },
          cost_usd: calculated.costUsd, cost_source: calculated.costSource,
        });
@@ -2982,7 +3001,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     await Promise.all([
       service.from("generation_jobs").update({
         completed_poses: completedCount, failed_poses: failedCount,
-        actual_cost_usd: Number(job.actual_cost_usd || 0) + attemptCost,
+        actual_cost_usd: Number(job.actual_cost_usd || 0) + attemptCost + qaAttemptCost,
         input_tokens: Number(job.input_tokens || 0) + generated.usage.inputTokens,
         input_text_tokens: Number(job.input_text_tokens || 0) + generated.usage.inputTextTokens,
         input_image_tokens: Number(job.input_image_tokens || 0) + generated.usage.inputImageTokens,
@@ -3016,7 +3035,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     lastError = errorMessage(error);
     terminalFailureCode = generationFailureCode(error, lastError);
     if (!permanentProviderError(error) && attempt < MAX_GENERATION_ATTEMPTS) {
-      return deferPoseRetry({ job, pose, attempt, message: lastError, corrections: qaCorrections, rejectedAttempts, attemptCost, usage: attemptUsage, providerRequestId, error });
+      return deferPoseRetry({ job, pose, attempt, message: lastError, corrections: qaCorrections, rejectedAttempts, attemptCost, qaCost: qaAttemptCost, usage: attemptUsage, providerRequestId, error });
     }
   }
   // Last attempt: the archive and the QA history have to be written here, because
@@ -3033,7 +3052,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         accumulatedUsage(pose as JsonRecord, attemptUsage, providerRequestId, attemptCost),
       ).eq("session_id", job.session_id).eq("generation_id", pose.generation_id),
       service.from("generation_jobs").update({
-        actual_cost_usd: Number(job.actual_cost_usd || 0) + attemptCost,
+        actual_cost_usd: Number(job.actual_cost_usd || 0) + attemptCost + qaAttemptCost,
         input_tokens: Number(job.input_tokens || 0) + attemptUsage.inputTokens,
         input_text_tokens: Number(job.input_text_tokens || 0) + attemptUsage.inputTextTokens,
         input_image_tokens: Number(job.input_image_tokens || 0) + attemptUsage.inputImageTokens,
@@ -3043,7 +3062,7 @@ async function processWorker(request: Request, args: JsonRecord) {
       }).eq("job_id", job.job_id),
     ]);
   }
-  await failPoseAndJob({ ...job, actual_cost_usd: Number(job.actual_cost_usd || 0) + attemptCost }, session, pose, lastError, terminalFailureCode);
+  await failPoseAndJob({ ...job, actual_cost_usd: Number(job.actual_cost_usd || 0) + attemptCost + qaAttemptCost }, session, pose, lastError, terminalFailureCode);
   return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed", error: lastError };
 }
 
@@ -3383,8 +3402,42 @@ async function rerunPoseQa(request: Request, args: JsonRecord) {
     }),
   ]);
   assertSupabaseResults(results, "Could not save the QA rerun");
+  const qaUsage = ((qa as { usageMetadata?: JsonRecord }).usageMetadata || {}) as JsonRecord;
+  const policy = (qa as { policy?: VisionPolicy }).policy;
+  const calculated = await pricedVisionUsage({ usageMetadata: qaUsage }, policy?.provider || "openai", policy?.model || "gpt-5.6-luna");
+  await recordAiRun({
+    organization_id: workspace.organization.id,
+    planning_request_id: job.planning_request_id,
+    job_id: job.job_id,
+    session_id: job.session_id,
+    pose_index: pose.pose_index,
+    run_kind: "quality_assurance",
+    model: policy?.model || "gpt-5.6-luna",
+    provider: policy?.provider || "openai",
+    purpose: policy?.purpose || "qa",
+    thinking_level: policy?.thinkingLevel || "high",
+    input_fingerprint: smallHash(String(pose.full_prompt || pose.generation_id)),
+    input_summary: { pose: pose.pose_index, rerun: true, policy: policy ? visionPolicySnapshot(policy, (qa as { visionAttempts?: VisionAttempt[] }).visionAttempts || []) : null },
+    output_json: { qa, qaVersion: QA_VERSION, rerun: true },
+    status: qa.outcome,
+    cost_usd: calculated.costUsd,
+    cost_source: calculated.costSource,
+    input_tokens: calculated.inTok,
+    input_text_tokens: calculated.inTok,
+    output_tokens: calculated.outTok,
+    total_tokens: calculated.totalTok,
+    thoughts_token_count: calculated.thoughtsTok,
+    cached_content_token_count: calculated.cachedTok,
+    usage_payload: { providerQa: qaUsage, attempts: (qa as { visionAttempts?: VisionAttempt[] }).visionAttempts || [] },
+  });
+  if (calculated.costUsd > 0) {
+    await service.from("generation_jobs").update({
+      actual_cost_usd: Number(job.actual_cost_usd || 0) + calculated.costUsd,
+      updated_at: reviewedAt,
+    }).eq("job_id", job.job_id);
+  }
   await syncCatalogAnchorQa(job as JsonRecord, pose as JsonRecord, sessionData, qa.outcome);
-  return { success: true, outcome: qa.outcome, score: qa.score, qaVersion: QA_VERSION };
+  return { success: true, outcome: qa.outcome, score: qa.score, qaVersion: QA_VERSION, costUsd: calculated.costUsd };
 }
 
 // Requeues every pose in a failed job that didn't complete, so one bad pose (or the cascading
@@ -5196,7 +5249,7 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
     const missingDetectedSareeEvidence = detectedSaree ? missingRequiredReferenceLabels(references, "saree") : [];
     if (missingDetectedSareeEvidence.length) {
       const message = sareeReferenceRequirementMessage(missingDetectedSareeEvidence);
-      const calculatedIncomplete = extractVisionUsageAndCost({ usage: analysis.usage }, analysis.policy.provider, analysis.policy.model);
+      const calculatedIncomplete = await pricedVisionUsage({ usage: analysis.usage }, analysis.policy.provider, analysis.policy.model);
       await Promise.all([
         service.from("planning_requests").update({
           category: "saree",
@@ -5220,12 +5273,13 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
           cost_usd: calculatedIncomplete.costUsd, cost_source: calculatedIncomplete.costSource,
           input_tokens: calculatedIncomplete.inTok, input_text_tokens: calculatedIncomplete.inTok, input_image_tokens: 0, output_tokens: calculatedIncomplete.outTok,
           total_tokens: calculatedIncomplete.totalTok, thoughts_token_count: calculatedIncomplete.thoughtsTok,
+          cached_content_token_count: calculatedIncomplete.cachedTok,
           usage_payload: { providerAnalysis: analysis.usage || {}, attempts: analysis.attempts, isColorwayDelta: analysis.isColorwayDelta },
         }),
       ]);
       return { processed: false, reason: "saree_references_incomplete", requestId: variant.id, missing: missingDetectedSareeEvidence };
     }
-    const calculated = extractVisionUsageAndCost({ usage: analysis.usage }, analysis.policy.provider, analysis.policy.model);
+    const calculated = await pricedVisionUsage({ usage: analysis.usage }, analysis.policy.provider, analysis.policy.model);
     await Promise.all([
       service.from("planning_requests").update({
         analysis_status: "ready", analysis_fingerprint: hashes.fingerprint, analysis_updated_at: now,
@@ -5241,6 +5295,7 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
         cost_usd: calculated.costUsd, cost_source: calculated.costSource,
         input_tokens: calculated.inTok, input_text_tokens: calculated.inTok, input_image_tokens: 0, output_tokens: calculated.outTok,
         total_tokens: calculated.totalTok, thoughts_token_count: calculated.thoughtsTok,
+        cached_content_token_count: calculated.cachedTok,
         usage_payload: { providerAnalysis: analysis.usage || {}, attempts: analysis.attempts, isColorwayDelta: analysis.isColorwayDelta },
       }),
     ]);
@@ -5550,6 +5605,17 @@ async function queueCatalogVariantGeneration(
     session_data: sessionData,
   });
   if (sessionInsertError) throw new Error(sessionInsertError.message);
+  await attachAiRunsToSession({
+    organizationId: String(batch.organization_id),
+    sessionId,
+    planningRequestId: String(variant.id),
+    fingerprint: analysisHashes.fingerprint,
+  });
+  const analysisCostUsd = await analysisCostUsdFor({
+    organizationId: String(batch.organization_id),
+    sessionId,
+    planningRequestId: String(variant.id),
+  });
 
   const jobData = {
     skuId: String(variant.request_code || variant.id),
@@ -5584,6 +5650,7 @@ async function queueCatalogVariantGeneration(
     quality,
     pose_qa: Boolean(generationSettings.poseQa),
     estimated_cost_usd: 0.25,
+    actual_cost_usd: analysisCostUsd,
     created_at: queuedAt,
     updated_at: queuedAt,
   });
@@ -7218,6 +7285,15 @@ async function openAiAdminPages(path: string, params: URLSearchParams) {
   return buckets;
 }
 
+async function openAiAdminPagesLenient(path: string, params: URLSearchParams) {
+  try {
+    return await openAiAdminPages(path, params);
+  } catch (error) {
+    console.error(`OpenAI Admin ${path} skipped: ${errorMessage(error)}`);
+    return [];
+  }
+}
+
 async function syncOpenAiUsageOperation(request: Request, args: JsonRecord) {
   const bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   const workerSecret = Deno.env.get("CATALOG_WORKER_SECRET")?.trim();
@@ -7245,10 +7321,17 @@ async function syncOpenAiUsageOperation(request: Request, args: JsonRecord) {
   const costParams = new URLSearchParams({ start_time: String(start), end_time: String(end), bucket_width: "1d", limit: String(days) });
   ["line_item", "project_id"].forEach((field) => costParams.append("group_by", field));
   if (projectId) costParams.append("project_ids", projectId);
-  const [usageBuckets, costBuckets] = await Promise.all([
-    openAiAdminPages("usage/images", usageParams), openAiAdminPages("costs", costParams),
+  const completionParams = new URLSearchParams({ start_time: String(start), end_time: String(end), bucket_width: "1d", limit: String(days) });
+  ["model", "project_id"].forEach((field) => completionParams.append("group_by", field));
+  if (projectId) completionParams.append("project_ids", projectId);
+  const [usageBuckets, costBuckets, completionBuckets] = await Promise.all([
+    openAiAdminPages("usage/images", usageParams),
+    openAiAdminPages("costs", costParams),
+    openAiAdminPagesLenient("usage/completions", completionParams),
   ]);
   const snapshots: JsonRecord[] = [];
+  const completionResults: Array<{ model?: string; input_tokens?: number; output_tokens?: number; input_cached_tokens?: number }> = [];
+  const costResults: Array<{ line_item?: string; amount?: { value?: number; currency?: string } }> = [];
   for (const bucket of usageBuckets) {
     const usageDate = new Date(Number(bucket.start_time || 0) * 1000).toISOString().slice(0, 10);
     for (const result of (Array.isArray(bucket.results) ? bucket.results as JsonRecord[] : [])) {
@@ -7259,15 +7342,47 @@ async function syncOpenAiUsageOperation(request: Request, args: JsonRecord) {
       snapshots.push({ usage_date: usageDate, dimension_key: `usage:${model}:${imageSize}:${source}:${openaiProjectId}`, model, image_size: imageSize, source, openai_project_id: openaiProjectId, image_count: Number(result.images || 0), request_count: Number(result.num_model_requests || 0), actual_cost_usd: 0, currency: "usd", usage_payload: result, cost_payload: {}, synced_at: new Date().toISOString() });
     }
   }
+  for (const bucket of completionBuckets) {
+    const usageDate = new Date(Number(bucket.start_time || 0) * 1000).toISOString().slice(0, 10);
+    for (const result of (Array.isArray(bucket.results) ? bucket.results as JsonRecord[] : [])) {
+      const model = String(result.model || "unknown");
+      const openaiProjectId = String(result.project_id || "");
+      completionResults.push({
+        model,
+        input_tokens: Number(result.input_tokens || 0),
+        output_tokens: Number(result.output_tokens || 0),
+        input_cached_tokens: Number(result.input_cached_tokens || 0),
+      });
+      snapshots.push({
+        usage_date: usageDate,
+        dimension_key: `${COMPLETIONS_DIMENSION_PREFIX}${model}:${openaiProjectId}`,
+        model,
+        image_size: "n/a",
+        source: "completions",
+        openai_project_id: openaiProjectId,
+        image_count: 0,
+        request_count: Number(result.num_model_requests || 0),
+        actual_cost_usd: 0,
+        currency: "usd",
+        usage_payload: result,
+        cost_payload: {},
+        synced_at: new Date().toISOString(),
+      });
+    }
+  }
   for (const bucket of costBuckets) {
     const usageDate = new Date(Number(bucket.start_time || 0) * 1000).toISOString().slice(0, 10);
     for (const result of (Array.isArray(bucket.results) ? bucket.results as JsonRecord[] : [])) {
       const amount = result.amount && typeof result.amount === "object" ? result.amount as JsonRecord : {};
       const lineItem = String(result.line_item || "all");
       const openaiProjectId = String(result.project_id || "");
+      costResults.push({ line_item: lineItem, amount: { value: Number(amount.value || 0), currency: String(amount.currency || "usd") } });
       snapshots.push({ usage_date: usageDate, dimension_key: `cost:${lineItem}:${openaiProjectId}`, model: "billing", image_size: "n/a", source: lineItem, openai_project_id: openaiProjectId, image_count: 0, request_count: 0, actual_cost_usd: Number(amount.value || 0), currency: String(amount.currency || "usd"), usage_payload: {}, cost_payload: result, synced_at: new Date().toISOString() });
     }
   }
+  const derivedRates = deriveAdminRateTable({ costResults, completionResults });
+  snapshots.push(...adminRateSnapshots(new Date().toISOString().slice(0, 10), derivedRates, projectId));
+  adminRatesCache = null;
   for (const orgId of organizationIds) {
     if (snapshots.length) {
       const { error } = await service.from("openai_usage_daily").upsert(snapshots.map((snapshot) => ({ ...snapshot, organization_id: orgId })), { onConflict: "organization_id,usage_date,dimension_key" });
@@ -7279,7 +7394,9 @@ async function syncOpenAiUsageOperation(request: Request, args: JsonRecord) {
     configured: true, syncedOrganizations: organizationIds.length, rows: snapshots.length,
     images: snapshots.reduce((total, row) => total + Number(row.image_count || 0), 0),
     requests: snapshots.reduce((total, row) => total + Number(row.request_count || 0), 0),
-    costUsd: snapshots.reduce((total, row) => total + Number(row.actual_cost_usd || 0), 0),
+    costUsd: snapshots.filter((row) => String(row.dimension_key || "").startsWith("cost:")).reduce((total, row) => total + Number(row.actual_cost_usd || 0), 0),
+    completionRequests: completionResults.length,
+    derivedRateModels: Object.keys(derivedRates),
   };
 }
 
