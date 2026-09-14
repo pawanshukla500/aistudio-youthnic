@@ -348,25 +348,57 @@ export function deriveAdminRateTable(args: {
   }
 
   const tokens = new Map<string, { input: number; output: number; cached: number }>();
-  for (const result of args.completionResults) {
+  const addTokens = (result: AdminUsageResult) => {
     const key = normalizeModelKey(String(result.model || "unknown"));
     const current = tokens.get(key) || { input: 0, output: 0, cached: 0 };
     current.input += Number(result.input_tokens || 0);
     current.output += Number(result.output_tokens || 0);
     current.cached += Number(result.input_cached_tokens || 0);
     tokens.set(key, current);
-  }
+  };
+  for (const result of args.completionResults) addTokens(result);
+  for (const result of args.imageResults || []) addTokens(result);
+
+  const matchBilled = (model: string) =>
+    billed.get(model) || [...billed.entries()].find(([key]) => model.includes(key) || key.includes(model))?.[1];
 
   const table: AdminRateTable = {};
-  for (const [model, token] of tokens) {
-    const money = billed.get(model) || [...billed.entries()].find(([key]) => model.includes(key) || key.includes(model))?.[1];
-    if (!money) continue;
+  const applyVisionRates = (model: string, token: { input: number; output: number; cached: number }, money: { input: number; output: number; cached: number; image: number }) => {
     const uncached = Math.max(0, token.input - token.cached);
-    const rates: AdminModelRates = {};
+    const rates: AdminModelRates = { ...(table[model] || {}) };
     if (money.input > 0 && uncached >= MIN_TOKENS_FOR_RATE) rates.input = money.input / uncached * 1_000_000;
     if (money.output > 0 && token.output >= MIN_TOKENS_FOR_RATE) rates.output = money.output / token.output * 1_000_000;
     if (money.cached > 0 && token.cached >= MIN_TOKENS_FOR_RATE) rates.cached = money.cached / token.cached * 1_000_000;
-    if (rates.input || rates.output || rates.cached) table[model] = rates;
+    if (rates.input || rates.output || rates.cached || rates.textInput || rates.imageInput || rates.imageOutput) table[model] = rates;
+  };
+
+  for (const [model, token] of tokens) {
+    const money = matchBilled(model);
+    if (money) applyVisionRates(model, token, money);
+  }
+
+  for (const [model, money] of billed) {
+    const publicImage = IMAGE_TOKEN_RATES[model] || [...Object.entries(IMAGE_TOKEN_RATES)].find(([key]) => model.includes(key) || key.includes(model))?.[1];
+    if (!publicImage) continue;
+    const token = tokens.get(model) || [...tokens.entries()].find(([key]) => model.includes(key) || key.includes(model))?.[1] || { input: 0, output: 0, cached: 0 };
+    const uncached = Math.max(0, token.input - token.cached);
+    const rates: AdminModelRates = { ...(table[model] || {}) };
+    if (money.input > 0 && uncached >= MIN_TOKENS_FOR_RATE) rates.textInput = money.input / uncached * 1_000_000;
+    if (money.output > 0 && token.output >= MIN_TOKENS_FOR_RATE) rates.imageOutput = money.output / token.output * 1_000_000;
+    const tokenVolume = token.input + token.output;
+    if (money.image > 0 && tokenVolume >= MIN_TOKENS_FOR_RATE) {
+      const estimated = (
+        token.input * publicImage.imageInput +
+        token.output * publicImage.imageOutput
+      ) / 1_000_000;
+      if (estimated > 0) {
+        const scale = money.image / estimated;
+        rates.textInput = publicImage.textInput * scale;
+        rates.imageInput = publicImage.imageInput * scale;
+        rates.imageOutput = publicImage.imageOutput * scale;
+      }
+    }
+    if (rates.textInput || rates.imageInput || rates.imageOutput) table[model] = { ...table[model], ...rates };
   }
   return table;
 }
@@ -398,7 +430,7 @@ export function adminRateSnapshots(usageDate: string, rates: AdminRateTable, ope
 }
 
 export function parseAdminRateRows(rows: Array<{ dimension_key?: string; usage_date?: string; usage_payload?: unknown; model?: string }>): AdminRateTable {
-  const newest = new Map<string, { date: string; rates: AdminModelRates }>();
+  const newest = new Map<string, { rates: AdminModelRates; componentDates: Record<string, string> }>();
   for (const row of rows) {
     const key = String(row.dimension_key || "");
     if (!key.startsWith(ADMIN_RATE_DIMENSION_PREFIX)) continue;
@@ -408,9 +440,10 @@ export function parseAdminRateRows(rows: Array<{ dimension_key?: string; usage_d
     if (!usdPerMillion) continue;
     const model = normalizeModelKey(String(row.model || key.slice(ADMIN_RATE_DIMENSION_PREFIX.length).split(":")[0] || "unknown"));
     const date = String(row.usage_date || "");
-    const current = newest.get(model);
-    const next = !current || date > current.date ? {} : date === current.date ? { ...current.rates } : current.rates;
-    if (current && date < current.date) continue;
+    const current = newest.get(model) || { rates: {}, componentDates: {} };
+    const previousDate = current.componentDates[component] || "";
+    if (previousDate && date < previousDate) continue;
+    const next = { ...current.rates };
     if (component === "input") next.input = usdPerMillion;
     else if (component === "output") next.output = usdPerMillion;
     else if (component === "cached") next.cached = usdPerMillion;
@@ -418,7 +451,10 @@ export function parseAdminRateRows(rows: Array<{ dimension_key?: string; usage_d
     else if (component === "imageInput") next.imageInput = usdPerMillion;
     else if (component === "imageOutput") next.imageOutput = usdPerMillion;
     else continue;
-    newest.set(model, { date, rates: next });
+    newest.set(model, {
+      rates: next,
+      componentDates: { ...current.componentDates, [component]: date },
+    });
   }
   return Object.fromEntries([...newest.entries()].map(([model, value]) => [model, value.rates]));
 }
@@ -434,6 +470,22 @@ function isNearSession(runCreatedAt: string | null | undefined, sessionCreatedAt
   const sessionMs = Date.parse(sessionCreatedAt);
   if (!Number.isFinite(runMs) || !Number.isFinite(sessionMs)) return false;
   return runMs <= sessionMs + 10 * 60_000 && runMs >= sessionMs - 2 * 60 * 60_000;
+}
+
+function runStatus(run: CostRun) {
+  return String(run.status || "").trim().toLowerCase();
+}
+
+export function isExecutedQaRun(run: CostRun) {
+  if (Number(run.cost_usd || 0) > 0) return true;
+  const status = runStatus(run);
+  return Boolean(status) && status !== "failed" && status !== "queued";
+}
+
+export function isCountableGenerationRun(run: CostRun) {
+  if (Number(run.cost_usd || 0) > 0) return true;
+  const status = runStatus(run);
+  return status !== "failed" && status !== "queued";
 }
 
 export function attributeJobCostRuns(args: {
@@ -458,8 +510,12 @@ export function attributeJobCostRuns(args: {
     const bucket = costBucket(run.run_kind);
     const jobMatch = Boolean(jobId && nonempty(run.job_id) === jobId);
     const sessionMatch = Boolean(sessionId && nonempty(run.session_id) === sessionId);
-    if (bucket === "generation" || bucket === "qa") {
-      if (jobMatch || sessionMatch) remember(run);
+    if (bucket === "generation") {
+      if ((jobMatch || sessionMatch) && isCountableGenerationRun(run)) remember(run);
+      continue;
+    }
+    if (bucket === "qa") {
+      if ((jobMatch || sessionMatch) && isExecutedQaRun(run)) remember(run);
       continue;
     }
     if (bucket !== "analysis") continue;
@@ -513,8 +569,10 @@ export function rollupSessionCost(runs: CostRun[], fallbackGenerationUsd = 0): S
       otherUsd += cost;
     }
   }
-  const usedAiRuns = runs.length > 0;
-  if (!generationRunCount && fallbackGenerationUsd > 0) generationUsd = fallbackGenerationUsd;
+  const usedAiRuns = analysisRunCount > 0 || generationRunCount > 0 || qaRunCount > 0;
+  if (!generationRunCount && fallbackGenerationUsd > 0) {
+    generationUsd = Math.max(0, fallbackGenerationUsd - analysisUsd - qaUsd);
+  }
   return {
     analysisUsd: roundUsd(analysisUsd),
     generationUsd: roundUsd(generationUsd),

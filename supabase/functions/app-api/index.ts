@@ -7331,6 +7331,7 @@ async function syncOpenAiUsageOperation(request: Request, args: JsonRecord) {
   ]);
   const snapshots: JsonRecord[] = [];
   const completionResults: Array<{ model?: string; input_tokens?: number; output_tokens?: number; input_cached_tokens?: number }> = [];
+  const imageResults: Array<{ model?: string; input_tokens?: number; output_tokens?: number; input_cached_tokens?: number; images?: number }> = [];
   const costResults: Array<{ line_item?: string; amount?: { value?: number; currency?: string } }> = [];
   for (const bucket of usageBuckets) {
     const usageDate = new Date(Number(bucket.start_time || 0) * 1000).toISOString().slice(0, 10);
@@ -7339,6 +7340,13 @@ async function syncOpenAiUsageOperation(request: Request, args: JsonRecord) {
       const imageSize = String(result.size || "unknown");
       const source = String(result.source || "unknown");
       const openaiProjectId = String(result.project_id || "");
+      imageResults.push({
+        model,
+        input_tokens: Number(result.input_tokens || 0),
+        output_tokens: Number(result.output_tokens || 0),
+        input_cached_tokens: Number(result.input_cached_tokens || 0),
+        images: Number(result.images || 0),
+      });
       snapshots.push({ usage_date: usageDate, dimension_key: `usage:${model}:${imageSize}:${source}:${openaiProjectId}`, model, image_size: imageSize, source, openai_project_id: openaiProjectId, image_count: Number(result.images || 0), request_count: Number(result.num_model_requests || 0), actual_cost_usd: 0, currency: "usd", usage_payload: result, cost_payload: {}, synced_at: new Date().toISOString() });
     }
   }
@@ -7380,7 +7388,7 @@ async function syncOpenAiUsageOperation(request: Request, args: JsonRecord) {
       snapshots.push({ usage_date: usageDate, dimension_key: `cost:${lineItem}:${openaiProjectId}`, model: "billing", image_size: "n/a", source: lineItem, openai_project_id: openaiProjectId, image_count: 0, request_count: 0, actual_cost_usd: Number(amount.value || 0), currency: String(amount.currency || "usd"), usage_payload: {}, cost_payload: result, synced_at: new Date().toISOString() });
     }
   }
-  const derivedRates = deriveAdminRateTable({ costResults, completionResults });
+  const derivedRates = deriveAdminRateTable({ costResults, completionResults, imageResults });
   snapshots.push(...adminRateSnapshots(new Date().toISOString().slice(0, 10), derivedRates, projectId));
   adminRatesCache = null;
   for (const orgId of organizationIds) {

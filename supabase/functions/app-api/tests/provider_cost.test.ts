@@ -78,6 +78,16 @@ Deno.test("parseAdminRateRows keeps the newest snapshot per model", () => {
   assertEquals(rates["gpt-5.6-luna"]?.output, 1.05);
 });
 
+Deno.test("parseAdminRateRows keeps older components when a newer day only updates one rate", () => {
+  const rates = parseAdminRateRows([
+    { dimension_key: "rate:gpt-5.6-luna:input", model: "gpt-5.6-luna", usage_date: "2026-09-01", usage_payload: { component: "input", usdPerMillion: 0.2 } },
+    { dimension_key: "rate:gpt-5.6-luna:output", model: "gpt-5.6-luna", usage_date: "2026-09-01", usage_payload: { component: "output", usdPerMillion: 1.2 } },
+    { dimension_key: "rate:gpt-5.6-luna:input", model: "gpt-5.6-luna", usage_date: "2026-09-13", usage_payload: { component: "input", usdPerMillion: 0.18 } },
+  ]);
+  assertEquals(rates["gpt-5.6-luna"]?.input, 0.18);
+  assertEquals(rates["gpt-5.6-luna"]?.output, 1.2);
+});
+
 Deno.test("session rollup includes analysis and QA, and omits QA when it never ran", () => {
   const attributed = attributeJobCostRuns({
     jobId: "job_1",
@@ -129,4 +139,49 @@ Deno.test("generation and QA from another job on the same planning request are e
   assertEquals(rolled.qaRunCount, 0);
   assertAlmostEquals(rolled.analysisUsd, 0.01, 1e-8);
   assertAlmostEquals(rolled.generationUsd, 0.08, 1e-8);
+});
+
+Deno.test("failed unavailable QA is not treated as a billed QA run", () => {
+  const attributed = attributeJobCostRuns({
+    jobId: "job_1",
+    sessionId: "session_1",
+    runs: [
+      { id: "g1", run_kind: "image_generation", cost_usd: 0.10, job_id: "job_1", session_id: "session_1", status: "completed" },
+      { id: "qa-fail", run_kind: "quality_assurance", cost_usd: 0, job_id: "job_1", session_id: "session_1", status: "failed" },
+    ],
+  });
+  const rolled = rollupSessionCost(attributed);
+  assertEquals(rolled.qaRunCount, 0);
+  assertEquals(rolled.qaUsd, 0);
+  assertEquals(rolled.generationRunCount, 1);
+});
+
+Deno.test("job actual fallback does not double-count seeded analysis cost", () => {
+  const rolled = rollupSessionCost([
+    { run_kind: "product_reference_analysis", cost_usd: 0.0117, status: "completed" },
+  ], 0.0117);
+  assertAlmostEquals(rolled.analysisUsd, 0.0117, 1e-8);
+  assertEquals(rolled.generationUsd, 0);
+  assertAlmostEquals(rolled.totalUsd, 0.0117, 1e-8);
+});
+
+Deno.test("deriveAdminRateTable prices image models from billed dollars and image usage tokens", () => {
+  const split = deriveAdminRateTable({
+    costResults: [
+      { line_item: "gpt-image-2.5-flare, input", amount: { value: 5 } },
+      { line_item: "gpt-image-2.5-flare, output", amount: { value: 15 } },
+    ],
+    completionResults: [],
+    imageResults: [{ model: "gpt-image-2.5-flare", input_tokens: 10_000_000, output_tokens: 500_000 }],
+  });
+  assertAlmostEquals(split["gpt-image-2.5-flare"]?.textInput || 0, 0.5, 1e-8);
+  assertAlmostEquals(split["gpt-image-2.5-flare"]?.imageOutput || 0, 30, 1e-8);
+
+  const scaled = deriveAdminRateTable({
+    costResults: [{ line_item: "Image models, gpt-image-2.5-flare", amount: { value: 2.2 } }],
+    completionResults: [],
+    imageResults: [{ model: "gpt-image-2.5-flare", input_tokens: 100_000, output_tokens: 10_000 }],
+  });
+  assertAlmostEquals(scaled["gpt-image-2.5-flare"]?.imageInput || 0, 16, 1e-8);
+  assertAlmostEquals(scaled["gpt-image-2.5-flare"]?.imageOutput || 0, 60, 1e-8);
 });

@@ -54,6 +54,22 @@ function isNearSession(runCreatedAt: string | null | undefined, sessionCreatedAt
   return runMs <= sessionMs + 10 * 60_000 && runMs >= sessionMs - 2 * 60 * 60_000;
 }
 
+function runStatus(run: CostRun) {
+  return String(run.status || "").trim().toLowerCase();
+}
+
+export function isExecutedQaRun(run: CostRun) {
+  if (Number(run.cost_usd || 0) > 0) return true;
+  const status = runStatus(run);
+  return Boolean(status) && status !== "failed" && status !== "queued";
+}
+
+export function isCountableGenerationRun(run: CostRun) {
+  if (Number(run.cost_usd || 0) > 0) return true;
+  const status = runStatus(run);
+  return status !== "failed" && status !== "queued";
+}
+
 export function attributeJobCostRuns(args: {
   runs: CostRun[];
   jobId: string;
@@ -76,8 +92,12 @@ export function attributeJobCostRuns(args: {
     const bucket = costBucket(run.run_kind);
     const jobMatch = Boolean(jobId && nonempty(run.job_id) === jobId);
     const sessionMatch = Boolean(sessionId && nonempty(run.session_id) === sessionId);
-    if (bucket === "generation" || bucket === "qa") {
-      if (jobMatch || sessionMatch) remember(run);
+    if (bucket === "generation") {
+      if ((jobMatch || sessionMatch) && isCountableGenerationRun(run)) remember(run);
+      continue;
+    }
+    if (bucket === "qa") {
+      if ((jobMatch || sessionMatch) && isExecutedQaRun(run)) remember(run);
       continue;
     }
     if (bucket !== "analysis") continue;
@@ -129,7 +149,9 @@ export function rollupSessionCost(runs: CostRun[], fallbackGenerationUsd = 0): S
       otherUsd += cost;
     }
   }
-  if (!generationRunCount && fallbackGenerationUsd > 0) generationUsd = fallbackGenerationUsd;
+  if (!generationRunCount && fallbackGenerationUsd > 0) {
+    generationUsd = Math.max(0, fallbackGenerationUsd - analysisUsd - qaUsd);
+  }
   return {
     analysisUsd: roundUsd(analysisUsd),
     generationUsd: roundUsd(generationUsd),
@@ -139,7 +161,7 @@ export function rollupSessionCost(runs: CostRun[], fallbackGenerationUsd = 0): S
     analysisRunCount,
     generationRunCount,
     qaRunCount,
-    usedAiRuns: runs.length > 0,
+    usedAiRuns: analysisRunCount > 0 || generationRunCount > 0 || qaRunCount > 0,
     usedAdminRates,
   };
 }

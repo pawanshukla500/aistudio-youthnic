@@ -395,7 +395,7 @@ async function getJob(jobId: string) {
     sessionCreatedAt: String(sessionResult.data?.created_at || job.created_at || ""),
   });
   const costRollup = rollupSessionCost(attributedRuns, Number(job.actual_cost_usd || 0));
-  const actualCost = costRollup.usedAiRuns ? costRollup.totalUsd : Number(job.actual_cost_usd || 0);
+  const actualCost = costRollup.totalUsd;
   return {
     ...summary,
     model: job.model,
