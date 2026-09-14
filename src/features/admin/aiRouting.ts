@@ -48,8 +48,8 @@ export function preferredModelId(provider: string, models: AdminAiRegistryModel[
   return ids[0] || "";
 }
 
-const VISION_PROVIDER_PREFERENCE = ["gemini", "openai", "meta", "qwen"];
-const FALLBACK_PROVIDER_PREFERENCE = ["openai", "gemini", "qwen", "meta"];
+const VISION_PROVIDER_PREFERENCE = ["openai", "meta", "qwen", "gemini"];
+const FALLBACK_PROVIDER_PREFERENCE = ["openai", "qwen", "meta"];
 
 export function preferredConfiguredProvider(
   registry: AdminAiRegistryEntry[],

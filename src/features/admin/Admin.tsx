@@ -551,9 +551,9 @@ export function Admin() {
       : undefined;
     return {
       purpose,
-      primaryProvider: primary?.provider || "gemini",
+      primaryProvider: primary?.provider || "openai",
       primaryModel: primaryModel?.id || "",
-      primaryThinking: normalizedThinking(primary?.provider || "gemini", primaryModel?.id || "", purpose, primaryModel?.thinkingLevels[0]),
+      primaryThinking: normalizedThinking(primary?.provider || "openai", primaryModel?.id || "", purpose, primaryModel?.thinkingLevels[0]),
       fallbackEnabled: purpose !== "image_generation" && Boolean(fallback && fallbackModel),
       fallbackProvider: fallback?.provider,
       fallbackModel: fallbackModel?.id,

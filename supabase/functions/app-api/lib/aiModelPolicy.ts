@@ -238,9 +238,8 @@ export function defaultThinkingLevel(
 }
 
 /**
- * Gemini 3.8 Flash is the Studio analyze primary: live multi-image completions
- * average ~27s. Muse Spark remains allowed and is attempted last at ≤25s.
- * Luna is the cheap OpenAI fallback — never Sol.
+ * Muse Spark remains allowed as an explicit org override, but it is never the
+ * automatic first hop. Studio Analyze uses OpenAI Luna.
  */
 export const FAST_PRODUCT_TRUTH_ROUTE = {
   provider: "meta",
@@ -268,14 +267,11 @@ export const OPENAI_TERRA_VISION_ROUTE = {
 
 /**
  * Studio Analyze uses `supabase.functions.invoke("app-api")`. Without an
- * explicit client timeout the browser/SDK aborts around 55–60s, which kills
- * the Edge isolate right after a ~50s Muse hop — so hop 2 never starts and
- * `ai_runs` shows only Muse `attempt_number=1` at ~50011ms.
+ * explicit client timeout the browser/SDK aborts around 55–60s.
  *
- * The Studio client now waits `STUDIO_ANALYZE_TIMEOUT_MS` (140s), matching
- * `VISION_GATEWAY_BUDGET_MS`. Product-truth still must not give Muse a 50s
- * first hop: Gemini Flash (~27s live) runs first, Muse is capped at 25s and
- * runs last so a Muse-first org policy cannot brick Analyze.
+ * The Studio client waits `STUDIO_ANALYZE_TIMEOUT_MS` (140s). Product-truth
+ * uses OpenAI Luna first (same `OPENAI_API_KEY` as image generation). Gemini
+ * is not part of the automatic chain. Muse, if stored, is last and capped.
  */
 export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
 export const STUDIO_INVOKE_BUDGET_MS = STUDIO_ANALYZE_TIMEOUT_MS;
@@ -289,15 +285,13 @@ export const VISION_HOP_MIN_MS = 8_000;
 export const VISION_ROUTE_PROMOTION_THRESHOLD = 4;
 
 /**
- * Studio product-truth hops: Gemini Flash first (proven ~27s completions),
- * Luna, then Muse last at ≤25s. Stored Muse/Terra primaries are still
- * attempted after that, never as a 50s first hop. Sol is omitted — it is
- * not used for this workload.
+ * Studio product-truth hops: OpenAI Luna first. A stored Muse/Qwen/Terra
+ * route can still run after that. Gemini and Sol are omitted — this project
+ * uses the OpenAI API key for vision work. Keeping the automatic chain to a
+ * single OpenAI hop lets Luna use the remaining 140s Studio wait.
  */
 export const PRODUCT_TRUTH_FAILOVER_CHAIN: readonly NormalizedAiModelRoute[] = [
-  FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
   CHEAP_OPENAI_VISION_ROUTE,
-  FAST_PRODUCT_TRUTH_ROUTE,
 ];
 
 const FAST_OPENAI_THINKING: readonly AiThinkingLevel[] = ["none", "low"];
@@ -333,7 +327,9 @@ export function withFastProductTruthThinking(
 export function isOmittedProductTruthHop(
   route?: Pick<NormalizedAiModelRoute, "provider" | "model"> | null,
 ) {
-  return route?.provider === "openai" && route.model === "gpt-5.6-sol";
+  if (!route) return false;
+  if (text(route.provider) === "gemini") return true;
+  return route.provider === "openai" && route.model === "gpt-5.6-sol";
 }
 
 export function isSlowProductTruthHop(
@@ -381,11 +377,20 @@ export function productTruthRouteChain(
     const next = withFastProductTruthThinking(route);
     const key = routeKey(next);
     if (seen.has(key)) return;
+    // Luna is the OpenAI vision hop. Stacking Terra behind it would cap Luna
+    // at 40s and reintroduce the Studio timeout.
+    if (
+      next.provider === "openai" &&
+      next.model !== CHEAP_OPENAI_VISION_ROUTE.model &&
+      seen.has(routeKey(CHEAP_OPENAI_VISION_ROUTE))
+    ) {
+      return;
+    }
     seen.add(key);
     chain.push(next);
   };
-  // Gemini Flash first regardless of stored Muse/Luna primary so a 50s Muse
-  // hop cannot consume the client wait (or a leftover 60s gateway).
+  // OpenAI Luna first so a leftover Gemini or Muse org policy cannot consume
+  // the client wait before the configured OpenAI key is used.
   for (const hop of PRODUCT_TRUTH_FAILOVER_CHAIN) push(hop);
   push(primary);
   push(existingFallback);
@@ -438,9 +443,10 @@ export function remainingVisionTimeoutMs(args: {
     args.gatewayBudgetMs - args.elapsedMs - VISION_GATEWAY_RESERVE_MS,
   );
   if (remainingWall <= 0) return 0;
-  // Product-truth Studio client now waits 140s. Do not starve Gemini to reserve
-  // slices for later hops — later hops only run if this one fails fast.
+  // Product-truth Studio client waits 140s. The last hop (usually Luna) gets
+  // the remaining wall so a single OpenAI route is not capped at 40–90s.
   if (args.purpose === "product_truth") {
+    if (args.remainingRouteCount <= 1) return remainingWall;
     return Math.min(preferred, remainingWall);
   }
   if (args.remainingRouteCount <= 1) return Math.min(preferred, remainingWall);
@@ -613,17 +619,6 @@ export type VisionPromotionRun = {
 const PROMOTABLE_PRODUCT_TRUTH_ROUTES: Record<string, NormalizedAiModelRoute> = {
   "gpt-5.6-luna": CHEAP_OPENAI_VISION_ROUTE,
   "gpt-5.6-terra": OPENAI_TERRA_VISION_ROUTE,
-  "gemini-3.8-flash": FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
-  "gemini-3.6-flash": {
-    provider: "gemini",
-    model: "gemini-3.6-flash",
-    thinkingLevel: "low",
-  },
-  "gemini-2.5-flash": {
-    provider: "gemini",
-    model: "gemini-2.5-flash",
-    thinkingLevel: "low",
-  },
 };
 
 function isSameVisionRoute(
@@ -638,7 +633,7 @@ function isSameVisionRoute(
  * Promote a proven product-truth model from live `ai_runs` completions.
  * Consecutive newest-first streak wins; if the stored primary has zero
  * completions in the window, the promotable model with the most completions
- * is used instead (Gemini Flash already has dozens of live successes).
+ * is used instead. Only OpenAI Luna/Terra are auto-promoted.
  */
 export function evaluateVisionRoutePromotion(args: {
   primary: Pick<NormalizedAiModelRoute, "provider" | "model">;
@@ -697,12 +692,6 @@ export function promotionFallbackRoute(
   if (text(promoted.model) === "gpt-5.6-luna") {
     return withFastProductTruthThinking(OPENAI_TERRA_VISION_ROUTE);
   }
-  if (text(promoted.model) === "gpt-5.6-terra") {
-    return withFastProductTruthThinking(CHEAP_OPENAI_VISION_ROUTE);
-  }
-  if (text(promoted.provider) === "gemini") {
-    return withFastProductTruthThinking(CHEAP_OPENAI_VISION_ROUTE);
-  }
   return withFastProductTruthThinking(CHEAP_OPENAI_VISION_ROUTE);
 }
 
@@ -713,43 +702,48 @@ export type FastProductTruthPreference = {
 };
 
 /**
- * Prefer Gemini Flash for product-truth analysis when the stored primary is a
- * slow OpenAI reasoning route. Expensive Sol is never kept as fallback; Luna is
- * the cheap OpenAI option. Gemini first plus a 140s client wait keeps Analyze
- * from dying on a Muse-first org policy.
+ * Prefer OpenAI Luna for product-truth analysis. Stored Gemini routes and
+ * slow GPT reasoning (Sol / high thinking) are rerouted to Luna so Analyze
+ * uses the configured OpenAI API key. Muse/Qwen org primaries stay in the
+ * chain after Luna via `productTruthRouteChain`.
  */
 export function preferFastProductTruthRoute(
   primary: NormalizedAiModelRoute,
   existingFallback?: NormalizedAiModelRoute,
 ): FastProductTruthPreference {
-  if (!isSlowReasoningVisionRoute(primary)) {
-    return { route: primary, fallback: existingFallback, rerouted: false };
+  const luna = withFastProductTruthThinking(CHEAP_OPENAI_VISION_ROUTE);
+  const shouldRerouteToOpenAi =
+    primary.provider === "gemini" ||
+    isOmittedProductTruthHop(primary) ||
+    isSlowReasoningVisionRoute(primary);
+
+  if (shouldRerouteToOpenAi) {
+    const fallback = existingFallback &&
+        !isOmittedProductTruthHop(existingFallback) &&
+        !isSlowReasoningVisionRoute(existingFallback) &&
+        existingFallback.provider !== luna.provider
+      ? withFastProductTruthThinking(existingFallback)
+      : undefined;
+    return { route: luna, fallback, rerouted: true };
   }
-  if (primary.provider === "openai" && primary.model !== "gpt-5.6-luna") {
-    return {
-      route: FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
-      fallback: CHEAP_OPENAI_VISION_ROUTE,
-      rerouted: true,
-    };
-  }
-  const fast = assertAllowedAiModelRoute(
-    FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
-    "product_truth",
-    { strictJson: true },
+
+  return { route: primary, fallback: existingFallback, rerouted: false };
+}
+
+/**
+ * Drop Gemini and any hop whose server-side secret is missing so Analyze does
+ * not spend 40–90s timing out a provider this project does not use.
+ */
+export function selectConfiguredVisionRoutes(
+  routes: NormalizedAiModelRoute[],
+  configuredProviders: ReadonlySet<string> | readonly string[],
+): NormalizedAiModelRoute[] {
+  const configured = configuredProviders instanceof Set
+    ? configuredProviders
+    : new Set(configuredProviders);
+  return routes.filter((route) =>
+    !isOmittedProductTruthHop(route) && configured.has(text(route.provider))
   );
-  const cheapOpenAi = assertAllowedAiModelRoute(
-    CHEAP_OPENAI_VISION_ROUTE,
-    "product_truth",
-    { strictJson: true },
-  );
-  const fallback = existingFallback &&
-      !isSlowReasoningVisionRoute(existingFallback) &&
-      existingFallback.model !== "gpt-5.6-sol" &&
-      (existingFallback.provider !== fast.provider ||
-        existingFallback.model !== fast.model)
-    ? existingFallback
-    : cheapOpenAi;
-  return { route: fast, fallback, rerouted: true };
 }
 
 export function aiModelDisplayLabel(model: string): string {
