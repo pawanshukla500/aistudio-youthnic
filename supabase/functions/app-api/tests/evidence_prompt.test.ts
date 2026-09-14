@@ -7,6 +7,7 @@ import {
   GenerationPromptBudgetError,
   IMAGE_PROMPT_SAFE_CHARS,
   assertGenerationPromptWithinLimit,
+  compactFullPromptSafely,
   composeGenerationPrompt,
 } from "../lib/generationPrompt.ts";
 import { normalizeAnalysis } from "../lib/profiles.ts";
@@ -816,6 +817,43 @@ Deno.test("composeGenerationPrompt locks style-reference jewellery and dual-mode
   assertStringIncludes(productDetail, "This frame is a PRODUCT-DETAIL close-up");
   assertStringIncludes(productDetail, "pallu border artwork");
   assertEquals(productDetail.includes("FACE + PRODUCT DETAIL"), false);
+
+  const withoutStyleImage = composeGenerationPrompt({
+    skuName: "NO-STYLE-SET",
+    productDetails: "Ivory kurta",
+    pose: {
+      id: "full_front",
+      title: "Front Hero View",
+      poseNumber: 1,
+      description: "Square front hero",
+      cameraAngle: "eye level",
+      framing: "full",
+      bodyPosition: "straight",
+      handPlacement: "relaxed",
+      expression: "confident",
+      highlightedDetails: ["neckline"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "hero",
+      consistencyNotes: "locked",
+      prompt: "Full front hero pose.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "ivory" },
+    },
+    references: [{ role: "front" }],
+  });
+  assertStringIncludes(withoutStyleImage, "No STYLE REFERENCE image is in this manifest");
+  assertEquals(withoutStyleImage.includes("If the STYLE REFERENCE image in this manifest shows jewellery"), false);
+
+  const padded = productDetail.replace(
+    "Create ONE premium photorealistic fashion e-commerce photograph",
+    `${"OVERFLOW ".repeat(4_000)}Create ONE premium photorealistic fashion e-commerce photograph`,
+  );
+  assertEquals(padded.length > IMAGE_PROMPT_SAFE_CHARS, true);
+  const compacted = compactFullPromptSafely(padded);
+  assertEquals(compacted.length <= IMAGE_PROMPT_SAFE_CHARS, true);
+  assertStringIncludes(compacted, "POSE 5 HARD RULE (PRODUCT DETAIL PRIMARY)");
 });
 
 

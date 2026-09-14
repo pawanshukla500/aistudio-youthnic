@@ -616,7 +616,9 @@ ${styling.themeInterpretation ? `- Theme being served: ${boundedText(styling.the
 ${creative?.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${boundedText(creative.suggestedAccessories, 420)}` : ""}`
   : `STYLING ADDITION (optional, locked once chosen):
 ${creative?.suggestedAccessories ? `The stylist has proposed adding: ${boundedText(creative.suggestedAccessories, 420)}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}
-- JEWELLERY & ORNAMENT LOCK: If the STYLE REFERENCE shows jewellery or ornaments that complement this product and the product itself does not already include competing pieces, keep those exact style-reference pieces identical across the set. Never invent a second jewellery story.`}
+- JEWELLERY & ORNAMENT LOCK: ${hasStyleReference
+    ? "If the STYLE REFERENCE image in this manifest shows jewellery or ornaments that complement this product and the product itself does not already include competing pieces, keep those exact style-reference pieces identical across the set. Never invent a second jewellery story."
+    : "No STYLE REFERENCE image is in this manifest. Use only jewellery/ornaments that ship with the product or were named in the approved styling plan. Do not invent jewellery from a missing style reference."}`}
 
 ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
 ${allowedDelta.map((value) => `- ${value}`).join("\n")}
@@ -682,9 +684,10 @@ ${rules.map((rule) => `- ${rule}`).join("\n")}
 ${(args.pose.id === "back" || isTrueBack) ? `- DUPATTA REAR VISIBILITY LOCK: If wearing a dupatta, scarf, stole, or shawl, it MUST be draped forward over both arms or held in front. The entire back of the kurti/dress (neckline, back panel, embroidery, seams, darts, and hem) must be 100% visible and NEVER covered or obstructed by the dupatta.
 - HAIR REAR VISIBILITY LOCK: Hair MUST be swept forward over the shoulders or styled in an updo/bun so the back neckline, rear embroidery, closures, and rear garment panel are completely unobstructed and fully visible.
 - TRUE BACK HARD RULE: shoulders and hips fully face away. Reproduce uploaded BACK exactly; never infer the rear from FRONT.` : ""}
-${isCloseup ? pose5HardRule({ closeupMode, heroDetail: closeupHeroDetail }) : ""}
 
-Product accuracy is more important than style matching. Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
+Product accuracy is more important than style matching.
+${isCloseup ? `${pose5HardRule({ closeupMode, heroDetail: closeupHeroDetail })}
+` : ""}Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
 
   return assertGenerationPromptWithinLimit(
     prompt.length > IMAGE_PROMPT_SAFE_CHARS ? compactFullPromptSafely(prompt) : prompt,

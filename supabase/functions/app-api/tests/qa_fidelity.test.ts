@@ -213,5 +213,7 @@ Deno.test("close-up QA requires a large product detail and can omit the face in 
   assertStringIncludes(productDetail, "product-detail-first close-up: pallu border artwork");
   assertStringIncludes(productDetail, "Do NOT fail pose_requirement merely because the face is cropped out");
   assertStringIncludes(productDetail, "Pass model_face when no recognizable face is in frame");
+  assertStringIncludes(productDetail, "apply only when a recognizable face is in frame");
+  assertStringIncludes(productDetail, "pass face_realism and model_face");
 });
 

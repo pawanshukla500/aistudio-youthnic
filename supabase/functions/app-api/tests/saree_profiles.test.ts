@@ -348,6 +348,22 @@ Deno.test("normalizeAnalysis persists seated pose and closeup mode locks", () =>
     productDetails: "no seating requested",
     creative: normalized.creativeDirection,
   }), true);
+  assertEquals(isSeatedEditorialPoseDemanded({
+    pose: { id: "creative", prompt: "walk and swirl" },
+    productDetails: "no seating requested",
+    creative: {
+      seatedPoseRequired: "no",
+      seatedPoseReason: "style reference is not seated; standing editorial on the plinth",
+    },
+  }), false);
+  assertEquals(isSeatedEditorialPoseDemanded({
+    pose: { id: "creative", prompt: "walk and swirl" },
+    productDetails: "please use a sitting pose on the bench",
+    creative: {
+      seatedPoseRequired: "no",
+      seatedPoseReason: "style reference is not seated",
+    },
+  }), true);
   assertEquals(resolveCloseupMode({
     pose: { id: "closeup", prompt: "face-to-chest beauty crop" },
     creative: normalized.creativeDirection,

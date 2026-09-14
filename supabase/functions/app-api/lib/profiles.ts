@@ -369,11 +369,20 @@ export function isSeatedEditorialPoseDemanded(args: {
   creative?: JsonRecord;
   stylingNotes?: string;
 }): boolean {
-  if (isYesDirectionFlag(args.creative?.seatedPoseRequired ?? args.creative?.seated_pose_required)) return true;
-  if (SITTING_POSE_RE.test(joinedPoseText(args.pose))) return true;
+  const recorded = args.creative?.seatedPoseRequired ?? args.creative?.seated_pose_required;
+  if (isYesDirectionFlag(recorded)) return true;
+  // User notes can still demand sitting even when analysis recorded "no".
   if (SITTING_POSE_RE.test(String(args.productDetails ?? ""))) return true;
+  // An explicit "no" must win over leftover "seated" wording in seatedPoseReason or styling notes.
+  if (String(recorded ?? "").trim() && normalizeYesNoFlag(recorded) === "no") return false;
+  if (SITTING_POSE_RE.test(joinedPoseText(args.pose))) return true;
   if (SITTING_POSE_RE.test(String(args.stylingNotes ?? ""))) return true;
-  return SITTING_POSE_RE.test(joinedCreativeText(args.creative));
+  const creative = args.creative && typeof args.creative === "object" ? { ...args.creative } : {};
+  delete creative.seatedPoseRequired;
+  delete creative.seated_pose_required;
+  delete creative.seatedPoseReason;
+  delete creative.seated_pose_reason;
+  return SITTING_POSE_RE.test(joinedCreativeText(creative));
 }
 
 export function getPoseSlots(garmentFamily: string): readonly StudioPose[] {
