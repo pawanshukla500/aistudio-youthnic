@@ -1,9 +1,12 @@
 import {
+  CLOSEUP_PRODUCT_DETAIL,
   CONSISTENCY_RULES,
   hasRecordedBottomWear,
   isFarshiBottomWear,
+  isSeatedEditorialPoseDemanded,
   normalizeStylingPlan,
   recordedBottomWearDetails,
+  resolveCloseupMode,
   type JsonRecord,
   type StudioPose,
   sanitizeDetailPlacementMap,
@@ -385,6 +388,14 @@ function poseCategoryRules(category: string) {
   }[category] || "";
 }
 
+function pose5HardRule(args: { closeupMode: string; heroDetail: string }) {
+  const detail = args.heroDetail || "the garment's most important real selling detail (embroidery, neckline, print scale, drape, or fabric texture)";
+  if (args.closeupMode === CLOSEUP_PRODUCT_DETAIL) {
+    return `- POSE 5 HARD RULE (PRODUCT DETAIL PRIMARY): this frame sells craftsmanship, not a beauty headshot. Fill the frame with ${detail} so construction, embroidery, print scale, or texture is catalog-readable. Never a full-body or wide hero repeat. Never a face-only crop that shrinks the selling detail. The face may be partial at the edge or omitted entirely when a full face would make that detail too small. If any face is visible it must match the identity lock.`;
+  }
+  return `- POSE 5 HARD RULE (FACE + PRODUCT DETAIL): genuine ZOOMED-IN face-to-chest or face-to-waist shot - tighter than the hero pose, never a full-body repeat. The face is sharp with a natural Gen-Z expression, AND ${detail} must occupy a LARGE, sharp, catalog-readable portion of the same frame - not a tiny hint of embroidery under a beauty close-up.`;
+}
+
 export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
   session: JsonRecord; references: PromptReference[]; correction?: string; learnings?: string; fashionKnowledge?: string;
@@ -434,13 +445,23 @@ export function composeGenerationPrompt(args: {
   const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
-  const faceVisible = !isTrueBack;
+  const isCloseup = args.pose.id === "closeup";
+  const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).join(", ");
+  const closeupMode = isCloseup ? resolveCloseupMode({ pose: args.pose, creative }) : "face_and_detail";
+  const closeupHeroDetail = boundedText(creative.closeupHeroDetail || creative.closeup_hero_detail || highlightedDetails, 260);
+  const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL);
+  const faceQualityInstruction = faceRequired
+    ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct and naturally shaped eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
+    : isTrueBack
+      ? "The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face and profile MUST be 100% identical to the MODEL FACE REFERENCE / APPROVED POSE 1 identity - same jawline, nose profile, skin texture with visible pores, eye shape, and makeup. Never substitute a different person or face."
+      : "This frame is a PRODUCT-DETAIL close-up. Do not force a full beauty-face crop. If any portion of the face appears it MUST match the identity lock - same jawline, eyes, skin texture with visible pores, and makeup. Prefer filling the frame with the named product selling detail; omit or crop the face when a full face would make that detail too small to read.";
   const isPose4 = args.pose.id === "creative" || args.pose.poseNumber === 4;
-  const sittingRegex = /\b(sit|sitting|seated)\b/i;
-  const poseText = `${args.pose.id} ${args.pose.title || ""} ${args.pose.bodyPosition || ""} ${args.pose.prompt || ""} ${args.pose.description || ""}`;
-  const userNotes = String(args.productDetails || "");
-  const creativeText = `${creative.composition || ""} ${creative.modelStyling || ""} ${creative.editorialCommercialFeel || ""}`;
-  const isSittingDemanded = sittingRegex.test(poseText) || sittingRegex.test(userNotes) || sittingRegex.test(creativeText);
+  const isSittingDemanded = isSeatedEditorialPoseDemanded({
+    pose: args.pose,
+    productDetails: String(args.productDetails || ""),
+    creative,
+    stylingNotes: styling?.stylingNotes,
+  });
 
   const allowedDelta = [
     `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step matching the set; complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(args.pose.bodyPosition, 360)}`,
@@ -451,7 +472,6 @@ export function composeGenerationPrompt(args: {
   const correction = boundedText(args.correction, 1_200);
   const learnings = boundedText(args.learnings, 900);
   const fashionKnowledge = boundedText(args.fashionKnowledge, 700);
-  const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).join(", ");
   const visibilityRules = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
   const poseCategory = (isTrueBack || args.pose.id === "back")
     ? "back"
@@ -506,9 +526,7 @@ ${hasModelReference
     : hasApprovedAnchor
       ? "The image labeled APPROVED POSE 1 in the reference manifest above is the exact, non-negotiable ground truth for this model's identity. Reproduce the identical facial bone structure, eye shape and color, eyebrow shape, nose, lips, jawline, skin tone and texture, and hairstyle seen in that image - do not idealize, beautify, average, or drift toward a different face."
       : "This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally beautiful adult face exactly as described in modelIdentity above - every later pose in this set must reproduce this same face."}
-${faceVisible
-    ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct and naturally shaped eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
-    : "The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face and profile MUST be 100% identical to the MODEL FACE REFERENCE / APPROVED POSE 1 identity - same jawline, nose profile, skin texture with visible pores, eye shape, and makeup. Never substitute a different person or face."}
+${faceQualityInstruction}
 
 LOCKED PRODUCT - MUST NOT CHANGE:
 ${productCoreJson}
@@ -593,10 +611,14 @@ ${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, ide
 ${styling.stylingNotes ? `- Stylist notes: ${boundedText(styling.stylingNotes, 600)}` : ""}
 ${styling.themeInterpretation ? `- Theme being served: ${boundedText(styling.themeInterpretation, 600)}` : ""}
 - Style the model with exactly these pieces - the same metal, the same count, the same placement in every frame. Do not add a necklace, bangle, ring, belt, bag, hair ornament or any other accessory this plan does not list, and do not drop one it does.
+- JEWELLERY & ORNAMENT LOCK: Wear exactly the jewellery and ornaments in this plan. If the plan copied style-reference ornaments, keep those pieces identical. Do not invent competing necklaces, maang tikkas, extra bangles, or hair jewellery. Product-included jewellery from the product references outranks style-reference jewellery when both exist, and nothing in this plan may hide neckline or embroidery.
 - This is styling only. It never becomes part of the garment, never hides or replaces a garment detail, bottom wear or footwear shown in the product references, and never contradicts the placement or absence locks above.
 ${creative?.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${boundedText(creative.suggestedAccessories, 420)}` : ""}`
   : `STYLING ADDITION (optional, locked once chosen):
-${creative?.suggestedAccessories ? `The stylist has proposed adding: ${boundedText(creative.suggestedAccessories, 420)}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}`}
+${creative?.suggestedAccessories ? `The stylist has proposed adding: ${boundedText(creative.suggestedAccessories, 420)}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}
+- JEWELLERY & ORNAMENT LOCK: ${hasStyleReference
+    ? "If the STYLE REFERENCE image in this manifest shows jewellery or ornaments that complement this product and the product itself does not already include competing pieces, keep those exact style-reference pieces identical across the set. Never invent a second jewellery story."
+    : "No STYLE REFERENCE image is in this manifest. Use only jewellery/ornaments that ship with the product or were named in the approved styling plan. Do not invent jewellery from a missing style reference."}`}
 
 ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
 ${allowedDelta.map((value) => `- ${value}`).join("\n")}
@@ -610,6 +632,11 @@ Visibility rules: ${visibilityRules}
 Purpose: ${boundedText(args.pose.purpose, 420)}
 Consistency notes: ${boundedText(args.pose.consistencyNotes, 600)}
 ${categoryRules ? `POSE CATEGORY RULES (${poseCategory.toUpperCase()}):\n${categoryRules}` : ""}
+${isPose4 && hasStyleReference ? `
+STYLE REFERENCE SITTING OVERRIDE (POSE 4):
+- Look at the STYLE REFERENCE image in the manifest. If that image, or any uploaded reference that shows a model pose, depicts a sitting/seated person, this 4th pose MUST be a seated editorial pose even if the written pose plan still describes walking or movement.
+- Keep garment, bottom wear, hemline, and footwear fully visible. Use only seating furniture/props that already belong to the style-reference set.
+` : ""}
 ${isPose4 && isSittingDemanded ? `
 SEATED EDITORIAL POSE REQUIREMENT (POSE 4):
 - The style reference or product requirements specifically demand an elegant seated pose for this frame.
@@ -642,7 +669,7 @@ REALISTIC INTEGRATION:
 - Match locked lighting direction, color temperature, shadows, contact shadows, perspective, lens feel, depth and scene geometry.
 - Keep anatomy realistic and keep hands away from product details.
 - Preserve believable pores, flyaway hairs, fabric microtexture, seam depth, edge transitions, optical depth of field, and grounded foot/contact shadows. Avoid waxy skin, over-smoothed fabric, duplicated motifs, over-sharpening, floating garments, plastic texture, and other synthetic AI tells.
-${faceVisible ? `- Render the eyes with correct anatomy: two naturally shaped, correctly positioned eyes with realistic iris detail, natural catchlights, and a correctly aligned gaze - never crossed, misaligned, melted, or malformed.
+${faceRequired ? `- Render the eyes with correct anatomy: two naturally shaped, correctly positioned eyes with realistic iris detail, natural catchlights, and a correctly aligned gaze - never crossed, misaligned, melted, or malformed.
 - Render teeth naturally: a real, slightly imperfect smile with naturally aligned teeth in the correct count - never uniformly perfect, fused, extra, missing, or warped.
 - Skin must show real photographic micro-detail (pores, faint texture variation) rather than an airbrushed, plastic, or over-smoothed "beauty filter" look.` : ""}
 
@@ -657,9 +684,10 @@ ${rules.map((rule) => `- ${rule}`).join("\n")}
 ${(args.pose.id === "back" || isTrueBack) ? `- DUPATTA REAR VISIBILITY LOCK: If wearing a dupatta, scarf, stole, or shawl, it MUST be draped forward over both arms or held in front. The entire back of the kurti/dress (neckline, back panel, embroidery, seams, darts, and hem) must be 100% visible and NEVER covered or obstructed by the dupatta.
 - HAIR REAR VISIBILITY LOCK: Hair MUST be swept forward over the shoulders or styled in an updo/bun so the back neckline, rear embroidery, closures, and rear garment panel are completely unobstructed and fully visible.
 - TRUE BACK HARD RULE: shoulders and hips fully face away. Reproduce uploaded BACK exactly; never infer the rear from FRONT.` : ""}
-${args.pose.id === "closeup" ? "- POSE 5 HARD RULE: this is a genuine ZOOMED-IN face-to-chest or face-to-waist shot - visibly tighter in scale than the full-body hero pose, never a repeat of that wide framing. The face must be sharp, beautiful, and carry a natural Gen-Z expression, and one real product detail (embroidery, neckline, drape, print, or fabric texture) must also be sharp and clearly visible in the same frame." : ""}
 
-Product accuracy is more important than style matching. Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
+Product accuracy is more important than style matching.
+${isCloseup ? `${pose5HardRule({ closeupMode, heroDetail: closeupHeroDetail })}
+` : ""}Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
 
   return assertGenerationPromptWithinLimit(
     prompt.length > IMAGE_PROMPT_SAFE_CHARS ? compactFullPromptSafely(prompt) : prompt,

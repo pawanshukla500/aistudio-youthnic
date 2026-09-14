@@ -244,6 +244,147 @@ export function isFarshiBottomWear(detailsOrProduct: unknown): boolean {
   return FARSHI_BOTTOM_WEAR.test(classification);
 }
 
+export const CLOSEUP_FACE_AND_DETAIL = "face_and_detail";
+export const CLOSEUP_PRODUCT_DETAIL = "product_detail";
+export type CloseupMode = typeof CLOSEUP_FACE_AND_DETAIL | typeof CLOSEUP_PRODUCT_DETAIL;
+
+const YES_DIRECTION_FLAG = /^(yes|true|required|1)$/i;
+const NO_DIRECTION_FLAG = /^(no|false|0)$/i;
+const SITTING_POSE_RE = /\b(sit|sits|sitting|seated)\b/i;
+const PRODUCT_DETAIL_CLOSEUP_RE =
+  /\b(product[_\s-]?detail(?:[_\s-]?(?:first|only|crop))?|detail[_\s-]?(?:first|only|crop)|omit(?:ting)?(?: the)? face|face optional|without(?: a)?(?: full)? face|macro (?:product )?detail)\b/i;
+
+export function normalizeYesNoFlag(value: unknown, fallback: "yes" | "no" = "no"): "yes" | "no" {
+  if (value === true) return "yes";
+  if (value === false) return "no";
+  const text = String(value ?? "").trim();
+  if (!text) return fallback;
+  if (YES_DIRECTION_FLAG.test(text)) return "yes";
+  if (NO_DIRECTION_FLAG.test(text)) return "no";
+  return fallback;
+}
+
+export function isYesDirectionFlag(value: unknown): boolean {
+  return normalizeYesNoFlag(value, "no") === "yes";
+}
+
+export function normalizeCloseupMode(value: unknown, fallback: CloseupMode = CLOSEUP_FACE_AND_DETAIL): CloseupMode {
+  const text = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!text) return fallback;
+  if (
+    text === CLOSEUP_PRODUCT_DETAIL ||
+    text === "product_detail_first" ||
+    text === "detail" ||
+    text === "detail_only" ||
+    text === "detail_crop" ||
+    text === "macro_detail"
+  ) return CLOSEUP_PRODUCT_DETAIL;
+  if (
+    text === CLOSEUP_FACE_AND_DETAIL ||
+    text === "face" ||
+    text === "beauty" ||
+    text === "face_to_chest" ||
+    text === "face_and_product"
+  ) return CLOSEUP_FACE_AND_DETAIL;
+  return fallback;
+}
+
+function joinedCreativeText(creative: JsonRecord | undefined) {
+  if (!creative) return "";
+  return Object.values(creative)
+    .filter((value) => typeof value === "string" || typeof value === "boolean" || typeof value === "number")
+    .map((value) => String(value))
+    .join(" ");
+}
+
+function joinedPoseText(pose: {
+  id?: string;
+  title?: string;
+  description?: string;
+  prompt?: string;
+  framing?: string;
+  bodyPosition?: string;
+  purpose?: string;
+  cameraAngle?: string;
+  expression?: string;
+  highlightedDetails?: unknown;
+  productVisibilityRules?: unknown;
+} | undefined) {
+  if (!pose) return "";
+  const listed = [
+    ...(Array.isArray(pose.highlightedDetails) ? pose.highlightedDetails : []),
+    ...(Array.isArray(pose.productVisibilityRules) ? pose.productVisibilityRules : []),
+  ].map((entry) => String(entry ?? ""));
+  return [
+    pose.id,
+    pose.title,
+    pose.description,
+    pose.prompt,
+    pose.framing,
+    pose.bodyPosition,
+    pose.purpose,
+    pose.cameraAngle,
+    pose.expression,
+    ...listed,
+  ].join(" ");
+}
+
+export function resolveCloseupMode(args: {
+  pose?: {
+    id?: string;
+    title?: string;
+    description?: string;
+    prompt?: string;
+    framing?: string;
+    bodyPosition?: string;
+    purpose?: string;
+    cameraAngle?: string;
+    expression?: string;
+    highlightedDetails?: unknown;
+    productVisibilityRules?: unknown;
+  };
+  creative?: JsonRecord;
+}): CloseupMode {
+  const recorded = args.creative?.closeupMode ?? args.creative?.closeup_mode;
+  if (String(recorded ?? "").trim()) return normalizeCloseupMode(recorded);
+  if (PRODUCT_DETAIL_CLOSEUP_RE.test(joinedPoseText(args.pose))) return CLOSEUP_PRODUCT_DETAIL;
+  return CLOSEUP_FACE_AND_DETAIL;
+}
+
+export function isSeatedEditorialPoseDemanded(args: {
+  pose?: {
+    id?: string;
+    title?: string;
+    description?: string;
+    prompt?: string;
+    framing?: string;
+    bodyPosition?: string;
+    purpose?: string;
+    cameraAngle?: string;
+    expression?: string;
+    highlightedDetails?: unknown;
+    productVisibilityRules?: unknown;
+  };
+  productDetails?: string;
+  creative?: JsonRecord;
+  stylingNotes?: string;
+}): boolean {
+  const recorded = args.creative?.seatedPoseRequired ?? args.creative?.seated_pose_required;
+  if (isYesDirectionFlag(recorded)) return true;
+  // User notes can still demand sitting even when analysis recorded "no".
+  if (SITTING_POSE_RE.test(String(args.productDetails ?? ""))) return true;
+  // An explicit "no" must win over leftover "seated" wording in seatedPoseReason or styling notes.
+  if (String(recorded ?? "").trim() && normalizeYesNoFlag(recorded) === "no") return false;
+  if (SITTING_POSE_RE.test(joinedPoseText(args.pose))) return true;
+  if (SITTING_POSE_RE.test(String(args.stylingNotes ?? ""))) return true;
+  const creative = args.creative && typeof args.creative === "object" ? { ...args.creative } : {};
+  delete creative.seatedPoseRequired;
+  delete creative.seated_pose_required;
+  delete creative.seatedPoseReason;
+  delete creative.seated_pose_reason;
+  return SITTING_POSE_RE.test(joinedCreativeText(creative));
+}
+
 export function getPoseSlots(garmentFamily: string): readonly StudioPose[] {
   const isSaree = garmentFamily === "saree";
 
@@ -336,30 +477,35 @@ export function getPoseSlots(garmentFamily: string): readonly StudioPose[] {
           "creative movement does not alter bottom wear cut, leg volume, fit, or silhouette",
           "if seated on a bench or architectural step, both trouser legs and footwear remain visible, unbunched, and fully displayed",
         ],
-      consistencyNotes: "Borrow only art direction from style references; garment, bottom wear, footwear, accessories, model, and shoot continuity remain locked",
+      consistencyNotes: "Borrow only art direction, backdrop, and jewellery/ornament taste from style references; garment, bottom wear, footwear, accessories that ship with the product, model, and shoot continuity remain locked",
       description: "A current, expressive Gen-Z fashion pose that follows the selected creative direction (standing editorial movement or seated pose if demanded by the style reference/product) without hiding the garment.",
       cameraAngle: "Product-appropriate editorial angle",
       highlightedDetails: isSaree ? ["fabric movement", "fluidity", "creative direction"] : ["movement", "silhouette", "creative direction"],
       primaryReference: "front",
       purpose: "Campaign and social-commerce storytelling",
-      prompt: "Create a bold, playful, scroll-stopping Gen-Z fashion pose suited to this exact product category (or an elegant seated editorial pose on a minimal studio bench/step if the style reference shows a sitting pose), with genuine attitude and movement. Preserve the complete product, bottom wear silhouette, and footwear while borrowing only mood, composition, and lighting from style references.",
+      prompt: "Create a bold, playful, scroll-stopping Gen-Z fashion pose suited to this exact product (or an elegant seated editorial pose on a minimal studio bench/step if the style reference shows a sitting pose), with genuine attitude and movement. Preserve the complete product, bottom wear silhouette, and footwear. Rebuild the photoshoot backdrop, wall, floor, lighting, and jewellery/ornament taste from the style reference only - never from product-photo backgrounds.",
       enabled: true,
     },
     {
       id: "closeup",
-      title: "Zoomed-In Face & Product Highlight",
-      framing: "3:4 portrait, genuinely zoomed in to a face-to-chest or face-to-waist crop - visibly tighter in scale than the full-body hero pose, never a repeat of it",
-      bodyPosition: "Natural, relaxed upper-body angle, as if caught mid-moment, that keeps both the face and the chosen product highlight clearly readable",
+      title: "Zoomed-In Product Detail Highlight",
+      framing: "3:4 portrait, genuinely zoomed in - either a face-to-chest/face-to-waist crop with a LARGE readable product detail, or a tighter product-detail crop when a full face would make that detail too small - never a repeat of the full-body hero",
+      bodyPosition: "Natural, relaxed upper-body or detail-crop angle that keeps the chosen selling detail large and sharp; include the face only when that still leaves the detail catalog-readable",
       handPlacement: "Hands relaxed and natural - resting near the highlighted detail without covering it, or away from frame if the detail is elsewhere",
-      expression: "A beautiful, cute, natural Gen-Z-style face with a genuine expression - a soft real smile or candid laugh, warm eyes, unfiltered and approachable, never stiff or over-posed",
-      productVisibilityRules: ["face is sharp and clearly visible", "one real product detail (embroidery, neckline, pallu/dupatta drape, print, trim, or fabric texture) is also sharp and unobstructed in the same frame", "this is a genuine zoomed-in shot, not the full-body hero framing repeated"],
-      consistencyNotes: "Keep the same face, hair, makeup, accessories, footwear, scene, lighting, and exact bottom wear established in Pose 1; only the framing zooms in tight enough to read both the face and the highlighted detail clearly",
-      description: "A zoomed-in shot that pairs a beautiful, natural face with a sharp highlight of the product's most important real detail.",
-      cameraAngle: "Eye-level, zoomed in to a face-to-chest or face-to-waist crop",
-      highlightedDetails: ["natural expression", "face", "key product detail"],
+      expression: "When the face is in frame: a beautiful, cute, natural Gen-Z-style expression. When the crop is product-detail-first: expression is optional because the face may be partial or omitted",
+      productVisibilityRules: [
+        "the named product selling detail is large, sharp, and unobstructed - this is the subject of the frame",
+        "never a full-body or wide hero repeat",
+        "include a sharp face-to-chest or face-to-waist pairing only when that crop still makes the detail readable",
+        "if embroidery, neckline craft, print scale, pallu/border, or fabric texture would be too small beside a full face, crop to the product detail instead of the face",
+      ],
+      consistencyNotes: "Keep the same identity, hair, makeup, jewellery, footwear, scene, lighting, and product truth from Pose 1; only the crop tightens around the selling detail",
+      description: "A zoomed-in shot that sells the product's most important real detail, with the face included only when it does not shrink that detail.",
+      cameraAngle: "Eye-level, zoomed in to a product-detail crop or a face-to-chest/face-to-waist crop that still leaves the detail large",
+      highlightedDetails: ["key product detail", "craftsmanship", "optional face"],
       primaryReference: "fabric_pattern",
-      purpose: "Social-first beauty-and-product shot that sells both the face and the craftsmanship",
-      prompt: "Create a genuinely zoomed-in face-to-chest or face-to-waist shot - clearly tighter in scale than the full-body hero pose, never a repeat of it - pairing a beautiful, cute, Gen-Z-style face with a genuine, natural expression alongside one sharp, clearly visible highlight of the product's most important real detail (embroidery, neckline, drape, print, or fabric texture).",
+      purpose: "Social-first product-detail shot that can also include the face when the craftsmanship stays readable",
+      prompt: "Create a genuinely zoomed-in product-detail photograph - clearly tighter than the full-body hero, never a repeat of it. Lead with one sharp, large, catalog-readable highlight of the product's most important real detail (embroidery, neckline, drape, print scale, or fabric texture). Pair a beautiful, cute, Gen-Z-style face in a face-to-chest or face-to-waist crop only when that still leaves the detail large. If a full face would make the selling detail too small, crop to the product detail and let the face be partial or omitted.",
       enabled: true,
     },
   ];
@@ -962,6 +1108,10 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
       creative.suggestedAccessories ?? creative.suggested_accessories,
       "No additional accessory needed - style with only what the product references show",
     ),
+    seatedPoseRequired: normalizeYesNoFlag(creative.seatedPoseRequired ?? creative.seated_pose_required, "no"),
+    seatedPoseReason: stringValue(creative.seatedPoseReason ?? creative.seated_pose_reason, ""),
+    closeupMode: normalizeCloseupMode(creative.closeupMode ?? creative.closeup_mode),
+    closeupHeroDetail: stringValue(creative.closeupHeroDetail ?? creative.closeup_hero_detail, ""),
   };
   const modelIdentity = {
     castingDirection: stringValue(model.castingDirection ?? model.casting_direction, "One consistent adult fashion model across all five images, reading as a youthful young adult with a naturally pretty, warm, approachable face"),
@@ -1084,6 +1234,7 @@ Crucial Evidence Rules:
   Fill detailPlacementMap with only source-supported region-specific hard locks and absenceConstraints with negative product facts as well for backward compatibility.
 
 SCENE AUTHORITY: when a STYLE REFERENCE image is supplied, that image defines the shoot. Describe what it actually shows - wall colour and finish, floor or ground surface, every prop and its placement, plant or furniture presence, light direction and quality, camera height and distance, depth of field, colour grade - concretely enough to rebuild that set from the description alone. Never replace it with a generic "clean premium studio backdrop": a plain seamless-paper description when the reference shows a styled set is a failure of this analysis. A requested scene direction refines mood, styling and props on top of the referenced set; it does not replace the referenced backdrop. Only when no style reference is supplied does the requested scene direction define the scene by itself.
+PRODUCT vs STYLE DIVISION: Product references are garment/SKU truth only (cut, colour, print, embroidery, construction). The STYLE REFERENCE is the sole authority for photoshoot backdrop, room architecture, flooring, lighting, camera, mood, AND jewellery/ornament taste when those pieces are not already part of the product. Never mix a product-photo wall, arch, urn, pot, plant, or courtyard into creativeDirection.
 CRITICAL NEGATIVE RULE FOR SCENE & BACKGROUND: Product reference images (FRONT, BACK, BOTTOM, FABRIC, MANNEQUIN) frequently show the garment in an existing pre-shoot studio, outdoor location, archway, courtyard, terracotta pots/urns, plants, or furniture. You are STRICTLY FORBIDDEN from describing, extracting, or incorporating ANY background elements, walls, arches, urns, pots, plants, or furniture from the PRODUCT reference images into creativeDirection or backgroundStyle! The photoshoot scene MUST BE DERIVED 100% FROM THE STYLE REFERENCE (if supplied), or from the requested scene direction (if no style reference is supplied), or designed as a fresh, clean, elegant, neutral fashion studio.
 
 Build a Creative Direction Profile from style references, but never allow style to alter the product. Lock one lens family, camera height, perspective, exposure, white balance, color grade, light direction, shadow behavior, set geometry, and time-of-day so the results read as contact sheets from one real professional shoot. In realismRules, explicitly require natural skin texture with visible pores, anatomically correct and naturally shaped eyes and teeth, and no synthetic AI artifacts.
@@ -1095,8 +1246,8 @@ Overall pose energy: every one of the five poses should feel playful, warm, and 
 
 STYLING PLAN - decide what this model wears alongside the garment, and fill stylingPlan. Read both sources before choosing: the product references decide what the garment already includes, and the style reference decides the aesthetic the shoot is aiming at. State each choice specifically enough that a stylist could pull it from a shelf and repeat it identically in every frame - "oxidised silver jhumkas roughly 4 cm with a small matching cuff on the right wrist" is usable, "ethnic jewellery" is not.
 - footwear: one specific pair - style, heel height, colour, finish - that suits the garment length and hem. Say if the product references already show footwear that must be kept instead.
-- jewellery: choose the metal and family deliberately - oxidised silver, temple or antique gold, polished gold, kundan or polki, pearl, contemporary minimal - and name each piece worn (earrings, neckpiece, bangles, rings, maang tikka, nose ring). Pick what the reference theme and the garment's own embellishment support: heavy gold against dense zari competes, oxidised silver suits earthy prints and handloom, minimal metal suits pastels and modern indo-western.
-- ornaments: any remaining accessory decisions - belt, potli or bag, dupatta drape treatment, waist chain, hair ornament - or an explicit "none" so nothing is invented later.
+- jewellery: PRODUCT FIRST, STYLE REFERENCE SECOND. If the product already includes jewellery, keep those pieces. Otherwise, if the STYLE REFERENCE shows jewellery/ornaments the vision analysis considers complementary (metal, count, placement) and they do not hide neckline/embroidery, lock those exact pieces into stylingPlan.jewellery. Pick the metal and family deliberately - oxidised silver, temple or antique gold, polished gold, kundan or polki, pearl, contemporary minimal - and name each piece worn (earrings, neckpiece, bangles, rings, maang tikka, nose ring). Never invent a second competing jewellery story on top of the style-reference pieces, and never add a heavy neckpiece over an embroidered yoke unless the style reference clearly uses that AND the yoke remains readable. If the style reference is jewellery-free, do not add statement jewellery.
+- ornaments: any remaining accessory decisions copied from the style reference when they complement this product - belt, potli or bag, dupatta drape treatment, waist chain, hair ornament - or an explicit "none" so nothing is invented later.
 - makeup and hair: one look each, held across all five frames.
 - stylingNotes: the rule a stylist would need to avoid mistakes on this specific product, for example "keep the right wrist bare so the sleeve embroidery stays visible" or "no neckpiece over the embroidered yoke".
 - themeInterpretation: one sentence naming the aesthetic you read from the style reference and why this styling serves it.
@@ -1113,15 +1264,18 @@ Reuse this language for pose energy, scene continuity, and styling so you do not
 
 Accessory styling suggestion: look at what footwear and accessories (if any) the product references actually show. If the product's own footwear/bag/accessories are missing, incomplete, or would not read well on camera, propose ONE tasteful, trend-right, Gen-Z-appropriate addition (for example a specific footwear style or a small bag) in creativeDirection.suggestedAccessories, described specifically enough for a stylist to execute identically across all five poses. Only suggest an addition when it genuinely fits the pose plan and category - if the product references already show adequate footwear/accessories, or nothing suits the shot, leave creativeDirection.suggestedAccessories empty. This is a styling addition only: it must never be treated as part of the garment, and it must never contradict detailPlacementMap or absenceConstraints.
 
-Create exactly five product-specific camera setups in one coherent commercial coverage sequence, in this order and with these ids: full_front, angled, back, creative, closeup. They are not five unrelated concepts. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints.
+Create exactly five product-specific camera setups in one coherent commercial coverage sequence, in this order and with these ids: full_front, angled, back, creative, closeup. They are not five unrelated concepts. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints. Every individual prompt must (1) describe THIS product's exact colour, fabric, construction and selling details from the product references, and (2) rebuild the photoshoot backdrop, wall, floor, lighting and props from the STYLE REFERENCE only.
 
 - full_front: square, unobstructed head-to-toe hero; establishes face/hair/styling/footwear/scene/lighting anchor with playful, confident Gen-Z energy.
 - angled: best side or three-quarter orientation for THIS garment; for stitched garments, reveal side construction; for sarees, reveal drape depth and pallu fall. Show existing slits or pockets only when references prove they exist; never invent, extend, or extrapolate decoration into unknown side regions.
 - back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees. For outfits with a dupatta or shawl, the dupatta must be draped forward over arms or front so the rear garment (neckline, back panel, embroidery, hem) is 100% unobstructed and visible. The studio set, backdrop wall, lighting, and model identity must strictly match the other poses.
 - creative:
-  * CONDITIONAL SITTING POSE: Look carefully at the STYLE REFERENCE image (if provided) and user product notes. If the style reference depicts a sitting/seated pose OR if the user product notes/direction demand a sitting pose: design this 4th pose as an elegant, graceful SEATED EDITORIAL POSE (e.g. seated on a minimal studio bench, architectural plinth/step, or clean prop matching the set). The seated pose MUST keep the garment, bottom wear, hemline, and footwear completely visible and beautifully draped, never crumpled or hidden.
-  * OTHERWISE (if neither the style reference nor product notes demand sitting): design this 4th pose with playful, scroll-stopping Gen-Z editorial movement tailored to this garment (e.g. a playful dynamic walk, swirl, or light motion) while keeping the complete product readable. For sarees, use safe pallu movement tailored to its fabric physics.
-- closeup: a genuine zoomed-in face-to-chest or face-to-waist shot (never a repeat of the full-body hero framing) pairing a beautiful, cute, Gen-Z-style face with a genuine, natural expression AND one sharp, clearly visible real product detail (embroidery, neckline, drape, print, or fabric texture).
+  * SEATED POSE LOCK: Inspect the STYLE REFERENCE image first. Also inspect any other uploaded image that shows a model pose, plus the user product notes. If ANY of those show a sitting/seated person, or the notes demand sitting, set creativeDirection.seatedPoseRequired to "yes" and seatedPoseReason to a one-line evidence note (for example "style reference model is seated on a stone plinth"). Then this 4th pose MUST be an elegant seated editorial pose (minimal studio bench, architectural plinth/step, or a clean prop that already belongs to the style-reference set). Keep the garment, bottom wear, hemline, and footwear completely visible and beautifully arranged, never crumpled or hidden. Do not seat poses 1-3 or 5 just because pose 4 sits.
+  * OTHERWISE (seatedPoseRequired "no"): design this 4th pose with playful, scroll-stopping Gen-Z editorial movement tailored to this garment (e.g. a playful dynamic walk, swirl, or light motion) while keeping the complete product readable. For sarees, use safe pallu movement tailored to its fabric physics.
+- closeup: THIS POSE SELLS PRODUCT DETAIL. First choose the single most important real selling detail from THIS product (embroidery geometry, neckline construction, print scale, pallu/border, sleeve craft, or fabric texture) and record it in creativeDirection.closeupHeroDetail. Then choose framing and record it in creativeDirection.closeupMode:
+  * "face_and_detail" when that detail sits at neckline/chest/yoke and stays LARGE beside the face: genuine zoomed-in face-to-chest or face-to-waist crop. Face is sharp with a natural Gen-Z expression AND the product detail occupies a large, catalog-readable portion of the frame - never a tiny hint of embroidery under a beauty close-up.
+  * "product_detail" when a full face would shrink that selling detail below readable catalog size: crop to the product detail so it fills most of the frame. Face may be partial at the edge or omitted. Never a full-body hero repeat, and never a face-only beauty crop.
+  The closeup pose prompt, framing, highlightedDetails, and productVisibilityRules MUST match that choice. highlightedDetails must lead with the product detail, not the face, when closeupMode is "product_detail".
 
 If the garmentFamily is "saree", you MUST also generate sareeTruth and sareeDrapePlan inside the JSON root.
 sareeTruth: Record exact base and secondary colours; fabric family; weave/lattice geometry; texture, shine and transparency; every peacock/floral/other motif with its scale, orientation, repeat, density and placement by body/pallu/border; separate upper/lower border widths, construction and colours; the exact region where the pallu starts plus its artwork, motif density and orientation; tassel colour, construction and spacing; blouse colour/fabric/front/back/neckline/sleeves/ties/closures; and fabric weight, stiffness, fluidity and expected fall. Add regionEvidence entries with region, sourceRole, confirmed/confirmed_absent/unknown state and the same evidence fields as garmentEvidence. Unknown must stay unknown: never mirror or extrapolate decoration into an unproven region.
@@ -1133,7 +1287,7 @@ CRITICAL: Every individual 'prompt' MUST be completely self-contained. The image
 Across all five, ONLY pose, angle, framing, and expression may change. Exact product, colors, pattern, bottom wear, face, hairstyle, makeup, accessories, footwear, scene, lighting, shadows, camera/lens feel, and color treatment remain locked.
 
 Return STRICT JSON only:
-{"productIdentity":{"garmentFamily":"","category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[],"garmentEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeTruth":{"body":{"mainFabric":"","weave":"","weaveGeometry":"","texture":"","transparency":"","shine":"","baseColor":"","secondaryColors":[],"pattern":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","motifPlacement":"","embellishment":"","bodyOrientation":""},"borders":{"upperBorder":"","lowerBorder":"","borderWidth":"","upperBorderWidth":"","lowerBorderWidth":"","borderColors":"","construction":"","motifGeometry":"","edgeTreatment":"","continuityRules":"","tasselColor":"","tasselConstruction":"","tasselSpacing":""},"pallu":{"hasDistinctPallu":false,"startingRegion":"","baseColor":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","borders":"","artwork":"","zari":"","embroidery":"","tassels":"","edgeTreatment":"","visualOrientation":"","evidenceReferences":"","uncertainty":""},"pleatZone":{"patternBehavior":"","borderBehavior":"","embellishmentBehavior":"","hasSpecialPanel":false},"blouse":{"hasBlouse":false,"color":"","fabric":"","frontConstruction":"","backConstruction":"","neckline":"","sleeves":"","ties":"","closure":"","embroidery":"","border":"","pattern":"","fit":"","isUnstitchedPiece":false},"physics":{"weight":"","stiffness":"","fluidity":"","transparency":"","shine":"","creaseBehavior":"","expectedFall":""},"regionEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeDrapePlan":{"baseDrapeFamily":"","shoulderSide":"","waistTuck":"","frontPleatTreatment":"","palluShoulderPlacement":"","openOrPleatedPallu":"","palluSpread":"","palluFallDirection":"","palluVisibleLength":"","handInteraction":"","movementAmount":"","pinningBehavior":"","borderVisibility":"","blouseVisibility":"","coverageConstraints":"","poseSpecificDrapeState":""},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"angled","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"back","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"creative","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"closeup","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""}]}  `;
+{"productIdentity":{"garmentFamily":"","category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[],"garmentEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeTruth":{"body":{"mainFabric":"","weave":"","weaveGeometry":"","texture":"","transparency":"","shine":"","baseColor":"","secondaryColors":[],"pattern":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","motifPlacement":"","embellishment":"","bodyOrientation":""},"borders":{"upperBorder":"","lowerBorder":"","borderWidth":"","upperBorderWidth":"","lowerBorderWidth":"","borderColors":"","construction":"","motifGeometry":"","edgeTreatment":"","continuityRules":"","tasselColor":"","tasselConstruction":"","tasselSpacing":""},"pallu":{"hasDistinctPallu":false,"startingRegion":"","baseColor":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","borders":"","artwork":"","zari":"","embroidery":"","tassels":"","edgeTreatment":"","visualOrientation":"","evidenceReferences":"","uncertainty":""},"pleatZone":{"patternBehavior":"","borderBehavior":"","embellishmentBehavior":"","hasSpecialPanel":false},"blouse":{"hasBlouse":false,"color":"","fabric":"","frontConstruction":"","backConstruction":"","neckline":"","sleeves":"","ties":"","closure":"","embroidery":"","border":"","pattern":"","fit":"","isUnstitchedPiece":false},"physics":{"weight":"","stiffness":"","fluidity":"","transparency":"","shine":"","creaseBehavior":"","expectedFall":""},"regionEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeDrapePlan":{"baseDrapeFamily":"","shoulderSide":"","waistTuck":"","frontPleatTreatment":"","palluShoulderPlacement":"","openOrPleatedPallu":"","palluSpread":"","palluFallDirection":"","palluVisibleLength":"","handInteraction":"","movementAmount":"","pinningBehavior":"","borderVisibility":"","blouseVisibility":"","coverageConstraints":"","poseSpecificDrapeState":""},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":"","seatedPoseRequired":"no","seatedPoseReason":"","closeupMode":"face_and_detail","closeupHeroDetail":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"angled","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"back","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"creative","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"closeup","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""}]}  `;
 }
 
 export const CONSISTENCY_RULES = [
@@ -1146,6 +1300,8 @@ export const CONSISTENCY_RULES = [
   "Use the back product image as the sole authority for the back pose.",
   "Style references control background, lighting, composition, camera, mood, and creative treatment. When a style reference is provided, it is the sole authority for the photoshoot backdrop environment and architecture.",
   "Product reference images are for the garment only: never copy or reproduce pre-shoot background walls, arches, urns, pots, plants, or furniture from product references into the generated images.",
+  "When a style reference shows jewellery or ornaments that complement this product, keep those exact pieces unless the product itself already includes jewellery; never invent a competing jewellery story.",
+  "Pose 5 must be a tight product-detail close-up, never a full-body hero repeat. Include a sharp face only when that crop still leaves the selling detail large and readable; otherwise crop to the product detail.",
   "Never add text, random logos, extra layers, duplicate people, or unreferenced garment elements.",
   "Treat detailPlacementMap and absenceConstraints as hard locks: never relocate, mirror, extend, add, or remove a garment detail.",
   "Keep the identical studio backdrop wall color, texture, flooring, and lighting established in Pose 1 across all poses 2-5 without adding new props (no brass urlis, urns, flower petals, or altered staircases).",
@@ -1165,7 +1321,8 @@ export const CONSISTENCY_RULES = [
 // v17 adds dedicated bottom-wear architecture and silhouette fidelity locks (preventing farshi/palazzo from falling back to dhoti/salwar).
 // v18 separates farshi from palazzo/lehenga, locks bottom-wear print transfer off the upper-garment fabric close-up, and adds an optional dedicated bottom reference role.
 // v19 enforces style reference backdrop authority, prohibits pre-shoot backgrounds from product images, and adds conditional sitting pose for pose 4.
-export const ANALYSIS_VERSION = "generation-session-v19-style-backdrop-sitting-pose";
+// v20 records seatedPoseRequired from style-reference sitting, locks style-reference jewellery/ornaments, and lets pose 5 crop to product detail when a face would hide craftsmanship.
+export const ANALYSIS_VERSION = "generation-session-v20-pose-detail-seated-lock";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

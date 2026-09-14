@@ -242,6 +242,10 @@ export type CreativeDirectionProfile = {
   setContinuity: string;
   realismRules: string;
   suggestedAccessories: string;
+  seatedPoseRequired?: string;
+  seatedPoseReason?: string;
+  closeupMode?: string;
+  closeupHeroDetail?: string;
 };
 
 export type StudioAnalysis = {

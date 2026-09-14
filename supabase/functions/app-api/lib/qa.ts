@@ -1,4 +1,4 @@
-import { parseJsonResponse, hasRecordedBottomWear, type JsonRecord } from "./profiles.ts";
+import { parseJsonResponse, hasRecordedBottomWear, resolveCloseupMode, CLOSEUP_PRODUCT_DETAIL, type JsonRecord } from "./profiles.ts";
 import { isDirectBackProductRole } from "./referencePolicy.ts";
 
 const GENERIC_CHECK_KEYS = [
@@ -129,6 +129,19 @@ export function buildPoseQaPrompt(args: {
   const qaProductIdentity = args.poseType === "back" ? rearOnlyQaProductIdentity(args.productIdentity) : args.productIdentity;
   const exampleChecks = Object.fromEntries(checkKeys.map((key) => [key, "pass"]));
   const exampleScores = Object.fromEntries(checkKeys.map((key) => [key, 100]));
+  const closeupMode = args.poseType === "closeup"
+    ? resolveCloseupMode({
+      pose: record(args.poseDirection),
+      creative: record(args.creativeDirection),
+    })
+    : "";
+  const closeupHeroDetail = String(record(args.creativeDirection).closeupHeroDetail || record(args.creativeDirection).closeup_hero_detail || "").trim();
+  const productDetailCloseup = closeupMode === CLOSEUP_PRODUCT_DETAIL;
+  const pose5Rule = args.poseType === "closeup"
+    ? productDetailCloseup
+      ? `For pose 5 (product-detail-first close-up${closeupHeroDetail ? `: ${closeupHeroDetail}` : ""}), fail pose_requirement if it is a full-body or wide shot that repeats the hero framing, if it is a face-only beauty crop that hides the selling detail, or if the named/key product detail is not large, sharp, and catalog-readable. Do NOT fail pose_requirement merely because the face is cropped out or only partially visible. If no recognizable face is in frame, pass face_realism. If a full or clearly readable face is in frame, apply the face quality bar. A cropped forehead/cheek at the edge of a detail crop is not a face_realism failure.`
+      : `For pose 5 (face-and-product-detail close-up${closeupHeroDetail ? `: ${closeupHeroDetail}` : ""}), fail pose_requirement if it is a full-body or wide shot that just repeats the hero framing instead of a genuine zoomed-in face-to-chest/face-to-waist crop, if the face is not sharp and clearly visible, if the product detail is not LARGE and sharply highlighted in the same frame (a tiny sliver of embroidery under a beauty close-up is a fail), or if the expression looks stiff or unnatural instead of a beautiful, cute, genuine Gen-Z smile or expression.`
+    : "";
   return `You are a strict fashion e-commerce consistency validator.
 
 Review IMAGE A (the newly generated pose) against every labeled source image that follows it.
@@ -151,6 +164,7 @@ ${args.hasModelReference
     : args.hasApprovedAnchor
       ? "Compare IMAGE A against the APPROVED POSE 1 reference on visual appearance attributes - face shape, eye shape and colour, eyebrow shape, nose shape, lip shape, jawline, skin tone and texture, and hairstyle must look consistent across the set. Also confirm body proportions, styling, backdrop, lighting, and colour treatment match."
       : "This is Pose 1. It must establish one specific, photorealistic, naturally beautiful adult face and a realistic, coherent shoot anchor."}
+${productDetailCloseup ? "This pose 5 crop may omit the face. Pass model_face when no recognizable face is in frame rather than failing for a missing beauty close-up. If a readable face is present, still compare it to the identity lock." : ""}
 
 PRODUCT FIDELITY - the failure mode that matters most here is a garment that reads as the same style but is not the same SKU. Judge it against the product references, not against your sense of what such a garment usually looks like:
 - pattern_geometry: compare motif shape, motif scale relative to the body, spacing, orientation, repeat interval and density PANEL BY PANEL. Upper-garment motifs against the FABRIC / PATTERN DETAIL and FRONT references. Bottom-wear motifs against FRONT, BACK, MANNEQUIN, ADDITIONAL, and BOTTOM WEAR / FARSHI references where the trousers/skirt are visible - never against an upper-only fabric close-up. Fail it when motifs are enlarged, simplified, redrawn, reduced to fewer larger shapes, re-angled, made denser or sparser, or when accent colours inside the print are missing - even when the print type and colour family are right. A perfect kurta with missing or miniaturized bottom print is still a fail.
@@ -187,9 +201,9 @@ SCORING SCALE - anchor every number to these meanings, and never hand several at
 - 40: a different product in the same category.
 Only 95-100 is eligible for automatic verification. A critical score of 90-94 requires human review. A critical score below 90 fails automatic QA and requires a specific correction. A named critical failure always fails even when the average is high. Do not hand many critical fields nearly identical hedged scores; inspect each region independently.
 
-Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face. Fail any invented or moved button, tassel/latkan, closure, trim, pocket, logo, embroidery, jewelry, or hardware. For a back pose, fail unless it is a true back view matching the uploaded BACK; face_realism automatically passes for a back pose since the face is not visible. For pose 5 (the zoomed-in face & product detail highlight), fail pose_requirement if it is a full-body or wide shot that just repeats the hero framing instead of a genuine zoomed-in face-to-chest/face-to-waist crop, if the face is not sharp and clearly visible, if no real product detail is sharply highlighted in the same frame, or if the expression looks stiff or unnatural instead of a beautiful, cute, genuine Gen-Z smile or expression. Judge styling_addition against the approved styling plan in the session rules above: fail it when a listed piece is missing, when a piece appears that the plan does not list (an invented necklace, bangle, belt, bag or hair ornament), when the metal or family differs from the plan (gold where the plan says oxidised silver), when it changes between poses, or when it hides or replaces a garment detail, bottom wear or footwear from the product references. Pass it when the frame matches the plan exactly, or when no plan and no suggestion were provided and nothing was invented.
+Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face when a recognizable face is in frame. Fail any invented or moved button, tassel/latkan, closure, trim, pocket, logo, embroidery, jewelry, or hardware. For a back pose, fail unless it is a true back view matching the uploaded BACK; face_realism automatically passes for a back pose since the face is not visible. ${pose5Rule} Judge styling_addition against the approved styling plan in the session rules above: fail it when a listed piece is missing, when a piece appears that the plan does not list (an invented necklace, bangle, belt, bag or hair ornament), when the metal or family differs from the plan (gold where the plan says oxidised silver), when it changes between poses, or when it hides or replaces a garment detail, bottom wear or footwear from the product references. Pass it when the frame matches the plan exactly, or when no plan and no suggestion were provided and nothing was invented.
 
-Face quality bar - fail face_realism for any of these even if everything else matches: plastic, waxy, airbrushed, or over-smoothed "beauty filter" skin instead of natural texture with visible pores; crossed, misaligned, asymmetric, glassy, or otherwise distorted/malformed eyes; unnaturally uniform, fused, extra, missing, or warped teeth; any blurring, warping, melting, or duplicated/misplaced facial features; or a mirror-symmetric "AI face" that does not read as a real photographed person. Give a specific, actionable correction for any face_realism or model_face failure (name the exact feature that is wrong).
+Face quality bar - apply only when a recognizable face is in frame. For a true back pose or a product-detail-first close-up with no recognizable face, pass face_realism and model_face; do not fail for a missing face. When a face is visible (including a clearly readable partial face or a back-pose over-shoulder glance), fail face_realism for any of these even if everything else matches: plastic, waxy, airbrushed, or over-smoothed "beauty filter" skin instead of natural texture with visible pores; crossed, misaligned, asymmetric, glassy, or otherwise distorted/malformed eyes; unnaturally uniform, fused, extra, missing, or warped teeth; any blurring, warping, melting, or duplicated/misplaced facial features; or a mirror-symmetric "AI face" that does not read as a real photographed person. Give a specific, actionable correction for any face_realism or model_face failure (name the exact feature that is wrong).
 
 Return STRICT JSON only:
 ${JSON.stringify({ pass: true, score: 100, checks: exampleChecks, scores: exampleScores, failed: [], reason: "short evidence-based verdict", correction: "specific correction for every failed field" })}`;

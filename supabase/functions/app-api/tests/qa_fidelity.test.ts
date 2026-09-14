@@ -177,3 +177,43 @@ Deno.test("creative editorial QA does not treat bottom_wear as critical when tro
   assertEquals(result.pass, true);
   assertEquals(result.automaticallyVerified, true);
 });
+
+Deno.test("close-up QA requires a large product detail and can omit the face in product-detail mode", () => {
+  const faceAndDetail = buildPoseQaPrompt({
+    poseNumber: 5,
+    poseType: "closeup",
+    poseTitle: "Product highlight",
+    poseDirection: { id: "closeup", title: "Product highlight" },
+    productIdentity: { embroidery: "yoke lattice" },
+    creativeDirection: { closeupMode: "face_and_detail", closeupHeroDetail: "square yoke embroidery lattice" },
+    modelIdentity: {},
+    garmentFamily: "ethnic/fusion",
+    consistencyRules: [],
+    hasApprovedAnchor: false,
+    hasModelReference: false,
+    referenceManifest: ["IMAGE 1: Front product"],
+  });
+  assertStringIncludes(faceAndDetail, "face-and-product-detail close-up: square yoke embroidery lattice");
+  assertStringIncludes(faceAndDetail, "tiny sliver of embroidery under a beauty close-up is a fail");
+
+  const productDetail = buildPoseQaPrompt({
+    poseNumber: 5,
+    poseType: "closeup",
+    poseTitle: "Product highlight",
+    poseDirection: { id: "closeup", title: "Product highlight", productVisibilityRules: ["face optional"] },
+    productIdentity: { embroidery: "pallu border" },
+    creativeDirection: { closeupMode: "product_detail", closeupHeroDetail: "pallu border artwork" },
+    modelIdentity: {},
+    garmentFamily: "ethnic/fusion",
+    consistencyRules: [],
+    hasApprovedAnchor: false,
+    hasModelReference: true,
+    referenceManifest: ["IMAGE 1: Front product", "IMAGE 2: Model face"],
+  });
+  assertStringIncludes(productDetail, "product-detail-first close-up: pallu border artwork");
+  assertStringIncludes(productDetail, "Do NOT fail pose_requirement merely because the face is cropped out");
+  assertStringIncludes(productDetail, "Pass model_face when no recognizable face is in frame");
+  assertStringIncludes(productDetail, "apply only when a recognizable face is in frame");
+  assertStringIncludes(productDetail, "pass face_realism and model_face");
+});
+

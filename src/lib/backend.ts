@@ -276,7 +276,7 @@ async function getJob(jobId: string) {
     "Professional Side / 3/4 View",
     "Full Back View",
     "Creative Gen-Z Fashion Pose",
-    "Zoomed-In Face & Product Highlight",
+    "Zoomed-In Product Detail Highlight",
   ];
   const mappedPoses = poseRows.map((pose) => {
     const assetsForPose = generatedAssets.filter((entry) => Number(record(entry.metadata).poseIndex) === Number(pose.pose_index));
