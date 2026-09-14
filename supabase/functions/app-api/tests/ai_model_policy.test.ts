@@ -358,7 +358,7 @@ Deno.test("product-truth defaults to fast thinking and reroutes slow GPT and Gem
   });
   assertEquals(preferred.rerouted, true);
   assertEquals(preferred.route, CHEAP_OPENAI_VISION_ROUTE);
-  assertEquals(preferred.fallback, undefined);
+  assertEquals(preferred.fallback, OPENAI_TERRA_VISION_ROUTE);
   const geminiPreferred = preferFastProductTruthRoute({
     provider: "gemini",
     model: "gemini-3.8-flash",
@@ -366,8 +366,15 @@ Deno.test("product-truth defaults to fast thinking and reroutes slow GPT and Gem
   });
   assertEquals(geminiPreferred.rerouted, true);
   assertEquals(geminiPreferred.route, CHEAP_OPENAI_VISION_ROUTE);
-  assertEquals(geminiPreferred.fallback, undefined);
-  assertEquals(isOmittedProductTruthHop(FAST_PRODUCT_TRUTH_GEMINI_ROUTE), true);
+  assertEquals(geminiPreferred.fallback, OPENAI_TERRA_VISION_ROUTE);
+  assertEquals(
+    preferFastProductTruthRoute({
+      provider: "openai",
+      model: "gpt-5.6-luna",
+      thinkingLevel: "low",
+    }),
+    { route: CHEAP_OPENAI_VISION_ROUTE, fallback: OPENAI_TERRA_VISION_ROUTE, rerouted: false },
+  );
   assertEquals(
     preferFastProductTruthThinking({
       provider: "gemini",
@@ -514,7 +521,7 @@ Deno.test("product-truth analyze clamps Admin high thinking to low for Muse and 
   assertEquals(STUDIO_INVOKE_BUDGET_MS, 140_000);
 });
 
-Deno.test("product-truth failover is OpenAI Luna and omits Gemini", () => {
+Deno.test("product-truth failover is OpenAI Luna, keeps Terra, and omits Gemini", () => {
   const expected = ["openai:gpt-5.6-luna:low"];
   assertEquals(
     productTruthRouteChain(CHEAP_OPENAI_VISION_ROUTE).map((route) =>
@@ -559,12 +566,17 @@ Deno.test("product-truth failover is OpenAI Luna and omits Gemini", () => {
     ],
   );
   assertEquals(
+    productTruthRouteChain(CHEAP_OPENAI_VISION_ROUTE, OPENAI_TERRA_VISION_ROUTE)
+      .map((route) => `${route.provider}:${route.model}`),
+    ["openai:gpt-5.6-luna", "openai:gpt-5.6-terra"],
+  );
+  assertEquals(
     productTruthRouteChain({
       provider: "openai",
       model: "gpt-5.6-terra",
       thinkingLevel: "low",
     }).map((route) => `${route.provider}:${route.model}`),
-    ["openai:gpt-5.6-luna"],
+    ["openai:gpt-5.6-luna", "openai:gpt-5.6-terra"],
   );
   assertEquals(
     productTruthRouteChain({
@@ -938,7 +950,7 @@ Deno.test("Gemini completions are not auto-promoted; only configured OpenAI hops
       ],
       ["openai", "gemini", "meta"],
     ).map((route) => `${route.provider}:${route.model}`),
-    ["openai:gpt-5.6-luna", "meta:muse-spark-1.3"],
+    ["gemini:gemini-3.8-flash", "openai:gpt-5.6-luna", "meta:muse-spark-1.3"],
   );
 });
 

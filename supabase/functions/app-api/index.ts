@@ -622,9 +622,7 @@ async function resolveVisionPolicy(orgId: string, args: {
     return applyFastProductTruthRouting({
       ...defaultRoute,
       purpose: args.purpose,
-      // Product-truth keeps Luna as the only automatic hop so it can use the
-      // remaining Studio wait. QA still gets Terra on the same OpenAI key.
-      fallback: args.purpose === "product_truth" ? undefined : defaultFallback,
+      fallback: defaultFallback,
       revision: 0,
       source: "default",
     });
@@ -652,6 +650,17 @@ async function resolveVisionPolicy(orgId: string, args: {
 
 function applyFastProductTruthRouting(policy: VisionPolicy): VisionPolicy {
   if (policy.purpose !== "product_truth" && policy.purpose !== "qa") return policy;
+  // Product-truth is forced onto Luna so Studio Analyze uses OPENAI_API_KEY.
+  // QA keeps the administrator-selected provider, including Gemini.
+  if (policy.purpose === "qa") {
+    return {
+      ...policy,
+      thinkingLevel: preferFastProductTruthThinking(policy),
+      fallback: policy.fallback
+        ? { ...policy.fallback, thinkingLevel: preferFastProductTruthThinking(policy.fallback) }
+        : policy.fallback,
+    };
+  }
   const preferred = preferFastProductTruthRoute({
     provider: policy.provider,
     model: policy.model,
@@ -663,26 +672,17 @@ function applyFastProductTruthRouting(policy: VisionPolicy): VisionPolicy {
   } else if (preferred.fallback) {
     next = { ...policy, fallback: preferred.fallback };
   }
-  if (next.purpose === "product_truth") {
-    const chain = productTruthRouteChain({
-      provider: next.provider,
-      model: next.model,
-      thinkingLevel: clampProductTruthThinking(next),
-    }, next.fallback);
-    const [primary, ...fallbacks] = chain;
-    return {
-      ...next,
-      ...primary,
-      fallback: fallbacks[0],
-      fallbacks,
-    };
-  }
+  const chain = productTruthRouteChain({
+    provider: next.provider,
+    model: next.model,
+    thinkingLevel: clampProductTruthThinking(next),
+  }, next.fallback);
+  const [primary, ...fallbacks] = chain;
   return {
     ...next,
-    thinkingLevel: preferFastProductTruthThinking(next),
-    fallback: next.fallback
-      ? { ...next.fallback, thinkingLevel: preferFastProductTruthThinking(next.fallback) }
-      : next.fallback,
+    ...primary,
+    fallback: fallbacks[0],
+    fallbacks,
   };
 }
 

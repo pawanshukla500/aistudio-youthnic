@@ -377,15 +377,6 @@ export function productTruthRouteChain(
     const next = withFastProductTruthThinking(route);
     const key = routeKey(next);
     if (seen.has(key)) return;
-    // Luna is the OpenAI vision hop. Stacking Terra behind it would cap Luna
-    // at 40s and reintroduce the Studio timeout.
-    if (
-      next.provider === "openai" &&
-      next.model !== CHEAP_OPENAI_VISION_ROUTE.model &&
-      seen.has(routeKey(CHEAP_OPENAI_VISION_ROUTE))
-    ) {
-      return;
-    }
     seen.add(key);
     chain.push(next);
   };
@@ -703,15 +694,18 @@ export type FastProductTruthPreference = {
 
 /**
  * Prefer OpenAI Luna for product-truth analysis. Stored Gemini routes and
- * slow GPT reasoning (Sol / high thinking) are rerouted to Luna so Analyze
- * uses the configured OpenAI API key. Muse/Qwen org primaries stay in the
- * chain after Luna via `productTruthRouteChain`.
+ * slow GPT reasoning (Sol / high thinking) are rerouted to Luna. Terra is
+ * kept as the same-key fallback when no other usable fallback exists.
+ * Muse/Qwen org primaries stay in the chain after Luna via
+ * `productTruthRouteChain`. This helper is product-truth only — QA keeps
+ * the administrator-selected route.
  */
 export function preferFastProductTruthRoute(
   primary: NormalizedAiModelRoute,
   existingFallback?: NormalizedAiModelRoute,
 ): FastProductTruthPreference {
   const luna = withFastProductTruthThinking(CHEAP_OPENAI_VISION_ROUTE);
+  const terra = withFastProductTruthThinking(OPENAI_TERRA_VISION_ROUTE);
   const shouldRerouteToOpenAi =
     primary.provider === "gemini" ||
     isOmittedProductTruthHop(primary) ||
@@ -721,18 +715,26 @@ export function preferFastProductTruthRoute(
     const fallback = existingFallback &&
         !isOmittedProductTruthHop(existingFallback) &&
         !isSlowReasoningVisionRoute(existingFallback) &&
-        existingFallback.provider !== luna.provider
+        routeKey(existingFallback) !== routeKey(luna)
       ? withFastProductTruthThinking(existingFallback)
-      : undefined;
+      : terra;
     return { route: luna, fallback, rerouted: true };
+  }
+
+  if (
+    primary.provider === "openai" &&
+    primary.model === luna.model &&
+    (!existingFallback || isOmittedProductTruthHop(existingFallback))
+  ) {
+    return { route: luna, fallback: terra, rerouted: false };
   }
 
   return { route: primary, fallback: existingFallback, rerouted: false };
 }
 
 /**
- * Drop Gemini and any hop whose server-side secret is missing so Analyze does
- * not spend 40–90s timing out a provider this project does not use.
+ * Keep hops whose server-side secret is present. Gemini is omitted from the
+ * product-truth chain separately; QA may still use a configured Gemini route.
  */
 export function selectConfiguredVisionRoutes(
   routes: NormalizedAiModelRoute[],
@@ -741,9 +743,7 @@ export function selectConfiguredVisionRoutes(
   const configured = configuredProviders instanceof Set
     ? configuredProviders
     : new Set(configuredProviders);
-  return routes.filter((route) =>
-    !isOmittedProductTruthHop(route) && configured.has(text(route.provider))
-  );
+  return routes.filter((route) => configured.has(text(route.provider)));
 }
 
 export function aiModelDisplayLabel(model: string): string {
