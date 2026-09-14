@@ -531,6 +531,13 @@ function defaultVisionRoute(args: {
   uncertainty?: boolean;
   referenceCount?: number;
 }): NormalizedAiModelRoute {
+  if (Deno.env.get("OPENAI_API_KEY")?.trim()) {
+    return assertAllowedAiModelRoute(
+      CHEAP_OPENAI_VISION_ROUTE,
+      args.purpose,
+      { strictJson: true },
+    );
+  }
   if (
     (args.purpose === "product_truth" || args.purpose === "qa") &&
     Deno.env.get("GEMINI_API_KEY")?.trim()
@@ -548,24 +555,11 @@ function defaultVisionRoute(args: {
       { strictJson: true },
     );
   }
-  if (args.purpose === "product_truth" || Deno.env.get("GEMINI_API_KEY")?.trim()) {
-    return assertAllowedAiModelRoute(
-      FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
-      args.purpose,
-      { strictJson: true },
-    );
-  }
-  const current = resolveGeminiPolicy({
-    purpose: args.purpose,
-    garmentFamily: args.garmentFamily,
-    uncertainty: args.uncertainty,
-    referenceCount: args.referenceCount,
-  });
-  return assertAllowedAiModelRoute({
-    provider: "gemini",
-    model: current.model,
-    thinkingLevel: current.thinkingLevel,
-  }, args.purpose, { strictJson: true });
+  return assertAllowedAiModelRoute(
+    CHEAP_OPENAI_VISION_ROUTE,
+    args.purpose,
+    { strictJson: true },
+  );
 }
 
 function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiModelRoute {
@@ -672,17 +666,21 @@ function applyFastProductTruthRouting(policy: VisionPolicy): VisionPolicy {
   }, policy.fallback);
   let next = policy;
   if (preferred.rerouted) {
-    const geminiReady = Boolean(Deno.env.get("GEMINI_API_KEY")?.trim());
-    const museReady = preferred.route.provider === "meta" &&
-      Boolean(Deno.env.get("META_MODEL_API_KEY")?.trim());
-    if (geminiReady) {
-      next = {
-        ...policy,
-        ...FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
-        fallback: preferred.fallback,
-      };
-    } else if (museReady) {
+    if (preferred.route.provider === "openai") {
       next = { ...policy, ...preferred.route, fallback: preferred.fallback };
+    } else {
+      const geminiReady = Boolean(Deno.env.get("GEMINI_API_KEY")?.trim());
+      const museReady = preferred.route.provider === "meta" &&
+        Boolean(Deno.env.get("META_MODEL_API_KEY")?.trim());
+      if (geminiReady) {
+        next = {
+          ...policy,
+          ...FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+          fallback: preferred.fallback,
+        };
+      } else if (museReady) {
+        next = { ...policy, ...preferred.route, fallback: preferred.fallback };
+      }
     }
   }
   if (next.purpose === "product_truth") {
@@ -1275,10 +1273,15 @@ async function openAiCompatibleVisionJson(
       model: route.model,
       messages: [{ role: "user", content: chatContentFromParts(parts) }],
       response_format: { type: "json_object" },
-      max_tokens: 16384,
-      ...(provider === "meta"
-        ? { reasoning_effort: route.thinkingLevel === "none" ? "minimal" : route.thinkingLevel }
-        : route.thinkingLevel !== "none" ? { reasoning_effort: openaiReasoningEffort(route.thinkingLevel) } : {}),
+      ...(provider === "openai"
+        ? {
+            max_completion_tokens: 16384,
+            ...(route.thinkingLevel !== "none" ? { reasoning_effort: openaiReasoningEffort(route.thinkingLevel) } : {}),
+          }
+        : {
+            max_tokens: 16384,
+            reasoning_effort: route.thinkingLevel === "none" ? "minimal" : route.thinkingLevel,
+          }),
     }),
   });
   const data = await response.json().catch(() => ({})) as JsonRecord;
@@ -1301,11 +1304,11 @@ async function openAiVisionJson(
   timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
 ) {
   try {
-    return await openAiResponsesVisionJson(route, parts, timeoutMs);
+    return await openAiCompatibleVisionJson(route, parts, "openai", timeoutMs);
   } catch (error) {
     const classified = asVisionProviderError(error, route);
     try {
-      return await openAiCompatibleVisionJson(route, parts, "openai", timeoutMs);
+      return await openAiResponsesVisionJson(route, parts, timeoutMs);
     } catch {
       throw classified;
     }

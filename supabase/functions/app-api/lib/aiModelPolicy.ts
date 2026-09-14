@@ -273,9 +273,9 @@ export const OPENAI_TERRA_VISION_ROUTE = {
  * `ai_runs` shows only Muse `attempt_number=1` at ~50011ms.
  *
  * The Studio client now waits `STUDIO_ANALYZE_TIMEOUT_MS` (140s), matching
- * `VISION_GATEWAY_BUDGET_MS`. Product-truth default hops budget standard models
- * (Gemini Flash, Luna) at 40s and heavier reasoning models (Terra, Muse) at 25s
- * so subsequent failover hops always have sufficient remaining gateway time.
+ * `VISION_GATEWAY_BUDGET_MS`. Product-truth still must not give Muse a 50s
+ * first hop: Gemini Flash (~27s live) runs first, Muse is capped at 25s and
+ * runs last so a Muse-first org policy cannot brick Analyze.
  */
 export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
 export const STUDIO_INVOKE_BUDGET_MS = STUDIO_ANALYZE_TIMEOUT_MS;
@@ -330,21 +330,19 @@ export function withFastProductTruthThinking(
   return { ...route, thinkingLevel: clampProductTruthThinking(route) };
 }
 
-function isOmittedProductTruthHop(route: Pick<NormalizedAiModelRoute, "model">) {
-  // Sol is never a product-truth hop (expensive reasoning). Terra is allowed
-  // only as a stored primary/fallback appended after Gemini → Luna → Muse.
-  return text(route.model) === "gpt-5.6-sol";
+export function isOmittedProductTruthHop(
+  route?: Pick<NormalizedAiModelRoute, "provider" | "model"> | null,
+) {
+  return route?.provider === "openai" && route.model === "gpt-5.6-sol";
 }
 
 export function isSlowProductTruthHop(
   route?: Pick<NormalizedAiModelRoute, "provider" | "model"> | null,
 ) {
   if (!route) return false;
-  const model = text(route.model);
-  return route.provider === "meta" ||
-    model.includes("muse-spark") ||
-    model.includes("terra") ||
-    model.includes("sol");
+  if (route.provider === "meta") return true;
+  if (route.provider === "openai" && route.model === "gpt-5.6-terra") return true;
+  return false;
 }
 
 export function productTruthHopTimeoutMs(
@@ -726,6 +724,13 @@ export function preferFastProductTruthRoute(
 ): FastProductTruthPreference {
   if (!isSlowReasoningVisionRoute(primary)) {
     return { route: primary, fallback: existingFallback, rerouted: false };
+  }
+  if (primary.provider === "openai" && primary.model !== "gpt-5.6-luna") {
+    return {
+      route: FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+      fallback: CHEAP_OPENAI_VISION_ROUTE,
+      rerouted: true,
+    };
   }
   const fast = assertAllowedAiModelRoute(
     FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
