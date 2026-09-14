@@ -102,8 +102,11 @@ export function Studio() {
   const { data: queuePosition, error: _queuePositionError } = useQuery(api.jobs.getQueuePosition, submittedJobId && submittedJob?.status === "queued" ? { jobId: submittedJobId } : "skip");
   const { data: effectiveRouting } = useQuery(api.ai.getEffectiveRouting, organization?._id ? { organizationId: organization._id } : "skip");
 
-  const orgModel = (effectiveRouting as any)?.imageGeneration?.model as OutputOptions["model"] | undefined;
-  const orgModelLabel = (effectiveRouting as any)?.imageGeneration?.displayLabel as string | undefined;
+  const rawOrgModel = (effectiveRouting as any)?.imageGeneration?.model as OutputOptions["model"] | undefined;
+  const orgModel = rawOrgModel === "gpt-image-2" ? "gpt-image-2.5-flare-2026-09-08" : rawOrgModel;
+  const orgModelLabel = rawOrgModel === "gpt-image-2"
+    ? "GPT Image 2.5 Flare (2026-09-08 · Default)"
+    : (effectiveRouting as any)?.imageGeneration?.displayLabel as string | undefined;
   const userOverrodeModelRef = useRef(false);
 
   useEffect(() => {
