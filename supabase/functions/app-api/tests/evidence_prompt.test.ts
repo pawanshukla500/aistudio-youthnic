@@ -672,6 +672,150 @@ Deno.test("composeGenerationPrompt enforces seated editorial pose for Pose 4 whe
 
   assertStringIncludes(promptWithoutSitting, "POSE CATEGORY RULES (DYNAMIC):");
   assertStringIncludes(promptWithoutSitting, "DYNAMIC POSE: Show active movement");
+  assertStringIncludes(promptWithoutSitting, "STYLE REFERENCE SITTING OVERRIDE (POSE 4):");
   assertEquals(promptWithoutSitting.includes("SEATED EDITORIAL POSE REQUIREMENT (POSE 4):"), false);
 });
+
+Deno.test("composeGenerationPrompt seats pose 4 from seatedPoseRequired even when pose text is walking", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "SEATED-FLAG-SET",
+    productDetails: "Kurti set with wide farshi pants",
+    pose: {
+      id: "creative",
+      title: "Playful Editorial Swirl",
+      poseNumber: 4,
+      description: "Dynamic walking motion and swirl",
+      cameraAngle: "editorial",
+      framing: "full",
+      bodyPosition: "controlled walking movement",
+      handPlacement: "expressive",
+      expression: "chic",
+      highlightedDetails: ["swirl", "drape"],
+      productVisibilityRules: ["all visible"],
+      purpose: "editorial",
+      consistencyNotes: "locked",
+      prompt: "Playful walking motion and garment swirl.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "fuchsia",
+        bottomWearDetails: "farshi pajama",
+      },
+      creativeDirection: {
+        backgroundStyle: "Clean architectural studio",
+        seatedPoseRequired: "yes",
+        seatedPoseReason: "style reference model is seated on a stone plinth",
+      },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+
+  assertStringIncludes(prompt, "POSE CATEGORY RULES (SITTING):");
+  assertStringIncludes(prompt, "SEATED EDITORIAL POSE REQUIREMENT (POSE 4):");
+  assertStringIncludes(prompt, "Elegant seated editorial pose on a minimal studio bench");
+});
+
+Deno.test("composeGenerationPrompt locks style-reference jewellery and dual-mode pose 5", () => {
+  const jewelleryPrompt = composeGenerationPrompt({
+    skuName: "ORNAMENT-SET",
+    productDetails: "Ivory kurta",
+    pose: {
+      id: "full_front",
+      title: "Front Hero View",
+      poseNumber: 1,
+      description: "Square front hero",
+      cameraAngle: "eye level",
+      framing: "full",
+      bodyPosition: "straight",
+      handPlacement: "relaxed",
+      expression: "confident",
+      highlightedDetails: ["neckline"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "hero",
+      consistencyNotes: "locked",
+      prompt: "Full front hero pose.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "ivory" },
+      stylingPlan: {
+        footwear: "nude block heels",
+        jewellery: "oxidised silver jhumkas and one matching cuff",
+        ornaments: "none",
+        makeup: "natural",
+        hair: "low bun",
+        stylingNotes: "keep yoke clear",
+        themeInterpretation: "style-reference temple silver",
+      },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(jewelleryPrompt, "JEWELLERY & ORNAMENT LOCK");
+  assertStringIncludes(jewelleryPrompt, "oxidised silver jhumkas and one matching cuff");
+  assertStringIncludes(jewelleryPrompt, "never invent a competing jewellery story");
+
+  const faceAndDetail = composeGenerationPrompt({
+    skuName: "CLOSEUP-FACE-SET",
+    productDetails: "Ivory kurta",
+    pose: {
+      id: "closeup",
+      title: "Zoomed-In Product Detail Highlight",
+      poseNumber: 5,
+      description: "Face and neckline",
+      cameraAngle: "eye level",
+      framing: "face-to-chest",
+      bodyPosition: "upper body",
+      handPlacement: "away",
+      expression: "soft smile",
+      highlightedDetails: ["neckline embroidery"],
+      productVisibilityRules: ["face and detail visible"],
+      purpose: "detail",
+      consistencyNotes: "locked",
+      prompt: "Face-to-chest crop with neckline embroidery.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "ivory" },
+      creativeDirection: { closeupMode: "face_and_detail", closeupHeroDetail: "square yoke embroidery lattice" },
+    },
+    references: [{ role: "front" }, { role: "fabric_pattern" }],
+  });
+  assertStringIncludes(faceAndDetail, "POSE 5 HARD RULE (FACE + PRODUCT DETAIL)");
+  assertStringIncludes(faceAndDetail, "square yoke embroidery lattice");
+  assertEquals(faceAndDetail.includes("PRODUCT DETAIL PRIMARY"), false);
+
+  const productDetail = composeGenerationPrompt({
+    skuName: "CLOSEUP-DETAIL-SET",
+    productDetails: "Ivory kurta",
+    pose: {
+      id: "closeup",
+      title: "Zoomed-In Product Detail Highlight",
+      poseNumber: 5,
+      description: "Macro embroidery crop, face optional",
+      cameraAngle: "eye level",
+      framing: "product detail crop",
+      bodyPosition: "detail crop",
+      handPlacement: "away",
+      expression: "optional",
+      highlightedDetails: ["pallu border artwork"],
+      productVisibilityRules: ["product-detail-first crop", "face optional"],
+      purpose: "detail",
+      consistencyNotes: "locked",
+      prompt: "Product-detail-first crop of pallu border artwork.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "ivory" },
+      creativeDirection: { closeupMode: "product_detail", closeupHeroDetail: "pallu border artwork" },
+    },
+    references: [{ role: "front" }, { role: "fabric_pattern" }],
+  });
+  assertStringIncludes(productDetail, "POSE 5 HARD RULE (PRODUCT DETAIL PRIMARY)");
+  assertStringIncludes(productDetail, "This frame is a PRODUCT-DETAIL close-up");
+  assertStringIncludes(productDetail, "pallu border artwork");
+  assertEquals(productDetail.includes("FACE + PRODUCT DETAIL"), false);
+});
+
 

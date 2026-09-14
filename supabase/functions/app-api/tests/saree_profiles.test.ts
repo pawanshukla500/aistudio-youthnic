@@ -7,9 +7,12 @@ import {
   ANALYSIS_VERSION,
   assertSareeGenerationReady,
   buildCombinedAnalysisPrompt,
+  CLOSEUP_PRODUCT_DETAIL,
   hasRecordedBottomWear,
   isFarshiBottomWear,
+  isSeatedEditorialPoseDemanded,
   normalizeAnalysis,
+  resolveCloseupMode,
   sareeAnalysisIssues,
 } from "../lib/profiles.ts";
 
@@ -58,7 +61,7 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v19-style-backdrop-sitting-pose");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v20-pose-detail-seated-lock");
 });
 
 Deno.test("analysis prompt distinguishes farshi from palazzo and does not take bottom print from upper fabric close-ups", () => {
@@ -303,3 +306,51 @@ Deno.test("a saree category cannot queue with a non-saree garment family", () =>
     "Stored saree analysis is incomplete or outdated. Reanalyse the product references before generation.",
   );
 });
+
+Deno.test("analysis prompt locks style-reference backdrop, jewellery, seated pose 4, and dual-mode pose 5", () => {
+  const prompt = buildCombinedAnalysisPrompt({
+    skuName: "STYLE-LOCK-SET",
+    category: "kurta set",
+    productDetails: "white kurta",
+    modelDirection: "",
+    sceneDirection: "",
+    referenceManifest: [
+      { number: 1, role: "front" },
+      { number: 2, role: "style_reference" },
+    ],
+  });
+  assertStringIncludes(prompt, "PRODUCT vs STYLE DIVISION");
+  assertStringIncludes(prompt, "PRODUCT FIRST, STYLE REFERENCE SECOND");
+  assertStringIncludes(prompt, "SEATED POSE LOCK");
+  assertStringIncludes(prompt, "seatedPoseRequired");
+  assertStringIncludes(prompt, "THIS POSE SELLS PRODUCT DETAIL");
+  assertStringIncludes(prompt, '"product_detail"');
+  assertStringIncludes(prompt, "closeupHeroDetail");
+  assertStringIncludes(prompt, "rebuild the photoshoot backdrop, wall, floor, lighting and props from the STYLE REFERENCE only");
+});
+
+Deno.test("normalizeAnalysis persists seated pose and closeup mode locks", () => {
+  const normalized = normalizeAnalysis({
+    productIdentity: { category: "kurta set" },
+    creativeDirection: {
+      seatedPoseRequired: true,
+      seatedPoseReason: "style reference model is seated on a stone plinth",
+      closeupMode: "product_detail",
+      closeupHeroDetail: "yoke embroidery lattice",
+    },
+  }, "ethnic/fusion");
+  assertEquals(normalized.creativeDirection.seatedPoseRequired, "yes");
+  assertEquals(normalized.creativeDirection.seatedPoseReason, "style reference model is seated on a stone plinth");
+  assertEquals(normalized.creativeDirection.closeupMode, CLOSEUP_PRODUCT_DETAIL);
+  assertEquals(normalized.creativeDirection.closeupHeroDetail, "yoke embroidery lattice");
+  assertEquals(isSeatedEditorialPoseDemanded({
+    pose: { id: "creative", prompt: "walk and swirl" },
+    productDetails: "no seating requested",
+    creative: normalized.creativeDirection,
+  }), true);
+  assertEquals(resolveCloseupMode({
+    pose: { id: "closeup", prompt: "face-to-chest beauty crop" },
+    creative: normalized.creativeDirection,
+  }), CLOSEUP_PRODUCT_DETAIL);
+});
+
