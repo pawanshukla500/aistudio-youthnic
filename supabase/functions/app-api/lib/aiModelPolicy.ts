@@ -238,10 +238,23 @@ export function defaultThinkingLevel(
 }
 
 /**
- * Gemini 3.8 Flash is the Studio analyze primary: live multi-image completions
- * average ~27s. Muse Spark remains allowed and is attempted last at ≤25s.
- * Luna is the cheap OpenAI fallback — never Sol.
+ * OpenAI Terra is the default Studio analyze and pose writing primary:
+ * deep structured visual reasoning, accurate saree drape mapping, and
+ * photorealistic 5-pose prompt composition. Luna is the fast, cost-efficient
+ * fallback. Gemini 3.8 Flash and Muse Spark are subsequent failovers.
  */
+export const OPENAI_TERRA_VISION_ROUTE = {
+  provider: "openai",
+  model: "gpt-5.6-terra",
+  thinkingLevel: "low",
+} as const satisfies NormalizedAiModelRoute;
+
+export const CHEAP_OPENAI_VISION_ROUTE = {
+  provider: "openai",
+  model: "gpt-5.6-luna",
+  thinkingLevel: "low",
+} as const satisfies NormalizedAiModelRoute;
+
 export const FAST_PRODUCT_TRUTH_ROUTE = {
   provider: "meta",
   model: "muse-spark-1.3",
@@ -254,17 +267,7 @@ export const FAST_PRODUCT_TRUTH_GEMINI_ROUTE = {
   thinkingLevel: "low",
 } as const satisfies NormalizedAiModelRoute;
 
-export const CHEAP_OPENAI_VISION_ROUTE = {
-  provider: "openai",
-  model: "gpt-5.6-luna",
-  thinkingLevel: "low",
-} as const satisfies NormalizedAiModelRoute;
-
-export const OPENAI_TERRA_VISION_ROUTE = {
-  provider: "openai",
-  model: "gpt-5.6-terra",
-  thinkingLevel: "low",
-} as const satisfies NormalizedAiModelRoute;
+export const DEFAULT_PRODUCT_TRUTH_ROUTE = OPENAI_TERRA_VISION_ROUTE;
 
 /**
  * Studio Analyze uses `supabase.functions.invoke("app-api")`. Without an
@@ -273,9 +276,9 @@ export const OPENAI_TERRA_VISION_ROUTE = {
  * `ai_runs` shows only Muse `attempt_number=1` at ~50011ms.
  *
  * The Studio client now waits `STUDIO_ANALYZE_TIMEOUT_MS` (140s), matching
- * `VISION_GATEWAY_BUDGET_MS`. Product-truth still must not give Muse a 50s
- * first hop: Gemini Flash (~27s live) runs first, Muse is capped at 25s and
- * runs last so a Muse-first org policy cannot brick Analyze.
+ * `VISION_GATEWAY_BUDGET_MS`. Product-truth default hops start with OpenAI
+ * Terra (50s) and Luna (35s) using the same OpenAI API key configured for
+ * image generation, with Gemini and Muse as subsequent failover hops.
  */
 export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
 export const STUDIO_INVOKE_BUDGET_MS = STUDIO_ANALYZE_TIMEOUT_MS;
@@ -348,8 +351,13 @@ export function isSlowProductTruthHop(
 }
 
 export function productTruthHopTimeoutMs(
-  route?: Pick<NormalizedAiModelRoute, "provider" | "model"> | null,
-) {
+  providerOrRoute?: AiProvider | Pick<NormalizedAiModelRoute, "provider" | "model"> | null,
+  model?: string,
+): number {
+  if (!providerOrRoute) return PRODUCT_TRUTH_TIMEOUT_MS;
+  const route = typeof providerOrRoute === "string"
+    ? { provider: providerOrRoute, model: model || "" }
+    : providerOrRoute;
   if (isSlowProductTruthHop(route)) return PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS;
   return PRODUCT_TRUTH_TIMEOUT_MS;
 }
