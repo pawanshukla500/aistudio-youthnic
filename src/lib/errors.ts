@@ -11,11 +11,11 @@ const ANALYZE_OPERATIONS = new Set([
   "analysis.analyzeReferences",
 ]);
 
-/** Must cover VISION_GATEWAY_BUDGET_MS so Muse timeout can still start hop 2. */
+/** Must cover VISION_GATEWAY_BUDGET_MS so a single OpenAI Luna hop can finish. */
 export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
 
 export const ANALYZE_GATEWAY_CUT_MESSAGE =
-  "Analysis was interrupted before fallback providers could finish. Retry Analyze — Gemini Flash runs first so a typical run completes in about 30 seconds.";
+  "Analysis was interrupted before OpenAI could finish. Retry Analyze — GPT 5.6 Luna runs first on the configured OpenAI API key.";
 
 export function isAnalyzeInvokeOperation(operation: string) {
   return ANALYZE_OPERATIONS.has(operation);

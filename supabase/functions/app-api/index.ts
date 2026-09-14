@@ -31,7 +31,7 @@ import {
   DEFAULT_IMAGE_GENERATION_ROUTE,
   defaultImageGenerationRoute,
   CHEAP_OPENAI_VISION_ROUTE,
-  FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+  OPENAI_TERRA_VISION_ROUTE,
   FAST_PRODUCT_TRUTH_ROUTE,
   PRODUCT_TRUTH_TIMEOUT_MS,
   VISION_GATEWAY_BUDGET_MS,
@@ -48,6 +48,7 @@ import {
   promotionFallbackRoute,
   providerSecretName,
   runVisionProviderChain,
+  selectConfiguredVisionRoutes,
   shouldRetrySameVisionRoute,
   visionAttemptTelemetryRows,
   type AiModelPurpose,
@@ -538,16 +539,6 @@ function defaultVisionRoute(args: {
       { strictJson: true },
     );
   }
-  if (
-    (args.purpose === "product_truth" || args.purpose === "qa") &&
-    Deno.env.get("GEMINI_API_KEY")?.trim()
-  ) {
-    return assertAllowedAiModelRoute(
-      FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
-      args.purpose,
-      { strictJson: true },
-    );
-  }
   if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
     return assertAllowedAiModelRoute(
       FAST_PRODUCT_TRUTH_ROUTE,
@@ -564,7 +555,7 @@ function defaultVisionRoute(args: {
 
 function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiModelRoute {
   return assertAllowedAiModelRoute(
-    CHEAP_OPENAI_VISION_ROUTE,
+    OPENAI_TERRA_VISION_ROUTE,
     args.purpose,
     { strictJson: true },
   );
@@ -659,6 +650,17 @@ async function resolveVisionPolicy(orgId: string, args: {
 
 function applyFastProductTruthRouting(policy: VisionPolicy): VisionPolicy {
   if (policy.purpose !== "product_truth" && policy.purpose !== "qa") return policy;
+  // Product-truth is forced onto Luna so Studio Analyze uses OPENAI_API_KEY.
+  // QA keeps the administrator-selected provider, including Gemini.
+  if (policy.purpose === "qa") {
+    return {
+      ...policy,
+      thinkingLevel: preferFastProductTruthThinking(policy),
+      fallback: policy.fallback
+        ? { ...policy.fallback, thinkingLevel: preferFastProductTruthThinking(policy.fallback) }
+        : policy.fallback,
+    };
+  }
   const preferred = preferFastProductTruthRoute({
     provider: policy.provider,
     model: policy.model,
@@ -666,43 +668,21 @@ function applyFastProductTruthRouting(policy: VisionPolicy): VisionPolicy {
   }, policy.fallback);
   let next = policy;
   if (preferred.rerouted) {
-    if (preferred.route.provider === "openai") {
-      next = { ...policy, ...preferred.route, fallback: preferred.fallback };
-    } else {
-      const geminiReady = Boolean(Deno.env.get("GEMINI_API_KEY")?.trim());
-      const museReady = preferred.route.provider === "meta" &&
-        Boolean(Deno.env.get("META_MODEL_API_KEY")?.trim());
-      if (geminiReady) {
-        next = {
-          ...policy,
-          ...FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
-          fallback: preferred.fallback,
-        };
-      } else if (museReady) {
-        next = { ...policy, ...preferred.route, fallback: preferred.fallback };
-      }
-    }
+    next = { ...policy, ...preferred.route, fallback: preferred.fallback };
+  } else if (preferred.fallback) {
+    next = { ...policy, fallback: preferred.fallback };
   }
-  if (next.purpose === "product_truth") {
-    const chain = productTruthRouteChain({
-      provider: next.provider,
-      model: next.model,
-      thinkingLevel: clampProductTruthThinking(next),
-    }, next.fallback);
-    const [primary, ...fallbacks] = chain;
-    return {
-      ...next,
-      ...primary,
-      fallback: fallbacks[0],
-      fallbacks,
-    };
-  }
+  const chain = productTruthRouteChain({
+    provider: next.provider,
+    model: next.model,
+    thinkingLevel: clampProductTruthThinking(next),
+  }, next.fallback);
+  const [primary, ...fallbacks] = chain;
   return {
     ...next,
-    thinkingLevel: preferFastProductTruthThinking(next),
-    fallback: next.fallback
-      ? { ...next.fallback, thinkingLevel: preferFastProductTruthThinking(next.fallback) }
-      : next.fallback,
+    ...primary,
+    fallback: fallbacks[0],
+    fallbacks,
   };
 }
 
@@ -1390,7 +1370,7 @@ async function visionJson(
   parts: JsonRecord[],
   options?: { onAttempt?: (attempt: VisionHopAttempt) => Promise<void> },
 ): Promise<VisionResult> {
-  const routes = policy.purpose === "product_truth"
+  const requested = policy.purpose === "product_truth"
     ? productTruthRouteChain({
       provider: policy.provider,
       model: policy.model,
@@ -1400,15 +1380,19 @@ async function visionJson(
       { provider: policy.provider, model: policy.model, thinkingLevel: policy.thinkingLevel },
       ...(policy.fallback ? [policy.fallback] : []),
     ];
+  const configured = new Set(
+    AI_PROVIDERS.filter((provider) => Boolean(Deno.env.get(providerSecretName(provider))?.trim())),
+  );
+  const routes = selectConfiguredVisionRoutes(requested, configured);
   try {
     const chained = await runVisionProviderChain({
       routes,
       purpose: policy.purpose,
       gatewayBudgetMs: visionGatewayBudgetMs(policy.purpose),
       invoke: async (route, timeoutMs) => {
-        // Product-truth hops already fail over Gemini → Luna → Muse. Studio
-        // waits 140s so a Muse timeout can still start hop 2. A same-route
-        // retry would starve later hops.
+        // Product-truth hops fail over Luna → Terra. Studio waits 140s so a
+        // Luna timeout can still start Terra. A same-route retry would starve
+        // later hops.
         if (policy.purpose === "product_truth") {
           return await invokeVisionRoute(policy, route, parts, timeoutMs);
         }
@@ -2899,10 +2883,10 @@ async function processWorker(request: Request, args: JsonRecord) {
     if (!qaUnavailable && Boolean(job.pose_qa)) {
        const qaUsage = (qa.usageMetadata || {}) as any;
        const policy = (qa as any).policy as VisionPolicy | undefined;
-       const calculated = extractVisionUsageAndCost({ usageMetadata: qaUsage }, policy?.provider || "gemini", policy?.model || "gemini-3.8-flash");
+         const calculated = extractVisionUsageAndCost({ usageMetadata: qaUsage }, policy?.provider || "openai", policy?.model || "gpt-5.6-luna");
        await recordAiRun({
          organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
-         job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: policy?.model || "gemini-3.8-flash", provider: policy?.provider || "gemini",
+         job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: policy?.model || "gpt-5.6-luna", provider: policy?.provider || "openai",
          purpose: policy?.purpose || "qa", thinking_level: policy?.thinkingLevel || "high",
          input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt, policy: policy ? visionPolicySnapshot(policy, (qa as any).visionAttempts || []) : null },
          output_json: { qa, qaVersion: QA_VERSION }, status: qa.outcome, latency_ms: qaLatencyMs,

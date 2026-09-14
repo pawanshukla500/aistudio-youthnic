@@ -65,19 +65,18 @@ Deno.test("OpenAI fallback cannot keep a Gemini model id", () => {
   assertEquals(coerced.repairRequired, true);
 });
 
-Deno.test("new vision routing prefers Gemini Flash then Luna when both are configured", () => {
+Deno.test("new vision routing prefers OpenAI Luna when both OpenAI and Gemini are configured", () => {
   const primary = preferredConfiguredProvider(registry, "product_truth");
-  assertEquals(primary?.provider, "gemini");
-  assertEquals(preferredModelId("gemini", primary!.models), "gemini-3.8-flash");
-  const fallback = preferredConfiguredProvider(registry, "product_truth", {
-    exclude: primary?.provider,
-    fallback: true,
-  });
-  assertEquals(fallback?.provider, "openai");
+  assertEquals(primary?.provider, "openai");
   assertEquals(
     preferredModelId("openai", modelsForProviderPurpose(registry, "openai", "product_truth")),
     "gpt-5.6-luna",
   );
+  const fallback = preferredConfiguredProvider(registry, "product_truth", {
+    exclude: primary?.provider,
+    fallback: true,
+  });
+  assertEquals(fallback?.provider, "meta");
 });
 
 Deno.test("preferred image generation model is Flare 2026-09-08 over Sunburst and legacy GPT Image 2", () => {
