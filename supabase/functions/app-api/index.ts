@@ -742,7 +742,7 @@ async function resolveImageGenerationPolicy(orgId: string): Promise<ImageGenerat
   // available. We never write or trust an unvalidated model in this path.
   if (error?.code === "42P01") return fallback;
   if (error) throw new Error(`Could not load the organization image-generation policy: ${error.message}`);
-  if (!data) return fallback;
+  if (!data || data.primary_model === "gpt-image-2") return fallback;
   if (data.fallback_enabled === true) {
     throw new Error("Stored image-generation routing is invalid. Clear its fallback and choose an approved OpenAI GPT Image model in Administration.");
   }
