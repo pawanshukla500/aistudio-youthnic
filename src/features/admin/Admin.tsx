@@ -771,7 +771,7 @@ export function Admin() {
     setNotice(null);
     try {
       const result = await syncOpenAiUsage({ days: 31 });
-      setNotice({ tone: "success", text: `OpenAI organization usage synced: ${result.images || 0} images and $${Number(result.costUsd || 0).toFixed(4)} billed cost.` });
+      setNotice({ tone: "success", text: `OpenAI organization usage synced: ${result.images || 0} images and $${Number(result.costUsd || 0).toFixed(4)} billed cost${Array.isArray(result.derivedRateModels) && result.derivedRateModels.length ? `, with billed rates for ${result.derivedRateModels.length} models` : ""}.` });
     } catch (reason) {
       setNotice({ tone: "error", text: getErrorMessage(reason, "Could not sync OpenAI organization usage.") });
     } finally { setSaving(false); }
