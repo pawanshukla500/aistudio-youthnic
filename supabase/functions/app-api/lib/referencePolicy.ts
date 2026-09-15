@@ -215,7 +215,7 @@ export function selectReferences<T extends ReferenceLike>(
   const order = preferredProductOrder(poseType, normalizedFamily);
 
   const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
-  const style = references.filter((reference) => reference.role === "style_reference");
+  const style = references.filter((reference) => reference.role === "style_reference").slice(0, 1);
   const product = order.flatMap((role) => references.filter((reference) => reference.role === role));
   // A SKU can have several photos of one region. Taking every image from an
   // early role (many bottoms, many fronts) can exhaust the provider limit and
@@ -252,12 +252,12 @@ export function selectReferences<T extends ReferenceLike>(
   const remainingProduct = product.filter((reference) => !protectedSet.has(reference));
   const productPriority = [...protectedProduct, ...remainingProduct];
   const anchor = approved.slice(0, 1);
+  // Duplicate product photos must not crowd out the style reference or Pose 1
+  // continuity anchor. Protected product regions still outrank extra fronts.
   const priority = poseType === "back"
     ? [...productPriority, ...model, ...anchor]
-    : [...model, ...productPriority, ...anchor];
-  const selected = priority.slice(0, maxReferences);
-  const remaining = Math.max(0, maxReferences - selected.length);
-  return [...selected, ...style.slice(0, remaining)];
+    : [...model, ...protectedProduct, ...style, ...anchor, ...remainingProduct];
+  return priority.slice(0, maxReferences);
 }
 
 export function canUsePoseOneAnchor(garmentFamily: string, qaStatus: unknown, qaEnabled?: boolean) {

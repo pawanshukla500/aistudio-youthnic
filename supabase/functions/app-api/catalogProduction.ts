@@ -77,7 +77,7 @@ export function humanProductLearningGuidance(comments: string) {
 // guard for a re-generation of the *same* source product. It is deliberately
 // not promoted to a category rule: a note such as "no lace on the rear" is
 // evidence for one SKU, not a general fact about ethnic/fusion products.
-async function recordHumanProductLearningRule(args: {
+export async function recordHumanProductLearningRule(args: {
   service: SupabaseClient;
   workspace: CatalogWorkspace;
   planningRequestId: string;

@@ -846,6 +846,36 @@ Deno.test("composeGenerationPrompt locks style-reference jewellery and dual-mode
   assertStringIncludes(withoutStyleImage, "No STYLE REFERENCE image is in this manifest");
   assertEquals(withoutStyleImage.includes("If the STYLE REFERENCE image in this manifest shows jewellery"), false);
 
+  const memoryPrompt = composeGenerationPrompt({
+    skuName: "MEMORY-SET",
+    productDetails: "Ivory kurta",
+    pose: {
+      id: "angled",
+      title: "Angled",
+      poseNumber: 2,
+      description: "Three-quarter",
+      cameraAngle: "eye level",
+      framing: "full",
+      bodyPosition: "angled",
+      handPlacement: "relaxed",
+      expression: "confident",
+      highlightedDetails: ["neckline"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "angle",
+      consistencyNotes: "locked",
+      prompt: "Angled coverage pose.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "ivory" },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }, { role: "approved_pose" }],
+    generationMemory: "- Product images (SKU/garment truth only): front, back.\n- Style reference (photoshoot set, backdrop, lighting, jewellery taste only): style_reference.",
+  });
+  assertStringIncludes(memoryPrompt, "GENERATION MEMORY (DO NOT FORGET)");
+  assertStringIncludes(memoryPrompt, "Product images (SKU/garment truth only): front, back");
+  assertStringIncludes(memoryPrompt, "Style reference remains set/backdrop authority");
+
   const padded = productDetail.replace(
     "Create ONE premium photorealistic fashion e-commerce photograph",
     `${"OVERFLOW ".repeat(4_000)}Create ONE premium photorealistic fashion e-commerce photograph`,
