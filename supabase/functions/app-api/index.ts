@@ -64,8 +64,10 @@ import { selectPromptPatterns } from "./lib/promptPatterns.ts";
 import {
   buildGenerationMemory,
   extractLearnedPromptPatterns,
+  foldPromptPatternDuplicates,
   formatGenerationMemoryBrief,
-  nextPromptPatternCounts,
+  planPromptPatternWrite,
+  PROMPT_PATTERN_WRITE_ATTEMPTS,
   resetGenerationMemoryForClone,
 } from "./lib/generationMemory.ts";
 import { firebaseCatalogPath, supabaseCatalogPath } from "./lib/catalogStoragePaths.ts";
@@ -811,6 +813,8 @@ function sessionGenerationMemory(sessionData: JsonRecord, extras: {
   references?: Array<{ role?: string }>;
   generatedAssets?: unknown[];
   approvedAssets?: unknown[];
+  upsertApprovedAssets?: unknown[];
+  revokeApprovedPoseIndexes?: number[];
   corrections?: unknown[];
   referenceFingerprint?: string;
   productIdentity?: JsonRecord;
@@ -822,8 +826,10 @@ function sessionGenerationMemory(sessionData: JsonRecord, extras: {
       ?? (Array.isArray(sessionData.references) ? sessionData.references as Array<{ role?: string }> : []),
     productIdentity: extras.productIdentity ?? jsonRecord(sessionData.productIdentity),
     creativeDirection: extras.creativeDirection ?? jsonRecord(sessionData.creativeDirection),
-    generatedAssets: extras.generatedAssets,
-    approvedAssets: extras.approvedAssets,
+    ...(extras.generatedAssets !== undefined ? { generatedAssets: extras.generatedAssets } : {}),
+    ...(extras.approvedAssets !== undefined ? { approvedAssets: extras.approvedAssets } : {}),
+    upsertApprovedAssets: extras.upsertApprovedAssets,
+    revokeApprovedPoseIndexes: extras.revokeApprovedPoseIndexes,
     corrections: extras.corrections,
     referenceFingerprint: extras.referenceFingerprint,
   });
@@ -2787,8 +2793,6 @@ async function compilePosePrompt(
       references: selected,
       memory: sessionGenerationMemory(sessionData, {
         references: selected,
-        generatedAssets: Array.isArray(sessionData.generatedAssets) ? sessionData.generatedAssets as unknown[] : [],
-        approvedAssets: Array.isArray(sessionData.approvedAssets) ? sessionData.approvedAssets as unknown[] : [],
         referenceFingerprint: String(session.reference_hash || ""),
       }),
     }),
@@ -3273,7 +3277,8 @@ async function approvePose(request: Request, args: JsonRecord) {
       session_data: {
         ...sessionData,
         generationMemory: sessionGenerationMemory(sessionData, {
-          approvedAssets: status === "approved" ? [approvalAsset] : [],
+          upsertApprovedAssets: status === "approved" ? [approvalAsset] : undefined,
+          revokeApprovedPoseIndexes: status === "rejected" ? [Number(pose.pose_index || 0)] : undefined,
           corrections: status === "rejected" && notes.trim()
             ? [{ poseIndex: Number(pose.pose_index || 0), text: notes.trim() }]
             : [],
@@ -5248,47 +5253,82 @@ async function recordPromptPatternOutcomes(args: {
   const organizationId = String(args.organizationId || "").trim();
   const category = String(args.category || "").trim();
   if (!organizationId || !category || !args.patterns.length) return;
+
+  const matchingPatterns = () => service.from("prompt_patterns")
+    .select("id,success_count,failure_count,avg_quality,created_at")
+    .eq("organization_id", organizationId)
+    .eq("product_category", category);
+
   for (const pattern of args.patterns) {
     try {
-      const { data, error } = await service.from("prompt_patterns")
-        .select("id,success_count,failure_count,avg_quality")
-        .eq("organization_id", organizationId)
-        .eq("product_category", category)
+      let wrote = false;
+      for (let attempt = 1; attempt <= PROMPT_PATTERN_WRITE_ATTEMPTS && !wrote; attempt++) {
+        const { data, error } = await matchingPatterns()
+          .eq("pattern_kind", pattern.kind)
+          .eq("title", pattern.title)
+          .order("created_at", { ascending: true })
+          .limit(8);
+        if (error) {
+          console.error(`Could not load prompt pattern ${pattern.title}: ${error.message}`);
+          break;
+        }
+        const plan = planPromptPatternWrite(data || [], pattern.outcome, args.qualityScore);
+        const now = new Date().toISOString();
+        if (plan.action === "skip") {
+          wrote = true;
+          break;
+        }
+        if (plan.action === "update") {
+          const { data: updated, error: updateError } = await service.from("prompt_patterns").update({
+            pattern_text: pattern.patternText,
+            success_count: plan.next.successCount,
+            failure_count: plan.next.failureCount,
+            avg_quality: plan.next.avgQuality,
+            last_used_at: now,
+            updated_at: now,
+          }).eq("id", plan.id)
+            .eq("success_count", plan.expectedSuccessCount)
+            .eq("failure_count", plan.expectedFailureCount)
+            .select("id")
+            .maybeSingle();
+          if (updateError) {
+            console.error(`Could not update prompt pattern ${pattern.title}: ${updateError.message}`);
+            break;
+          }
+          if (updated?.id) wrote = true;
+          continue;
+        }
+        const { error: insertError } = await service.from("prompt_patterns").insert({
+          organization_id: organizationId,
+          product_category: category,
+          pattern_kind: pattern.kind,
+          title: pattern.title,
+          pattern_text: pattern.patternText,
+          success_count: plan.next.successCount,
+          failure_count: plan.next.failureCount,
+          avg_quality: plan.next.avgQuality,
+          last_used_at: now,
+        });
+        if (!insertError) {
+          wrote = true;
+          break;
+        }
+        if (attempt === PROMPT_PATTERN_WRITE_ATTEMPTS) {
+          console.error(`Could not record prompt pattern ${pattern.title}: ${insertError.message}`);
+        }
+      }
+
+      const { data: duplicates, error: duplicateError } = await matchingPatterns()
         .eq("pattern_kind", pattern.kind)
         .eq("title", pattern.title)
-        .limit(1)
-        .maybeSingle();
-      if (error) {
-        console.error(`Could not load prompt pattern ${pattern.title}: ${error.message}`);
-        continue;
+        .order("created_at", { ascending: true })
+        .limit(8);
+      if (duplicateError) continue;
+      const folded = foldPromptPatternDuplicates(duplicates || []);
+      if (folded.deleteIds.length) {
+        const { error: deleteError } = await service.from("prompt_patterns").delete().in("id", folded.deleteIds);
+        if (deleteError) console.error(`Could not fold duplicate prompt patterns ${pattern.title}: ${deleteError.message}`);
       }
-      const counts = nextPromptPatternCounts(data, pattern.outcome, args.qualityScore);
-      const now = new Date().toISOString();
-      if (data?.id) {
-        const { error: updateError } = await service.from("prompt_patterns").update({
-          pattern_text: pattern.patternText,
-          success_count: counts.successCount,
-          failure_count: counts.failureCount,
-          avg_quality: counts.avgQuality,
-          last_used_at: now,
-          updated_at: now,
-        }).eq("id", data.id);
-        if (updateError) console.error(`Could not update prompt pattern ${pattern.title}: ${updateError.message}`);
-        continue;
-      }
-      if (pattern.outcome !== "success") continue;
-      const { error: insertError } = await service.from("prompt_patterns").insert({
-        organization_id: organizationId,
-        product_category: category,
-        pattern_kind: pattern.kind,
-        title: pattern.title,
-        pattern_text: pattern.patternText,
-        success_count: counts.successCount,
-        failure_count: counts.failureCount,
-        avg_quality: counts.avgQuality,
-        last_used_at: now,
-      });
-      if (insertError) console.error(`Could not record prompt pattern ${pattern.title}: ${insertError.message}`);
     } catch (error) {
       console.error(`Could not record prompt pattern ${pattern.title}: ${errorMessage(error)}`);
     }

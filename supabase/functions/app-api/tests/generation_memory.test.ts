@@ -3,8 +3,10 @@ import {
   buildGenerationMemory,
   classifyReferenceRole,
   extractLearnedPromptPatterns,
+  foldPromptPatternDuplicates,
   formatGenerationMemoryBrief,
   nextPromptPatternCounts,
+  planPromptPatternWrite,
   resetGenerationMemoryForClone,
 } from "../lib/generationMemory.ts";
 
@@ -113,4 +115,62 @@ Deno.test("prompt pattern counts increment without treating failure as a first i
   assertEquals(nextFailure.successCount, 2);
   assertEquals(nextFailure.failureCount, 1);
   assertEquals(nextFailure.avgQuality, 80);
+});
+
+Deno.test("approved-asset snapshots replace omitted poses and empty lists clear them", () => {
+  const existing = buildGenerationMemory({
+    approvedAssets: [
+      { poseIndex: 1, url: "https://assets.example/old-1.jpg" },
+      { poseIndex: 2, url: "https://assets.example/old-2.jpg" },
+    ],
+  });
+  const replaced = buildGenerationMemory({
+    existing,
+    approvedAssets: [{ poseIndex: 1, url: "https://assets.example/new-1.jpg" }],
+  });
+  assertEquals(replaced.approvedAssets.map((asset) => `${asset.poseIndex}:${asset.url}`), [
+    "1:https://assets.example/new-1.jpg",
+  ]);
+
+  const cleared = buildGenerationMemory({ existing, approvedAssets: [] });
+  assertEquals(cleared.approvedAssets, []);
+
+  const kept = buildGenerationMemory({ existing, corrections: [{ poseIndex: 3, text: "fix backdrop" }] });
+  assertEquals(kept.approvedAssets.map((asset) => asset.poseIndex), [1, 2]);
+
+  const upserted = buildGenerationMemory({
+    existing,
+    upsertApprovedAssets: [{ poseIndex: 3, url: "https://assets.example/new-3.jpg" }],
+  });
+  assertEquals(upserted.approvedAssets.map((asset) => asset.poseIndex), [1, 2, 3]);
+
+  const revoked = buildGenerationMemory({
+    existing,
+    revokeApprovedPoseIndexes: [2],
+  });
+  assertEquals(revoked.approvedAssets.map((asset) => asset.poseIndex), [1]);
+});
+
+Deno.test("prompt pattern writes retry against the oldest row and fold duplicates", () => {
+  const update = planPromptPatternWrite([
+    { id: "newer", success_count: 9, created_at: "2026-09-15T12:00:00.000Z" },
+    { id: "oldest", success_count: 3, failure_count: 1, created_at: "2026-09-15T10:00:00.000Z" },
+  ], "success", 70);
+  assertEquals(update.action, "update");
+  if (update.action === "update") {
+    assertEquals(update.id, "oldest");
+    assertEquals(update.expectedSuccessCount, 3);
+    assertEquals(update.expectedFailureCount, 1);
+    assertEquals(update.next.successCount, 4);
+  }
+
+  assertEquals(planPromptPatternWrite([], "failure").action, "skip");
+  assertEquals(planPromptPatternWrite([], "success").action, "insert");
+
+  const folded = foldPromptPatternDuplicates([
+    { id: "b", created_at: "2026-09-15T11:00:00.000Z" },
+    { id: "a", created_at: "2026-09-15T10:00:00.000Z" },
+  ]);
+  assertEquals(folded.keepId, "a");
+  assertEquals(folded.deleteIds, ["b"]);
 });

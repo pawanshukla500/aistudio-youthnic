@@ -56,6 +56,7 @@ export type LearnedPromptPattern = {
 };
 
 export type PromptPatternOutcomeRow = {
+  [key: string]: unknown;
   id?: unknown;
   organization_id?: unknown;
   product_category?: unknown;
@@ -65,6 +66,7 @@ export type PromptPatternOutcomeRow = {
   success_count?: unknown;
   failure_count?: unknown;
   avg_quality?: unknown;
+  created_at?: unknown;
 };
 
 function text(value: unknown) {
@@ -139,13 +141,25 @@ function asCorrection(value: unknown): MemoryCorrection | null {
   return { poseIndex, text: body };
 }
 
-function mergeAssets(existing: MemoryAsset[], incoming: MemoryAsset[]) {
+function snapshotAssets(incoming: unknown[] | undefined) {
+  return (Array.isArray(incoming) ? incoming : [])
+    .map(asAsset)
+    .filter((entry): entry is MemoryAsset => Boolean(entry))
+    .sort((left, right) => left.poseIndex - right.poseIndex)
+    .slice(0, MAX_MEMORY_ASSETS);
+}
+
+function upsertAssets(existing: MemoryAsset[], incoming: MemoryAsset[]) {
   const byPose = new Map<number, MemoryAsset>();
-  for (const asset of [...existing, ...incoming]) {
-    if (byPose.size >= MAX_MEMORY_ASSETS && !byPose.has(asset.poseIndex)) continue;
-    byPose.set(asset.poseIndex, asset);
-  }
+  for (const asset of existing) byPose.set(asset.poseIndex, asset);
+  for (const asset of incoming) byPose.set(asset.poseIndex, asset);
   return [...byPose.values()].sort((left, right) => left.poseIndex - right.poseIndex).slice(0, MAX_MEMORY_ASSETS);
+}
+
+function revokeAssets(existing: MemoryAsset[], poseIndexes: number[]) {
+  const revoked = new Set(poseIndexes.filter((index) => index >= 1));
+  if (!revoked.size) return existing;
+  return existing.filter((asset) => !revoked.has(asset.poseIndex));
 }
 
 function mergeCorrections(existing: MemoryCorrection[], incoming: MemoryCorrection[]) {
@@ -234,6 +248,8 @@ export function buildGenerationMemory(args: {
   creativeDirection?: JsonRecord;
   generatedAssets?: unknown[];
   approvedAssets?: unknown[];
+  upsertApprovedAssets?: unknown[];
+  revokeApprovedPoseIndexes?: number[];
   corrections?: unknown[];
   referenceFingerprint?: string;
   existing?: unknown;
@@ -250,20 +266,29 @@ export function buildGenerationMemory(args: {
   const styleRoles = rolesOfClass(references, "style");
   const modelRoles = rolesOfClass(references, "model");
   const preservedDetails = preservedDetailsFromProduct(productIdentity, creativeDirection);
+  let generatedAssets = Array.isArray(args.generatedAssets)
+    ? snapshotAssets(args.generatedAssets)
+    : existing.generatedAssets;
+  let approvedAssets = Array.isArray(args.approvedAssets)
+    ? snapshotAssets(args.approvedAssets)
+    : existing.approvedAssets;
+  if (Array.isArray(args.upsertApprovedAssets)) {
+    approvedAssets = upsertAssets(
+      approvedAssets,
+      args.upsertApprovedAssets.map(asAsset).filter((entry): entry is MemoryAsset => Boolean(entry)),
+    );
+  }
+  if (Array.isArray(args.revokeApprovedPoseIndexes)) {
+    approvedAssets = revokeAssets(approvedAssets, args.revokeApprovedPoseIndexes.map(integer));
+  }
   return {
     version: GENERATION_MEMORY_VERSION,
     productRoles: productRoles.length ? productRoles : existing.productRoles,
     styleRoles: styleRoles.length ? styleRoles : existing.styleRoles,
     modelRoles: modelRoles.length ? modelRoles : existing.modelRoles,
     preservedDetails: preservedDetails.length ? preservedDetails : existing.preservedDetails,
-    generatedAssets: mergeAssets(
-      existing.generatedAssets,
-      (args.generatedAssets || []).map(asAsset).filter((entry): entry is MemoryAsset => Boolean(entry)),
-    ),
-    approvedAssets: mergeAssets(
-      existing.approvedAssets,
-      (args.approvedAssets || []).map(asAsset).filter((entry): entry is MemoryAsset => Boolean(entry)),
-    ),
+    generatedAssets,
+    approvedAssets,
     corrections: mergeCorrections(
       existing.corrections,
       (args.corrections || []).map(asCorrection).filter((entry): entry is MemoryCorrection => Boolean(entry)),
@@ -432,4 +457,50 @@ export function nextPromptPatternCounts(row: PromptPatternOutcomeRow | null | un
     avgQuality = Math.round(((prior * priorWeight) + quality) / nextSuccess * 100) / 100;
   }
   return { successCount: nextSuccess, failureCount: nextFailure, avgQuality };
+}
+
+export const PROMPT_PATTERN_WRITE_ATTEMPTS = 4;
+
+function rowCreatedAtMs(row: PromptPatternOutcomeRow) {
+  const parsed = Date.parse(text(row.created_at));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function sortPatternRows(rows: readonly PromptPatternOutcomeRow[]) {
+  return [...rows].sort((left, right) => {
+    const created = rowCreatedAtMs(left) - rowCreatedAtMs(right);
+    if (created) return created;
+    return text(left.id).localeCompare(text(right.id));
+  });
+}
+
+export function planPromptPatternWrite(
+  rows: readonly PromptPatternOutcomeRow[] | null | undefined,
+  outcome: "success" | "failure",
+  qualityScore?: number | null,
+) {
+  const sorted = sortPatternRows(Array.isArray(rows) ? rows.filter((row) => text(row.id)) : []);
+  const row = sorted[0];
+  if (!row) {
+    if (outcome !== "success") return { action: "skip" as const };
+    return { action: "insert" as const, next: nextPromptPatternCounts(null, outcome, qualityScore) };
+  }
+  return {
+    action: "update" as const,
+    id: text(row.id),
+    expectedSuccessCount: integer(row.success_count),
+    expectedFailureCount: integer(row.failure_count),
+    next: nextPromptPatternCounts(row, outcome, qualityScore),
+  };
+}
+
+export function foldPromptPatternDuplicates(rows: readonly PromptPatternOutcomeRow[]) {
+  const sorted = sortPatternRows(rows.filter((row) => text(row.id)));
+  if (sorted.length <= 1) {
+    return { keepId: text(sorted[0]?.id), deleteIds: [] as string[] };
+  }
+  return {
+    keepId: text(sorted[0].id),
+    deleteIds: sorted.slice(1).map((row) => text(row.id)),
+  };
 }
