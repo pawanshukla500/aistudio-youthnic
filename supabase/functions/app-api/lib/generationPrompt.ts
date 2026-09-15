@@ -241,7 +241,13 @@ function compactOptionalPromptContent(prompt: string) {
   compacted = compactPromptBlock(
     compacted,
     "\nFASHION KNOWLEDGE (SEEDED CUT/PRINT GUIDANCE, SUBORDINATE TO PRODUCT REFERENCES):\n",
-    ["\nCONTINUOUS LEARNING ADVISORY (APPROVED, REFERENCE-SCOPED GUIDANCE):", "\n\nPROMPT:"],
+    ["\nCONTINUOUS LEARNING ADVISORY (APPROVED, REFERENCE-SCOPED GUIDANCE):", "\nGENERATION MEMORY (DO NOT FORGET):", "\n\nPROMPT:"],
+    700,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nGENERATION MEMORY (DO NOT FORGET):\n",
+    ["\n\nEDIT GOAL:", "\nCONTINUOUS LEARNING ADVISORY (APPROVED, REFERENCE-SCOPED GUIDANCE):", "\n\nPROMPT:"],
     700,
   );
   return compacted;
@@ -399,6 +405,7 @@ function pose5HardRule(args: { closeupMode: string; heroDetail: string }) {
 export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
   session: JsonRecord; references: PromptReference[]; correction?: string; learnings?: string; fashionKnowledge?: string;
+  generationMemory?: string;
 }) {
   const product = objectValue(args.session.productIdentity);
   const creative = objectValue(args.session.creativeDirection);
@@ -472,6 +479,7 @@ export function composeGenerationPrompt(args: {
   const correction = boundedText(args.correction, 1_200);
   const learnings = boundedText(args.learnings, 900);
   const fashionKnowledge = boundedText(args.fashionKnowledge, 700);
+  const generationMemory = boundedText(args.generationMemory, 900);
   const visibilityRules = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
   const poseCategory = (isTrueBack || args.pose.id === "back")
     ? "back"
@@ -510,6 +518,11 @@ export function composeGenerationPrompt(args: {
 
 REFERENCE MANIFEST IN UPLOAD ORDER:
 ${manifest}
+${generationMemory ? `
+GENERATION MEMORY (DO NOT FORGET):
+${generationMemory}
+- Product images remain garment/SKU truth. Style reference remains set/backdrop authority. Approved Pose 1 is identity and set continuity only.
+` : ""}
 
 EDIT GOAL:
 Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${boundedText(args.pose.title, 160)}. The finished image must look like the same real professional photoshoot as the other four images.

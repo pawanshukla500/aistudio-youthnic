@@ -61,6 +61,13 @@ import {
 import { selectReusableLearningRules } from "./lib/learningRules.ts";
 import { selectFashionKnowledgeGuidance } from "./lib/fashionKnowledge.ts";
 import { selectPromptPatterns } from "./lib/promptPatterns.ts";
+import {
+  buildGenerationMemory,
+  extractLearnedPromptPatterns,
+  formatGenerationMemoryBrief,
+  nextPromptPatternCounts,
+  resetGenerationMemoryForClone,
+} from "./lib/generationMemory.ts";
 import { firebaseCatalogPath, supabaseCatalogPath } from "./lib/catalogStoragePaths.ts";
 import {
   MAX_IMAGE_REFERENCES,
@@ -86,6 +93,7 @@ import {
   markListingDone,
   markListingStarted,
   reconcileExistingGenerations,
+  recordHumanProductLearningRule,
   reviewCatalogQc,
   reviewCatalogPose,
   updateCatalogWorkItem,
@@ -793,6 +801,32 @@ function json(data: unknown, status = 200) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error || "Unknown error");
+}
+
+function jsonRecord(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
+function sessionGenerationMemory(sessionData: JsonRecord, extras: {
+  references?: Array<{ role?: string }>;
+  generatedAssets?: unknown[];
+  approvedAssets?: unknown[];
+  corrections?: unknown[];
+  referenceFingerprint?: string;
+  productIdentity?: JsonRecord;
+  creativeDirection?: JsonRecord;
+} = {}) {
+  return buildGenerationMemory({
+    existing: sessionData.generationMemory,
+    references: extras.references
+      ?? (Array.isArray(sessionData.references) ? sessionData.references as Array<{ role?: string }> : []),
+    productIdentity: extras.productIdentity ?? jsonRecord(sessionData.productIdentity),
+    creativeDirection: extras.creativeDirection ?? jsonRecord(sessionData.creativeDirection),
+    generatedAssets: extras.generatedAssets,
+    approvedAssets: extras.approvedAssets,
+    corrections: extras.corrections,
+    referenceFingerprint: extras.referenceFingerprint,
+  });
 }
 
 function assertSupabaseResults(
@@ -1645,6 +1679,12 @@ async function analyze(request: Request, args: JsonRecord) {
     analysisPolicy: visionPolicySnapshot(usedPolicy),
     analysisVersion: ANALYSIS_VERSION,
     generatedAssets: [], approvedAssets: [],
+    generationMemory: buildGenerationMemory({
+      references: (assets || []).map((asset) => ({ role: String(asset.asset_role || "") })),
+      productIdentity: normalized.productIdentity,
+      creativeDirection: normalized.creativeDirection,
+      referenceFingerprint: rHash,
+    }),
   };
   const { error: sessionError } = await service.from("catalog_sessions").insert({
     session_id: sessionId, job_id: "", user_id: workspace.user.firebaseUid, organization_id: orgId,
@@ -1943,7 +1983,15 @@ async function queueGeneration(request: Request, args: JsonRecord) {
         direction: jobData.modelIdentityDirection,
       },
       posePlan: enabled,
-      imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy)
+      imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
+      generationMemory: sessionGenerationMemory(sessionData, {
+        creativeDirection: {
+          ...(sessionData.creativeDirection as Record<string, unknown> || {}),
+          scene: jobData.backgroundStyle,
+          ...(jobData.backgroundStyle ? { backgroundStyle: jobData.backgroundStyle, studioEnvironment: jobData.backgroundStyle } : {}),
+        },
+        referenceFingerprint: String(session.reference_hash || ""),
+      }),
     }
   }).eq("session_id", sessionId).then((res) => { if (res.error) throw new Error(res.error.message); return res; });
 
@@ -2029,6 +2077,17 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   // generation_learnings is now an observation/audit ledger only. It is never
   // read by prompt compilation; reusable guidance must be explicitly curated
   // in generation_learning_rules with an organization and reference scope.
+  const learnedPatterns = extractLearnedPromptPatterns({
+    category: String(sessionData.category || ""),
+    hasStyleReference: (Array.isArray(sessionData.references) ? sessionData.references : []).some((entry) => String((entry as JsonRecord)?.role || "") === "style_reference"),
+    seatedPoseRequired: String((sessionData.creativeDirection as JsonRecord | undefined)?.seatedPoseRequired || ""),
+    closeupMode: String((sessionData.creativeDirection as JsonRecord | undefined)?.closeupMode || ""),
+    poses: poses.map((entry) => ({
+      poseIndex: Number(entry.pose_index || 0),
+      poseType: String(entry.pose_type || ((entry.generation_data || {}) as JsonRecord).id || ""),
+      status: String(entry.status || ""),
+    })),
+  });
   const { error: learningObservationError } = await service.from("generation_learnings").insert({
     organization_id: job.org_id, job_id: job.job_id, session_id: job.session_id,
     sku_name: job.sku_name || "", product_category: String(sessionData.category || ""), model: job.model,
@@ -2040,6 +2099,13 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
       verifiedPoses: verifiedQualityScores.length,
       unverifiedCompletedPoses: unverifiedCompleted,
       qualityEvidence: verifiedQualityScores.length ? "verified_pose_qa" : "none",
+      productRoles: (Array.isArray(sessionData.references) ? sessionData.references : [])
+        .map((entry) => String((entry as JsonRecord)?.role || ""))
+        .filter((role) => role && role !== "style_reference" && role !== "model_identity" && role !== "approved_pose"),
+      styleRoles: (Array.isArray(sessionData.references) ? sessionData.references : [])
+        .filter((entry) => String((entry as JsonRecord)?.role || "") === "style_reference")
+        .map(() => "style_reference"),
+      appliedPatternTitles: learnedPatterns.map((pattern) => pattern.title),
     },
     failure_signals: {
       garmentFamily: String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""),
@@ -2056,6 +2122,16 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     showcase_framing: "3:4", cost_source: "estimated_from_generation_attempts",
   });
   if (learningObservationError) console.error(`Could not record generation observation: ${learningObservationError.message}`);
+  try {
+    await recordPromptPatternOutcomes({
+      organizationId: String(job.org_id || ""),
+      category: String(sessionData.category || ""),
+      patterns: learnedPatterns,
+      qualityScore: verifiedQualityScore,
+    });
+  } catch (error) {
+    console.error(`Could not record house prompt patterns: ${errorMessage(error)}`);
+  }
   if (job.batch_id) {
     const batchId = String(job.batch_id);
     const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
@@ -2090,6 +2166,25 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
 async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRecord, message: string, failureCode = "pose_consistency_failed") {
   const now = new Date().toISOString();
   await service.from("session_generations").update({ status: "failed", qa_status: "failed", error: message.slice(0, 1000), updated_at: now }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
+  const sessionData = (session.session_data || {}) as JsonRecord;
+  const poseData = (pose.generation_data || {}) as JsonRecord;
+  const failedCorrections = (Array.isArray(poseData.corrections) ? poseData.corrections.map(String) : [String(poseData.correction || "")])
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (failedCorrections.length) {
+    const nextMemory = sessionGenerationMemory(sessionData, {
+      corrections: failedCorrections.map((entry) => ({
+        poseIndex: Number(pose.pose_index || 0),
+        text: entry,
+      })),
+    });
+    const { error: memoryError } = await service.from("catalog_sessions").update({
+      session_data: { ...sessionData, generationMemory: nextMemory },
+      updated_at: now,
+    }).eq("session_id", job.session_id);
+    if (memoryError) console.error(`Could not persist failed-pose generation memory: ${memoryError.message}`);
+    else session.session_data = { ...sessionData, generationMemory: nextMemory };
+  }
   const { data: poses, error: posesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
   if (posesError) console.error(posesError.message);
   const remaining = (poses || []).filter((entry) => entry.status === "queued");
@@ -2688,6 +2783,15 @@ async function compilePosePrompt(
     skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || "Untitled product"),
     productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
     references: selected, correction: promptCorrection(), learnings: learningSelection.guidance, fashionKnowledge,
+    generationMemory: formatGenerationMemoryBrief({
+      references: selected,
+      memory: sessionGenerationMemory(sessionData, {
+        references: selected,
+        generatedAssets: Array.isArray(sessionData.generatedAssets) ? sessionData.generatedAssets as unknown[] : [],
+        approvedAssets: Array.isArray(sessionData.approvedAssets) ? sessionData.approvedAssets as unknown[] : [],
+        referenceFingerprint: String(session.reference_hash || ""),
+      }),
+    }),
   });
   return { prompt, qaCorrections, learningRuleIds: learningSelection.ruleIds };
 }
@@ -3016,6 +3120,15 @@ async function processWorker(request: Request, args: JsonRecord) {
       service.from("catalog_sessions").update({
         session_data: {
           ...sessionData, generatedAssets, approvedAssets: generatedAssets.filter((asset) => asset.poseIndex === 1 && canUsePoseOneAnchor(String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), asset.qaStatus, Boolean(job.pose_qa))),
+          generationMemory: sessionGenerationMemory(sessionData, {
+            generatedAssets,
+            approvedAssets: generatedAssets.filter((asset) => (
+              (asset.poseIndex === 1 && canUsePoseOneAnchor(String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), asset.qaStatus, Boolean(job.pose_qa)))
+              || ["automatically_verified", "human_approved"].includes(String(asset.qaStatus || ""))
+            )),
+            corrections: qaCorrections.map((entry) => ({ poseIndex: Number(pose.pose_index), text: entry })),
+            referenceFingerprint: String(session.reference_hash || ""),
+          }),
           productDnaVersion: ANALYSIS_VERSION,
           validation: {
             ...(sessionData.validation && typeof sessionData.validation === "object" ? sessionData.validation as JsonRecord : {}),
@@ -3098,6 +3211,7 @@ async function cloneJob(request: Request, args: JsonRecord) {
     skuId: planningRequest.id,
     generatedAssets: [],
     approvedAssets: [],
+    generationMemory: resetGenerationMemoryForClone((sourceSession.session_data as JsonRecord)?.generationMemory),
   };
   
   const { error: newSessionError } = await service.from("catalog_sessions").insert({
@@ -3135,10 +3249,53 @@ async function approvePose(request: Request, args: JsonRecord) {
       approval_notes: notes
     })
     .eq("generation_id", generationId)
-    .select("generation_id")
+    .select("generation_id,session_id,pose_index,pose_type,output_url,storage_path,qa_status,generation_data")
     .single();
 
   if (poseError || !pose) throw new Error("Could not update approval status or pose not found.");
+
+  const { data: session, error: sessionError } = await service.from("catalog_sessions")
+    .select("session_id,planning_request_id,reference_hash,session_data")
+    .eq("session_id", pose.session_id)
+    .eq("organization_id", workspace.organization.id)
+    .maybeSingle();
+  if (sessionError) console.error(`Could not load the approved pose session: ${sessionError.message}`);
+  const sessionData = (session?.session_data || {}) as JsonRecord;
+  if (session?.session_id) {
+    const approvalAsset = {
+      poseIndex: Number(pose.pose_index || 0),
+      url: String(pose.output_url || ""),
+      storagePath: String(pose.storage_path || ""),
+      qaStatus: status === "approved" ? "human_approved" : status === "rejected" ? "human_rejected" : String(pose.qa_status || ""),
+      approvalStatus: status,
+    };
+    const { error: memoryError } = await service.from("catalog_sessions").update({
+      session_data: {
+        ...sessionData,
+        generationMemory: sessionGenerationMemory(sessionData, {
+          approvedAssets: status === "approved" ? [approvalAsset] : [],
+          corrections: status === "rejected" && notes.trim()
+            ? [{ poseIndex: Number(pose.pose_index || 0), text: notes.trim() }]
+            : [],
+          referenceFingerprint: String(session.reference_hash || ""),
+        }),
+      },
+      updated_at: new Date().toISOString(),
+    }).eq("session_id", session.session_id);
+    if (memoryError) console.error(`Could not persist approval generation memory: ${memoryError.message}`);
+  }
+  if (status === "rejected" && notes.trim() && session?.planning_request_id) {
+    await recordHumanProductLearningRule({
+      service,
+      workspace,
+      planningRequestId: String(session.planning_request_id),
+      assetVersionId: generationId,
+      sourceQaReviewId: "",
+      poseIndex: Number(pose.pose_index || 1),
+      comments: notes.trim(),
+      now: new Date().toISOString(),
+    });
+  }
 
   return { success: true, generationId: pose.generation_id, status };
 }
@@ -5082,6 +5239,62 @@ async function analysisLearningBrief(orgId: string, category = "") {
   return sections.join("\n");
 }
 
+async function recordPromptPatternOutcomes(args: {
+  organizationId: string;
+  category: string;
+  patterns: ReturnType<typeof extractLearnedPromptPatterns>;
+  qualityScore: number | null;
+}) {
+  const organizationId = String(args.organizationId || "").trim();
+  const category = String(args.category || "").trim();
+  if (!organizationId || !category || !args.patterns.length) return;
+  for (const pattern of args.patterns) {
+    try {
+      const { data, error } = await service.from("prompt_patterns")
+        .select("id,success_count,failure_count,avg_quality")
+        .eq("organization_id", organizationId)
+        .eq("product_category", category)
+        .eq("pattern_kind", pattern.kind)
+        .eq("title", pattern.title)
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        console.error(`Could not load prompt pattern ${pattern.title}: ${error.message}`);
+        continue;
+      }
+      const counts = nextPromptPatternCounts(data, pattern.outcome, args.qualityScore);
+      const now = new Date().toISOString();
+      if (data?.id) {
+        const { error: updateError } = await service.from("prompt_patterns").update({
+          pattern_text: pattern.patternText,
+          success_count: counts.successCount,
+          failure_count: counts.failureCount,
+          avg_quality: counts.avgQuality,
+          last_used_at: now,
+          updated_at: now,
+        }).eq("id", data.id);
+        if (updateError) console.error(`Could not update prompt pattern ${pattern.title}: ${updateError.message}`);
+        continue;
+      }
+      if (pattern.outcome !== "success") continue;
+      const { error: insertError } = await service.from("prompt_patterns").insert({
+        organization_id: organizationId,
+        product_category: category,
+        pattern_kind: pattern.kind,
+        title: pattern.title,
+        pattern_text: pattern.patternText,
+        success_count: counts.successCount,
+        failure_count: counts.failureCount,
+        avg_quality: counts.avgQuality,
+        last_used_at: now,
+      });
+      if (insertError) console.error(`Could not record prompt pattern ${pattern.title}: ${insertError.message}`);
+    } catch (error) {
+      console.error(`Could not record prompt pattern ${pattern.title}: ${errorMessage(error)}`);
+    }
+  }
+}
+
 async function saveCatalogStylingPlanOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const batch = await catalogBatch(workspace, String(args.catalogId || ""));
@@ -5591,6 +5804,12 @@ async function queueCatalogVariantGeneration(
     analysisVersion: ANALYSIS_VERSION,
     generatedAssets: [],
     approvedAssets: [],
+    generationMemory: buildGenerationMemory({
+      references,
+      productIdentity: normalized.productIdentity,
+      creativeDirection: normalized.creativeDirection,
+      referenceFingerprint: analysisHashes.rHash,
+    }),
   };
   const { error: sessionInsertError } = await service.from("catalog_sessions").insert({
     session_id: sessionId,

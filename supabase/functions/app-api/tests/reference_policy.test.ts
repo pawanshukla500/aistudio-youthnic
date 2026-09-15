@@ -33,8 +33,10 @@ Deno.test("critical saree regions survive provider-limit truncation before dupli
   for (const required of ["saree_front_drape", "saree_back_drape", "saree_body_detail", "saree_pallu_spread"]) {
     assert(roles.includes(required), `${required} must be protected from truncation.`);
   }
-  assertEquals(roles.includes("style_reference"), false);
-  assertEquals(roles.includes("approved_pose"), false);
+  assertEquals(roles.includes("style_reference"), true);
+  assertEquals(roles.includes("approved_pose"), true);
+  assertEquals(roles.includes("model_identity"), true);
+  assertEquals(selected.filter((reference) => reference.role === "saree_front_drape").length < 12, true);
 });
 
 Deno.test("legacy saree aliases remain valid and pallu has a distinct authority label", () => {
@@ -165,6 +167,24 @@ Deno.test("non-saree selection reserves front, bottom, back, and mannequin befor
     assert(roles.includes(required), `${required} must be protected from truncation.`);
   }
   assertEquals(selected.some((reference) => reference.hash === "back"), true);
+});
+
+Deno.test("style reference and Pose 1 anchor survive duplicate product overflow before extra fronts", () => {
+  const selected = selectReferences([
+    { role: "model_identity", hash: "model" },
+    { role: "front", hash: "front" },
+    ...Array.from({ length: 16 }, (_, index) => ({ role: "additional_product", hash: `extra-${index}` })),
+    { role: "back", hash: "back" },
+    { role: "style_reference", hash: "style" },
+  ], [{ role: "approved_pose", hash: "anchor" }], "full_front", "dress");
+  const roles = selected.map((reference) => reference.role);
+
+  assertEquals(selected.length, MAX_IMAGE_REFERENCES);
+  assertEquals(roles.includes("front"), true);
+  assertEquals(roles.includes("back"), true);
+  assertEquals(roles.includes("style_reference"), true);
+  assertEquals(roles.includes("approved_pose"), true);
+  assertEquals(roles.includes("model_identity"), true);
 });
 
 Deno.test("Studio and Bulk/Catalog share the same region-aware readiness policy", () => {
