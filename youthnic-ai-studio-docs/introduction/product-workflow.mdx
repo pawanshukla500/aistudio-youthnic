@@ -11,7 +11,7 @@ Youthnic AI Studio converts raw garment images into complete e-commerce catalogs
 flowchart TD
     S1[1. Upload References & Define SKU] --> S2[2. AI Vision Analysis & Garment Truth]
     S2 --> S3[3. Creative Direction & Styling Review]
-    S3 --> S4[4. 5-Pose Plan Configuration]
+    S3 --> S4[4. 6-Pose Plan Configuration]
     S4 --> S5[5. Multi-Model AI Generation]
     S5 --> S6[6. Quality Assurance & Review]
     S6 --> S7[7. Handoff & Listing Export]
@@ -50,8 +50,8 @@ The analysis compiles a unified creative brief:
 
 ---
 
-### Stage 4: 5-Pose Plan Configuration
-The platform populates the standard 5-pose commercial plan:
+### Stage 4: 6-Pose Plan Configuration
+The platform populates the standard 6-pose commercial plan:
 1. **Full Front Hero**: Clean commercial anchor.
 2. **Three-Quarter Side**: Reveals drape depth and side construction.
 3. **Rear Full View**: Shoulders away, dupatta draped forward.
@@ -65,7 +65,7 @@ Users can enable/disable poses, customize camera framing, or modify specific pro
 ### Stage 5: Multi-Model AI Generation
 When the user clicks **Generate Photoshoot**, the backend compiles the full prompt contract and routes generation to the approved OpenAI GPT Image engine:
 - **Pose 1 Generates First**: Creates the foundational anchor for model face, hair, and studio backdrop.
-- **Poses 2–5 Lock to Pose 1**: Subsequent poses reuse Pose 1 as a visual continuity anchor, ensuring 100% lighting, backdrop, and identity coherence.
+- **Poses 2–6 Lock to Pose 1**: Subsequent poses reuse Pose 1 as a visual continuity anchor, ensuring 100% lighting, backdrop, and identity coherence.
 
 [VIDEO REQUIRED:
 Title: Studio Photoshoot Generation Lifecycle
@@ -87,7 +87,7 @@ Every generated image passes through an automated QA validator:
 ### Stage 7: Handoff & Listing Export
 Once approved:
 - Download individual full-resolution 2K/4K images formatted in standard 3:4 e-commerce aspect ratios.
-- Download a packaged `.zip` archive containing all 5 poses named by SKU and pose index.
+- Download a packaged `.zip` archive containing all 6 poses named by SKU and pose index.
 - In **Catalog Production**, the SKU transitions automatically to `QC Passed` &rarr; `Ready for Listing` on the Kanban board.
 
 ---

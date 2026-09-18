@@ -567,7 +567,7 @@ async function getCatalog(catalogId: string) {
       variant.front_image_url && variant.back_image_url && ["pending", "stale"].includes(String(variant.analysis_status || "pending")) ? "Gemini analysis and pose plan must be rebuilt." : "",
       variant.analysis_status === "analyzing" ? "Gemini analysis is running." : "",
       variant.analysis_status === "failed" ? (variant.error_message || "Gemini analysis failed.") : "",
-      variant.analysis_status === "ready" && (!Array.isArray(variant.pose_plan) || variant.pose_plan.length !== 5) ? "The five-pose plan is incomplete." : "",
+      variant.analysis_status === "ready" && (!Array.isArray(variant.pose_plan) || variant.pose_plan.length < 5) ? "The pose plan is incomplete." : "",
     ].filter(Boolean);
     const readinessStatus = variant.generation_status === "completed" ? "completed"
       : variant.generation_status === "failed" ? "needs_review"

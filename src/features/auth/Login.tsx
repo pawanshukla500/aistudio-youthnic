@@ -48,7 +48,7 @@ export function Login({ redirect }: LoginProps) {
             <h1 className="mt-8 font-syne text-5xl font-bold leading-[1.05] tracking-[-0.04em] text-on-surface xl:text-6xl">One product.<br />One model.<br /><span className="text-primary">One perfect shoot.</span></h1>
             <p className="mt-7 max-w-xl text-base leading-7 text-secondary">Plan, analyze, generate, and review consistent fashion catalog imagery from one secure production workspace.</p>
             <div className="mt-10 grid max-w-xl gap-3 sm:grid-cols-3">
-              {[[Images, "Reference-locked", "Product accuracy"], [ShieldCheck, "Role controlled", "Team access"], [CheckCircle2, "QA validated", "Five-pose sets"]].map(([Icon, title, detail]) => (
+              {[[Images, "Reference-locked", "Product accuracy"], [ShieldCheck, "Role controlled", "Team access"], [CheckCircle2, "QA validated", "Six-pose sets"]].map(([Icon, title, detail]) => (
                 <div key={String(title)} className="rounded-2xl border border-white/70 bg-white/55 p-4 shadow-sm backdrop-blur"><Icon className="h-5 w-5 text-primary" /><p className="mt-4 text-sm font-bold text-on-surface">{String(title)}</p><p className="mt-0.5 text-[11px] text-secondary">{String(detail)}</p></div>
               ))}
             </div>

@@ -31,21 +31,21 @@ Status meanings:
 | Live data-driven Flow | Workflow detail joins work item, stage definitions, stage events/timings, owners, dependencies, poses, reviews, comments, handoffs, generation job, and session data. No sample stages are fabricated in the client. | **Implemented; live gate** — Realtime subscriptions refresh work item, event, and pose-version changes; production subscription delivery needs post-deploy proof. |
 | Status, owner, progress, step, start/end, and time per stage | Responsive stage rail and summary expose the persisted current state, entry/completion times, visit count, and total time across repeated review/re-generation visits. Transition duration is attributed to the stage being exited. | **Implemented** — deterministic Deno tests cover re-entry and legacy events without recorded duration. |
 | Blockers, failures, dependencies, and next action | Detail response returns structured dependencies, blocker/error details, permission-aware actions, and recovery state. | **Implemented** — API contract and exceptional-state UI. |
-| Expandable SKU detail and five-pose inspection | From list/Kanban a SKU opens a full-screen live workflow; pose cards expose history, prompt/model metadata, reviews, comments, and downloads. | **Implemented** — desktop/mobile browser QA and local build. |
+| Expandable SKU detail and six-pose inspection | From list/Kanban a SKU opens a full-screen live workflow; pose cards expose history, prompt/model metadata, reviews, comments, and downloads. | **Implemented** — desktop/mobile browser QA and local build. |
 | Search, sort, and requested filters | Search covers SKU/request/batch/campaign/theme/remarks/marketplace; filters cover batch, assignee, status, campaign, marketplace, priority, and date. | **Implemented** — Catalog Production controls operate on fetched rows. |
 | List, Kanban, and Flow views | Catalog Production provides list and Kanban; each SKU opens the live operational Flow. The technical generation graph remains available for diagnosis. | **Implemented** — existing diagnostics preserved. |
 | Responsive navigation and states | The application retains the collapsible sidebar. Catalog Production and workflow detail have desktop/mobile layouts plus loading, empty, success, and actionable error states. | **Implemented** — browser QA and production build. |
 | Working controls only | QC, re-generation guidance, bulk start, spreadsheet review, Planning delete/stop, Studio stop, History stop/retry/delete, send, and resend use accessible action dialogs with real handlers and server validation. | **Implemented** — static verifier fails on browser `prompt`/`confirm`, checks dialog wiring, and rendered QA found no native JavaScript dialog. |
 
-## Five-pose asset package
+## Pose asset package
 
 | Requirement | Implemented behavior | Status and evidence |
 | --- | --- | --- |
-| Stable five-pose structure | Pose indexes 1–5 represent full, angle/side, back-reference, creative, and close-up outputs from the persisted pose plan. | **Implemented** — approval cannot pass unless all five latest versions are complete. |
+| Stable six-pose structure | Pose indexes 1–6 represent full, angle/side, back-reference, creative, close-up, and garment-led showcase outputs from the persisted pose plan. | **Implemented** — approval cannot pass unless all six latest versions are complete. |
 | Preview/original/status/version/time/model/prompt | Immutable `catalog_pose_asset_versions` records contain stable storage path, preview/original/final URL fields, generation status, version, timestamp, model, prompt, and metadata. | **Implemented** — existing pose rows are backfilled without copying binaries. |
 | Approval, comments, and regeneration history | Latest-version-only human reviews are stored separately; version/review/event history remains visible after regeneration. | **Implemented** — stale-version review is rejected server-side. |
-| SKU-level Listing Team package | Final approval freezes the five exact versions into one revisioned handoff and exposes a stable authenticated workflow/package link plus individual signed asset links. | **Implemented; live gate** — package immutability and delivery behavior need the deployed acceptance run. |
-| Download | Operators can download an individual pose or a five-pose ZIP; backend-aware readers support Supabase and historical Firebase objects. | **Implemented** — browser and Edge download paths. |
+| SKU-level Listing Team package | Final approval freezes every pose version the shoot was queued with into one revisioned handoff and exposes a stable authenticated workflow/package link plus individual signed asset links. | **Implemented; live gate** — package immutability and delivery behavior need the deployed acceptance run. |
+| Download | Operators can download an individual pose or a full pose-set ZIP; backend-aware readers support Supabase and historical Firebase objects. | **Implemented** — browser and Edge download paths. |
 
 ## Daily approval handoff
 

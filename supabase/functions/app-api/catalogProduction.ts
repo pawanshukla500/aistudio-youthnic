@@ -1,5 +1,5 @@
 import { type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.112.2";
-import { type JsonRecord } from "./profiles.ts";
+import { REQUIRED_POSE_IDS, type JsonRecord } from "./profiles.ts";
 import { buildCatalogStageTimeline } from "./lib/catalogStageTimeline.ts";
 import { PRODUCT_REFERENCE_ROLES, isSareeReferenceSet, missingRequiredReferenceLabels, selectCurrentCatalogProductReferences } from "./lib/referencePolicy.ts";
 
@@ -64,7 +64,30 @@ function assertQueryResults(results: unknown[], context: string) {
   if (failure) throw new Error(`${context}: ${failure.message || "database operation failed"}`);
 }
 
-const POSE_IDS = ["full_front", "angled", "back", "creative", "closeup"] as const;
+// Shared with the pose plan itself: a private copy silently mapped a rejected
+// sixth frame onto the close-up rule when the plan grew past five poses.
+const POSE_IDS = REQUIRED_POSE_IDS;
+
+/**
+ * The pose indexes this work item was actually queued with.
+ *
+ * A shoot queued as a five-pose set must stay approvable and downloadable after
+ * the plan grew to six, and a six-pose set must not be approvable while its
+ * showcase frame is missing. So the item's own rows decide, and the current
+ * plan length is only the fallback for an item with no rows yet.
+ */
+export function poseIndexesFromRows(...rowSets: Array<ReadonlyArray<{ pose_index?: unknown }> | null | undefined>) {
+  const indexes = new Set<number>();
+  for (const rows of rowSets) {
+    for (const row of rows || []) {
+      const index = Number(row?.pose_index);
+      if (Number.isFinite(index) && index >= 1) indexes.add(Math.floor(index));
+    }
+  }
+  return indexes.size
+    ? [...indexes].sort((left, right) => left - right)
+    : REQUIRED_POSE_IDS.map((_id, position) => position + 1);
+}
 
 export function humanProductLearningGuidance(comments: string) {
   // The full human comment remains in qa_reviews, catalog_asset_reviews and
@@ -521,16 +544,22 @@ export async function reviewCatalogQc(
     throw new Error("This approved package has already been handed to the Listing Team and is immutable. Create a new catalog revision for further changes.");
   }
   if ((decision === "passed" && item.qc_status === "passed") || (decision === "rejected" && item.qc_status === "rejected")) {
-    throw new Error(`This five-pose set is already ${decision === "passed" ? "approved" : "rejected"}.`);
+    throw new Error(`This pose set is already ${decision === "passed" ? "approved" : "rejected"}.`);
   }
   if (decision === "passed") {
-    const { data: versions, error: versionsError } = await service.from("catalog_pose_asset_versions")
-      .select("pose_index,version_number,generation_status,approval_status")
-      .eq("organization_id", workspace.organization.id)
-      .eq("work_item_id", workItemId)
-      .order("pose_index")
-      .order("version_number", { ascending: false });
+    const [{ data: versions, error: versionsError }, { data: plannedPoses, error: plannedPosesError }] = await Promise.all([
+      service.from("catalog_pose_asset_versions")
+        .select("pose_index,version_number,generation_status,approval_status")
+        .eq("organization_id", workspace.organization.id)
+        .eq("work_item_id", workItemId)
+        .order("pose_index")
+        .order("version_number", { ascending: false }),
+      service.from("session_generations")
+        .select("pose_index")
+        .eq("session_id", text(item.catalog_session_id)),
+    ]);
     if (versionsError) throw new Error(versionsError.message);
+    if (plannedPosesError) throw new Error(plannedPosesError.message);
     const latestVersions = new Map<number, JsonRecord>();
     for (const version of versions || []) {
       const poseIndex = Number(version.pose_index);
@@ -539,11 +568,12 @@ export async function reviewCatalogQc(
     const completedPoseIndexes = new Set([...latestVersions.entries()]
       .filter(([, version]) => version.generation_status === "completed")
       .map(([poseIndex]) => poseIndex));
-    if ([1, 2, 3, 4, 5].some((poseIndex) => !completedPoseIndexes.has(poseIndex))) {
-      throw new Error("All five pose outputs must be complete before final approval.");
+    const expectedPoseIndexes = poseIndexesFromRows(plannedPoses, versions);
+    if (expectedPoseIndexes.some((poseIndex) => !completedPoseIndexes.has(poseIndex))) {
+      throw new Error(`All ${expectedPoseIndexes.length} pose outputs must be complete before final approval.`);
     }
     if ([...latestVersions.values()].some((version) => version.approval_status === "rejected")) {
-      throw new Error("A rejected pose must be regenerated or approved before the five-pose set can pass final review.");
+      throw new Error("A rejected pose must be regenerated or approved before the pose set can pass final review.");
     }
   }
   const patch = decision === "passed"
@@ -839,7 +869,7 @@ export async function reviewCatalogPose(
       status: "in_progress",
       blocked_reason: "",
       failure_code: "",
-      next_action: "Approve or reject the five-pose set",
+      next_action: "Approve or reject the pose set",
     }).eq("organization_id", workspace.organization.id).eq("id", workItemId));
   }
   assertQueryResults(await Promise.all(operations), "Could not finish the pose review audit trail");
@@ -1151,7 +1181,7 @@ export async function getCatalogWorkflowDetail(
     ...pose,
     output_url: await signedCatalogAssetUrl(service, workspace.organization.id, pose as JsonRecord, "output_url") || pose.output_url,
   })));
-  const latestByPose = [1, 2, 3, 4, 5].map((poseIndex) => {
+  const latestByPose = poseIndexesFromRows(posesResult.data, versionsResult.data).map((poseIndex) => {
     const versions = poseVersions.filter((version) => Number(version.pose_index) === poseIndex);
     const currentPose = poseRows.find((pose) => Number(pose.pose_index) === poseIndex);
     const generationData = asRecord(currentPose?.generation_data);
@@ -1181,6 +1211,7 @@ export async function getCatalogWorkflowDetail(
     };
   });
   const completedPoseCount = latestByPose.filter((pose) => pose.current && ["completed", "approved"].includes(text(pose.current.generation_status || pose.current.approval_status))).length;
+  const expectedPoseCount = latestByPose.length;
 
   const request = requestResult.data;
   const currentReferenceRows = selectCurrentCatalogProductReferences((assetsResult.data || []).map((asset) => ({
@@ -1224,8 +1255,8 @@ export async function getCatalogWorkflowDetail(
         { key: "front_reference", label: "Front product reference", status: missingReferenceLabels.includes("front product") ? "missing" : "complete" },
         { key: "back_reference", label: "Back product reference", status: missingReferenceLabels.includes("back product") ? "missing" : "complete" },
       ]),
-    { key: "pose_plan", label: "Five-pose plan", status: Array.isArray(request?.pose_plan) && request.pose_plan.length === 5 ? "complete" : "pending" },
-    { key: "pose_outputs", label: "Five generated outputs", status: completedPoseCount === 5 ? "complete" : completedPoseCount ? "in_progress" : "pending", detail: `${completedPoseCount}/5 complete` },
+    { key: "pose_plan", label: `${expectedPoseCount}-pose plan`, status: Array.isArray(request?.pose_plan) && request.pose_plan.length === expectedPoseCount ? "complete" : "pending" },
+    { key: "pose_outputs", label: `${expectedPoseCount} generated outputs`, status: completedPoseCount === expectedPoseCount ? "complete" : completedPoseCount ? "in_progress" : "pending", detail: `${completedPoseCount}/${expectedPoseCount} complete` },
     { key: "human_approval", label: "Final human approval", status: item.final_approved_at ? "complete" : item.qc_status === "rejected" ? "failed" : "pending" },
     { key: "listing_handoff", label: "Listing Team handoff", status: latestHandoff?.sent_at ? "complete" : latestHandoff ? "ready" : "pending" },
   ];
@@ -1238,7 +1269,7 @@ export async function getCatalogWorkflowDetail(
   const actions: JsonRecord[] = [];
   if (["blocked_failed", "regeneration_required"].includes(item.workflow_stage)) actions.push({ type: "retry_generation", label: "Retry generation", enabled: canGenerate });
   if (item.workflow_stage === "quality_review") {
-    actions.push({ type: "approve", label: "Approve five-pose set", enabled: canApprove && completedPoseCount === 5 });
+    actions.push({ type: "approve", label: "Approve pose set", enabled: canApprove && completedPoseCount === expectedPoseCount });
     actions.push({ type: "reject", label: "Request re-generation", enabled: canApprove });
   }
   if (item.workflow_stage === "ready_for_listing") actions.push({ type: "send_handoff", label: "Send to Listing Team", enabled: canManageHandoffs });
@@ -1276,7 +1307,7 @@ export async function getCatalogWorkflowDetail(
     progress: {
       percent: Number(item.workflow_progress || 0),
       completedPoseCount,
-      totalPoseCount: 5,
+      totalPoseCount: expectedPoseCount,
       currentPose: Number(jobResult.data?.current_pose || 0),
       currentStep: item.current_step || item.next_action,
     },

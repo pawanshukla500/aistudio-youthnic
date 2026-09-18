@@ -6,7 +6,7 @@ Legacy source of truth: `C:\Users\shukl\Desktop\Fashion-Catalog-Studio-main`
 
 | Legacy capability | Youthnic implementation |
 | --- | --- |
-| Five-pose catalog plan | Gemini multimodal analysis and garment-specific planning in `supabase/functions/app-api/` |
+| Six-pose catalog plan | Gemini multimodal analysis and garment-specific planning in `supabase/functions/app-api/` |
 | Product truth references | Firebase Storage URLs/paths recorded in Supabase `planning_assets` |
 | Product and creative analysis | Structured Product Identity and Creative Direction profiles from all labeled references |
 | Session memory | Supabase `catalog_sessions` with product/model/scene/pose locks and approved anchor data |

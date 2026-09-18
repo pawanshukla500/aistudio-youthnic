@@ -120,7 +120,7 @@ export function AnalysisProfile({
               {!ready
                 ? "Upload the required product evidence to start vision analysis."
                 : analyzing
-                  ? `${analysisRouteLabel(analysis)} is locking the product, scene, model, and five-pose plan.`
+                  ? `${analysisRouteLabel(analysis)} is locking the product, scene, model, and six-pose plan.`
                   : current
                     ? `${analysisRouteLabel(analysis)} locked product identity and creative direction for generation.`
                     : "Inputs changed - analysis and the pose plan are stale and will rebuild automatically."}

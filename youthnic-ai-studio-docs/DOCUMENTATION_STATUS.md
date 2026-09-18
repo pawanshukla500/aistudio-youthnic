@@ -24,7 +24,7 @@ This tracker monitors the writing, code verification, screenshot requirement, an
 | **Studio** | `studio/product-identity-profile.mdx` | Product Identity Profile | Yes | Yes | Required | Optional | Complete (Awaiting Media) |
 | **Studio** | `studio/creative-direction.mdx` | Creative Direction & Studio Sets | Yes | Yes | Required | Optional | Complete (Awaiting Media) |
 | **Studio** | `studio/styling-recommendations.mdx` | Styling Recommendations | Yes | Yes | Required | Optional | Complete (Awaiting Media) |
-| **Studio** | `studio/pose-planning.mdx` | Five-Pose Catalog Plan | Yes | Yes | Required | Optional | Complete (Awaiting Media) |
+| **Studio** | `studio/pose-planning.mdx` | Six-Pose Catalog Plan | Yes | Yes | Required | Optional | Complete (Awaiting Media) |
 | **Studio** | `studio/generate-photoshoot.mdx` | Generate Photoshoot | Yes | Yes | Required | Required | Complete (Awaiting Media) |
 | **Studio** | `studio/generation-progress.mdx` | Generation Progress & Live Status | Yes | Yes | Required | Optional | Complete (Awaiting Media) |
 | **Studio** | `studio/quality-validation.mdx` | Quality Validation & QA | Yes | Yes | Required | Optional | Complete (Awaiting Media) |

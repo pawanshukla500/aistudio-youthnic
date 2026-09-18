@@ -246,6 +246,7 @@ export type CreativeDirectionProfile = {
   seatedPoseReason?: string;
   closeupMode?: string;
   closeupHeroDetail?: string;
+  showcaseIntent?: string;
 };
 
 export type StudioAnalysis = {
@@ -287,5 +288,10 @@ export type OutputOptions = {
   imageSize: string;
   quality: "low" | "medium" | "high";
   backgroundStyle: string;
+  // How this shoot presents bottom wear. "auto" follows what the analysis
+  // proved in the references; the explicit values let a merchandiser force a
+  // full top+bottom set, or keep a top-only SKU from getting an invented
+  // matching bottom.
+  bottomWear: "auto" | "included" | "top_only";
   poseQa: boolean;
 };

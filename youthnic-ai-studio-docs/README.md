@@ -64,7 +64,7 @@ youthnic-ai-studio-docs/
 ├── images/                        # Static diagrams, logos, and UI asset directories
 ├── introduction/                  # Overview, audience, capabilities & product tour
 ├── getting-started/               # Onboarding, login, interface tour & first photoshoot
-├── studio/                        # Single-SKU studio workflow & 5-pose standard
+├── studio/                        # Single-SKU studio workflow & 6-pose standard
 ├── catalog-production/            # Multi-SKU & colourway batch production
 ├── events/                        # Marketing & festival calendar roadmaps
 ├── planning/                      # Batches, campaigns, capacity & scheduling

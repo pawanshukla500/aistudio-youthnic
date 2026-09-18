@@ -30,9 +30,10 @@ const basePoses: StudioPose[] = [
   { id: "back", title: "Full Back View", description: "True back view grounded in the uploaded back image.", cameraAngle: "Straight-on back view", highlightedDetails: ["back neckline", "back construction"], primaryReference: "back", purpose: "Document the real back design", prompt: "Model turned fully around. Reproduce the uploaded back product image exactly.", enabled: true },
   { id: "creative", title: "Creative Gen-Z Fashion Pose", description: "A current, expressive pose that keeps the exact product readable, or a seated editorial pose if the style reference is sitting.", cameraAngle: "Product-appropriate editorial angle", highlightedDetails: ["movement", "creative direction"], primaryReference: "front", purpose: "Campaign and social-commerce storytelling", prompt: "Create a current Gen-Z fashion pose suited to this exact product without hiding or changing it. If the style reference shows a sitting pose, sit this 4th pose as well while keeping garment, bottoms, hem, and footwear visible. Rebuild the backdrop from the style reference only.", enabled: true },
   { id: "closeup", title: "Zoomed-In Product Detail Highlight", description: "A zoomed-in shot that sells the product's most important detail, with the face included only when that detail stays large and readable.", cameraAngle: "Eye-level, zoomed in to a product-detail crop or a face-to-chest/face-to-waist crop that still leaves the detail large", highlightedDetails: ["key product detail", "craftsmanship", "optional face"], primaryReference: "fabric_pattern", purpose: "Social-first product-detail shot", prompt: "Genuinely zoomed-in product-detail shot - not a repeat of the full-body hero. Lead with one sharp, large product detail. Include a beautiful, natural Gen-Z face only when that crop still leaves the detail readable; otherwise crop to the product detail and let the face be partial or omitted.", enabled: true },
+  { id: "showcase", title: "Garment-Led Showcase", description: "A sixth frame chosen by the garment: a drape-led pallu frame for sarees, a head-to-toe top-and-bottom frame when the outfit includes bottom wear, a playful backdrop-matched moment for short kurtis and tops, or a full-length fall-and-fit frame.", cameraAngle: "Garment-appropriate full or three-quarter body angle", highlightedDetails: ["garment-specific selling frame"], primaryReference: "front", purpose: "Sell what a buyer of this garment actually judges", prompt: "Create the garment-led showcase frame inside the exact same studio set established in Pose 1, keeping the model identity, styling, footwear, backdrop and lighting unchanged.", enabled: true },
 ];
 
-const REQUIRED_POSE_COUNT = 5;
+const REQUIRED_POSE_COUNT = 6;
 const AUTO_ANALYZE_DELAY_MS = 900;
 
 const defaultOptions: OutputOptions = {
@@ -42,6 +43,7 @@ const defaultOptions: OutputOptions = {
   imageSize: "2K",
   quality: "medium",
   backgroundStyle: "Infer a premium consistent scene from the uploaded style reference",
+  bottomWear: "auto",
   poseQa: false,
 };
 
@@ -348,7 +350,7 @@ export function Studio() {
       // Fold the member's Scene direction / Garment summary edits into the same director's-note
       // params the rest of this form already sends - buildCombinedAnalysisPrompt treats them as
       // "requested scene direction" / "user product notes", so Gemini re-derives both the product
-      // identity and the five-pose plan around the correction. Because these strings also flow
+      // identity and the six-pose plan around the correction. Because these strings also flow
       // into the backend's cache key (productHash), repeating an edit you've already sent (or
       // reverting one) hits the existing 30-day analysis cache instead of a fresh Gemini call.
       const result = await analyzeReferences({
@@ -385,7 +387,7 @@ export function Studio() {
         setNotice({ tone: "success", text: `Saree detected. Front and rear references were preserved; now confirm or upload: ${missingEvidence}. Gemini will reanalyse before generation.` });
       } else {
         setAnalysisSourceKey(sourceKey);
-        setNotice({ tone: "success", text: "Product identity, creative direction, and the five-pose shoot plan are ready." });
+        setNotice({ tone: "success", text: "Product identity, creative direction, and the six-pose shoot plan are ready." });
       }
     } catch (error) {
       if (analysisRequestRef.current === requestId) {
@@ -447,11 +449,11 @@ export function Studio() {
   const handleGenerate = async () => {
     setNotice(null);
     if (!analysis || !analysisIsCurrent || analyzing) {
-      setNotice({ tone: "error", text: "Wait for Gemini analysis and the current five-pose plan to finish before generating." });
+      setNotice({ tone: "error", text: "Wait for Gemini analysis and the current six-pose plan to finish before generating." });
       return;
     }
     if (enabledPoseCount !== REQUIRED_POSE_COUNT) {
-      setNotice({ tone: "error", text: "All five required poses must be ready before generation." });
+      setNotice({ tone: "error", text: `All ${REQUIRED_POSE_COUNT} required poses must be ready before generation.` });
       return;
     }
     setGenerating(true);
@@ -471,6 +473,7 @@ export function Studio() {
         quality: options.quality,
         backgroundStyle: options.backgroundStyle,
         modelIdentity: options.modelIdentity,
+        bottomWear: options.bottomWear,
         poseQa: options.poseQa,
         referenceIds: analysis.referenceIds || allReferences.map((reference) => reference.uploadedId).filter(Boolean) as Id<"productReferences">[],
         poses,
@@ -665,7 +668,7 @@ export function Studio() {
             <StylingPlanEditor
               plan={normalizePlan(analysis.stylingPlan)}
               title="Footwear, jewellery & styling"
-              description="Proposed from your product photos and the style reference. Edit anything before you generate - these exact pieces are locked into all five frames."
+              description="Proposed from your product photos and the style reference. Edit anything before you generate - these exact pieces are locked into every frame."
               saving={savingStylingPlan}
               saveLabel="Save for this shoot"
               onSave={handleSaveStylingPlan}
@@ -674,7 +677,7 @@ export function Studio() {
         </div>
       </div>
 
-      {/* Bottom: five-pose plan, horizontal, full width */}
+      {/* Bottom: six-pose plan, horizontal, full width */}
       <section className="mt-6 rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all overflow-hidden">
          <PosePlan poses={poses} onChange={setPoses} enabledCount={enabledPoseCount} ready={analysisIsCurrent} stale={analysisIsStale} />
       </section>

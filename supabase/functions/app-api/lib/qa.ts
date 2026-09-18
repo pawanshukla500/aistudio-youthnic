@@ -1,4 +1,5 @@
-import { parseJsonResponse, hasRecordedBottomWear, resolveCloseupMode, CLOSEUP_PRODUCT_DETAIL, type JsonRecord } from "./profiles.ts";
+import { parseJsonResponse, resolveCloseupMode, CLOSEUP_PRODUCT_DETAIL, type JsonRecord } from "./profiles.ts";
+import { resolveBottomWearPresentation } from "./garmentPoses.ts";
 import { isDirectBackProductRole } from "./referencePolicy.ts";
 
 const GENERIC_CHECK_KEYS = [
@@ -27,7 +28,7 @@ const GENERIC_CRITICAL_CHECKS: readonly string[] = [
 
 const SAREE_CRITICAL_CHECKS: readonly string[] = [...SAREE_CHECK_KEYS];
 
-const QA_BOTTOM_WEAR_CRITICAL_POSES = new Set(["full_front", "angled", "back"]);
+const QA_BOTTOM_WEAR_CRITICAL_POSES = new Set(["full_front", "angled", "back", "showcase"]);
 
 // Listing-grade gates are intentionally attribute-level: 90-94 needs a human,
 // and anything below 90 fails even when the weighted average remains high.
@@ -123,8 +124,12 @@ export function buildPoseQaPrompt(args: {
   poseNumber: number; poseType: string; poseTitle: string; poseDirection: unknown;
   productIdentity: unknown; creativeDirection: unknown; modelIdentity: unknown;
   garmentFamily: string; consistencyRules: string[]; hasApprovedAnchor: boolean; hasModelReference: boolean; referenceManifest: string[];
+  bottomWearMode?: unknown;
 }) {
-  const hasBottomWear = hasRecordedBottomWear(args.productIdentity);
+  // QA must judge the shoot as it was configured. A top-only shoot has no
+  // coordinated bottom to match, so bottom-wear fidelity is not a gate there.
+  const bottomWear = resolveBottomWearPresentation({ mode: args.bottomWearMode, productIdentity: args.productIdentity });
+  const hasBottomWear = bottomWear.includesBottomWear;
   const { checkKeys, isSaree } = qaKeys(args.garmentFamily, args.poseType, hasBottomWear);
   const qaProductIdentity = args.poseType === "back" ? rearOnlyQaProductIdentity(args.productIdentity) : args.productIdentity;
   const exampleChecks = Object.fromEntries(checkKeys.map((key) => [key, "pass"]));
@@ -209,8 +214,9 @@ Return STRICT JSON only:
 ${JSON.stringify({ pass: true, score: 100, checks: exampleChecks, scores: exampleScores, failed: [], reason: "short evidence-based verdict", correction: "specific correction for every failed field" })}`;
 }
 
-export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown } = {}) {
-  const hasBottomWear = options.hasBottomWear ?? hasRecordedBottomWear(options.productIdentity);
+export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown; bottomWearMode?: unknown } = {}) {
+  const hasBottomWear = options.hasBottomWear ??
+    resolveBottomWearPresentation({ mode: options.bottomWearMode, productIdentity: options.productIdentity }).includesBottomWear;
   const { checkKeys, criticalChecks } = qaKeys(options.garmentFamily, options.poseType, hasBottomWear);
   const checks = raw.checks && typeof raw.checks === "object" ? raw.checks as JsonRecord : {};
   const rawScores = raw.scores && typeof raw.scores === "object" ? raw.scores as JsonRecord : {};
@@ -308,7 +314,7 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
   };
 }
 
-export function parseQaResponse(text: string, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown } = {}) {
+export function parseQaResponse(text: string, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown; bottomWearMode?: unknown } = {}) {
   return normalizePoseQaResult(parseJsonResponse(text), options);
 }
 

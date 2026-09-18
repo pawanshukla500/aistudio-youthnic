@@ -120,7 +120,7 @@ type PendingAction = {
 
 const panels = [
   { id: "flow", label: "Live flow", icon: Zap },
-  { id: "assets", label: "Five-pose set", icon: ImageIcon },
+  { id: "assets", label: "Pose set", icon: ImageIcon },
   { id: "activity", label: "Activity", icon: ListChecks },
   { id: "brief", label: "Creative brief", icon: FileText },
 ] as const;
@@ -222,6 +222,9 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
   const currentStage = data.stages.find((stage) => stage.status === "current");
   const activeAction = data.actions.find((action) => action.enabled);
   const completedPoses = data.poses.filter((pose) => pose.current?.generation_status === "completed").length;
+  // The backend reports the pose count this shoot was queued with, so a set
+  // queued before the sixth frame existed still reports out of five.
+  const totalPoses = data.progress.totalPoseCount || data.poses.length;
   const packageIsDelivered = Boolean(item.listing_sent_at || ["sent_to_listing_team", "listing_in_progress", "listed"].includes(item.workflow_stage));
   const workflowElapsedSeconds = elapsedSeconds(workflowStartedAt, workflowFinishedAt || clock);
   const generationElapsedSeconds = elapsedSeconds(item.generation_started_at, item.generation_completed_at || clock);
@@ -300,10 +303,10 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
 
   const actionDialogCopy = (() => {
     if (!pendingAction) return null;
-    if (pendingAction.type === "approve") return { eyebrow: "Final review", title: "Approve this five-pose set?", description: "The current five pose versions will be frozen into a stable Listing Team package.", confirm: "Approve set", notes: "Optional approval note", required: false, danger: false };
+    if (pendingAction.type === "approve") return { eyebrow: "Final review", title: "Approve this pose set?", description: "The current pose versions will be frozen into a stable Listing Team package.", confirm: "Approve set", notes: "Optional approval note", required: false, danger: false };
     if (pendingAction.type === "reject") return { eyebrow: "Quality decision", title: "Request re-generation?", description: "The pending handoff will be invalidated and the generation owner will receive your guidance.", confirm: "Request changes", notes: "Required re-generation guidance", required: true, danger: true };
     if (pendingAction.type === "retry_generation") return { eyebrow: "Generation retry", title: `Retry ${item.sku_name}?`, description: "The generation will be queued again and downstream approval state will reopen.", confirm: "Queue retry", notes: "", required: false, danger: true };
-    if (pendingAction.type === "send_handoff") return { eyebrow: "Listing Team delivery", title: "Send the consolidated handoff now?", description: "Every currently ready, undelivered five-pose package will be revalidated and included in one tracked email.", confirm: "Send handoff", notes: "", required: false, danger: false };
+    if (pendingAction.type === "send_handoff") return { eyebrow: "Listing Team delivery", title: "Send the consolidated handoff now?", description: "Every currently ready, undelivered pose package will be revalidated and included in one tracked email.", confirm: "Send handoff", notes: "", required: false, danger: false };
     if (pendingAction.type === "regenerate_pose") return { eyebrow: `Pose ${pendingAction.pose?.poseIndex} re-generation`, title: "Describe the required change", description: "A new immutable version will be created; earlier versions remain in history.", confirm: "Queue re-generation", notes: "Re-generation instructions", required: true, danger: true };
     const rejected = pendingAction.decision === "rejected";
     return { eyebrow: `Pose ${pendingAction.pose?.poseIndex} review`, title: rejected ? "Request changes to this pose?" : "Approve this pose version?", description: rejected ? "The SKU returns to re-generation and the current pending handoff is invalidated." : "This decision is recorded against the current immutable version.", confirm: rejected ? "Request changes" : "Approve pose", notes: rejected ? "Required reviewer guidance" : "Optional reviewer note", required: rejected, danger: rejected };
@@ -312,7 +315,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
   const submitPendingAction = async () => {
     if (!pendingAction || !actionDialogCopy || (actionDialogCopy.required && !actionNotes.trim())) return;
     let saved = false;
-    if (pendingAction.type === "approve") saved = Boolean(await run("approve", () => invokeAppApi("catalogProduction.reviewQc", { workItemId: item.id, decision: "passed", comments: actionNotes.trim() }), "Five-pose set approved and the Listing Team package is ready."));
+    if (pendingAction.type === "approve") saved = Boolean(await run("approve", () => invokeAppApi("catalogProduction.reviewQc", { workItemId: item.id, decision: "passed", comments: actionNotes.trim() }), "Pose set approved and the Listing Team package is ready."));
     else if (pendingAction.type === "reject") saved = Boolean(await run("reject", () => invokeAppApi("catalogProduction.reviewQc", { workItemId: item.id, decision: "rejected", comments: actionNotes.trim() }), "Re-generation guidance recorded."));
     else if (pendingAction.type === "retry_generation") saved = Boolean(await run("retry", () => invokeAppApi("catalogProduction.bulkGenerate", { workItemIds: [item.id] }), "Generation retry queued."));
     else if (pendingAction.type === "send_handoff") saved = Boolean(await run("handoff", () => invokeAppApi("catalogProduction.handoffs.send", {}), "Approved packages sent to the Listing Team."));
@@ -394,7 +397,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
       for (const asset of result.assets) {
         if (asset.base64) zip.file(`pose-${asset.poseIndex}.${extension(asset.mimeType)}`, asset.base64, { base64: true });
       }
-      saveAs(await zip.generateAsync({ type: "blob" }), `${safeFilename(item.sku_name)}-approved-five-pose-set.zip`);
+      saveAs(await zip.generateAsync({ type: "blob" }), `${safeFilename(item.sku_name)}-approved-pose-set.zip`);
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     } finally {
@@ -428,7 +431,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
             <div className="w-full rounded-2xl border border-white/10 bg-white/[0.07] p-4 backdrop-blur-sm xl:w-[390px]">
               <div className="flex items-center justify-between gap-4"><p className="text-xs font-bold uppercase tracking-[0.15em] text-white/55">Workflow progress</p><p className="font-syne text-2xl font-bold">{data.progress.percent}%</p></div>
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-r from-pink-400 via-rose-400 to-amber-300 transition-all duration-700" style={{ width: `${Math.max(2, data.progress.percent)}%` }} /></div>
-              <div className="mt-3 flex items-center justify-between text-[11px] text-white/60"><span>{completedPoses}/5 poses generated</span><span>{item.next_action || currentStage?.defaultNextAction}</span></div>
+              <div className="mt-3 flex items-center justify-between text-[11px] text-white/60"><span>{completedPoses}/{totalPoses} poses generated</span><span>{item.next_action || currentStage?.defaultNextAction}</span></div>
               {activeAction && <button disabled={Boolean(busy)} onClick={() => void runWorkflowAction(activeAction.type)} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-[#182033] transition hover:bg-white/90 disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}{activeAction.label}</button>}
             </div>
           </div>
@@ -499,7 +502,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
 
       {panel === "assets" && (
         <main className="p-4 sm:p-6 lg:p-8">
-          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">Approved asset package</p><h2 className="mt-1 font-syne text-xl font-bold text-on-surface">Five-pose output set</h2><p className="mt-1 text-xs text-secondary">Every version, prompt, generation time, approval and reviewer note stays attached to this SKU.</p></div><button onClick={() => void downloadAll()} disabled={!completedPoses || Boolean(busy)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40">{busy === "download-all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download five-pose ZIP</button></div>
+          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">Approved asset package</p><h2 className="mt-1 font-syne text-xl font-bold text-on-surface">Pose output set</h2><p className="mt-1 text-xs text-secondary">Every version, prompt, generation time, approval and reviewer note stays attached to this SKU.</p></div><button onClick={() => void downloadAll()} disabled={!completedPoses || Boolean(busy)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40">{busy === "download-all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Download pose ZIP</button></div>
           <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
             {data.poses.map((pose) => {
               const asset = pose.current;

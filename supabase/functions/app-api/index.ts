@@ -12,6 +12,7 @@ import {
   normalizeAnalysis,
   normalizeStylingPlan,
   parseJsonResponse,
+  REQUIRED_POSE_IDS,
   sareeAnalysisIssues,
   smallHash,
   type JsonRecord,
@@ -58,6 +59,7 @@ import {
   type VisionHopAttempt,
   type VisionProviderFailure,
 } from "./lib/aiModelPolicy.ts";
+import { normalizeBottomWearMode } from "./lib/garmentPoses.ts";
 import { selectReusableLearningRules } from "./lib/learningRules.ts";
 import { selectFashionKnowledgeGuidance } from "./lib/fashionKnowledge.ts";
 import { selectPromptPatterns } from "./lib/promptPatterns.ts";
@@ -1000,7 +1002,18 @@ async function geminiGroundedJson(prompt: string) {
   return { model, raw: data, json: parseJsonResponse(text), citations };
 }
 
-async function loadReference(reference: ReferenceInput, orgId: string): Promise<LoadedReference> {
+/**
+ * `encodeBase64: false` skips the base64 copy of the image bytes. The image
+ * providers take the blob directly through multipart form data; only the Gemini
+ * vision calls (analysis and QA) need inline base64. Encoding up to sixteen
+ * references per pose into 1.33x-sized strings on a memory-constrained Edge
+ * isolate is pure waste when this pose is not going to run QA.
+ */
+async function loadReference(
+  reference: ReferenceInput,
+  orgId: string,
+  options: { encodeBase64?: boolean } = {},
+): Promise<LoadedReference> {
   let blob: Blob | null = null;
   assertCatalogReferenceOwnership(orgId, reference);
   if (reference.storagePath) blob = await downloadCatalogObject(orgId, reference.storagePath, reference.storageBackend, reference.downloadUrl);
@@ -1010,7 +1023,14 @@ async function loadReference(reference: ReferenceInput, orgId: string): Promise<
   }
   if (!blob) throw new Error(`Could not load ${reference.filename} from catalog asset storage.`);
   const mimeType = reference.mimeType || blob.type || "image/jpeg";
-  return { ...reference, mimeType, blob, base64: await blobToBase64(blob) };
+  return { ...reference, mimeType, blob, base64: options.encodeBase64 === false ? "" : await blobToBase64(blob) };
+}
+
+/** Fill in the inline base64 a vision call needs, for references loaded without it. */
+async function withInlineBase64(references: LoadedReference[]): Promise<LoadedReference[]> {
+  return await Promise.all(references.map(async (reference) => (
+    reference.base64 ? reference : { ...reference, base64: await blobToBase64(reference.blob) }
+  )));
 }
 
 function assertRequiredProductReferences(references: ReferenceInput[], garmentFamily = "") {
@@ -1025,32 +1045,60 @@ function assertTrueBackReferenceAvailable(references: ReferenceInput[], garmentF
   }
 }
 
-async function loadAvailableReferences(references: ReferenceInput[], orgId: string, garmentFamily = ""): Promise<LoadedReference[]> {
-  const loaded: LoadedReference[] = [];
+function requiredAvailabilityRoles(references: ReferenceInput[], garmentFamily = "") {
   // Analysis can identify a saree even when the UI category began as the broad
   // "ethnic/fusion" choice. Keep the availability check aligned with the
   // Product Truth gate so an unavailable pallu/back image never becomes an
   // optional omission in the real worker path.
   const requiresSareeEvidence = garmentFamily.trim().toLowerCase() === "saree" || isSareeReferenceSet(references);
-  const requiredRoles = requiresSareeEvidence
+  return requiresSareeEvidence
     ? new Set(["saree_front_drape", "saree_back_drape", "saree_pallu_spread", "saree_body_detail"])
     : new Set(["front", "back"]);
-  for (const reference of references) {
-    try {
-      loaded.push(await loadReference(reference, orgId));
-    } catch (error) {
-      if (requiredRoles.has(reference.role)) {
-        throw new Error(
-          `Could not load required ${reference.role} reference ${reference.filename}: ${errorMessage(error)}`,
-        );
-      }
-      console.warn(
-        `Skipping unavailable optional ${reference.role} reference ${reference.filename}: ${errorMessage(error)}`,
+}
+
+async function loadAvailableReferences(
+  references: ReferenceInput[],
+  orgId: string,
+  garmentFamily = "",
+  options: { encodeBase64?: boolean } = {},
+): Promise<LoadedReference[]> {
+  const requiredRoles = requiredAvailabilityRoles(references, garmentFamily);
+  // Every reference is an independent storage read plus an optional base64
+  // encode. Loading them one at a time made a pose wait for the sum of all
+  // downloads; the provider call that follows is the only part that must be
+  // serial.
+  const settled = await Promise.allSettled(references.map((reference) => loadReference(reference, orgId, options)));
+  const loaded: LoadedReference[] = [];
+  settled.forEach((result, index) => {
+    const reference = references[index];
+    if (result.status === "fulfilled") {
+      loaded.push(result.value);
+      return;
+    }
+    if (requiredRoles.has(reference.role)) {
+      throw new Error(
+        `Could not load required ${reference.role} reference ${reference.filename}: ${errorMessage(result.reason)}`,
       );
     }
-  }
+    console.warn(
+      `Skipping unavailable optional ${reference.role} reference ${reference.filename}: ${errorMessage(result.reason)}`,
+    );
+  });
   assertRequiredProductReferences(loaded, garmentFamily);
   return loaded;
+}
+
+/**
+ * The references a single pose can actually use. `selectReferences` already caps
+ * the manifest at MAX_REFERENCES and a true-back frame legitimately uses three
+ * images, so downloading and base64-encoding every uploaded asset for every pose
+ * was paid latency for bytes the prompt never saw. Required-evidence roles stay
+ * in the set so the availability gate still runs against real bytes.
+ */
+function poseReferenceCandidates(references: ReferenceInput[], poseType: string, garmentFamily: string) {
+  const required = requiredAvailabilityRoles(references, garmentFamily);
+  const selected = new Set<ReferenceInput>(selectReferences(references, [], poseType, garmentFamily, MAX_REFERENCES));
+  return references.filter((reference) => selected.has(reference) || required.has(reference.role));
 }
 
 function extensionForMimeType(mimeType: string) {
@@ -1806,12 +1854,15 @@ async function validatePose(args: {
   approved: LoadedReference[]; session: JsonRecord; pose: StudioPose & { poseNumber: number }; organizationId: string;
 }) {
   const garmentFamily = String((args.session.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
-  const qaRefs = selectReferences(args.references, args.approved, args.pose.id, garmentFamily, MAX_REFERENCES);
+  const qaRefs = await withInlineBase64(
+    selectReferences(args.references, args.approved, args.pose.id, garmentFamily, MAX_REFERENCES),
+  );
   const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
   const prompt = buildPoseQaPrompt({
     poseNumber: args.pose.poseNumber, poseType: args.pose.id, poseTitle: args.pose.title, poseDirection: args.pose,
     productIdentity: args.session.productIdentity, creativeDirection: args.session.creativeDirection,
     modelIdentity: args.session.modelIdentity, garmentFamily,
+    bottomWearMode: args.session.bottomWearMode,
     consistencyRules: [
       ...((args.session.consistencyRules as string[]) || CONSISTENCY_RULES),
       ...(styling
@@ -1850,7 +1901,7 @@ async function validatePose(args: {
       ? [...baseParts, { text: "INDEPENDENT RECHECK: disregard prior numeric scores, re-inspect each critical region separately, and return newly reasoned evidence-based scores." }]
       : baseParts;
     const result = await visionJson(policy, parts);
-    return { result, qa: parseQaResponse(result.text, { garmentFamily, poseType: args.pose.id, productIdentity: args.session.productIdentity }) };
+    return { result, qa: parseQaResponse(result.text, { garmentFamily, poseType: args.pose.id, productIdentity: args.session.productIdentity, bottomWearMode: args.session.bottomWearMode }) };
   };
 
   const complex = ["saree", "lehenga", "suit", "multi-piece"].some((family) => garmentFamily.toLowerCase().includes(family));
@@ -1904,7 +1955,10 @@ async function queueGeneration(request: Request, args: JsonRecord) {
   const sessionData = session.session_data as JsonRecord;
   const poses = (Array.isArray(args.poses) ? args.poses : sessionData.posePlan) as StudioPose[];
   const enabled = poses.filter((pose) => pose.enabled !== false && pose.prompt?.trim());
-  if (enabled.length !== 5 || enabled.map((pose) => pose.id).join(",") !== "full_front,angled,back,creative,closeup") throw new Error("The current generation session must contain the complete ordered five-pose plan.");
+  if (
+    enabled.length !== REQUIRED_POSE_IDS.length ||
+    enabled.map((pose) => pose.id).join(",") !== REQUIRED_POSE_IDS.join(",")
+  ) throw new Error(`The current generation session must contain the complete ordered ${REQUIRED_POSE_IDS.length}-pose plan.`);
   assertSareeGenerationReady({ ...sessionData, posePlan: enabled });
   const queuedReferences = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
   const queuedGarmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
@@ -1928,6 +1982,9 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     }
   }
   const quality = ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : "medium";
+  // Presentation choice, not product truth: the analysis still records what the
+  // references prove, and "auto" keeps the two in sync.
+  const bottomWearMode = normalizeBottomWearMode(args.bottomWear ?? args.bottomWearMode);
   const jobId = `job_${crypto.randomUUID()}`;
   const now = new Date().toISOString();
   const jobData = {
@@ -1938,6 +1995,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     references: sessionData.references || [], analysisFingerprint: session.analysis_fingerprint,
     imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
     requestedModel: String(args.model || "").trim() || null,
+    bottomWearMode,
   };
   const analysisCostUsd = await analysisCostUsdFor({
     organizationId: workspace.organization.id,
@@ -1947,7 +2005,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
   const { error: jobError } = await service.from("generation_jobs").insert({
     job_id: jobId, user_id: workspace.user.firebaseUid, user_email: workspace.user.email, org_id: workspace.organization.id,
     status: "queued", readiness_status: "ready", readiness_reasons: [], sku_name: jobData.skuName, session_id: sessionId, job_data: jobData,
-    planning_request_id: session.planning_request_id, total_poses: 5, provider: imageGenerationPolicy.provider, model,
+    planning_request_id: session.planning_request_id, total_poses: enabled.length, provider: imageGenerationPolicy.provider, model,
     aspect_ratio: String(args.aspectRatio || "3:4"), image_size: String(args.imageSize || "2K"), quality,
     pose_qa: Boolean(args.poseQa), estimated_cost_usd: 0.25, actual_cost_usd: analysisCostUsd, created_at: now, updated_at: now,
   });
@@ -1989,6 +2047,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
         direction: jobData.modelIdentityDirection,
       },
       posePlan: enabled,
+      bottomWearMode,
       imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
       generationMemory: sessionGenerationMemory(sessionData, {
         creativeDirection: {
@@ -2026,7 +2085,7 @@ async function nextJob(args: JsonRecord) {
 async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonRecord[]) {
   const completed = poses.filter((pose) => pose.status === "completed").length;
   const failed = poses.filter((pose) => pose.status === "failed").length;
-  // A complete five-pose delivery is an operational result, not fidelity
+  // A complete pose-set delivery is an operational result, not fidelity
   // evidence. In particular, Gemini outages intentionally leave paid images
   // unverified. Keep that distinction in the immutable observation ledger so
   // it can never later be mistaken for high-quality training data.
@@ -2088,6 +2147,7 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     hasStyleReference: (Array.isArray(sessionData.references) ? sessionData.references : []).some((entry) => String((entry as JsonRecord)?.role || "") === "style_reference"),
     seatedPoseRequired: String((sessionData.creativeDirection as JsonRecord | undefined)?.seatedPoseRequired || ""),
     closeupMode: String((sessionData.creativeDirection as JsonRecord | undefined)?.closeupMode || ""),
+    showcaseIntent: String((sessionData.creativeDirection as JsonRecord | undefined)?.showcaseIntent || ""),
     poses: poses.map((entry) => ({
       poseIndex: Number(entry.pose_index || 0),
       poseType: String(entry.pose_type || ((entry.generation_data || {}) as JsonRecord).id || ""),
@@ -2394,7 +2454,9 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
   }) });
 
   const result = await visionJson(policy, parts);
-  const normalized = normalizeAnalysis(result.json, category);
+  const normalized = normalizeAnalysis(result.json, category, {
+    bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+  });
 
   // Store baseAnalysis into catalog_memory
   try {
@@ -2658,31 +2720,47 @@ async function processNode(request: Request, args: JsonRecord) {
 async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, pose: JsonRecord) {
   const sourceInputs = (Array.isArray(sessionData.references) ? sessionData.references : []) as ReferenceInput[];
   const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
-  const loadedReferences = await loadAvailableReferences(sourceInputs, String(job.org_id), garmentFamily);
   const storedPoseData = (pose.generation_data || {}) as JsonRecord;
   const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
+  const candidates = poseReferenceCandidates(sourceInputs, poseData.id, garmentFamily);
+  // Image generation posts the blobs as multipart form data. Only Gemini QA
+  // needs the inline base64 copy, so a QA-disabled shoot never pays for it.
+  const referenceLoadOptions = { encodeBase64: Boolean(job.pose_qa) };
   // Provide the front anchor to the back pose for model identity and background
   // continuity. The generation prompt explicitly instructs the LLM not to use
-  // it as a garment geometry source for the back pose.
-  const canUseAnchorForPose = true;
-  let { data: anchorPose } = Number(pose.pose_index) > 1 && canUseAnchorForPose
-    ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title,qa_status").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
-    : { data: null };
-  if (canUseAnchorForPose && !anchorPose?.output_url && !anchorPose?.storage_path && job.batch_id) {
-    const { data: batchRow, error: batchRowError } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
-    if (batchRowError) throw new Error(batchRowError.message);
-    const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
-    if ((memory.anchorOutputUrl || memory.anchorStoragePath) && canUsePoseOneAnchor(garmentFamily, memory.anchorQaStatus, Boolean(job.pose_qa))) {
-      anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor", qa_status: String(memory.anchorQaStatus || "") };
+  // it as a garment geometry source for the back pose. This lookup shares no
+  // state with the reference downloads, so the two run together.
+  const anchorLookup = async () => {
+    let { data: anchorPose } = Number(pose.pose_index) > 1
+      ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title,qa_status").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
+      : { data: null };
+    if (!anchorPose?.output_url && !anchorPose?.storage_path && job.batch_id) {
+      const { data: batchRow, error: batchRowError } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
+      if (batchRowError) throw new Error(batchRowError.message);
+      const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
+      if ((memory.anchorOutputUrl || memory.anchorStoragePath) && canUsePoseOneAnchor(garmentFamily, memory.anchorQaStatus, Boolean(job.pose_qa))) {
+        anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor", qa_status: String(memory.anchorQaStatus || "") };
+      }
     }
+    if (anchorPose && !canUsePoseOneAnchor(garmentFamily, anchorPose.qa_status, Boolean(job.pose_qa))) return null;
+    return anchorPose;
+  };
+  let [loadedReferences, anchorPose] = await Promise.all([
+    loadAvailableReferences(candidates, String(job.org_id), garmentFamily, referenceLoadOptions),
+    anchorLookup(),
+  ]);
+  if (loadedReferences.length < candidates.length && candidates.length < sourceInputs.length) {
+    // An optional candidate was unavailable. Fall back to the complete set so the
+    // selector can promote the same replacement it would have chosen before this
+    // pose-scoped fast path existed.
+    loadedReferences = await loadAvailableReferences(sourceInputs, String(job.org_id), garmentFamily, referenceLoadOptions);
   }
-  if (anchorPose && !canUsePoseOneAnchor(garmentFamily, anchorPose.qa_status, Boolean(job.pose_qa))) anchorPose = null;
   const approved: LoadedReference[] = [];
   if (anchorPose?.output_url || anchorPose?.storage_path) {
     const loaded = await loadReference({
       role: "approved_pose", downloadUrl: anchorPose.output_url, storagePath: anchorPose.storage_path, storageBackend: anchorPose.storage_backend as CatalogStorageBackend,
       hash: smallHash(String(anchorPose.output_url || anchorPose.storage_path)), filename: "approved-pose-1", mimeType: "", size: 0,
-    }, String(job.org_id));
+    }, String(job.org_id), referenceLoadOptions);
     loaded.filename = `approved-pose-1.${extensionForMimeType(loaded.mimeType)}`;
     approved.push(loaded);
   }
@@ -2758,37 +2836,42 @@ async function compilePosePrompt(
   // an observation ledger containing failed and unavailable-QA jobs. Only a
   // reviewed rule may be advisory, and product-specific guidance additionally
   // requires the exact current reference fingerprint.
+  // Both lookups are independent advisory reads, so they run together rather
+  // than adding two serial round trips to every paid pose attempt.
+  const [learningRulesResult, fashionKnowledge] = await Promise.all([
+    service.from("generation_learning_rules")
+      .select("id,organization_id,garment_family,product_category,pose_id,scope,rule_kind,reference_fingerprint,guidance,status,approved_by_member_id,approved_at")
+      .eq("organization_id", String(job.org_id))
+      .eq("status", "approved")
+      .eq("garment_family", currentGarmentFamily)
+      .eq("product_category", String(sessionData.category || ""))
+      .order("updated_at", { ascending: false })
+      .limit(30),
+    fashionKnowledgeBrief(
+      String(job.org_id),
+      String(sessionData.category || ""),
+      currentGarmentFamily,
+    ),
+  ]);
   let learningRows: JsonRecord[] = [];
-  const { data, error: learningRulesError } = await service.from("generation_learning_rules")
-    .select("id,organization_id,garment_family,product_category,pose_id,scope,rule_kind,reference_fingerprint,guidance,status,approved_by_member_id,approved_at")
-    .eq("organization_id", String(job.org_id))
-    .eq("status", "approved")
-    .eq("garment_family", currentGarmentFamily)
-    .eq("product_category", String(sessionData.category || ""))
-    .order("updated_at", { ascending: false })
-    .limit(30);
-  if (learningRulesError) {
+  if (learningRulesResult.error) {
     // Learning is optional advice. A migration rollout or read outage must not
     // block a paid job; source references remain sufficient to generate.
-    console.error(`Could not load approved generation learning rules: ${learningRulesError.message}`);
+    console.error(`Could not load approved generation learning rules: ${learningRulesResult.error.message}`);
   } else {
-    learningRows = (data || []) as JsonRecord[];
+    learningRows = (learningRulesResult.data || []) as JsonRecord[];
   }
   const learningSelection = selectReusableLearningRules(learningRows, {
     organizationId: String(job.org_id), garmentFamily: currentGarmentFamily,
     productCategory: String(sessionData.category || ""), poseType: poseData.id,
     referenceFingerprint: String(session.reference_hash || ""),
   });
-  const fashionKnowledge = await fashionKnowledgeBrief(
-    String(job.org_id),
-    String(sessionData.category || ""),
-    currentGarmentFamily,
-  );
 
   const prompt = composeGenerationPrompt({
     skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || "Untitled product"),
     productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
     references: selected, correction: promptCorrection(), learnings: learningSelection.guidance, fashionKnowledge,
+    bottomWearMode: sessionData.bottomWearMode ?? (job.job_data as JsonRecord | undefined)?.bottomWearMode,
     generationMemory: formatGenerationMemoryBrief({
       references: selected,
       memory: sessionGenerationMemory(sessionData, {
@@ -2819,26 +2902,27 @@ async function processWorker(request: Request, args: JsonRecord) {
     return { processed: true, completed: true, jobId: job.job_id };
   }
   const sessionData = session.session_data as JsonRecord;
-  
-  // Organization Budget Pre-flight Check
-  const { data: budget } = await service.from("organization_budgets").select("*").eq("organization_id", job.org_id).eq("is_enabled", true).maybeSingle();
-  if (budget) {
+
+  // Organization budget pre-flight. The read is independent of reference
+  // loading, so it is started here and awaited once both are in flight.
+  const budgetCheck = (async () => {
+    const { data: budget } = await service.from("organization_budgets").select("*").eq("organization_id", job.org_id).eq("is_enabled", true).maybeSingle();
+    if (!budget) return "";
     const startOfDay = new Date();
     startOfDay.setUTCHours(0, 0, 0, 0);
     const { data: runs, error: runsError } = await service.from("ai_runs")
       .select("cost_usd")
       .eq("organization_id", job.org_id)
       .gte("created_at", startOfDay.toISOString());
-    
-    if (!runsError && runs) {
-      const todaySpend = runs.reduce((sum, run) => sum + Number(run.cost_usd || 0), 0);
-      if (todaySpend >= Number(budget.daily_limit)) {
-        const message = `Organization daily AI budget limit ($${budget.daily_limit}) exceeded. Today's spend: $${todaySpend.toFixed(2)}.`;
-        await failPoseAndJob(job, session, pose, message, "budget_exceeded");
-        return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed", error: message };
-      }
-    }
-  }
+    if (runsError || !runs) return "";
+    const todaySpend = runs.reduce((sum, run) => sum + Number(run.cost_usd || 0), 0);
+    if (todaySpend < Number(budget.daily_limit)) return "";
+    return `Organization daily AI budget limit ($${budget.daily_limit}) exceeded. Today's spend: $${todaySpend.toFixed(2)}.`;
+  })().catch((error) => {
+    // A budget read outage must not silently block a queued job.
+    console.error(`Could not evaluate the organization AI budget: ${errorMessage(error)}`);
+    return "";
+  });
 
   // Run the corrected v14 Product Truth gate before changing workflow state or
   // making any paid provider request. This also protects queued v13 jobs that
@@ -2869,12 +2953,20 @@ async function processWorker(request: Request, args: JsonRecord) {
   // processing. A missing/replaced rear reference must fail transparently and
   // never leave a job looking like it is spending time or provider credits.
   let resolvedPoseReferences: Awaited<ReturnType<typeof resolvePoseReferences>>;
+  let budgetBlock = "";
   try {
-    resolvedPoseReferences = await resolvePoseReferences(job, sessionData, pose);
+    [resolvedPoseReferences, budgetBlock] = await Promise.all([
+      resolvePoseReferences(job, sessionData, pose),
+      budgetCheck,
+    ]);
   } catch (error) {
     const message = errorMessage(error);
     await failPoseAndJob(job, session, pose, message, "reference_preflight_failed");
     return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed", error: message };
+  }
+  if (budgetBlock) {
+    await failPoseAndJob(job, session, pose, budgetBlock, "budget_exceeded");
+    return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed", error: budgetBlock };
   }
   const { loadedReferences, approved, poseData, selected, authoritativeBackReference, storedPoseData } = resolvedPoseReferences;
   const attempt = Number(pose.attempt_count || 0) + 1;
@@ -4574,6 +4666,7 @@ async function createCatalogOperation(request: Request, args: JsonRecord) {
     modelDirection: String(args.modelDirection || ""), sceneDirection: String(args.sceneDirection || ""),
     category: String(args.category || "ethnic/fusion"), aspectRatio: String(args.aspectRatio || "3:4"),
     imageSize: String(args.imageSize || "2K"), quality: "medium", poseQa: Boolean(args.poseQa),
+    bottomWear: normalizeBottomWearMode(args.bottomWear),
     lookAndMood: String(args.lookAndMood || ""), stylingRequirements: String(args.stylingRequirements || ""),
     lighting: String(args.lighting || ""), composition: String(args.composition || ""),
     poseDirection: String(args.poseDirection || ""),
@@ -4960,7 +5053,9 @@ async function analyzeCatalogVariant(
     analysisLearning: await analysisLearningBrief(String(batch.organization_id), category),
   }) });
   const result = await visionJson(policy, parts, { onAttempt });
-  const normalized = normalizeAnalysis(result.json, category);
+  const normalized = normalizeAnalysis(result.json, category, {
+    bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+  });
 
   // Store baseAnalysis into catalog_memory so subsequent SKUs reuse it
   try {
@@ -5618,7 +5713,7 @@ async function generateCatalogFlowGraph(batch: JsonRecord, variant: JsonRecord, 
   const settings = (batch.generation_settings || {}) as JsonRecord;
   const posePlan = Array.isArray(settings.posePlan) && settings.posePlan.length > 0
     ? settings.posePlan 
-    : Array.from({ length: 5 }, (_, i) => ({ title: `Pose ${i + 1}`, id: `pose-${i+1}`, prompt: `Generate pose ${i + 1}` }));
+    : REQUIRED_POSE_IDS.map((id, i) => ({ title: `Pose ${i + 1}`, id, prompt: `Generate pose ${i + 1}` }));
 
   const poseRows = posePlan.map((pose: any, index: number) => ({
     session_id: sessionId, generation_id: `${sessionId}:pose:${index + 1}`, pose_index: index + 1,
@@ -5675,7 +5770,9 @@ async function queueCatalogVariantGeneration(
 
   const analysisHashes = await catalogAnalysisFingerprint(batch, variant, references);
   const storedNormalized = variant.ai_analysis
-    ? normalizeAnalysis(variant.ai_analysis as JsonRecord, category)
+    ? normalizeAnalysis(variant.ai_analysis as JsonRecord, category, {
+      bottomWearMode: generationSettings.bottomWear ?? generationSettings.bottomWearMode,
+    })
     : null;
   const hasCurrentAnalysis = variant.analysis_status === "ready"
     && variant.analysis_fingerprint === analysisHashes.fingerprint
@@ -5794,9 +5891,13 @@ async function queueCatalogVariantGeneration(
   }
 
   const poses = normalized.posePlan.filter((pose) => pose.enabled !== false && pose.prompt?.trim());
-  if (poses.length !== 5 || poses.map((pose) => pose.id).join(",") !== "full_front,angled,back,creative,closeup") {
-    throw new Error("Catalog analysis did not produce the required ordered five-pose plan.");
+  if (
+    poses.length !== REQUIRED_POSE_IDS.length ||
+    poses.map((pose) => pose.id).join(",") !== REQUIRED_POSE_IDS.join(",")
+  ) {
+    throw new Error(`Catalog analysis did not produce the required ordered ${REQUIRED_POSE_IDS.length}-pose plan.`);
   }
+  const bottomWearMode = normalizeBottomWearMode(generationSettings.bottomWear ?? generationSettings.bottomWearMode);
 
   assertSareeGenerationReady({
     productIdentity: normalized.productIdentity,
@@ -5835,6 +5936,7 @@ async function queueCatalogVariantGeneration(
     modelIdentity: normalized.modelIdentity,
     stylingPlan: normalized.stylingPlan,
     posePlan: poses,
+    bottomWearMode,
     consistencyRules: CONSISTENCY_RULES,
     workflowDirection: workflowDirection || null,
     analysisModel: analysisPolicy.model,
@@ -5887,6 +5989,7 @@ async function queueCatalogVariantGeneration(
     analysisFingerprint: analysisHashes.fingerprint,
     imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
     requestedModel: String(generationSettings.model || "").trim() || null,
+    bottomWearMode,
   };
   const { error: jobInsertError } = await service.from("generation_jobs").insert({
     job_id: jobId,
@@ -5901,7 +6004,7 @@ async function queueCatalogVariantGeneration(
     session_id: sessionId,
     job_data: jobData,
     planning_request_id: variant.id,
-    total_poses: 5,
+    total_poses: poses.length,
     provider: imageGenerationPolicy.provider,
     model,
     aspect_ratio: String(generationSettings.aspectRatio || "3:4"),
@@ -6690,7 +6793,7 @@ function catalogProductionReportHtml(organizationName: string, reportDate: strin
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:960px;margin:0 auto;border-collapse:collapse">
       <tr><td style="border-radius:18px;background:#4f2457;padding:26px">
         <div style="font:700 11px/1.5 Arial,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#f0c9f2">Catalog approval handoff</div>
-        <div style="font:700 24px/1.3 Arial,sans-serif;color:#ffffff;padding-top:5px">Approved five-pose packages</div>
+        <div style="font:700 24px/1.3 Arial,sans-serif;color:#ffffff;padding-top:5px">Approved pose packages</div>
         <div style="font:400 13px/1.6 Arial,sans-serif;color:#eadfea;padding-top:6px">${escapeHtml(organizationName)} · business date ${escapeHtml(reportDate)} · ${rows.length} SKU${rows.length === 1 ? "" : "s"}</div>
       </td></tr>
       <tr><td style="padding:14px 8px 0;font:400 12px/1.6 Arial,sans-serif;color:#655d6b">These SKU sets passed final human review and are ready for marketplace listing. Late, weekend, and holiday approvals are included in the next configured business-day digest.</td></tr>
@@ -7063,7 +7166,7 @@ async function runCatalogProductionAutomationOperation(request: Request) {
           if (!retryContext.rows.length) {
             await service.from("catalog_report_deliveries").update({
               status: "failed",
-              error_message: "Retry paused because the previously selected handoff no longer has a complete five-pose package.",
+              error_message: "Retry paused because the previously selected handoff no longer has a complete pose package.",
               next_retry_at: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
               updated_at: new Date().toISOString(),
             }).eq("id", failedDelivery.id).eq("organization_id", orgId);
@@ -7246,7 +7349,7 @@ async function sendCatalogHandoffDigestOperation(request: Request, args: JsonRec
     forceResend = true;
   }
   const context = await catalogDigestContext(workspace.organization.id, workspace.organization.name, { handoffIds });
-  if (!context.rows.length) throw new Error("No approved, undelivered five-pose packages are ready.");
+  if (!context.rows.length) throw new Error("No approved, undelivered pose packages are ready.");
   if (!context.recipients.length) throw new Error("No active member in the configured recipient team or custom handoff recipient is available.");
   const effectiveReportDate = resendReportDate || context.reportDate;
   const effectiveSubject = `${workspace.organization.name} · ${context.rows.length} approved catalog package${context.rows.length === 1 ? "" : "s"} · ${effectiveReportDate}`;
