@@ -4335,6 +4335,65 @@ export type Database = {
           },
         ]
       }
+      showcase_feature_outcomes: {
+        Row: {
+          avg_quality: number | null
+          created_at: string
+          feature_region: string
+          garment_family: string
+          id: string
+          last_feedback_at: string
+          organization_id: string
+          product_category: string
+          qa_failed_count: number
+          regenerated_count: number
+          rejected_count: number
+          selected_count: number
+          shot_type: string
+          updated_at: string
+        }
+        Insert: {
+          avg_quality?: number | null
+          created_at?: string
+          feature_region: string
+          garment_family?: string
+          id?: string
+          last_feedback_at?: string
+          organization_id: string
+          product_category: string
+          qa_failed_count?: number
+          regenerated_count?: number
+          rejected_count?: number
+          selected_count?: number
+          shot_type: string
+          updated_at?: string
+        }
+        Update: {
+          avg_quality?: number | null
+          created_at?: string
+          feature_region?: string
+          garment_family?: string
+          id?: string
+          last_feedback_at?: string
+          organization_id?: string
+          product_category?: string
+          qa_failed_count?: number
+          regenerated_count?: number
+          rejected_count?: number
+          selected_count?: number
+          shot_type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "showcase_feature_outcomes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       styling_decisions: {
         Row: {
           ai_plan: Json
