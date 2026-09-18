@@ -59,11 +59,11 @@ import {
   type VisionHopAttempt,
   type VisionProviderFailure,
 } from "./lib/aiModelPolicy.ts";
-import { normalizeBottomWearMode } from "./lib/garmentPoses.ts";
+import { coarseGarmentFamilyForCategory, normalizeBottomWearMode } from "./lib/garmentPoses.ts";
 import { selectReusableLearningRules } from "./lib/learningRules.ts";
 import { selectFashionKnowledgeGuidance } from "./lib/fashionKnowledge.ts";
 import { selectPromptPatterns } from "./lib/promptPatterns.ts";
-import { selectShowcaseFeedbackGuidance } from "./lib/showcaseFeature.ts";
+import { effectiveShowcaseShot, selectShowcaseFeedbackGuidance } from "./lib/showcaseFeature.ts";
 import {
   buildGenerationMemory,
   extractLearnedPromptPatterns,
@@ -2150,9 +2150,10 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     hasStyleReference: (Array.isArray(sessionData.references) ? sessionData.references : []).some((entry) => String((entry as JsonRecord)?.role || "") === "style_reference"),
     seatedPoseRequired: String((sessionData.creativeDirection as JsonRecord | undefined)?.seatedPoseRequired || ""),
     closeupMode: String((sessionData.creativeDirection as JsonRecord | undefined)?.closeupMode || ""),
-    showcaseShotType: String(
-      ((sessionData.creativeDirection as JsonRecord | undefined)?.showcasePlan as JsonRecord | undefined)?.shotType || "",
-    ),
+    // The frame that was actually generated, not the one originally planned: a
+    // close-up collision widens it, and learning a framing that never shipped is
+    // worse than learning nothing.
+    showcaseShotType: effectiveShowcaseShot(sessionData.creativeDirection)?.shotType || "",
     poses: poses.map((entry) => ({
       poseIndex: Number(entry.pose_index || 0),
       poseType: String(entry.pose_type || ((entry.generation_data || {}) as JsonRecord).id || ""),
@@ -5079,7 +5080,11 @@ async function analyzeCatalogVariant(
     housePreferences: await stylingPreferenceBrief(String(batch.organization_id), category),
     fashionKnowledge: await fashionKnowledgeBrief(String(batch.organization_id), category),
     analysisLearning: await analysisLearningBrief(String(batch.organization_id), category),
-    showcaseFeedback: await showcaseFeedbackBrief(String(batch.organization_id), category),
+    showcaseFeedback: await showcaseFeedbackBrief(
+      String(batch.organization_id),
+      category,
+      String(asBaseAnalysisGarmentFamily(batch)),
+    ),
   }) });
   const result = await visionJson(policy, parts, { onAttempt });
   const normalized = normalizeAnalysis(result.json, category, {
@@ -5320,13 +5325,25 @@ async function fashionKnowledgeBrief(orgId: string, category = "", garmentFamily
  * is about to choose the next one. Advice only - the read failing must never
  * block an analysis, and the prompt says product references still decide.
  */
+/** The family a catalog batch already established, from its base analysis. */
+function asBaseAnalysisGarmentFamily(batch: JsonRecord) {
+  const memory = (batch.catalog_memory || {}) as JsonRecord;
+  const baseAnalysis = (memory.baseAnalysis || {}) as JsonRecord;
+  return String(((baseAnalysis.productIdentity || {}) as JsonRecord).garmentFamily || "");
+}
+
 async function showcaseFeedbackBrief(orgId: string, category = "", garmentFamily = "") {
   if (!/^[0-9a-f-]{36}$/i.test(orgId) || !category.trim()) return "";
+  // Before analysis has run the declared category is the only family signal, and
+  // a category too broad to decide yields "" - which matches only category-wide
+  // rows rather than borrowing another family's taste.
+  const family = garmentFamily.trim() || coarseGarmentFamilyForCategory(category);
   try {
     const { data, error } = await service.from("showcase_feature_outcomes")
       .select("id,organization_id,product_category,garment_family,feature_region,shot_type,selected_count,rejected_count,regenerated_count,qa_failed_count,avg_quality")
       .eq("organization_id", orgId)
       .eq("product_category", category)
+      .eq("garment_family", family)
       .order("last_feedback_at", { ascending: false })
       .limit(40);
     if (error) {
@@ -5336,7 +5353,7 @@ async function showcaseFeedbackBrief(orgId: string, category = "", garmentFamily
     return selectShowcaseFeedbackGuidance(data || [], {
       organizationId: orgId,
       productCategory: category,
-      garmentFamily,
+      garmentFamily: family,
     }).guidance;
   } catch (error) {
     console.error(`Could not load showcase feedback: ${errorMessage(error)}`);

@@ -188,6 +188,27 @@ export function resolveShowcaseShotType(
   };
 }
 
+/**
+ * The frame this shoot will actually produce, resolved from a creativeDirection.
+ *
+ * Every consumer must agree on this: the pose slot writes it into the brief, the
+ * generation prompt writes the matching hard rule, the shoot memory records it,
+ * and the feedback row is keyed by it. Resolving it separately per consumer is
+ * how a widened frame ends up scored as the tight one that was never generated.
+ */
+export function effectiveShowcaseShot(creativeDirection: unknown): {
+  plan: ShowcasePlan;
+  shotType: ShowcaseShotType;
+  widenedFromCloseup: boolean;
+} | null {
+  const creative = objectValue(creativeDirection);
+  const plan = normalizeShowcasePlan(creative.showcasePlan ?? creative.showcase_plan);
+  if (!plan) return null;
+  const heroDetail = text(creative.closeupHeroDetail ?? creative.closeup_hero_detail);
+  const resolved = resolveShowcaseShotType(plan, { heroDetail });
+  return { plan, shotType: resolved.shotType, widenedFromCloseup: resolved.widenedFromCloseup };
+}
+
 export function showcaseShotDirection(shotType: ShowcaseShotType) {
   return {
     macro_detail:
@@ -238,13 +259,15 @@ export function selectShowcaseFeedbackGuidance(
   const garmentFamily = comparable(args.garmentFamily);
   if (!organizationId || !productCategory || !Array.isArray(rows)) return { ids: [], guidance: "" };
 
+
   const eligible = rows.filter((row) => {
     const owner = text(row.organization_id);
     if (owner && owner !== organizationId) return false;
     if (comparable(row.product_category) !== productCategory) return false;
-    // A family recorded on the row must match; a blank one is category-wide.
-    const family = comparable(row.garment_family);
-    if (family && garmentFamily && family !== garmentFamily) return false;
+    // Strict: a row recorded under one family never advises another, and a
+    // caller that does not yet know the family (the analysis has not run) sees
+    // only category-wide rows rather than inheriting whichever family wrote last.
+    if (comparable(row.garment_family) !== garmentFamily) return false;
     if (!normalizeShowcaseFeatureRegion(row.feature_region)) return false;
     if (!normalizeShowcaseShotType(row.shot_type)) return false;
     // Only rows carrying real feedback say anything.
@@ -265,7 +288,8 @@ export function selectShowcaseFeedbackGuidance(
     const id = text(row.id) || `${comparable(row.feature_region)}:${comparable(row.shot_type)}`;
     if (!id || selected.some((entry) => entry.id === id)) continue;
     const score = netScore(row);
-    const reworked = integer(row.rejected_count) + integer(row.regenerated_count);
+    const reworked = integer(row.rejected_count) + integer(row.regenerated_count) +
+      integer(row.qa_failed_count);
     const line = bounded(
       score > 0
         ? `${text(row.feature_region)} as ${text(row.shot_type)}: kept ${integer(row.selected_count)} time(s) - this reads well for this category.`

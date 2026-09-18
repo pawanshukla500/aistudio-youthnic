@@ -1,5 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { coarseGarmentFamilyForCategory } from "../lib/garmentPoses.ts";
 import {
+  effectiveShowcaseShot,
   nextShowcaseOutcomeCounts,
   normalizeShowcasePlan,
   planShowcaseOutcomeWrite,
@@ -199,14 +201,67 @@ Deno.test("the analysis prompt asks for a chosen feature and forbids a hero repe
   assertEquals(ANALYSIS_VERSION, "generation-session-v22-showcase-feature-chosen");
 });
 
+Deno.test("a widened frame is what the slot, the prompt and the feedback key all use", () => {
+  const collidingCreative = {
+    showcasePlan: { heroFeature: "sequinned square neckline yoke", featureRegion: "neckline", shotType: "macro_detail" },
+    closeupHeroDetail: "the sequinned neckline yoke embroidery",
+  };
+  const shot = effectiveShowcaseShot(collidingCreative);
+  assert(shot);
+  assertEquals(shot.shotType, "full_body_feature");
+  assertEquals(shot.widenedFromCloseup, true);
+  // The key the feedback row is written under must be the widened frame.
+  assertEquals(showcaseOutcomeKey({ featureRegion: shot.plan.featureRegion, shotType: shot.shotType }), "neckline:full_body_feature");
+
+  // The stored pose brief must not still describe the tight crop.
+  const slots = getPoseSlots({
+    productIdentity: { garmentFamily: "kurta_or_kurti_set" },
+    showcasePlan: { ...collidingCreative.showcasePlan, framing: "Tight macro crop on the yoke" },
+    closeupHeroDetail: collidingCreative.closeupHeroDetail,
+  });
+  assertEquals(slots[5].framing.includes("Tight macro crop"), false);
+  assertStringIncludes(slots[5].framing, "Frame head-to-toe");
+
+  assertEquals(effectiveShowcaseShot({}), null);
+  assertEquals(effectiveShowcaseShot({ showcasePlan: { heroFeature: "x" } }), null);
+});
+
+Deno.test("a model-supplied showcase pose cannot drop the plan's guarantees", () => {
+  const normalized = normalizeAnalysis({
+    productIdentity: { garmentFamily: "kurta_or_kurti_set", bottomWearDetails: "Palazzo, wide flare" },
+    showcasePlan: bottomPlan,
+    posePlan: [
+      { id: "showcase", title: "Hero repeat", prompt: "Straight-on full body", productVisibilityRules: ["whole outfit visible"], enabled: false },
+    ],
+  }, "kurta set");
+  const showcase = normalized.posePlan[5];
+  // Its own prose is kept...
+  assertEquals(showcase.title, "Hero repeat");
+  // ...but not at the cost of the subject, the non-duplication rule, or the frame.
+  assertEquals(showcase.enabled, true);
+  assert(showcase.productVisibilityRules.some((rule) => rule.includes("wide gold tissue flared palazzo")));
+  assert(showcase.productVisibilityRules.some((rule) => rule.includes("never a repeat of the hero framing")));
+  assert(showcase.productVisibilityRules.includes("whole outfit visible"));
+});
+
+Deno.test("the sixth-frame prompt does not lean on another frame having been shot", () => {
+  const slots = getPoseSlots({
+    productIdentity: { garmentFamily: "kurta_or_kurti_set", bottomWearDetails: "Palazzo, wide flare" },
+    showcasePlan: bottomPlan,
+  });
+  // The analysis contract requires every pose prompt to be self-contained.
+  assertEquals(/established in Pose 1|same as full_front|consistent with previous poses/i.test(slots[5].prompt), false);
+  assertStringIncludes(slots[5].prompt, "locked model identity");
+});
+
 Deno.test("feedback guidance is org, category and family scoped and needs real signal", () => {
   const rows = [
     { id: "a", organization_id: "org-1", product_category: "kurta set", garment_family: "kurta_or_kurti_set", feature_region: "bottom_wear", shot_type: "full_body_feature", selected_count: 5 },
-    { id: "b", organization_id: "org-1", product_category: "kurta set", garment_family: "", feature_region: "complete_set", shot_type: "full_body_feature", rejected_count: 4, regenerated_count: 2 },
+    { id: "b", organization_id: "org-1", product_category: "kurta set", garment_family: "kurta_or_kurti_set", feature_region: "complete_set", shot_type: "full_body_feature", rejected_count: 4, regenerated_count: 2 },
     // No feedback recorded yet.
-    { id: "c", organization_id: "org-1", product_category: "kurta set", garment_family: "", feature_region: "sleeve", shot_type: "macro_detail" },
+    { id: "c", organization_id: "org-1", product_category: "kurta set", garment_family: "kurta_or_kurti_set", feature_region: "sleeve", shot_type: "macro_detail" },
     // Another tenant.
-    { id: "d", organization_id: "org-2", product_category: "kurta set", garment_family: "", feature_region: "print", shot_type: "macro_detail", selected_count: 9 },
+    { id: "d", organization_id: "org-2", product_category: "kurta set", garment_family: "kurta_or_kurti_set", feature_region: "print", shot_type: "macro_detail", selected_count: 9 },
     // Another category.
     { id: "e", organization_id: "org-1", product_category: "saree", garment_family: "saree", feature_region: "pallu", shot_type: "drape_feature", selected_count: 9 },
     // Another family within the same category.
@@ -227,6 +282,28 @@ Deno.test("feedback guidance is org, category and family scoped and needs real s
 
   assertEquals(selectShowcaseFeedbackGuidance(rows, { organizationId: "", productCategory: "kurta set" }).ids, []);
   assertEquals(selectShowcaseFeedbackGuidance(null, { organizationId: "org-1", productCategory: "kurta set" }).ids, []);
+
+  // A caller that does not yet know the family must not inherit one.
+  assertEquals(
+    selectShowcaseFeedbackGuidance(rows, { organizationId: "org-1", productCategory: "kurta set" }).ids,
+    [],
+  );
+});
+
+Deno.test("a QA-only refusal is reported as negative, not as zero", () => {
+  const guidance = selectShowcaseFeedbackGuidance(
+    [{ id: "a", organization_id: "org-1", product_category: "saree", garment_family: "saree", feature_region: "pallu", shot_type: "macro_detail", qa_failed_count: 3 }],
+    { organizationId: "org-1", productCategory: "saree", garmentFamily: "saree" },
+  ).guidance;
+  assertStringIncludes(guidance, "reworked or rejected 3 time(s)");
+  assertEquals(guidance.includes("0 time(s)"), false);
+});
+
+Deno.test("a broad category yields no family, a specific one resolves it", () => {
+  assertEquals(coarseGarmentFamilyForCategory("ethnic/fusion"), "");
+  assertEquals(coarseGarmentFamilyForCategory("saree"), "saree");
+  assertEquals(coarseGarmentFamilyForCategory("kurta set"), "kurta_or_kurti_set");
+  assertEquals(coarseGarmentFamilyForCategory("dress"), "dress");
 });
 
 Deno.test("outcome counts move independently and average quality only on keeps", () => {

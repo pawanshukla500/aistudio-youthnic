@@ -1,7 +1,7 @@
 import { type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.112.2";
 import { REQUIRED_POSE_IDS, type JsonRecord } from "./profiles.ts";
 import {
-  normalizeShowcasePlan,
+  effectiveShowcaseShot,
   planShowcaseOutcomeWrite,
   SHOWCASE_OUTCOME_WRITE_ATTEMPTS,
   type ShowcaseOutcome,
@@ -135,9 +135,12 @@ export async function recordShowcaseFeatureOutcome(
       return;
     }
     const sessionData = asRecord(session?.session_data);
-    const creative = asRecord(sessionData.creativeDirection);
-    const plan = normalizeShowcasePlan(creative.showcasePlan ?? creative.showcase_plan);
-    if (!plan) return;
+    // The effective shot, not the planned one: a close-up collision widens the
+    // frame, and scoring the tight framing that was never generated would teach
+    // the next analysis the opposite of what happened.
+    const shot = effectiveShowcaseShot(sessionData.creativeDirection);
+    if (!shot) return;
+    const { plan, shotType } = shot;
     const productCategory = text(sessionData.category);
     if (!productCategory) return;
     const garmentFamily = text(asRecord(sessionData.productIdentity).garmentFamily);
@@ -148,7 +151,7 @@ export async function recordShowcaseFeatureOutcome(
       .eq("product_category", productCategory)
       .eq("garment_family", garmentFamily)
       .eq("feature_region", plan.featureRegion)
-      .eq("shot_type", plan.shotType);
+      .eq("shot_type", shotType);
 
     for (let attempt = 1; attempt <= SHOWCASE_OUTCOME_WRITE_ATTEMPTS; attempt += 1) {
       const { data, error } = await match().order("created_at", { ascending: true }).limit(4);
@@ -164,7 +167,7 @@ export async function recordShowcaseFeatureOutcome(
           product_category: productCategory,
           garment_family: garmentFamily,
           feature_region: plan.featureRegion,
-          shot_type: plan.shotType,
+          shot_type: shotType,
           selected_count: write.next.selectedCount,
           rejected_count: write.next.rejectedCount,
           regenerated_count: write.next.regeneratedCount,
@@ -172,10 +175,16 @@ export async function recordShowcaseFeatureOutcome(
           avg_quality: write.next.avgQuality,
           last_feedback_at: now,
         });
-        // A concurrent insert wins the unique key; retry and update it instead.
         if (!insertError) return;
-        if (attempt === SHOWCASE_OUTCOME_WRITE_ATTEMPTS) {
+        // Only a lost unique-key race is worth retrying: the winning row now
+        // exists and the next pass updates it. Any other error repeats forever,
+        // so report it immediately rather than after four silent attempts.
+        if (String((insertError as { code?: string }).code || "") !== "23505") {
           console.error(`Could not record showcase feedback: ${insertError.message}`);
+          return;
+        }
+        if (attempt === SHOWCASE_OUTCOME_WRITE_ATTEMPTS) {
+          console.error(`Could not record showcase feedback after a contended insert: ${insertError.message}`);
         }
         continue;
       }

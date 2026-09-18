@@ -11,7 +11,7 @@
 import { type JsonRecord } from "./profiles.ts";
 import { PRODUCT_REFERENCE_ROLES } from "./referencePolicy.ts";
 import { type PromptPatternKind } from "./promptPatterns.ts";
-import { normalizeShowcasePlan, normalizeShowcaseShotType } from "./showcaseFeature.ts";
+import { effectiveShowcaseShot, normalizeShowcaseShotType } from "./showcaseFeature.ts";
 
 export const GENERATION_MEMORY_VERSION = 1;
 export const MAX_MEMORY_ASSETS = 12;
@@ -196,9 +196,9 @@ function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirect
   if (closeupMode) {
     details.push(`Pose 5 close-up mode: ${closeupMode}${hero ? ` (${hero})` : ""}`);
   }
-  const showcasePlan = normalizeShowcasePlan(creativeDirection.showcasePlan ?? creativeDirection.showcase_plan);
-  if (showcasePlan) {
-    details.push(`Pose 6 sells: ${boundedText(showcasePlan.heroFeature, 120)} (${showcasePlan.shotType})`);
+  const showcaseShot = effectiveShowcaseShot(creativeDirection);
+  if (showcaseShot) {
+    details.push(`Pose 6 sells: ${boundedText(showcaseShot.plan.heroFeature, 120)} (${showcaseShot.shotType})`);
   } else {
     const showcaseIntent = boundedText(creativeDirection.showcaseIntent ?? creativeDirection.showcase_intent, 40);
     if (showcaseIntent) details.push(`Pose 6 showcase intent: ${showcaseIntent}`);

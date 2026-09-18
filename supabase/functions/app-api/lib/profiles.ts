@@ -1,9 +1,11 @@
 export type JsonRecord = Record<string, unknown>;
 
 import {
+  effectiveShowcaseShot,
   normalizeShowcasePlan,
   type ShowcasePlan,
   showcaseShotDirection,
+  type ShowcaseShotType,
 } from "./showcaseFeature.ts";
 import {
   classifyBottomCut,
@@ -408,6 +410,8 @@ export type PoseSlotContext = {
   bottomWearMode?: unknown;
   /** The vision analysis's chosen subject for the sixth frame. */
   showcasePlan?: unknown;
+  /** Pose 5's recorded subject, so a colliding sixth frame is widened here too. */
+  closeupHeroDetail?: unknown;
 };
 
 function poseSlotContext(input: string | PoseSlotContext): PoseSlotContext {
@@ -439,16 +443,25 @@ export function poseFamilyFor(input: string | PoseSlotContext): GarmentPoseFamil
  * cached or legacy analysis that predates the plan, and a fixed template is what
  * turned this frame into a second hero shot in the first place.
  */
-function showcaseSlotFromPlan(plan: ShowcasePlan, family: GarmentPoseFamily): StudioPose {
-  const shotDirection = showcaseShotDirection(plan.shotType);
+function showcaseSlotFromPlan(
+  plan: ShowcasePlan,
+  family: GarmentPoseFamily,
+  shot: { shotType: ShowcaseShotType; widenedFromCloseup: boolean },
+): StudioPose {
+  const shotDirection = showcaseShotDirection(shot.shotType);
+  // The plan's own framing/posture text describes its original distance, so it
+  // is dropped once a close-up collision has widened the frame.
+  const plannedFraming = shot.widenedFromCloseup ? "" : plan.framing;
+  const plannedBodyPosition = shot.widenedFromCloseup ? "" : plan.bodyPosition;
+  const plannedCameraAngle = shot.widenedFromCloseup ? "" : plan.cameraAngle;
   const feature = plan.heroFeature;
   const subjectRule = `${feature} is the subject of this frame and must be large, sharp and completely unobstructed`;
   return {
     id: "showcase",
     title: `Feature Focus: ${feature.length > 48 ? `${feature.slice(0, 45).trimEnd()}...` : feature}`,
-    framing: plan.framing || `3:4 portrait framed for ${feature}. ${shotDirection}`,
-    cameraAngle: plan.cameraAngle || "Eye-level, angled and distanced so the named feature reads at its best",
-    bodyPosition: plan.bodyPosition ||
+    framing: plannedFraming || `3:4 portrait framed for ${feature}. ${shotDirection}`,
+    cameraAngle: plannedCameraAngle || "Eye-level, angled and distanced so the named feature reads at its best",
+    bodyPosition: plannedBodyPosition ||
       `Posture and angle chosen so ${feature} is presented at its best, natural and unforced, with the garment uncrumpled`,
     handPlacement: plan.handPlacement || `Hands clear of ${feature}; they may frame or hold it open, never cover it`,
     expression: plan.expression ||
@@ -463,9 +476,13 @@ function showcaseSlotFromPlan(plan: ShowcasePlan, family: GarmentPoseFamily): St
     highlightedDetails: [feature, plan.featureRegion.replace(/_/g, " ")],
     primaryReference: plan.evidenceReference || (isSareePoseFamily(family) ? "saree_front_drape" : "front"),
     purpose: plan.whyItSells || "Sell the detail that makes this product worth buying",
-    prompt: `Create the sixth catalog frame inside the exact same studio set established in Pose 1, built entirely around ${feature}. ${shotDirection} ${
+    prompt: `Create a catalog frame built entirely around ${feature}. ${shotDirection} ${
+      shot.widenedFromCloseup
+        ? "Shoot it at this wider distance so it reads on the worn garment rather than as a repeat of the detail crop. "
+        : ""
+    }${
       plan.distinctFrom ? `It must differ from the other frames: ${plan.distinctFrom} ` : ""
-    }Keep the exact same model identity, hair, makeup, jewellery, footwear, backdrop wall, flooring and lighting established in Pose 1, and keep the garment's design, print, colour, fit and construction exactly as the product references show.`,
+    }Render the exact model face, hair, skin tone, makeup, jewellery and footwear described in the locked model identity and styling plan, the exact studio set, backdrop wall, flooring and lighting described in the locked creative direction, and the garment's design, print, colour, fit and construction exactly as the product references show.`,
     enabled: true,
   };
 }
@@ -584,6 +601,12 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
   const context = poseSlotContext(input);
   const family = poseFamilyFor(context);
   const isSaree = isSareePoseFamily(family);
+  // Resolved once here so the stored brief and the generation hard rule describe
+  // the same frame even when a close-up collision widens it.
+  const showcaseShot = effectiveShowcaseShot({
+    showcasePlan: context.showcasePlan,
+    closeupHeroDetail: context.closeupHeroDetail,
+  });
   // The sixth frame's brief must agree with how the shoot will actually be
   // rendered, so a top-only shoot never stores a "show the bottom wear" brief.
   const hasBottoms = resolveBottomWearPresentation({
@@ -714,8 +737,8 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       prompt: "Create a genuinely zoomed-in product-detail photograph - clearly tighter than the full-body hero, never a repeat of it. Lead with one sharp, large, catalog-readable highlight of the product's most important real detail (embroidery, neckline, drape, print scale, or fabric texture). Pair a beautiful, cute, Gen-Z-style face in a face-to-chest or face-to-waist crop only when that still leaves the detail large. If a full face would make the selling detail too small, crop to the product detail and let the face be partial or omitted.",
       enabled: true,
     },
-    normalizeShowcasePlan(context.showcasePlan)
-      ? showcaseSlotFromPlan(normalizeShowcasePlan(context.showcasePlan) as ShowcasePlan, family)
+    showcaseShot
+      ? showcaseSlotFromPlan(showcaseShot.plan, family, showcaseShot)
       : showcaseSlot(family, hasBottoms),
   ];
 }
@@ -1346,6 +1369,7 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     category: productIdentity.category || categoryFallback,
     bottomWearMode: options.bottomWearMode,
     showcasePlan: creativeDirection.showcasePlan,
+    closeupHeroDetail: creativeDirection.closeupHeroDetail,
   });
   const posePlan: StudioPose[] = poseSlots.map((fallback, index) => {
     const candidate = objectValue(poses.find((pose) => objectValue(pose).id === fallback.id) ?? poses[index]);
@@ -1364,6 +1388,18 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
       consistencyNotes: stringValue(candidate.consistencyNotes ?? candidate.consistency_notes, fallback.consistencyNotes),
       prompt: stringValue(candidate.prompt, fallback.prompt), enabled: candidate.enabled !== false,
     };
+  }).map((pose) => {
+    // The model writes the prose for all six frames, but the sixth frame's
+    // guarantees come from showcasePlan. Its own pose entry may elaborate; it
+    // may not quietly drop the chosen subject, the non-duplication rule, or the
+    // frame itself, which is how it became a hero repeat before.
+    if (pose.id !== "showcase" || !creativeDirection.showcasePlan) return pose;
+    const planRules = poseSlots[poseSlots.length - 1].productVisibilityRules;
+    const merged = [...planRules];
+    for (const rule of pose.productVisibilityRules) {
+      if (!merged.some((existing) => existing.toLowerCase() === rule.toLowerCase())) merged.push(rule);
+    }
+    return { ...pose, productVisibilityRules: merged.slice(0, 12), enabled: true };
   });
   const stylingPlan = normalizeStylingPlan(raw.stylingPlan ?? raw.styling_plan);
   return { productIdentity, creativeDirection, modelIdentity, stylingPlan, posePlan };

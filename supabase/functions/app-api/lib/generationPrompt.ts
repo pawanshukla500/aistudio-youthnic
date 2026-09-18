@@ -11,8 +11,7 @@ import {
   sanitizeDetailPlacementMap,
 } from "./profiles.ts";
 import {
-  normalizeShowcasePlan,
-  resolveShowcaseShotType,
+  effectiveShowcaseShot,
   type ShowcasePlan,
   showcaseShotDirection,
   type ShowcaseShotType,
@@ -647,11 +646,10 @@ export function composeGenerationPrompt(args: {
   // every showcase look like a collision with the close-up.
   const recordedCloseupHeroDetail = boundedText(creative.closeupHeroDetail ?? creative.closeup_hero_detail, 260);
   // The analysis chooses this frame's subject per SKU. The fixed intents remain
-  // only for a cached analysis made before showcasePlan existed.
-  const showcasePlan = normalizeShowcasePlan(creative.showcasePlan ?? creative.showcase_plan);
-  const showcaseShot = showcasePlan
-    ? resolveShowcaseShotType(showcasePlan, { heroDetail: recordedCloseupHeroDetail })
-    : null;
+  // only for a cached analysis made before showcasePlan existed. Resolved by the
+  // shared helper so the pose brief, this rule, the shoot memory and the feedback
+  // row all describe the same frame.
+  const showcaseShot = effectiveShowcaseShot(creative);
   const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL);
   const faceQualityInstruction = faceRequired
     ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct and naturally shaped eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
@@ -835,9 +833,9 @@ ${categoryRules ? `POSE CATEGORY RULES (${poseCategory.toUpperCase()}):\n${categ
 GARMENT POSE GRAMMAR (${garmentPoseFamilyHeading(poseFamily)}) - body language and framing only; it never changes the garment's design, print, colour, fit or construction:
 ${garmentPoseDirection(poseFamily)}
 ${isShowcase
-    ? (showcasePlan && showcaseShot
+    ? (showcaseShot
       ? showcasePlanHardRule({
-        plan: showcasePlan,
+        plan: showcaseShot.plan,
         shotType: showcaseShot.shotType,
         widenedFromCloseup: showcaseShot.widenedFromCloseup,
         closeupHeroDetail: recordedCloseupHeroDetail,
