@@ -1,6 +1,11 @@
 export type JsonRecord = Record<string, unknown>;
 
 import {
+  normalizeShowcasePlan,
+  type ShowcasePlan,
+  showcaseShotDirection,
+} from "./showcaseFeature.ts";
+import {
   classifyBottomCut,
   detectGarmentPoseFamily,
   type GarmentPoseFamily,
@@ -401,6 +406,8 @@ export type PoseSlotContext = {
   poseFamily?: GarmentPoseFamily;
   /** "auto" | "included" | "top_only". An explicit choice outranks the analysis. */
   bottomWearMode?: unknown;
+  /** The vision analysis's chosen subject for the sixth frame. */
+  showcasePlan?: unknown;
 };
 
 function poseSlotContext(input: string | PoseSlotContext): PoseSlotContext {
@@ -425,7 +432,45 @@ export function poseFamilyFor(input: string | PoseSlotContext): GarmentPoseFamil
   });
 }
 
-/** The sixth frame's brief, chosen by garment family. */
+/**
+ * Build the sixth frame from the feature the vision analysis actually chose.
+ *
+ * This is the normal path. The family templates below are only the floor for a
+ * cached or legacy analysis that predates the plan, and a fixed template is what
+ * turned this frame into a second hero shot in the first place.
+ */
+function showcaseSlotFromPlan(plan: ShowcasePlan, family: GarmentPoseFamily): StudioPose {
+  const shotDirection = showcaseShotDirection(plan.shotType);
+  const feature = plan.heroFeature;
+  const subjectRule = `${feature} is the subject of this frame and must be large, sharp and completely unobstructed`;
+  return {
+    id: "showcase",
+    title: `Feature Focus: ${feature.length > 48 ? `${feature.slice(0, 45).trimEnd()}...` : feature}`,
+    framing: plan.framing || `3:4 portrait framed for ${feature}. ${shotDirection}`,
+    cameraAngle: plan.cameraAngle || "Eye-level, angled and distanced so the named feature reads at its best",
+    bodyPosition: plan.bodyPosition ||
+      `Posture and angle chosen so ${feature} is presented at its best, natural and unforced, with the garment uncrumpled`,
+    handPlacement: plan.handPlacement || `Hands clear of ${feature}; they may frame or hold it open, never cover it`,
+    expression: plan.expression ||
+      "Warm, natural Gen-Z energy with the same face and hairstyle as every other frame, or no face at all when the crop is tight on the feature",
+    productVisibilityRules: [
+      subjectRule,
+      ...plan.visibilityRules,
+      "this frame must add coverage the other five do not: never a repeat of the hero framing or of the close-up's subject",
+    ].slice(0, 8),
+    consistencyNotes: "Same model identity, styling, footwear, set, backdrop and lighting as Pose 1; only the framing and posture change to sell this feature",
+    description: `A frame built around ${feature}${plan.whyItSells ? ` - ${plan.whyItSells}` : ""}.`,
+    highlightedDetails: [feature, plan.featureRegion.replace(/_/g, " ")],
+    primaryReference: plan.evidenceReference || (isSareePoseFamily(family) ? "saree_front_drape" : "front"),
+    purpose: plan.whyItSells || "Sell the detail that makes this product worth buying",
+    prompt: `Create the sixth catalog frame inside the exact same studio set established in Pose 1, built entirely around ${feature}. ${shotDirection} ${
+      plan.distinctFrom ? `It must differ from the other frames: ${plan.distinctFrom} ` : ""
+    }Keep the exact same model identity, hair, makeup, jewellery, footwear, backdrop wall, flooring and lighting established in Pose 1, and keep the garment's design, print, colour, fit and construction exactly as the product references show.`,
+    enabled: true,
+  };
+}
+
+/** The sixth frame's fallback brief, chosen by garment family. */
 function showcaseSlot(family: GarmentPoseFamily, hasBottoms: boolean): StudioPose {
   if (family === "saree_bengali" || family === "saree_ethnic") {
     const bengali = family === "saree_bengali";
@@ -669,7 +714,9 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       prompt: "Create a genuinely zoomed-in product-detail photograph - clearly tighter than the full-body hero, never a repeat of it. Lead with one sharp, large, catalog-readable highlight of the product's most important real detail (embroidery, neckline, drape, print scale, or fabric texture). Pair a beautiful, cute, Gen-Z-style face in a face-to-chest or face-to-waist crop only when that still leaves the detail large. If a full face would make the selling detail too small, crop to the product detail and let the face be partial or omitted.",
       enabled: true,
     },
-    showcaseSlot(family, hasBottoms),
+    normalizeShowcasePlan(context.showcasePlan)
+      ? showcaseSlotFromPlan(normalizeShowcasePlan(context.showcasePlan) as ShowcasePlan, family)
+      : showcaseSlot(family, hasBottoms),
   ];
 }
 
@@ -1276,6 +1323,9 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     closeupMode: normalizeCloseupMode(creative.closeupMode ?? creative.closeup_mode),
     closeupHeroDetail: stringValue(creative.closeupHeroDetail ?? creative.closeup_hero_detail, ""),
     showcaseIntent: normalizeShowcaseIntent(creative.showcaseIntent ?? creative.showcase_intent),
+    showcasePlan: normalizeShowcasePlan(
+      raw.showcasePlan ?? raw.showcase_plan ?? creative.showcasePlan ?? creative.showcase_plan,
+    ),
   };
   const modelIdentity = {
     castingDirection: stringValue(model.castingDirection ?? model.casting_direction, "One consistent adult fashion model across every image in the set, reading as a youthful young adult with a naturally pretty, warm, approachable face"),
@@ -1295,6 +1345,7 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     garmentFamily: productIdentity.garmentFamily,
     category: productIdentity.category || categoryFallback,
     bottomWearMode: options.bottomWearMode,
+    showcasePlan: creativeDirection.showcasePlan,
   });
   const posePlan: StudioPose[] = poseSlots.map((fallback, index) => {
     const candidate = objectValue(poses.find((pose) => objectValue(pose).id === fallback.id) ?? poses[index]);
@@ -1321,7 +1372,7 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
 export function buildCombinedAnalysisPrompt(args: {
   skuName: string; productDetails: string; category: string; modelDirection: string; sceneDirection: string;
   referenceManifest: Array<{ number: number; role: string }>; housePreferences?: string; fashionKnowledge?: string;
-  analysisLearning?: string;
+  analysisLearning?: string; showcaseFeedback?: string;
 }) {
   const manifest = args.referenceManifest.map(({ number, role }) => `IMAGE ${number}: ${role}`).join("\n");
   return `You are the visual merchandiser and shoot planner for a fashion e-commerce studio.
@@ -1429,6 +1480,9 @@ Use this only to name and measure what the current product images actually show.
 ` : ""}${args.analysisLearning ? `SUCCESSFUL HOUSE PATTERNS (POSE/SCENE LANGUAGE TO REUSE, SUBORDINATE TO PRODUCT REFERENCES):
 ${args.analysisLearning}
 Reuse this language for pose energy, scene continuity, and styling so you do not re-derive a six-pose system from scratch. Product references still outrank these patterns. Never let a pattern change bottom-wear cut, print, or construction.
+` : ""}${args.showcaseFeedback ? `SIXTH-FRAME FEEDBACK (WHAT THIS TEAM KEPT AND WHAT THEY THREW AWAY):
+${args.showcaseFeedback}
+This records how earlier sixth frames for this category were received - which subjects and framings operators approved, and which they rejected or sent back for regeneration. Use it to break ties between comparably strong features, and to avoid a framing this team keeps rejecting. It is house taste, not product truth: if these product references clearly make a different feature the strongest one, choose that feature and ignore this.
 ` : ""}Every choice is a styling addition only: it must never be treated as part of the garment, must never hide, replace or contradict a detail from the product references, and must never contradict detailPlacementMap or absenceConstraints. When the product references already show footwear or accessories that ship with the product, keep those and say so rather than replacing them.
 
 Accessory styling suggestion: look at what footwear and accessories (if any) the product references actually show. If the product's own footwear/bag/accessories are missing, incomplete, or would not read well on camera, propose ONE tasteful, trend-right, Gen-Z-appropriate addition (for example a specific footwear style or a small bag) in creativeDirection.suggestedAccessories, described specifically enough for a stylist to execute identically across all six poses. Only suggest an addition when it genuinely fits the pose plan and category - if the product references already show adequate footwear/accessories, or nothing suits the shot, leave creativeDirection.suggestedAccessories empty. This is a styling addition only: it must never be treated as part of the garment, and it must never contradict detailPlacementMap or absenceConstraints.
@@ -1455,12 +1509,22 @@ Create exactly six product-specific camera setups in one coherent commercial cov
   * "face_and_detail" when that detail sits at neckline/chest/yoke and stays LARGE beside the face: genuine zoomed-in face-to-chest or face-to-waist crop. Face is sharp with a natural Gen-Z expression AND the product detail occupies a large, catalog-readable portion of the frame - never a tiny hint of embroidery under a beauty close-up.
   * "product_detail" when a full face would shrink that selling detail below readable catalog size: crop to the product detail so it fills most of the frame. Face may be partial at the edge or omitted. Never a full-body hero repeat, and never a face-only beauty crop.
   The closeup pose prompt, framing, highlightedDetails, and productVisibilityRules MUST match that choice. highlightedDetails must lead with the product detail, not the face, when closeupMode is "product_detail".
-- showcase: THE SIXTH FRAME IS GARMENT-LED. Choose its job from what this SKU actually is and record it in creativeDirection.showcaseIntent:
-  * SAREE (any regional style): a drape-led frame. The pallu is the subject - placed exactly as sareeDrapePlan specifies, opened low and flat so its artwork, motif scale, end treatment and border are completely readable, with front pleats flat and vertical and the hem border level. For a Bengali saree (tant, jamdani, garad, korial, baluchari, lal-paar and related styles, or an aatpoure/Bengali drape) hold the posture upright and serene and keep the aanchal over its recorded shoulder. Set showcaseIntent to "saree_drape".
-  * KURTI / KURTA SET, LEHENGA, OR ANY OUTFIT WHOSE REFERENCES PROVE BOTTOM WEAR: a head-to-toe frame that sells the complete set. The top from shoulder seam to hem AND the bottom wear from waistband to hem must both be fully visible in one frame, with the exact bottom-wear cut, leg volume, pleat architecture, hem finish and print preserved, and footwear grounded. Set showcaseIntent to "set_full_length".
-  * SHORT KURTI, TOP, OR WESTERN/CASUAL UPPER GARMENT: a playful, natural, lively moment that plays against the backdrop this shoot has actually established - a light step, a turn, a relaxed lean on an element already present in the style reference, a genuine mid-laugh - while the neckline, sleeve shape, hem line, fit and print stay completely readable. Never invent a new prop, furniture or architecture to pose against. Set showcaseIntent to "playful_backdrop".
-  * STANDALONE LONG KURTI, DRESS, OR GOWN: a full-length frame proving true fall, fit and length, with the hem level and inside the frame. Set showcaseIntent to "full_length_silhouette".
-  This frame reuses the identical model, styling, footwear, set, backdrop and lighting - only stance and framing change.
+- showcase: THE SIXTH FRAME IS DECIDED BY YOU, FROM THESE IMAGES. It has no fixed subject. Its only job is to sell the ONE thing that makes THIS product worth buying, and it must add coverage the other five frames do not already give.
+  Look at the product references and decide what a buyer would actually zoom in on or ask about. It may be an embroidered or sequinned yoke, a neckline construction, a sleeve treatment, a print's scale and repeat, the cut and flare of the bottom wear, a hem or border, a dupatta's print/border/length/drape, a saree's pallu, drape style, border or blouse, or any other genuinely distinguishing feature. Choose the single strongest one.
+  Then fill showcasePlan at the JSON root:
+  - heroFeature: that feature, named concretely enough to shoot it - "gold sequin square-neck yoke with scalloped edge", not "embroidery".
+  - featureRegion: one of neckline, embroidery, print, sleeve, upper_garment, bottom_wear, hem_border, dupatta, pallu, drape, blouse, silhouette, complete_set, other.
+  - shotType: one of macro_detail (fill the frame with the feature), half_body_detail (crop to the body section it sits on), full_body_feature (needs the whole garment - flare, length, fall), drape_feature (a held or spread panel), movement_feature (fall/flare shown in motion).
+  - whyItSells: one line on why this is the feature a buyer judges this product by.
+  - evidenceReference: the manifest role that proves it.
+  - framing, cameraAngle, bodyPosition, handPlacement, expression: concrete direction for that shot.
+  - distinctFrom: one line stating how this frame differs from BOTH pose 1 and pose 5.
+  - visibilityRules: what must stay unobstructed for this feature to read.
+  MANDATORY NON-DUPLICATION. This frame is wasted if it repeats another:
+  * It must NOT be a second full-body hero. If your chosen shotType is full_body_feature, the angle, distance, stance and composition must be visibly different from pose 1, and the named feature must be unmistakably the subject rather than the whole outfit.
+  * It must NOT re-shoot pose 5's subject. You have already recorded creativeDirection.closeupHeroDetail for pose 5; if the strongest feature is that same detail, either pick the next strongest feature for this frame, or keep the feature and change the distance (for example pose 5 macro on the yoke, pose 6 showing the same embroidery running across the full garment in a drape or movement frame). Say which you did in distinctFrom.
+  * "Complete set", "full outfit" or "hero repeat" is only a valid heroFeature when the product genuinely has no distinguishing component - that is rare, and a coordinated set's bottom wear, dupatta or border is almost always the stronger choice.
+  This frame reuses the identical model, styling, footwear, set, backdrop and lighting - only the subject, stance and framing change.
 
 If the garmentFamily is "saree", you MUST also generate sareeTruth and sareeDrapePlan inside the JSON root.
 sareeTruth: Record exact base and secondary colours; fabric family; weave/lattice geometry; texture, shine and transparency; every peacock/floral/other motif with its scale, orientation, repeat, density and placement by body/pallu/border; separate upper/lower border widths, construction and colours; the exact region where the pallu starts plus its artwork, motif density and orientation; tassel colour, construction and spacing; blouse colour/fabric/front/back/neckline/sleeves/ties/closures; and fabric weight, stiffness, fluidity and expected fall. Add regionEvidence entries with region, sourceRole, confirmed/confirmed_absent/unknown state and the same evidence fields as garmentEvidence. Unknown must stay unknown: never mirror or extrapolate decoration into an unproven region.
@@ -1472,7 +1536,7 @@ CRITICAL: Every individual 'prompt' MUST be completely self-contained. The image
 Across all six, ONLY pose, angle, framing, and expression may change. Exact product, colors, pattern, bottom wear, face, hairstyle, makeup, accessories, footwear, scene, lighting, shadows, camera/lens feel, and color treatment remain locked.
 
 Return STRICT JSON only:
-{"productIdentity":{"garmentFamily":"","category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[],"garmentEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeTruth":{"body":{"mainFabric":"","weave":"","weaveGeometry":"","texture":"","transparency":"","shine":"","baseColor":"","secondaryColors":[],"pattern":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","motifPlacement":"","embellishment":"","bodyOrientation":""},"borders":{"upperBorder":"","lowerBorder":"","borderWidth":"","upperBorderWidth":"","lowerBorderWidth":"","borderColors":"","construction":"","motifGeometry":"","edgeTreatment":"","continuityRules":"","tasselColor":"","tasselConstruction":"","tasselSpacing":""},"pallu":{"hasDistinctPallu":false,"startingRegion":"","baseColor":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","borders":"","artwork":"","zari":"","embroidery":"","tassels":"","edgeTreatment":"","visualOrientation":"","evidenceReferences":"","uncertainty":""},"pleatZone":{"patternBehavior":"","borderBehavior":"","embellishmentBehavior":"","hasSpecialPanel":false},"blouse":{"hasBlouse":false,"color":"","fabric":"","frontConstruction":"","backConstruction":"","neckline":"","sleeves":"","ties":"","closure":"","embroidery":"","border":"","pattern":"","fit":"","isUnstitchedPiece":false},"physics":{"weight":"","stiffness":"","fluidity":"","transparency":"","shine":"","creaseBehavior":"","expectedFall":""},"regionEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeDrapePlan":{"baseDrapeFamily":"","shoulderSide":"","waistTuck":"","frontPleatTreatment":"","palluShoulderPlacement":"","openOrPleatedPallu":"","palluSpread":"","palluFallDirection":"","palluVisibleLength":"","handInteraction":"","movementAmount":"","pinningBehavior":"","borderVisibility":"","blouseVisibility":"","coverageConstraints":"","poseSpecificDrapeState":""},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":"","seatedPoseRequired":"no","seatedPoseReason":"","closeupMode":"face_and_detail","closeupHeroDetail":"","showcaseIntent":""},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"angled","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"back","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"creative","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"closeup","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"showcase","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""}]}  `;
+{"productIdentity":{"garmentFamily":"","category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[],"garmentEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeTruth":{"body":{"mainFabric":"","weave":"","weaveGeometry":"","texture":"","transparency":"","shine":"","baseColor":"","secondaryColors":[],"pattern":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","motifPlacement":"","embellishment":"","bodyOrientation":""},"borders":{"upperBorder":"","lowerBorder":"","borderWidth":"","upperBorderWidth":"","lowerBorderWidth":"","borderColors":"","construction":"","motifGeometry":"","edgeTreatment":"","continuityRules":"","tasselColor":"","tasselConstruction":"","tasselSpacing":""},"pallu":{"hasDistinctPallu":false,"startingRegion":"","baseColor":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","borders":"","artwork":"","zari":"","embroidery":"","tassels":"","edgeTreatment":"","visualOrientation":"","evidenceReferences":"","uncertainty":""},"pleatZone":{"patternBehavior":"","borderBehavior":"","embellishmentBehavior":"","hasSpecialPanel":false},"blouse":{"hasBlouse":false,"color":"","fabric":"","frontConstruction":"","backConstruction":"","neckline":"","sleeves":"","ties":"","closure":"","embroidery":"","border":"","pattern":"","fit":"","isUnstitchedPiece":false},"physics":{"weight":"","stiffness":"","fluidity":"","transparency":"","shine":"","creaseBehavior":"","expectedFall":""},"regionEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeDrapePlan":{"baseDrapeFamily":"","shoulderSide":"","waistTuck":"","frontPleatTreatment":"","palluShoulderPlacement":"","openOrPleatedPallu":"","palluSpread":"","palluFallDirection":"","palluVisibleLength":"","handInteraction":"","movementAmount":"","pinningBehavior":"","borderVisibility":"","blouseVisibility":"","coverageConstraints":"","poseSpecificDrapeState":""},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":"","seatedPoseRequired":"no","seatedPoseReason":"","closeupMode":"face_and_detail","closeupHeroDetail":""},"showcasePlan":{"heroFeature":"","featureRegion":"","shotType":"","whyItSells":"","evidenceReference":"","framing":"","cameraAngle":"","bodyPosition":"","handPlacement":"","expression":"","distinctFrom":"","visibilityRules":[]},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"angled","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"back","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"creative","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"closeup","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"showcase","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""}]}  `;
 }
 
 export const CONSISTENCY_RULES = [
@@ -1511,7 +1575,10 @@ export const CONSISTENCY_RULES = [
 // (Bengali saree pallu placement, ethnic saree drape, kurti fit/length/sleeve,
 // playful short-kurti/top framing) and the configurable bottom-wear
 // presentation, so a cached v20 plan would still be a five-pose plan.
-export const ANALYSIS_VERSION = "generation-session-v21-six-pose-garment-aware";
+// v22 makes the sixth frame's subject a per-SKU decision recorded in
+// showcasePlan instead of one of four fixed intents, so a cached v21 plan would
+// still carry the fixed "complete set" brief that duplicated the hero frame.
+export const ANALYSIS_VERSION = "generation-session-v22-showcase-feature-chosen";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

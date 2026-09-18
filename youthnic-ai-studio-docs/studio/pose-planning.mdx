@@ -61,12 +61,11 @@ Filename: studio-six-pose-plan-strip.webp]
     <br/>**Focus**: Macro depth-of-field, soft background blur.
   </Card>
 
-  <Card title="Pose 6: Garment-Led Showcase (Category Aware)" icon="shirt">
-    **Framing**: Chosen by the garment family the analysis detected, so this frame always sells what the buyer actually judges.
-    <br/>**Saree (Bengali or other traditional)**: a drape-led frame. The pallu/aanchal is placed exactly as the drape plan states, opened low and flat so its artwork, end treatment and border read; pleats stay flat and vertical, the hem border stays level. A Bengali saree additionally holds the upright, serene posture with the aanchal over its recorded shoulder.
-    <br/>**Kurti / kurta set, lehenga, or any outfit with bottom wear**: a head-to-toe frame proving the top and the bottom wear are one coordinated set - top from shoulder seam to hem AND bottom wear from waistband to hem in a single frame, footwear grounded.
-    <br/>**Short kurti, top, or western/casual**: a playful, natural, lively moment that plays against the backdrop this shoot already established - a light step, a turn, a relaxed lean, a genuine mid-laugh - with no new props invented.
-    <br/>**Standalone long kurti, dress, or gown**: a full-length frame proving true fall, fit and length, hem level and complete in frame.
+  <Card title="Pose 6: Feature Showcase (Chosen Per Product)" icon="shirt">
+    **Framing**: Decided by the analysis, not by a template. The vision model inspects the product references, picks the ONE feature a buyer actually judges this product by, and designs this frame around it.
+    <br/>**What it can pick**: an embroidered or sequinned yoke, a neckline construction, a sleeve treatment, a print's scale and repeat, the cut and flare of the bottom wear, a hem or border, a dupatta's print/border/length/drape, a saree's pallu, drape style, border or blouse — or any other genuinely distinguishing detail.
+    <br/>**Shot type**: also chosen — `macro_detail` (fill the frame), `half_body_detail` (crop to the section it sits on), `full_body_feature` (needs the whole garment: flare, length, fall), `drape_feature` (a held or spread panel), or `movement_feature` (fall and flare in motion).
+    <br/>**Non-duplication (enforced)**: it may not be a second hero shot, and it may not re-shoot Pose 5's subject. If the strongest feature is already Pose 5's close-up subject, the frame is automatically widened so it shows how that feature sits on the worn garment instead of re-cropping the same detail.
   </Card>
 </CardGroup>
 
@@ -87,6 +86,23 @@ Body language is selected from the garment category, never from a generic ethnic
 | Dress / gown / western-casual | Relaxed current body language showing the complete silhouette, hem level and in frame |
 
 ---
+
+---
+
+## How Pose 6 Is Chosen, and How It Learns
+
+The sixth frame is the only one without a fixed job, and the analysis records its decision in `showcasePlan`: the named feature, its garment region, the shot type, why it sells, the reference that proves it, and one line stating how the frame differs from Poses 1 and 5.
+
+Those decisions are scored by what your team actually does with them:
+
+| Signal | Recorded as |
+| --- | --- |
+| A reviewer approves the sixth pose version, or approves the whole set | `selected` |
+| A reviewer rejects the sixth pose version | `rejected` |
+| Anyone asks for the sixth pose to be regenerated | `regenerated` |
+| Automatic QA refuses the sixth pose | `qa_failed` |
+
+Counts are kept per organization, category, garment family, feature region and shot type — never per SKU — and fed back into later analyses as a short "what this team kept and threw away" note. It breaks ties between comparably strong features and steers away from a framing your team keeps sending back. It is house taste, not product truth: when the references clearly make a different feature the strongest one, the analysis follows the references.
 
 ## Bottom-Wear Presentation
 
