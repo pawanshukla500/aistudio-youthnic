@@ -1,5 +1,5 @@
 import { type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.112.2";
-import { type JsonRecord } from "./profiles.ts";
+import { REQUIRED_POSE_IDS, type JsonRecord } from "./profiles.ts";
 import { buildCatalogStageTimeline } from "./lib/catalogStageTimeline.ts";
 import { PRODUCT_REFERENCE_ROLES, isSareeReferenceSet, missingRequiredReferenceLabels, selectCurrentCatalogProductReferences } from "./lib/referencePolicy.ts";
 
@@ -64,7 +64,9 @@ function assertQueryResults(results: unknown[], context: string) {
   if (failure) throw new Error(`${context}: ${failure.message || "database operation failed"}`);
 }
 
-const POSE_IDS = ["full_front", "angled", "back", "creative", "closeup"] as const;
+// Shared with the pose plan itself: a private copy silently mapped a rejected
+// sixth frame onto the close-up rule when the plan grew past five poses.
+const POSE_IDS = REQUIRED_POSE_IDS;
 
 export function humanProductLearningGuidance(comments: string) {
   // The full human comment remains in qa_reviews, catalog_asset_reviews and
