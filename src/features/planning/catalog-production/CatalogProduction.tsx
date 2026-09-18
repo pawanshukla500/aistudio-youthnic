@@ -682,10 +682,10 @@ export function CatalogProduction() {
 
       <ActionDialog
         open={Boolean(qcDialog)}
-        title={qcDialog?.decision === "rejected" ? "Request re-generation" : "Approve five-pose set"}
+        title={qcDialog?.decision === "rejected" ? "Request re-generation" : "Approve pose set"}
         description={qcDialog?.decision === "rejected"
           ? "Explain exactly what failed so the generation owner has actionable guidance. This decision is added to the SKU activity history."
-          : "Confirm that the latest five pose versions meet catalog and marketplace requirements. Your note will be visible to the Listing Team."}
+          : "Confirm that the latest pose versions meet catalog and marketplace requirements. Your note will be visible to the Listing Team."}
         confirmLabel={qcDialog?.decision === "rejected" ? "Reject and request changes" : "Approve final set"}
         tone={qcDialog?.decision === "rejected" ? "danger" : "primary"}
         busy={Boolean(qcDialog && busyKey === `qc:${qcDialog.id}`)}
@@ -713,7 +713,7 @@ export function CatalogProduction() {
         title={generationDialog?.mode === "ready" ? "Start all ready SKUs" : "Start selected generation"}
         description={generationDialog?.mode === "ready"
           ? `Queue ${generationDialog.ids.length} ready SKU${generationDialog.ids.length === 1 ? "" : "s"}. Items awaiting references, blocked items, and rejected sets are excluded.`
-          : `Queue the ${generationDialog?.ids.length || 0} selected SKU${generationDialog?.ids.length === 1 ? "" : "s"} for five-pose generation.`}
+          : `Queue the ${generationDialog?.ids.length || 0} selected SKU${generationDialog?.ids.length === 1 ? "" : "s"} for pose generation.`}
         confirmLabel={`Start ${generationDialog?.ids.length || 0} generation task${generationDialog?.ids.length === 1 ? "" : "s"}`}
         busy={busyKey === "bulkGenerate" || busyKey === "autoStart"}
         onCancel={() => { if (!busyKey) setGenerationDialog(null); }}

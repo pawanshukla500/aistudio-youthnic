@@ -77,7 +77,7 @@ const managedAiPurposes: Array<{ purpose: AiPolicyPurpose; label: string; descri
   {
     purpose: "product_truth",
     label: "Product truth & pose planning",
-    description: "Analyzes the authoritative product references and builds the five-pose plan before paid image generation.",
+    description: "Analyzes the authoritative product references and builds the six-pose plan before paid image generation.",
   },
   {
     purpose: "qa",

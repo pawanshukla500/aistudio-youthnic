@@ -37,7 +37,7 @@ export function PosePlan({
           <div>
             <h2 className="text-base font-bold text-on-surface">Poses</h2>
             <p className="mt-0.5 text-xs text-secondary">
-              {ready ? `${enabledCount}/5 ready from Gemini` : stale ? "Stale - rebuilding automatically" : "Waiting for product analysis"}
+              {ready ? `${enabledCount}/${poses.length || 6} ready from Gemini` : stale ? "Stale - rebuilding automatically" : "Waiting for product analysis"}
             </p>
           </div>
         </div>
@@ -48,12 +48,12 @@ export function PosePlan({
         <div className="space-y-4 border-t border-outline-variant/30 bg-white/50 p-5">
           {!ready && (
             <div className="rounded-lg border border-outline-variant/50 bg-surface-container-low px-3 py-2 text-xs text-secondary">
-              Generation remains locked until Gemini has created the current five-pose plan.
+              Generation remains locked until Gemini has created the current six-pose plan.
             </div>
           )}
 
           {/* Horizontal pose selector row */}
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
             {poses.map((pose, index) => {
               const active = selected?.id === pose.id;
               return (

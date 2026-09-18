@@ -6,7 +6,7 @@ This document records the operational audit completed before the Catalog Product
 
 Live baseline on 24 August 2026:
 
-- Catalog Planning creates `planning_batches` and one `planning_requests` row per colourway/SKU. A batch stores the campaign and shared generation settings; each SKU stores front/back readiness, analysis, the five-pose plan, queue state, and the current generation job.
+- Catalog Planning creates `planning_batches` and one `planning_requests` row per colourway/SKU. A batch stores the campaign and shared generation settings; each SKU stores front/back readiness, analysis, the six-pose plan, queue state, and the current generation job.
 - Reference and generated files are stored in Firebase Storage. Supabase stores their URLs, paths, hashes, role, and generation metadata in `planning_assets`, `catalog_sessions`, and `session_generations`.
 - A durable worker processes `generation_jobs`. Five `session_generations` rows hold the current pose outputs. `ai_runs` and `qa_reviews` hold provider and automatic-QA telemetry.
 - Database triggers copy generation state into `catalog_work_items`. Catalog Production then supplies assignment, human QC, Listing Team completion, Excel import, and reconciliation actions.
@@ -20,8 +20,8 @@ Live baseline on 24 August 2026:
 1. A manager creates a catalog in Planning and optionally links a campaign/event.
 2. Multiple SKU/colourway lines are added.
 3. Shared style/model direction and SKU front/back references are uploaded.
-4. Gemini preflight validates product truth and produces a five-pose plan.
-5. The catalog is scheduled or started; a durable generation job produces five pose rows.
+4. Gemini preflight validates product truth and produces a six-pose plan.
+5. The catalog is scheduled or started; a durable generation job produces six pose rows.
 6. Automatic QA runs during generation. Generation completion creates or updates a Catalog Production work item.
 7. A manager may assign generation and listing owners.
 8. A reviewer passes or rejects the SKU as a single unit.
@@ -38,7 +38,7 @@ Live baseline on 24 August 2026:
 | Structured creative brief | Batch settings and free-form directions | Store a queryable creative-direction record with mood, model, styling, pose, background, lighting, composition, and marketplace requirements |
 | Thirteen business stages | Four coarse status columns | Persist one canonical workflow stage, progress, next action, blocked reason, and stage entry/exit timing |
 | Complete activity trail | Status-change events only | Add actor-aware comments, assignments, approvals, rejections, failures, regenerations, and handoff/delivery events |
-| Five-pose versioning | One mutable row per pose plus JSON history | Create immutable pose-version records and human review rows while retaining the current output rows for compatibility |
+| Pose versioning | One mutable row per pose plus JSON history | Create immutable pose-version records and human review rows while retaining the current output rows for compatibility |
 | Stable Listing Team package | Individual current pose links and ZIP action | Create a stable SKU handoff record that resolves to the five approved pose versions |
 | Approval-based daily email | Prior-day generation-complete email | Select unsent final approvals, use business-day/timezone settings, keep delivery attempts, and never create an empty delivery |
 | Live production status | 15-second polling | Publish work, event, asset-version, handoff, and delivery tables to Realtime and retain a low-frequency recovery poll |
@@ -103,13 +103,13 @@ Stage definitions are database records; work items and activity timestamps deter
 
 ### Phase 3 — live Flow and production UI
 
-- Make the operational timeline the default Flow View, with responsive summary, progress, ownership, stage timing, dependencies, errors, five-pose detail, and activity.
+- Make the operational timeline the default Flow View, with responsive summary, progress, ownership, stage timing, dependencies, errors, six-pose detail, and activity.
 - Add search, filters, sort, list/Kanban/flow views, active-first ordering, detail panel, loading/empty/error/success states, and working actions.
 - Acceptance: the UI updates from Realtime, works at desktop and mobile widths, and contains no decorative buttons.
 
 ### Phase 4 — approval handoff and email administration
 
-- Freeze a five-pose handoff only after final approval.
+- Freeze a six-pose handoff only after final approval.
 - Select all unsent approvals before the current local-day cutoff, including late/weekend approvals, and label the delivery with the previous configured business day.
 - Skip empty deliveries; keep an idempotent item record and one attempt row for every send/resend. Revalidate the frozen approval immediately before provider delivery so a concurrently rejected package is skipped instead of emailed.
 - Acceptance: the same handoff is not included twice by automation, failed sends can retry without colliding with their existing item reservation, manual preview/send/resend is permission-controlled, and delivery history exposes recipients, timestamps, attempts, and errors.
@@ -125,7 +125,7 @@ Stage definitions are database records; work items and activity timestamps deter
 The implementation was verified locally on 24 August 2026 with:
 
 - `oxlint` across the React source.
-- A workflow contract test covering all thirteen stage records, tenant-scoped tables, RLS/storage declarations, Realtime publication, latest-version/five-pose approval gates, immutable delivered revisions, implemented UI actions, idempotent retry reservations, pre-send approval revalidation, and the no-empty-email rule.
+- A workflow contract test covering all thirteen stage records, tenant-scoped tables, RLS/storage declarations, Realtime publication, latest-version/full-pose-set approval gates, immutable delivered revisions, implemented UI actions, idempotent retry reservations, pre-send approval revalidation, and the no-empty-email rule.
 - Seven Deno tests: five business-calendar cases plus visit-aware stage timing, re-generation re-entry, and legacy duration reconstruction.
 - Deno type checking for the complete `app-api` Edge Function.
 - SQL parsing for all 109 statements in the immutable base migration plus all 39 statements in the additive hardening migration, including production-advisor FK indexes, assignment-history synchronization, Storage trigger refresh, tenant-relationship guards, and deployment assertions.
@@ -147,7 +147,7 @@ The base V2 migration, Edge Function, and client were deployed from the merged i
 After deployment, run `npm run verify:catalog-workflow:live` with:
 
 - `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`.
-- `CATALOG_TEST_WORK_ITEM_ID` pointing to a realistic five-pose catalog item in the primary test organization.
+- `CATALOG_TEST_WORK_ITEM_ID` pointing to a realistic six-pose catalog item in the primary test organization.
 - Fresh Firebase ID tokens for `CATALOG_TEST_MANAGER_JWT`, `CATALOG_TEST_GENERATOR_JWT`, `CATALOG_TEST_REVIEWER_JWT`, `CATALOG_TEST_LISTING_JWT`, `CATALOG_TEST_VIEWER_JWT`, and `CATALOG_TEST_OTHER_ORG_JWT`.
 
 The first five users must share one organization and default to the Planning Manager, Creative Team, Review Team, Listing Team, and Viewer roles. The final user must belong to a different organization. Optional `CATALOG_TEST_*_ROLE` values override those expected role slugs. The command is non-destructive: it reads one supplied workflow, probes invalid IDs for role boundaries, verifies direct server-owned writes are denied, checks cross-tenant database and Storage reads return no rows, and audits visible notification addressing.

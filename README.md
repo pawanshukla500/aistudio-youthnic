@@ -2,7 +2,7 @@
 
 Production additions now include grounded national/state-wise event intelligence, configurable Supabase Cron monthly reports and advance reminders, instruction-aware pose regeneration, readiness state tracking, OpenAI organization Usage/Costs synchronization, 14-day dashboard analytics, self-service profiles, and an optimized GitHub Actions → Cloud Run release path. See [Production deployment](docs/PRODUCTION_DEPLOYMENT.md) for required secrets, migration/deployment commands, and the low-cost Cloud Run configuration.
 
-Youthnic AI Studio creates a consistent five-image fashion catalog photoshoot from product references. Firebase owns authentication and media storage. Supabase owns the application database, authorization, queues, schedules, learning data, and server-side AI orchestration.
+Youthnic AI Studio creates a consistent six-image fashion catalog photoshoot from product references. Firebase owns authentication and media storage. Supabase owns the application database, authorization, queues, schedules, learning data, and server-side AI orchestration.
 
 Convex is no longer a runtime dependency of this application.
 
@@ -17,7 +17,7 @@ Convex is no longer a runtime dependency of this application.
 | Browser data access and organization isolation | Supabase Data API + PostgreSQL RLS |
 | Secure AI calls, administration, generation workers | Supabase Edge Function `app-api` |
 | Scheduled catalog processing and stale-job recovery | Supabase Cron + `pg_net` |
-| Product/reference analysis and five-pose planning | Gemini Vision |
+| Product/reference analysis and six-pose planning | Gemini Vision |
 | Final image generation | OpenAI `gpt-image-2.5-sunburst` (default high-fidelity/memory), `gpt-image-2.5-flare` (high speed), `gpt-image-2` |
 | Consistency validation and retry decisions | Gemini Vision QA |
 
@@ -27,10 +27,11 @@ The frontend sends the current Firebase ID token to Supabase. RLS maps the Fireb
 
 1. Upload the required front and back product images. Fabric/pattern detail, additional product photos, and style references are optional.
 2. Gemini analyzes every labeled reference and creates a structured Product Identity Profile and Creative Direction Profile.
-3. Gemini creates a garment-specific five-pose plan: hero front, side/three-quarter, authoritative back, creative Gen-Z editorial, and product-detail close-up.
+3. Gemini creates a garment-specific six-pose plan: hero front, side/three-quarter, authoritative back, creative Gen-Z editorial, product-detail close-up, and a garment-led showcase frame.
+   - The showcase frame adapts to the detected garment family: a drape-led pallu frame for sarees (with Bengali drape posture and aanchal placement when the weave or drape says Bengali), a head-to-toe top-and-bottom frame when the outfit includes bottom wear, a playful backdrop-matched moment for short kurtis and tops, and a full-length fall/fit frame for standalone long kurtis and dresses.
 4. The analysis and plan are fingerprinted. Changing any reference marks both stale and generation cannot start until they are rebuilt.
 5. A persistent generation session locks the product, model identity, face, hair, styling, scene, lighting, accessories, footwear, ratio, and pose plan.
-6. Supabase claims one generation task at a time. Pose 1 becomes the approved visual anchor for poses 2–5, but original product references always remain the highest-priority source of truth.
+6. Supabase claims one generation task at a time. Pose 1 becomes the approved visual anchor for poses 2–6, but original product references always remain the highest-priority source of truth.
 7. Each pose is generated with `gpt-image-2.5-sunburst` (or user/tenant configured model), checked against the product profile and set identity, and retried automatically when QA fails.
 
 Every new completed image is uploaded to the private `catalog-assets` Supabase Storage bucket before the pose is marked complete. Supabase stores the durable object path, generation status, prompt/QA metadata, provider request ID, reported token usage, and calculated cost. Readers mint short-lived signed URLs; historical Firebase paths remain readable and cleanup is backend-aware during migration. Deleting a job from History removes its database records and generated objects from the recorded backend; stopping a job preserves images that already completed.
@@ -42,11 +43,11 @@ Every new completed image is uploaded to the private `catalog-assets` Supabase S
 - Missing optional legacy references are skipped with a server warning. Missing front or back product truth remains a hard failure.
 - Once every colourway is ready, a saved preferred generation time is armed automatically. If that time is already due, the sequential catalog worker starts without another click.
 - `ai-studio-catalog-preflight` runs every two minutes as a recovery net for uploads made before a browser was closed or during transient delivery failures.
-- Catalog generation uses one active OpenAI image attempt at a time. Each colourway receives the same locked model, scene, camera/lighting continuity, and five-pose grammar while retaining its own front/back product truth.
+- Catalog generation uses one active OpenAI image attempt at a time. Each colourway receives the same locked model, scene, camera/lighting continuity, and six-pose grammar while retaining its own front/back product truth.
 
 ## Generation controls and accounting
 
-History and Studio show the live pose number, completed count, and percentage. A running job can be stopped safely, and History provides explicit stop/delete controls, per-image large preview, individual download, and ZIP download. History is server-paginated newest-first at 10 jobs per page; search and status filters run in Supabase before the page is returned. Only the visible page thumbnails and the five images of an expanded job are requested from Firebase.
+History and Studio show the live pose number, completed count, and percentage. A running job can be stopped safely, and History provides explicit stop/delete controls, per-image large preview, individual download, and ZIP download. History is server-paginated newest-first at 10 jobs per page; search and status filters run in Supabase before the page is returned. Only the visible page thumbnails and the images of an expanded job are requested from Firebase.
 
 When the Images API returns a `usage` object, the worker stores input text tokens, input image tokens, total input tokens, output tokens, total tokens, and the OpenAI request ID for each attempt and pose. “Actual cost” is calculated from those provider-reported tokens using the public rate for the selected GPT Image model. If OpenAI omits usage, the UI says that usage was not reported and does not invent a token count or fake actual cost. The original estimate remains visible separately.
 
@@ -56,7 +57,8 @@ Defaults:
 
 - Aspect ratio: `3:4`
 - GPT Image 2 quality: `medium`
-- Shoot size: 5 images
+- Shoot size: 6 images
+- Bottom wear: `auto` (follow the product references; `included` forces full-body top + bottom frames, `top only` forbids an invented matching bottom)
 - Generation order: sequential
 - Product truth priority: front, back, fabric/pattern, additional product, structured profile, approved anchor, then style-only references
 

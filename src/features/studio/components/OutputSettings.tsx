@@ -132,6 +132,15 @@ export function OutputSettings({
               <option value="Premium outdoor editorial scene with natural golden-hour lighting">Outdoor editorial</option>
             </select>
           </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-secondary">Bottom wear</label>
+            <select value={value.bottomWear} onChange={(event) => set("bottomWear", event.target.value as OutputOptions["bottomWear"])} className="h-10 w-full rounded-md border border-outline-variant bg-white px-3 text-sm outline-none focus:border-primary">
+              <option value="auto">Auto · detect from the product references</option>
+              <option value="included">Outfit includes bottom wear · full-body top + bottom frames</option>
+              <option value="top_only">Top only · never invent matching bottom wear</option>
+            </select>
+            <p className="mt-1.5 text-[11px] leading-4 text-secondary">Kurti/kurta sets with pants, palazzo, skirt or salwar get full-body poses showing both pieces. Top-only keeps the bottom plain and neutral so it never reads as part of the product.</p>
+          </div>
           <label className="flex cursor-pointer items-center justify-between border-t border-outline-variant/30 pt-4">
             <span>
               <span className="block text-[13px] font-semibold text-on-surface">Enable Pose QA</span>

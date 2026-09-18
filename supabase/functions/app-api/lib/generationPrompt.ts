@@ -1,16 +1,24 @@
 import {
   CLOSEUP_PRODUCT_DETAIL,
   CONSISTENCY_RULES,
-  hasRecordedBottomWear,
-  isFarshiBottomWear,
   isSeatedEditorialPoseDemanded,
+  normalizeShowcaseIntent,
   normalizeStylingPlan,
-  recordedBottomWearDetails,
   resolveCloseupMode,
   type JsonRecord,
+  type ShowcaseIntent,
   type StudioPose,
   sanitizeDetailPlacementMap,
 } from "./profiles.ts";
+import {
+  type BottomCutClass,
+  type BottomWearPresentation,
+  detectGarmentPoseFamily,
+  type GarmentPoseFamily,
+  garmentPoseDirection,
+  isSareePoseFamily,
+  resolveBottomWearPresentation,
+} from "./garmentPoses.ts";
 import { isDirectBackProductRole, roleLabel } from "./referencePolicy.ts";
 
 export type PromptReference = { role: string };
@@ -130,13 +138,18 @@ function canonicalSareeDrapePlan(value: unknown) {
   ]);
 }
 
-function productCore(value: JsonRecord) {
+function productCore(value: JsonRecord, includesBottomWear = true) {
   // These fields have dedicated evidence/geometry/saree sections below. Keeping
   // them out of the generic snapshot prevents the same Product Truth from being
   // sent two or three times while preserving every authoritative fact once.
-  return knownFields(value, [
+  const core = knownFields(value, [
     "garmentFamily", "category", "mainColor", "secondaryColors", "fabric", "pattern", "print", "texture", "neckline", "sleeveType", "length", "fit", "silhouette", "frontConstruction", "backConstruction", "buttons", "zippers", "pockets", "embroidery", "logos", "accessoriesIncluded", "bottomWearDetails", "footwearDetails", "invariantDetails", "uncertaintyNotes",
   ]);
+  // A top-only shoot must not carry a recorded bottom-wear specification into the
+  // locked-product snapshot: that would contradict the top-only instruction and
+  // invite exactly the coordinated bottom the setting exists to prevent.
+  if (!includesBottomWear) delete core.bottomWearDetails;
+  return core;
 }
 
 function requiredJsonSection(section: string, value: unknown, maxChars: number) {
@@ -166,12 +179,12 @@ function rearEvidenceOnly(evidence: JsonRecord[]) {
   });
 }
 
-function rearOnlyProductCore(product: JsonRecord) {
+function rearOnlyProductCore(product: JsonRecord, includesBottomWear = true) {
   // Do not pass global profile fields into a true-back frame. Older analyses can
   // contain a legitimate front detail (for example lace at the front hem) that
   // lacks field-level rear provenance. The direct rear image must decide every
   // rear product detail, including the absence of decoration.
-  const bottomWear = String(product.bottomWearDetails || "").trim();
+  const bottomWear = includesBottomWear ? String(product.bottomWearDetails || "").trim() : "";
   return {
     garmentFamily: String(product.garmentFamily || ""),
     ...(bottomWear ? { bottomWearDetails: bottomWear } : {}),
@@ -216,7 +229,7 @@ function compactOptionalPromptContent(prompt: string) {
   compacted = compactPromptBlock(compacted, "User notes: ", ["\nReference authority:"], 400);
   compacted = compactPromptBlock(
     compacted,
-    "\nAPPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in all five frames:\n",
+    "\nAPPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in every frame:\n",
     ["\n\nALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:"],
     1_200,
   );
@@ -287,6 +300,12 @@ export function compactFullPromptSafely(prompt: string): string {
     "\nREALISTIC INTEGRATION:\n",
     ["\nPROHIBITED UNRELATED CHANGES:"],
     800,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "GARMENT POSE GRAMMAR (",
+    ["\nSTYLE REFERENCE SITTING OVERRIDE", "\nSEATED EDITORIAL POSE REQUIREMENT", "\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:", "\n\nPROMPT:"],
+    900,
   );
   compacted = compactPromptBlock(
     compacted,
@@ -390,6 +409,7 @@ function poseCategoryRules(category: string) {
 - PLAYFUL / DETAIL POSE: Focus on charm, product interaction, or detail showcase.
 - Expression should be warm, joyful, or confident.
 - Framing might be slightly cropped or closer to highlight a specific feature.`,
+    showcase: "",
     generic: "",
   }[category] || "";
 }
@@ -402,10 +422,94 @@ function pose5HardRule(args: { closeupMode: string; heroDetail: string }) {
   return `- POSE 5 HARD RULE (FACE + PRODUCT DETAIL): genuine ZOOMED-IN face-to-chest or face-to-waist shot - tighter than the hero pose, never a full-body repeat. The face is sharp with a natural Gen-Z expression, AND ${detail} must occupy a LARGE, sharp, catalog-readable portion of the same frame - not a tiny hint of embroidery under a beauty close-up.`;
 }
 
+/**
+ * Only the guard that matches the recorded cut is sent. Emitting every family's
+ * prohibition on every prompt cost ~1.2k characters of the 31.5k budget and
+ * diluted the one rule that actually applies to this SKU.
+ */
+function bottomWearSubstitutionGuard(cutClass: BottomCutClass) {
+  const guards: Record<BottomCutClass, string> = {
+    farshi:
+      "- FARSHI / FARSI HARD LOCK: extremely voluminous floor-length trousers with TWO DISTINCT LEGS, heavy vertical pleating or gathers from the waist/hip, and architectural volume that flares and may trail or pool at the floor. You are STRICTLY FORBIDDEN from rendering palazzo, plain wide-leg pants, a lehenga/skirt (one circular flare with no leg split), dhoti pants, tulip pants, harem pants, Afghani salwars, or any pants that taper or gather into an ankle cuff. Never flatten the volume, and keep the exact recorded motif field at its recorded physical scale - a pretty palazzo or a skirt-like flare is a failed generation even if the top and the model face are perfect.",
+    palazzo:
+      "- PALAZZO HARD LOCK: the legs fall wide and straight or softly flared, with two distinct legs and no farshi-level pooling or skirt merge. Do NOT substitute farshi, lehenga/skirt, dhoti, tulip, harem, churidar, or an ankle-cuffed salwar.",
+    sharara_gharara:
+      "- SHARARA / GHARARA HARD LOCK: the flare begins at or below the knee exactly as recorded (a gharara additionally keeps its ruched/gote knee joint). Do NOT substitute straight trousers, palazzo, farshi, lehenga/skirt, or a salwar.",
+    salwar_churidar:
+      "- SALWAR / CHURIDAR / PATIALA HARD LOCK: keep the recorded pleat volume and the narrow ankle finish (poncha cuff, or the gathered churi rings at the calf and ankle). Do NOT substitute palazzo, farshi, straight trousers, or a skirt.",
+    straight_trouser:
+      "- STRAIGHT / CIGARETTE TROUSER HARD LOCK: the legs fall straight and tailored to the recorded hem. Do NOT flare them into palazzos, gather them into a salwar, or taper them into a churidar.",
+    skirt_lehenga:
+      "- SKIRT / LEHENGA HARD LOCK: one continuous flare with NO separate trouser legs, keeping the recorded panel structure, volume and hem weight. Do NOT substitute trousers, palazzo, farshi, or sharara.",
+    other:
+      "- BOTTOM-WEAR FAMILY LOCK: reproduce the exact recorded cut and silhouette. Never swap it for a different bottom-wear family (palazzo, farshi, lehenga/skirt, dhoti, tulip, harem, churidar or salwar) and never simplify its volume.",
+    none: "",
+  };
+  return guards[cutClass] || guards.other;
+}
+
+function bottomWearSection(args: {
+  bottomWear: BottomWearPresentation;
+  isSaree: boolean;
+  hasBottomReference: boolean;
+}) {
+  if (args.isSaree) return "";
+  if (!args.bottomWear.includesBottomWear) {
+    const reason = args.bottomWear.mode === "top_only"
+      ? "The shoot was configured as TOP ONLY."
+      : "The product references prove no bottom garment ships with this SKU.";
+    return `TOP-ONLY PRODUCT - DO NOT INVENT A MATCHING SET:
+- This SKU is the upper garment only. ${reason}
+- STRICTLY FORBIDDEN: rendering coordinated or "matching" bottom wear. Never give the bottoms this product's print, motif, embroidery, border, colour blocking, fabric or trim, and never render anything that would read as a second product piece the customer expects to receive.
+- Style the model in one simple, plain, solid, unbranded bottom in a quiet neutral tone that suits the garment and the set (or the bottom the approved styling plan names). It stays visually subordinate at all times.
+- Frame every pose so the upper garment - its neckline, sleeves, fit, print and hem line - remains the subject.${args.bottomWear.mode === "top_only" && args.bottomWear.recordedInAnalysis ? "\n- The analysis recorded bottom-wear details for this SKU, but the shoot is configured TOP ONLY. Present the top as the product and keep the bottom neutral and non-matching." : ""}`;
+  }
+  const guard = bottomWearSubstitutionGuard(args.bottomWear.cutClass);
+  return `LOCKED BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT - HIGHEST FIDELITY:
+Bottom wear specification: ${boundedText(args.bottomWear.details, 1_200)}
+${args.hasBottomReference ? "- A dedicated BOTTOM WEAR / FARSHI image is in the reference manifest. That image is the pixel-level authority for bottom-wear cut, volume, hem, fabric color, and print. Copy it literally onto the worn trousers/skirt." : "- Read bottom-wear cut, volume, hem, fabric color, and print from FRONT, BACK, MANNEQUIN, and ADDITIONAL product images where the trousers/skirt are visible. Do not invent a simpler palazzo or a solid/plain bottom."}
+- MANDATORY SILHOUETTE PRESERVATION: render the EXACT bottom wear cut, silhouette, leg volume, leg structure, pleat/gather architecture, and hem construction described above and shown in the product references, in EVERY pose.
+- ABSOLUTE PROHIBITION ON SILHOUETTE SUBSTITUTION:
+${guard}
+- COLOR & PRINT TRANSFER: copy the exact base fabric color, sheen, and motif geometry of the bottom wear from the bottom-visible product references. Large-scale metallic florals/bootas must remain large-scale metallic florals/bootas at the same physical size and density. You are STRICTLY FORBIDDEN from rendering the bottoms as solid/undecorated color, as faint dots/speckles, or as a miniaturized micro-print when the references show bold motifs. Never use the kurta/upper FABRIC / PATTERN DETAIL close-up as the bottom print.
+- FULL-BODY READABILITY: in every full or three-quarter body frame the bottom wear must be visible from waistband to hem with the footwear grounded, and the join where the top's hem meets the bottom must not be hidden by hands, hair, or a dupatta.`;
+}
+
+function garmentPoseFamilyHeading(family: GarmentPoseFamily) {
+  return family.replace(/_/g, " ").toUpperCase();
+}
+
+function showcaseIntentFor(args: {
+  creative: JsonRecord;
+  family: GarmentPoseFamily;
+  includesBottomWear: boolean;
+}): ShowcaseIntent {
+  const recorded = normalizeShowcaseIntent(args.creative.showcaseIntent ?? args.creative.showcase_intent);
+  if (recorded) return recorded;
+  if (isSareePoseFamily(args.family)) return "saree_drape";
+  if (args.includesBottomWear || args.family === "kurta_set" || args.family === "lehenga") return "set_full_length";
+  if (args.family === "short_kurti_top" || args.family === "western_casual") return "playful_backdrop";
+  return "full_length_silhouette";
+}
+
+function showcaseHardRule(intent: ShowcaseIntent, family: GarmentPoseFamily) {
+  if (intent === "saree_drape") {
+    const bengali = family === "saree_bengali";
+    return `- SHOWCASE FRAME HARD RULE (DRAPE-LED): this frame sells the drape. The pallu${bengali ? " (aanchal)" : ""} is the subject - place it exactly as the drape plan states (same shoulder, same fall direction, same visible length) and open it low and flat so its artwork, motif scale, end treatment and border are completely readable. Front pleats stay flat, evenly stacked and vertical; upper and lower borders stay continuous and identical in width; the hem border stays level. No hand, arm, hair or prop crosses the pallu artwork.${bengali ? " Hold the upright, serene Bengali posture - level shoulders, tall spine, small deliberate movement." : ""} Never a repeat of the hero framing.`;
+  }
+  if (intent === "set_full_length") {
+    return "- SHOWCASE FRAME HARD RULE (COMPLETE SET): one head-to-toe frame that proves the top and the bottom wear are a single coordinated set. The top must read from shoulder seam to hem at its true length and fit, AND the bottom wear must read from waistband to hem with its exact cut, leg volume, pleat architecture, hem finish, colour and print. Footwear is grounded and fully visible. Nothing may crop the hem or the footwear.";
+  }
+  if (intent === "playful_backdrop") {
+    return "- SHOWCASE FRAME HARD RULE (PLAYFUL, SET-MATCHED): natural, candid, lively body language that interacts with the backdrop and props ALREADY established in this shoot - a light step, a turn, a shoulder tilt, a relaxed lean on an element already present, a genuine mid-laugh. Introduce no new prop, furniture, plant or architecture. However playful the pose, the neckline, sleeve shape, hem line, fit and print stay unobstructed, uncrumpled and in frame.";
+  }
+  return "- SHOWCASE FRAME HARD RULE (TRUE FALL AND LENGTH): a full-length frame proving the garment's real fall, fit and length. Side seams hang straight, the hem stays level and complete inside the frame, and the garment is never hitched, tucked, gathered or shortened. Footwear grounded and visible.";
+}
+
 export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
   session: JsonRecord; references: PromptReference[]; correction?: string; learnings?: string; fashionKnowledge?: string;
-  generationMemory?: string;
+  generationMemory?: string; bottomWearMode?: unknown;
 }) {
   const product = objectValue(args.session.productIdentity);
   const creative = objectValue(args.session.creativeDirection);
@@ -432,7 +536,26 @@ export function composeGenerationPrompt(args: {
     ? (isTrueBack ? rearOnlySareeTruth(evidence) : canonicalSareeTruth(product.sareeTruth))
     : undefined;
   const sareeDrapePlan = isSaree && !isTrueBack ? canonicalSareeDrapePlan(product.sareeDrapePlan) : undefined;
-  const productCoreJson = compactJson(isTrueBack ? rearOnlyProductCore(product) : productCore(product), { maxString: 360, maxItems: 16, maxKeys: 32 });
+  const poseFamily = detectGarmentPoseFamily({
+    productIdentity: product,
+    category: String(product.category || args.session.category || ""),
+    productDetails: String(args.productDetails || ""),
+    skuName: String(args.skuName || ""),
+  });
+  // Analysis records what the references prove; the shoot option records how the
+  // merchandiser wants it presented. "auto" keeps them in sync, an explicit
+  // choice wins, and a top-only shoot never gets an invented matching set.
+  const bottomWear = resolveBottomWearPresentation({
+    mode: args.bottomWearMode ?? args.session.bottomWearMode ?? args.session.bottom_wear_mode,
+    productIdentity: product,
+  });
+  const isShowcase = args.pose.id === "showcase";
+  const productCoreJson = compactJson(
+    isTrueBack
+      ? rearOnlyProductCore(product, bottomWear.includesBottomWear)
+      : productCore(product, bottomWear.includesBottomWear),
+    { maxString: 360, maxItems: 16, maxKeys: 32 },
+  );
   const modelJson = compactJson(model, { maxString: 500, maxItems: 16, maxKeys: 32 });
   const creativeJson = compactJson(creative, { maxString: 500, maxItems: 16, maxKeys: 32 });
   const sareeTruthJson = isSaree ? requiredJsonSection(isTrueBack ? "Direct rear saree truth" : "Canonical saree truth", sareeTruth, 10_000) : "";
@@ -449,6 +572,8 @@ export function composeGenerationPrompt(args: {
     throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
   }
   const manifest = promptReferences.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
+  const hasBottomReference = promptReferences.some((reference) => reference.role === "bottom");
+  const showcaseIntent = showcaseIntentFor({ creative, family: poseFamily, includesBottomWear: bottomWear.includesBottomWear });
   const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
@@ -483,9 +608,14 @@ export function composeGenerationPrompt(args: {
   const visibilityRules = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
   const poseCategory = (isTrueBack || args.pose.id === "back")
     ? "back"
-    : (isPose4 && isSittingDemanded)
-      ? "sitting"
-      : detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || "") + " " + (args.pose.bodyPosition || ""));
+    // The sixth frame carries its own intent-specific hard rule below, so the
+    // generic keyword categories must not claim it ("showcase" reads as the
+    // playful/detail category and would fight a full-length set frame).
+    : args.pose.id === "showcase"
+      ? "showcase"
+      : (isPose4 && isSittingDemanded)
+        ? "sitting"
+        : detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || "") + " " + (args.pose.bodyPosition || ""));
   const categoryRules = poseCategoryRules(poseCategory);
   const evidenceLines = promptEvidence.slice(0, 16).map((entry) => {
     const row = objectValue(entry);
@@ -509,10 +639,6 @@ export function composeGenerationPrompt(args: {
     }
     return lines.join("\n");
   }).join("\n");
-  const bottomWear = recordedBottomWearDetails(product);
-  const hasBottomWear = hasRecordedBottomWear(product);
-  const farshiBottom = isFarshiBottomWear(bottomWear);
-  const hasBottomReference = promptReferences.some((reference) => reference.role === "bottom");
 
   const prompt = `Create ONE premium photorealistic fashion e-commerce photograph for ${boundedText(args.skuName, 160) || "this product"}.
 
@@ -525,7 +651,7 @@ ${generationMemory}
 ` : ""}
 
 EDIT GOAL:
-Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${boundedText(args.pose.title, 160)}. The finished image must look like the same real professional photoshoot as the other four images.
+Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${boundedText(args.pose.title, 160)}. The finished image must look like the same real professional photoshoot as every other frame in this set.
 Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE (if supplied) or the clean commercial studio direction. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
 
 LOCKED SUBJECT - MUST NOT CHANGE:
@@ -590,23 +716,13 @@ Embroidery geometry: ${embroideryGeometryJson}
 - Reproduce embroidery as the same internal geometry: same lattice or motif structure, same count and rhythm of repeated units, same borders, same coverage area, and the same relationship to the neckline, tie, drawstring and tassel.
 - If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".`)}
 
-${hasBottomWear ? `LOCKED BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT - HIGHEST FIDELITY:
-Bottom wear specification: ${boundedText(bottomWear, 1_200)}
-${hasBottomReference ? "- A dedicated BOTTOM WEAR / FARSHI image is in the reference manifest. That image is the pixel-level authority for bottom-wear cut, volume, hem, fabric color, and print. Copy it literally onto the worn trousers/skirt." : "- Read bottom-wear cut, volume, hem, fabric color, and print from FRONT, BACK, MANNEQUIN, and ADDITIONAL product images where the trousers/skirt are visible. Do not invent a simpler palazzo or a solid/plain bottom."}
-- MANDATORY SILHOUETTE PRESERVATION: You MUST render the EXACT bottom wear cut, silhouette, leg volume, two-leg structure, pleat/gather architecture, and hem construction described above and shown in the product references across ALL poses.
-- ABSOLUTE PROHIBITION ON SILHOUETTE SUBSTITUTION:
-  * If the bottom wear is Farshi / Farsi / Farshi Pajama: These are extremely voluminous floor-length trousers with TWO DISTINCT LEGS, heavy vertical pleating or gathers from the waist/hip, and architectural volume that flares and may trail or pool at the floor. You are STRICTLY FORBIDDEN from rendering palazzo, plain wide-leg pants, a lehenga/skirt (one circular flare with no leg split), dhoti pants, tulip pants, harem pants, Afghani salwars, or any pants that taper or gather into an ankle cuff. Do not flatten the volume.
-  * If the bottom wear is palazzo: The legs MUST fall wide without farshi-level pooling or a skirt merge. Do NOT substitute farshi, lehenga, dhoti, tulip, harem, or ankle-cuffed salwar.
-  * If the bottom wear is cigarette pants / straight trousers: The legs must fall straight and tailored; do NOT flare into palazzos or gather into salwars.
-  * If the bottom wear is a sharara or gharara: Flare must occur at or below the knee as designed; do NOT substitute regular pants.
-- COLOR & PRINT TRANSFER: Copy the exact base fabric color, sheen, and motif geometry of the bottom wear from the bottom-visible product references. Large-scale metallic florals/bootas must remain large-scale metallic florals/bootas at the same physical size and density. You are STRICTLY FORBIDDEN from rendering the bottoms as solid/undecorated color, as faint dots/speckles, or as a miniaturized micro-print when the references show bold motifs. Never use the kurta/upper FABRIC / PATTERN DETAIL close-up as the bottom print.
-${farshiBottom ? "- FARSHI / FARSI HARD LOCK: Keep two visible trouser legs, extreme structured volume, and the exact gold/silver floral (or other recorded) motif field from the bottom-wear evidence. A pretty magenta palazzo or a skirt-like flare is a failed generation even if the white kurta and model face are perfect." : ""}` : (!isSaree ? `- BOTTOM WEAR FIDELITY: Keep the exact bottom wear cut, silhouette, color, fabric, and print shown in the product references. Never substitute dhoti pants, tulip pants, palazzo, lehenga, or tapered salwars unless explicitly proven by the references.` : "")}
+${bottomWearSection({ bottomWear, isSaree, hasBottomReference })}
 
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
 ${creativeJson}
 - Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, camera height and distance, depth of field and colour grade. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
 - ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS: Never reproduce the background, wall, arches, urns, pots, plants, steps, or environment visible behind the garment in the product reference photos (front, back, bottom, mannequin). The photoshoot set must come exclusively from the STYLE REFERENCE (or Pose 1 anchor / studio specification).
-- BACKDROP AND SET CONTINUITY ACROSS ALL POSES: The exact same photoshoot set (wall color, wall finish, floor, lighting, and any props established by the style reference / Pose 1) must remain identical across all 5 poses without drift or forgetting context.
+- BACKDROP AND SET CONTINUITY ACROSS ALL POSES: The exact same photoshoot set (wall color, wall finish, floor, lighting, and any props established by the style reference / Pose 1) must remain identical across every pose in this set without drift or forgetting context.
 ${hasApprovedAnchor
   ? `- SET & BACKDROP HARD LOCK TO APPROVED POSE 1:
   * Rebuild the EXACT SAME physical room and backdrop set from Pose 1: identical wall color, wall plaster/paint finish, texture, architectural elements, floor surface, and carpet/rug.
@@ -615,7 +731,7 @@ ${hasApprovedAnchor
   * The camera and model remain in the exact same photoshoot location - only the pose and framing change.`
   : "- Maintain a single, consistent studio set, wall finish, flooring, and lighting setup across all poses."}
 
-${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in all five frames:
+${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in every frame:
 - Footwear: ${boundedText(styling.footwear, 360)}
 - Jewellery: ${boundedText(styling.jewellery, 360)}
 - Ornaments and accessories: ${boundedText(styling.ornaments, 360)}
@@ -645,6 +761,9 @@ Visibility rules: ${visibilityRules}
 Purpose: ${boundedText(args.pose.purpose, 420)}
 Consistency notes: ${boundedText(args.pose.consistencyNotes, 600)}
 ${categoryRules ? `POSE CATEGORY RULES (${poseCategory.toUpperCase()}):\n${categoryRules}` : ""}
+GARMENT POSE GRAMMAR (${garmentPoseFamilyHeading(poseFamily)}) - body language and framing only; it never changes the garment's design, print, colour, fit or construction:
+${garmentPoseDirection(poseFamily)}
+${isShowcase ? showcaseHardRule(showcaseIntent, poseFamily) : ""}
 ${isPose4 && hasStyleReference ? `
 STYLE REFERENCE SITTING OVERRIDE (POSE 4):
 - Look at the STYLE REFERENCE image in the manifest. If that image, or any uploaded reference that shows a model pose, depicts a sitting/seated person, this 4th pose MUST be a seated editorial pose even if the written pose plan still describes walking or movement.
@@ -690,7 +809,9 @@ PROHIBITED UNRELATED CHANGES:
 ${rules.map((rule) => `- ${rule}`).join("\n")}
 - Never complete, mirror, continue, relocate, add or remove decoration for symmetry.
 - Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
-- ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION: It is strictly forbidden to alter or replace the bottom wear cut, silhouette, volume, or print (e.g., never substitute palazzo, lehenga/skirt, dhoti pants, tulip pants, harem pants, or balloon salwars when Farshi / Farsi pajama is specified; never drop large gold/silver florals into solid color or tiny dots). Customers buy the complete set and expect the exact silhouette, color, and motif pattern shown in the product references.
+${bottomWear.includesBottomWear
+    ? "- ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION: it is strictly forbidden to alter or replace the recorded bottom-wear cut, silhouette, volume, colour or print, or to reduce bold motifs to solid colour or tiny dots. Customers buy the complete set and expect the exact silhouette, colour and motif pattern shown in the product references."
+    : "- ABSOLUTE PROHIBITION ON INVENTING A MATCHING SET: it is strictly forbidden to render coordinated bottom wear that repeats this product's print, motif, embroidery, border, colour blocking or fabric. The bottom stays plain, neutral and clearly styling, never a second product piece."}
 - STRICT PROHIBITION ON COPYING PRE-SHOOT BACKGROUNDS: Never copy or reproduce pre-shoot background walls, terracotta arches, urns, clay pots, plants, courtyard structures, or outdoor scenery from the product reference images into the generated image.
 - Never change the backdrop wall color, texture, floor, or lighting from what was established in Pose 1.
 - Never add random background props (brass urlis, urns, flower petals, pedestals) not present in Pose 1.

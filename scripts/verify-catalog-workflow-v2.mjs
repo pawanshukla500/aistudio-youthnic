@@ -163,4 +163,4 @@ assert.match(planning, /<ActionDialog[\s\S]*confirmPendingAction/, "Catalog Plan
 assert.match(studio, /<ActionDialog[\s\S]*stopSubmittedJob/, "Studio cancellation does not use the accessible action dialog");
 assert.match(history, /<ActionDialog[\s\S]*confirmPendingAction/, "History stop, retry, and delete actions do not use the accessible action dialog");
 
-console.log(`Catalog Workflow V2 contract verified: ${stageCodes.length} stages, ${tenantTables.length} tenant tables, live actions, five-pose approval, and idempotent handoff checks.`);
+console.log(`Catalog Workflow V2 contract verified: ${stageCodes.length} stages, ${tenantTables.length} tenant tables, live actions, pose-set approval, and idempotent handoff checks.`);

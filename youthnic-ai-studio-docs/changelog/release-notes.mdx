@@ -9,6 +9,21 @@ Stay up to date with new features, model upgrades, and workflow improvements int
 
 ---
 
+## September 2026 — v2.5 Release
+
+### Studio & Vision Conditioning
+- **Six-Pose Catalog Plan**: Added a sixth, garment-led **Showcase** frame to every shoot. Sarees get a drape-led pallu frame, kurti/kurta sets get a head-to-toe frame proving top and bottom together, short kurtis and tops get a playful moment against the shoot's own backdrop, and standalone long kurtis and dresses get a full-length fall-and-fit frame.
+- **Garment-Aware Pose Grammar**: Pose direction is now selected from the detected garment family instead of a single generic ethnic-wear prior. Bengali sarees (tant, jamdani, garad, korial, baluchari, lal-paar, aatpoure drape) hold an upright serene posture with the aanchal placed on its recorded shoulder and its artwork and border readable; other traditional sarees follow the recorded drape plan; kurti sets prove fit, length and sleeve shape; short kurtis and tops move naturally with the backdrop.
+- **Configurable Bottom Wear**: A new **Bottom wear** output setting (`Auto`, `Outfit includes bottom wear`, `Top only`) decides how a shoot presents a bottom garment. Top-only shoots are explicitly prohibited from inventing coordinated matching bottoms, and automatic QA follows the same setting.
+- **Scoped Fidelity Locks**: Each shoot now carries only the bottom-wear substitution guard that matches its recorded cut, so the instruction that applies is no longer diluted by five that do not.
+
+### Performance
+- **Parallel Reference Loading**: Product, style and model references are fetched concurrently instead of one at a time.
+- **Pose-Scoped Reference Loading**: Each pose downloads only the references its prompt can actually use, with a full-set fallback when an optional asset is unavailable.
+- **Overlapped Pre-flight**: The budget check, the Pose 1 continuity lookup, the approved-learning read and the seeded fashion-knowledge read now run alongside reference loading instead of adding serial round trips to every paid attempt.
+
+---
+
 ## September 2026 — v2.4 Release
 
 ### Catalog Production

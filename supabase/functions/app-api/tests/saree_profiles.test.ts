@@ -50,7 +50,7 @@ const rawDrapePlan = {
   palluSpread: "open",
 };
 
-const posePlan = ["full_front", "angled", "back", "creative", "closeup"].map((
+const posePlan = ["full_front", "angled", "back", "creative", "closeup", "showcase"].map((
   id,
 ) => ({ id }));
 const references = [
@@ -61,7 +61,7 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v20-pose-detail-seated-lock");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v21-six-pose-garment-aware");
 });
 
 Deno.test("analysis prompt distinguishes farshi from palazzo and does not take bottom print from upper fabric close-ups", () => {

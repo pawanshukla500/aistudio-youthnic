@@ -53,6 +53,7 @@ const emptyCreate = {
   category: "ethnic/fusion",
   aspectRatio: "3:4",
   imageSize: "2K",
+  bottomWear: "auto",
   poseQa: false,
   campaign: "",
   eventId: "",
@@ -65,7 +66,7 @@ const emptyCreate = {
   specialInstructions: "",
   lookAndMood: "",
   stylingRequirements: "",
-  poseDirection: "Full product, professional side angle, accurate back view, creative pose, close-up face and product detail",
+  poseDirection: "Full product, professional side angle, accurate back view, creative pose, close-up face and product detail, garment-led showcase frame",
   lighting: "",
   composition: "",
   marketplaceRequirements: "",
@@ -266,6 +267,7 @@ export function Planning() {
         category: form.category,
         aspectRatio: form.aspectRatio,
         imageSize: form.imageSize,
+        bottomWear: form.bottomWear,
         poseQa: form.poseQa,
         campaign: form.campaign.trim() || undefined,
         eventId: form.eventId ? (form.eventId as Id<"events">) : undefined,
@@ -843,7 +845,7 @@ export function Planning() {
                         </div>
                       )}
                       {canEditReferences && focusVariant.readinessStatus !== "ready" && <p className="mt-2 rounded-lg bg-warning-surface px-3 py-2 text-[11px] text-warning">{(focusVariant.readinessReasons || []).join(" ")}</p>}
-                      {focusVariant.readinessStatus === "ready" && <div className={`mt-2 flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] ${focusVariant.analysisStatus === "ready" ? "bg-success-surface text-success" : focusVariant.analysisStatus === "failed" ? "bg-danger-surface text-danger" : "bg-info-surface text-info"}`}>{focusVariant.analysisStatus === "ready" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Loader2 className="h-3.5 w-3.5 animate-spin" />}<span>{focusVariant.analysisStatus === "ready" ? "Product identity and five-pose plan are preflighted." : focusVariant.analysisStatus === "failed" ? "Preflight failed; it will rebuild before generation." : "Gemini is analyzing the product, references, and five-pose plan automatically."}</span></div>}
+                      {focusVariant.readinessStatus === "ready" && <div className={`mt-2 flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] ${focusVariant.analysisStatus === "ready" ? "bg-success-surface text-success" : focusVariant.analysisStatus === "failed" ? "bg-danger-surface text-danger" : "bg-info-surface text-info"}`}>{focusVariant.analysisStatus === "ready" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Loader2 className="h-3.5 w-3.5 animate-spin" />}<span>{focusVariant.analysisStatus === "ready" ? "Product identity and six-pose plan are preflighted." : focusVariant.analysisStatus === "failed" ? "Preflight failed; it will rebuild before generation." : "Gemini is analyzing the product, references, and six-pose plan automatically."}</span></div>}
                       {focusVariant.jobStatus === "queued" && focusVariant.jobError && (
                         <div className="mt-2 rounded-lg bg-info-surface px-3 py-2 text-[11px] leading-4 text-info">
                           <p className="font-bold">Automatic retry queued</p>
@@ -880,10 +882,10 @@ export function Planning() {
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Steps 3–4 · Analyze and generate</p>
                     <h3 className="mt-1 font-syne text-lg font-bold text-on-surface">Automatic catalog generation</h3>
-                    <p className="mt-1 max-w-2xl text-xs leading-5 text-secondary">At the scheduled time, Gemini analyzes the hero references and locks the five-pose plan. GPT Image 2 generates the hero first, then each ready colourway one-by-one with the same approved model and scene.</p>
+                    <p className="mt-1 max-w-2xl text-xs leading-5 text-secondary">At the scheduled time, Gemini analyzes the hero references and locks the six-pose plan. GPT Image 2 generates the hero first, then each ready colourway one-by-one with the same approved model and scene.</p>
                     <div className="mt-4 grid gap-2 sm:grid-cols-2">
                       {[
-                        [Sparkles, "Gemini preflight", "Product, style, and five-pose plan"],
+                        [Sparkles, "Gemini preflight", "Product, style, and six-pose plan"],
                         [ShieldCheck, "Consistency anchor", "Hero Pose 1 locks model and scene"],
                         [Layers, "Sequential queue", "One colourway at a time for reliability"],
                         [RefreshCcw, "Automatic recovery", "Provider and QA retries are bounded"],
@@ -1026,12 +1028,13 @@ export function Planning() {
               <label className="text-sm font-semibold text-secondary sm:col-span-2">Model direction (same across every colour)<textarea rows={2} value={form.modelDirection} onChange={(e) => setForm({ ...form, modelDirection: e.target.value })} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" /></label>
               <label className="text-sm font-semibold text-secondary sm:col-span-2">Styling requirements<textarea rows={2} value={form.stylingRequirements} onChange={(e) => setForm({ ...form, stylingRequirements: e.target.value })} placeholder="Accessories, footwear, drape, hair and makeup" className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" /></label>
               <label className="text-sm font-semibold text-secondary sm:col-span-2">Backdrop / scene direction<textarea rows={2} value={form.sceneDirection} onChange={(e) => setForm({ ...form, sceneDirection: e.target.value })} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" /></label>
-              <label className="text-sm font-semibold text-secondary sm:col-span-2">Five-pose direction<textarea rows={2} value={form.poseDirection} onChange={(e) => setForm({ ...form, poseDirection: e.target.value })} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" /></label>
+              <label className="text-sm font-semibold text-secondary sm:col-span-2">Six-pose direction<textarea rows={2} value={form.poseDirection} onChange={(e) => setForm({ ...form, poseDirection: e.target.value })} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" /></label>
               <label className="text-sm font-semibold text-secondary sm:col-span-2">Lighting<input value={form.lighting} onChange={(e) => setForm({ ...form, lighting: e.target.value })} placeholder="Soft directional daylight, clean skin tones" className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface outline-none focus:border-primary" /></label>
               <label className="text-sm font-semibold text-secondary sm:col-span-2">Composition<input value={form.composition} onChange={(e) => setForm({ ...form, composition: e.target.value })} placeholder="Marketplace-safe crop, product unobstructed" className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface outline-none focus:border-primary" /></label>
               <label className="text-sm font-semibold text-secondary sm:col-span-2">Marketplace / campaign requirements<textarea rows={2} value={form.marketplaceRequirements} onChange={(e) => setForm({ ...form, marketplaceRequirements: e.target.value })} placeholder="Background, ratio, crop, policy or campaign constraints" className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" /></label>
               <label className="text-sm font-semibold text-secondary sm:col-span-2">Special instructions / important remarks<textarea rows={2} value={form.specialInstructions} onChange={(e) => setForm({ ...form, specialInstructions: e.target.value })} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface outline-none focus:border-primary" /></label>
               <label className="text-sm font-semibold text-secondary">Category<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface">{CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
+              <label className="text-sm font-semibold text-secondary">Bottom wear<select value={form.bottomWear} onChange={(e) => setForm({ ...form, bottomWear: e.target.value })} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface"><option value="auto">Auto from references</option><option value="included">Includes bottom wear</option><option value="top_only">Top only</option></select></label>
               <label className="text-sm font-semibold text-secondary">Aspect ratio<select value={form.aspectRatio} onChange={(e) => setForm({ ...form, aspectRatio: e.target.value })} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface">{ASPECTS.map((a) => <option key={a} value={a}>{a}</option>)}</select></label>
               <label className="text-sm font-semibold text-secondary sm:col-span-2">Preferred generation date and time <span className="font-normal">(schedule after references are ready)</span><input type="datetime-local" value={scheduleAt} min={toDateTimeInput(Date.now())} onChange={(event) => setScheduleAt(event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant px-3 text-on-surface outline-none focus:border-primary" /><span className="mt-1 block text-[10px] font-normal text-secondary">Asia/Kolkata timezone</span></label>
               <label className="text-sm font-semibold text-secondary sm:col-span-2 lg:col-span-4">Colourway SKUs (one per line — <span className="font-normal">SKU, colour label</span>)<textarea rows={4} value={form.skusText} onChange={(e) => setForm({ ...form, skusText: e.target.value })} placeholder={"T45-Bubbly-Pink, Pink\nT45-Bubbly-Green, Green\nT45-Bubbly-Red, Red"} className="mt-1.5 w-full rounded-lg border border-outline-variant px-3 py-2 font-mono text-[13px] text-on-surface outline-none focus:border-primary" /></label>

@@ -195,6 +195,8 @@ function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirect
   if (closeupMode) {
     details.push(`Pose 5 close-up mode: ${closeupMode}${hero ? ` (${hero})` : ""}`);
   }
+  const showcaseIntent = boundedText(creativeDirection.showcaseIntent ?? creativeDirection.showcase_intent, 40);
+  if (showcaseIntent) details.push(`Pose 6 showcase intent: ${showcaseIntent}`);
   details.push("Product images are garment/SKU truth. Style reference is set/backdrop/jewellery taste only.");
   return details.slice(0, MAX_MEMORY_PRESERVED_DETAILS);
 }
@@ -370,6 +372,7 @@ export function extractLearnedPromptPatterns(args: {
   hasStyleReference?: boolean;
   seatedPoseRequired?: string;
   closeupMode?: string;
+  showcaseIntent?: string;
   poses?: Array<{ poseIndex?: number; poseType?: string; status?: string }>;
 }): LearnedPromptPattern[] {
   const category = text(args.category);
@@ -427,6 +430,23 @@ export function extractLearnedPromptPatterns(args: {
       "A face-and-detail close-up is tighter than the hero pose: face plus a large, catalog-readable product detail, never a full-body repeat.",
       closeupOutcome,
     ));
+  }
+
+  const showcaseIntent = text(args.showcaseIntent).toLowerCase();
+  const pose6 = [...byType("showcase"), ...byIndex(6)];
+  const showcaseOutcome = outcomeFor(pose6);
+  const showcaseText: Record<string, string> = {
+    saree_drape:
+      "A drape-led showcase frame places the pallu exactly as the drape plan states, opened flat so its artwork and border read, with pleats vertical and the hem border level.",
+    set_full_length:
+      "A complete-set showcase frame is head-to-toe: the top readable shoulder-to-hem AND the bottom wear readable waistband-to-hem in one frame, footwear grounded.",
+    playful_backdrop:
+      "A playful showcase frame uses candid movement against the backdrop already established for the shoot, never a new prop, while the garment stays unobstructed.",
+    full_length_silhouette:
+      "A full-length showcase frame proves true fall, fit and length: side seams straight, hem level and complete in frame, garment never hitched or gathered.",
+  };
+  if (showcaseOutcome && showcaseText[showcaseIntent]) {
+    extracted.push(pattern("pose", `showcase-${showcaseIntent.replace(/_/g, "-")}-lock`, showcaseText[showcaseIntent], showcaseOutcome));
   }
 
   const pose1 = [...byType("full_front"), ...byIndex(1)];
