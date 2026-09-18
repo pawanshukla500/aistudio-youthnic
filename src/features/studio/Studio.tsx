@@ -104,7 +104,7 @@ export function Studio() {
   const autoAnalyzeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { data: submittedJob, error: _submittedJobError } = useQuery(api.jobs.get, submittedJobId ? { jobId: submittedJobId } : "skip");
   const { data: queuePosition, error: _queuePositionError } = useQuery(api.jobs.getQueuePosition, submittedJobId && submittedJob?.status === "queued" ? { jobId: submittedJobId } : "skip");
-  const { data: effectiveRouting } = useQuery(api.ai.getEffectiveRouting, organization?._id ? { organizationId: organization._id } : "skip");
+  const { data: effectiveRouting, error: effectiveRoutingError } = useQuery(api.ai.getEffectiveRouting, organization?._id ? { organizationId: organization._id } : "skip");
 
   // Whatever Administration actually routes to, reported as-is. Rewriting one
   // approved model into another here made this panel show an "Admin route" the
@@ -113,6 +113,14 @@ export function Studio() {
   const orgModel = (effectiveRouting as any)?.imageGeneration?.model as OutputOptions["model"] | undefined;
   const orgModelLabel = (effectiveRouting as any)?.imageGeneration?.displayLabel as string | undefined;
   const orgModelOptions = ((effectiveRouting as any)?.imageGeneration?.allowedModels || []) as Array<{ id: OutputOptions["model"]; label: string }>;
+  // Discarding this error let a failed lookup render as "no route configured",
+  // which is the opposite of what it means: the organization has a route, it is
+  // invalid, and queueing throws on the same policy. Report it instead.
+  const routingStatus: "loading" | "ready" | "error" = effectiveRoutingError
+    ? "error"
+    : effectiveRouting
+      ? "ready"
+      : "loading";
 
   const allReferences = useMemo(
     () => [...Object.values(productReferences).filter(Boolean), ...(modelReference ? [modelReference] : []), ...styleReferences] as StudioReference[],
@@ -636,7 +644,7 @@ export function Studio() {
           </section>
 
           <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm">
-            <OutputSettings value={options} onChange={updateOptions} orgModel={orgModel} orgModelLabel={orgModelLabel} orgModelOptions={orgModelOptions} />
+            <OutputSettings value={options} onChange={updateOptions} orgModel={orgModel} orgModelLabel={orgModelLabel} orgModelOptions={orgModelOptions} routingStatus={routingStatus} routingError={effectiveRoutingError?.message} />
           </section>
 
           <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all overflow-hidden">

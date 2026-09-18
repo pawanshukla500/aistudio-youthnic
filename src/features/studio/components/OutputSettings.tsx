@@ -2,23 +2,14 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
 import type { OutputOptions } from "../types";
 
-const MODEL_OPTIONS: Array<{ id: OutputOptions["model"]; label: string }> = [
-  { id: "gpt-image-2.5-flare-2026-09-08", label: "GPT Image 2.5 Flare (2026-09-08 Snapshot · Default)" },
-  { id: "gpt-image-2.5-flare", label: "GPT Image 2.5 Flare (High Speed & Low Latency)" },
-  { id: "gpt-image-2.5-sunburst", label: "GPT Image 2.5 Sunburst (High Fidelity & Character Memory)" },
-  { id: "gpt-image-2", label: "GPT Image 2 (Standard Production)" },
-  { id: "gpt-image-1.5", label: "GPT Image 1.5 (Legacy)" },
-  { id: "gpt-image-1", label: "GPT Image 1 (Legacy)" },
-  { id: "gpt-image-1-mini", label: "GPT Image 1 Mini (Legacy Cost-Optimized)" },
-  { id: "reve-2.1-image", label: "Reve 2.1 Image" },
-];
-
 export function OutputSettings({
   value,
   onChange,
   orgModel,
   orgModelLabel,
   orgModelOptions,
+  routingStatus = "loading",
+  routingError,
 }: {
   value: OutputOptions;
   onChange: (value: OutputOptions) => void;
@@ -26,15 +17,31 @@ export function OutputSettings({
   orgModelLabel?: string;
   /** Models this organization's provider actually accepts, served by the API. */
   orgModelOptions?: Array<{ id: OutputOptions["model"]; label: string }>;
+  /** Whether the organization's route has actually arrived yet. */
+  routingStatus?: "loading" | "ready" | "error";
+  routingError?: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const set = <K extends keyof OutputOptions>(key: K, next: OutputOptions[K]) => onChange({ ...value, [key]: next });
   // No override means the organization's route is what will run.
   const activeModel = value.model || orgModel || "";
-  // Offering a model the provider would reject makes the choice a no-op, so the
-  // served list wins and the static one is only a pre-routing placeholder.
-  const modelOptions = orgModelOptions?.length ? orgModelOptions : MODEL_OPTIONS;
+  // There is deliberately no static list to fall back on. A model this
+  // organization's provider does not accept is discarded at queue time without
+  // telling anyone, so until the served list arrives there is nothing honest to
+  // offer and the control stays disabled rather than inviting a silent no-op.
+  const routingReady = routingStatus === "ready";
+  const modelOptions = routingReady ? (orgModelOptions || []) : [];
   const labelFor = (id: string) => modelOptions.find((option) => option.id === id)?.label || id;
+  // Selected, but not something this route accepts: the queue would quietly run
+  // the organization's model instead, so say so rather than showing it as live.
+  const overrideRejected = Boolean(value.model) && modelOptions.length > 0 && !modelOptions.some((option) => option.id === value.model);
+  const summaryModel = routingStatus === "error"
+    ? "route unavailable"
+    : !routingReady
+      ? "loading route…"
+      : activeModel
+        ? labelFor(activeModel)
+        : "organization route";
 
   return (
     <div className="w-full">
@@ -50,7 +57,7 @@ export function OutputSettings({
           <div>
             <h2 className="text-base font-bold text-on-surface">Output settings</h2>
             <p className="mt-0.5 text-xs text-secondary">
-              Image generation · {activeModel ? labelFor(activeModel) : "organization route"} · {value.aspectRatio} · {value.imageSize} · {value.quality} quality
+              Image generation · {summaryModel} · {value.aspectRatio} · {value.imageSize} · {value.quality} quality
             </p>
           </div>
         </div>
@@ -72,8 +79,9 @@ export function OutputSettings({
             </div>
             <select
               value={value.model}
+              disabled={!routingReady}
               onChange={(event) => set("model", event.target.value as OutputOptions["model"])}
-              className="h-10 w-full rounded-md border border-outline-variant bg-white px-3 text-sm outline-none focus:border-primary"
+              className="h-10 w-full rounded-md border border-outline-variant bg-white px-3 text-sm outline-none focus:border-primary disabled:cursor-not-allowed disabled:bg-surface-container-low disabled:text-secondary"
             >
               <option value="">
                 {orgModel
@@ -86,15 +94,27 @@ export function OutputSettings({
                 </option>
               ))}
               {Boolean(value.model) && !modelOptions.some((opt) => opt.id === value.model) && (
-                <option value={value.model}>{value.model}</option>
+                <option value={value.model}>
+                  {value.model}{overrideRejected ? " · not accepted on this route" : ""}
+                </option>
               )}
             </select>
-            <p className="mt-1.5 text-[11px] leading-4 text-secondary">
-              {value.model && orgModel && value.model !== orgModel
-                ? `Overriding this shoot only. Your organization's route in Administration stays ${orgModelLabel || labelFor(orgModel)}.`
-                : orgModel
-                  ? `Using your organization's route from Administration: ${orgModelLabel || labelFor(orgModel)}.`
-                  : "No organization route is configured yet, so the system default applies. Set one in Administration."}
+            <p
+              className={`mt-1.5 text-[11px] leading-4 ${
+                routingStatus === "error" || overrideRejected ? "text-red-600" : "text-secondary"
+              }`}
+            >
+              {routingStatus === "error"
+                ? `Could not load your organization's route${routingError ? `: ${routingError}` : "."} No override can be applied until it loads, and generation may fail with the same error. Check the image-generation route in Administration.`
+                : !routingReady
+                  ? "Loading your organization's route from Administration…"
+                  : overrideRejected
+                    ? `${value.model} is not accepted on this organization's route, so ${orgModelLabel || labelFor(orgModel || "") || "the organization model"} would run instead. Pick a listed model, or clear the override.`
+                    : value.model && orgModel && value.model !== orgModel
+                      ? `Overriding this shoot only. Your organization's route in Administration stays ${orgModelLabel || labelFor(orgModel)}.`
+                      : orgModel
+                        ? `Using your organization's route from Administration: ${orgModelLabel || labelFor(orgModel)}.`
+                        : "No organization route is configured yet, so the system default applies. Set one in Administration."}
             </p>
           </div>
           <div>

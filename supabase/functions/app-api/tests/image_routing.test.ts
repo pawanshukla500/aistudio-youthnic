@@ -126,9 +126,40 @@ Deno.test("a new shoot carries no model override, so the organization route deci
 });
 
 Deno.test("the model picker offers the served list and an explicit no-override choice", () => {
-  assertEquals(outputSettingsSource.includes("orgModelOptions?.length ? orgModelOptions : MODEL_OPTIONS"), true);
+  assertEquals(outputSettingsSource.includes("routingReady ? (orgModelOptions || []) : []"), true);
   assertEquals(outputSettingsSource.includes('<option value="">'), true);
   // Binding the control to the resolved model made an unset override look like
   // a deliberate one and re-sent it on submit.
   assertEquals(outputSettingsSource.includes("value={value.model}"), true);
+});
+
+Deno.test("there is no static model list left to drift from the registry", () => {
+  // A hard-coded list offered models the organization's provider would reject,
+  // and the queue discards those without telling anyone.
+  assertEquals(outputSettingsSource.includes("MODEL_OPTIONS"), false);
+  assertEquals(outputSettingsSource.includes("gpt-image-2.5-flare-2026-09-08"), false);
+  assertEquals(outputSettingsSource.includes("reve-2.1-image"), false);
+});
+
+Deno.test("no override can be picked before the served route arrives", () => {
+  assertEquals(outputSettingsSource.includes("disabled={!routingReady}"), true);
+  assertEquals(outputSettingsSource.includes('const routingReady = routingStatus === "ready";'), true);
+});
+
+Deno.test("a failed routing lookup is reported, not rendered as no route configured", () => {
+  // useQuery returns { data, error }; dropping the error made an invalid stored
+  // policy read as "not configured" while queueing threw on that same policy.
+  assertEquals(studioSource.includes("error: effectiveRoutingError"), true);
+  assertEquals(studioSource.includes("routingStatus={routingStatus}"), true);
+  assertEquals(studioSource.includes("routingError={effectiveRoutingError?.message}"), true);
+  const status = studioSource.slice(studioSource.indexOf("const routingStatus:"));
+  assertEquals(status.slice(0, status.indexOf(";")).includes('effectiveRoutingError\n    ? "error"'), true);
+});
+
+Deno.test("an override the route would not accept is flagged rather than shown as live", () => {
+  assertEquals(outputSettingsSource.includes("const overrideRejected ="), true);
+  assertEquals(outputSettingsSource.includes("not accepted on this route"), true);
+  // An empty served list means we cannot judge the override, so we must not
+  // claim it will be rejected.
+  assertEquals(outputSettingsSource.includes("modelOptions.length > 0 && !modelOptions.some"), true);
 });
