@@ -956,6 +956,48 @@ export function defaultImageGenerationRoute(): NormalizedAiModelRoute {
   );
 }
 
+export type StoredImageRoutingRow = {
+  primary_provider?: unknown;
+  primary_model?: unknown;
+  primary_reasoning?: unknown;
+  fallback_enabled?: unknown;
+  revision?: unknown;
+};
+
+export type StoredImageRouteResolution = NormalizedAiModelRoute & { revision: number };
+
+/**
+ * Turn a stored organization image-generation row into the route that will run.
+ *
+ * Returns null only when there is no stored row, so the caller applies the
+ * system default. Anything stored is the administrator's explicit choice: it is
+ * validated against the registry and used as written, or it throws. Quietly
+ * substituting one approved model for another is what made Administration show
+ * a setting the rest of the system ignored.
+ */
+export function resolveStoredImageGenerationRoute(
+  row: StoredImageRoutingRow | null | undefined,
+): StoredImageRouteResolution | null {
+  if (!row) return null;
+  if (row.fallback_enabled === true) {
+    throw new Error(
+      "Stored image-generation routing is invalid. Clear its fallback and choose an approved OpenAI GPT Image model in Administration.",
+    );
+  }
+  try {
+    const primary = assertAllowedAiModelRoute({
+      provider: text(row.primary_provider),
+      model: text(row.primary_model),
+      thinkingLevel: text(row.primary_reasoning),
+    }, "image_generation");
+    return { ...primary, revision: Math.max(1, Number(row.revision || 1)) };
+  } catch {
+    throw new Error(
+      "Stored image-generation routing is invalid. Choose an approved OpenAI GPT Image model in Administration.",
+    );
+  }
+}
+
 export type ProviderFailureInput = {
   status?: unknown;
   message?: unknown;
