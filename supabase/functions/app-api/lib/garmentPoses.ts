@@ -228,6 +228,26 @@ function isShortUpperGarment(product: JsonRecord, haystack: string) {
   return SHORT_LENGTH_RE.test(haystack) && !LONG_LENGTH_RE.test(haystack);
 }
 
+/**
+ * The coarse `productIdentity.garmentFamily` a declared category implies, or ""
+ * when the category is too broad to tell (for example "ethnic/fusion", which
+ * covers both sarees and kurta sets).
+ *
+ * Used before analysis has run, where the category is the only signal. Returning
+ * "" there is deliberate: feedback recorded for one family must not be applied
+ * to another just because the category could not decide between them.
+ */
+export function coarseGarmentFamilyForCategory(category: string): string {
+  const family = detectGarmentPoseFamily({ productIdentity: {}, category });
+  if (isSareePoseFamily(family)) return "saree";
+  if (family === "kurta_set" || family === "long_kurti" || family === "short_kurti_top") {
+    return "kurta_or_kurti_set";
+  }
+  if (family === "dress") return "dress";
+  if (family === "western_casual") return "western_or_casual";
+  return "";
+}
+
 export function isSareePoseFamily(family: GarmentPoseFamily) {
   return family === "saree_bengali" || family === "saree_ethnic";
 }

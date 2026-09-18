@@ -11,6 +11,7 @@
 import { type JsonRecord } from "./profiles.ts";
 import { PRODUCT_REFERENCE_ROLES } from "./referencePolicy.ts";
 import { type PromptPatternKind } from "./promptPatterns.ts";
+import { effectiveShowcaseShot, normalizeShowcaseShotType } from "./showcaseFeature.ts";
 
 export const GENERATION_MEMORY_VERSION = 1;
 export const MAX_MEMORY_ASSETS = 12;
@@ -195,8 +196,13 @@ function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirect
   if (closeupMode) {
     details.push(`Pose 5 close-up mode: ${closeupMode}${hero ? ` (${hero})` : ""}`);
   }
-  const showcaseIntent = boundedText(creativeDirection.showcaseIntent ?? creativeDirection.showcase_intent, 40);
-  if (showcaseIntent) details.push(`Pose 6 showcase intent: ${showcaseIntent}`);
+  const showcaseShot = effectiveShowcaseShot(creativeDirection);
+  if (showcaseShot) {
+    details.push(`Pose 6 sells: ${boundedText(showcaseShot.plan.heroFeature, 120)} (${showcaseShot.shotType})`);
+  } else {
+    const showcaseIntent = boundedText(creativeDirection.showcaseIntent ?? creativeDirection.showcase_intent, 40);
+    if (showcaseIntent) details.push(`Pose 6 showcase intent: ${showcaseIntent}`);
+  }
   details.push("Product images are garment/SKU truth. Style reference is set/backdrop/jewellery taste only.");
   return details.slice(0, MAX_MEMORY_PRESERVED_DETAILS);
 }
@@ -372,7 +378,7 @@ export function extractLearnedPromptPatterns(args: {
   hasStyleReference?: boolean;
   seatedPoseRequired?: string;
   closeupMode?: string;
-  showcaseIntent?: string;
+  showcaseShotType?: string;
   poses?: Array<{ poseIndex?: number; poseType?: string; status?: string }>;
 }): LearnedPromptPattern[] {
   const category = text(args.category);
@@ -432,21 +438,23 @@ export function extractLearnedPromptPatterns(args: {
     ));
   }
 
-  const showcaseIntent = text(args.showcaseIntent).toLowerCase();
   const pose6 = [...byType("showcase"), ...byIndex(6)];
   const showcaseOutcome = outcomeFor(pose6);
-  const showcaseText: Record<string, string> = {
-    saree_drape:
-      "A drape-led showcase frame places the pallu exactly as the drape plan states, opened flat so its artwork and border read, with pleats vertical and the hem border level.",
-    set_full_length:
-      "A complete-set showcase frame is head-to-toe: the top readable shoulder-to-hem AND the bottom wear readable waistband-to-hem in one frame, footwear grounded.",
-    playful_backdrop:
-      "A playful showcase frame uses candid movement against the backdrop already established for the shoot, never a new prop, while the garment stays unobstructed.",
-    full_length_silhouette:
-      "A full-length showcase frame proves true fall, fit and length: side seams straight, hem level and complete in frame, garment never hitched or gathered.",
+  const shotType = normalizeShowcaseShotType(args.showcaseShotType);
+  const shotText: Record<string, string> = {
+    macro_detail:
+      "A macro showcase frame fills the frame with the chosen feature so its construction and material read at catalog resolution; the face may be partial or absent.",
+    half_body_detail:
+      "A half-body showcase frame crops to the section the chosen feature sits on, keeping it large while its placement on the garment stays legible.",
+    full_body_feature:
+      "A full-length showcase frame composes for the chosen feature, not the whole outfit: angle, distance and stance differ from the hero frame and the feature is the subject.",
+    drape_feature:
+      "A drape showcase frame holds or spreads the panel clear of the body so its artwork, border and full length read end to end.",
+    movement_feature:
+      "A movement showcase frame uses controlled motion so the feature's fall, flare or fluidity is visible while the garment stays readable.",
   };
-  if (showcaseOutcome && showcaseText[showcaseIntent]) {
-    extracted.push(pattern("pose", `showcase-${showcaseIntent.replace(/_/g, "-")}-lock`, showcaseText[showcaseIntent], showcaseOutcome));
+  if (showcaseOutcome && shotType && shotText[shotType]) {
+    extracted.push(pattern("pose", `showcase-${shotType.replace(/_/g, "-")}-lock`, shotText[shotType], showcaseOutcome));
   }
 
   const pose1 = [...byType("full_front"), ...byIndex(1)];

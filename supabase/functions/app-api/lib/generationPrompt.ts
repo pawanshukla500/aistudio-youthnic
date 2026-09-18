@@ -11,6 +11,12 @@ import {
   sanitizeDetailPlacementMap,
 } from "./profiles.ts";
 import {
+  effectiveShowcaseShot,
+  type ShowcasePlan,
+  showcaseShotDirection,
+  type ShowcaseShotType,
+} from "./showcaseFeature.ts";
+import {
   type BottomCutClass,
   type BottomWearPresentation,
   detectGarmentPoseFamily,
@@ -504,6 +510,45 @@ function showcaseIntentFor(args: {
   return "full_length_silhouette";
 }
 
+/**
+ * The sixth frame's rule, written around the feature the analysis chose.
+ *
+ * It names the subject, the distance, and - explicitly - the two frames it must
+ * not become, because a generic "showcase" instruction is what produced a second
+ * hero shot for a SKU whose bottom wear was the real story.
+ */
+function showcasePlanHardRule(args: {
+  plan: ShowcasePlan;
+  shotType: ShowcaseShotType;
+  widenedFromCloseup: boolean;
+  closeupHeroDetail: string;
+}) {
+  const lines = [
+    `- SHOWCASE FRAME SUBJECT: ${args.plan.heroFeature}. This frame exists to sell that one feature${
+      args.plan.whyItSells ? ` - ${args.plan.whyItSells}` : ""
+    }. It must be large, sharp, unobstructed, and unmistakably what the frame is about.`,
+    `- SHOWCASE FRAME DISTANCE: ${showcaseShotDirection(args.shotType)}`,
+    "- SHOWCASE FRAME MUST NOT DUPLICATE: this is not a second hero shot. Do not reproduce Pose 1's straight-on, full-length, whole-outfit composition. If this frame is full length, the angle, distance, stance and composition must read as a different photograph whose subject is the named feature, not the outfit as a whole.",
+  ];
+  if (args.closeupHeroDetail) {
+    lines.push(
+      `- SHOWCASE FRAME MUST NOT REPEAT THE CLOSE-UP: Pose 5 already sells "${args.closeupHeroDetail}" in a tight crop. This frame must add coverage that pose does not give${
+        args.widenedFromCloseup
+          ? " - so shoot the named feature at a wider distance here, showing how it sits on the worn garment rather than re-cropping the same detail."
+          : "."
+      }`,
+    );
+  }
+  if (args.plan.distinctFrom) {
+    lines.push(`- SHOWCASE FRAME DISTINCTION: ${args.plan.distinctFrom}`);
+  }
+  for (const rule of args.plan.visibilityRules.slice(0, 4)) {
+    lines.push(`- ${rule}`);
+  }
+  lines.push("- Everything else stays locked: same model identity, styling, footwear, set, backdrop, lighting, and the exact garment design, print, colour, fit and construction the product references show.");
+  return lines.join("\n");
+}
+
 function showcaseHardRule(intent: ShowcaseIntent, family: GarmentPoseFamily) {
   if (intent === "saree_drape") {
     const bengali = family === "saree_bengali";
@@ -596,6 +641,15 @@ export function composeGenerationPrompt(args: {
   const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).join(", ");
   const closeupMode = isCloseup ? resolveCloseupMode({ pose: args.pose, creative }) : "face_and_detail";
   const closeupHeroDetail = boundedText(creative.closeupHeroDetail || creative.closeup_hero_detail || highlightedDetails, 260);
+  // Pose 5's own recorded subject, without the current pose's highlights as a
+  // fallback: on pose 6 that fallback is this frame's details, which would make
+  // every showcase look like a collision with the close-up.
+  const recordedCloseupHeroDetail = boundedText(creative.closeupHeroDetail ?? creative.closeup_hero_detail, 260);
+  // The analysis chooses this frame's subject per SKU. The fixed intents remain
+  // only for a cached analysis made before showcasePlan existed. Resolved by the
+  // shared helper so the pose brief, this rule, the shoot memory and the feedback
+  // row all describe the same frame.
+  const showcaseShot = effectiveShowcaseShot(creative);
   const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL);
   const faceQualityInstruction = faceRequired
     ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct and naturally shaped eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
@@ -778,7 +832,16 @@ Consistency notes: ${boundedText(args.pose.consistencyNotes, 600)}
 ${categoryRules ? `POSE CATEGORY RULES (${poseCategory.toUpperCase()}):\n${categoryRules}` : ""}
 GARMENT POSE GRAMMAR (${garmentPoseFamilyHeading(poseFamily)}) - body language and framing only; it never changes the garment's design, print, colour, fit or construction:
 ${garmentPoseDirection(poseFamily)}
-${isShowcase ? showcaseHardRule(showcaseIntent, poseFamily) : ""}
+${isShowcase
+    ? (showcaseShot
+      ? showcasePlanHardRule({
+        plan: showcaseShot.plan,
+        shotType: showcaseShot.shotType,
+        widenedFromCloseup: showcaseShot.widenedFromCloseup,
+        closeupHeroDetail: recordedCloseupHeroDetail,
+      })
+      : showcaseHardRule(showcaseIntent, poseFamily))
+    : ""}
 ${isPose4 && hasStyleReference ? `
 STYLE REFERENCE SITTING OVERRIDE (POSE 4):
 - Look at the STYLE REFERENCE image in the manifest. If that image, or any uploaded reference that shows a model pose, depicts a sitting/seated person, this 4th pose MUST be a seated editorial pose even if the written pose plan still describes walking or movement.

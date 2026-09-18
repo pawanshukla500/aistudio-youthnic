@@ -1,5 +1,11 @@
 import { type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.112.2";
 import { REQUIRED_POSE_IDS, type JsonRecord } from "./profiles.ts";
+import {
+  effectiveShowcaseShot,
+  planShowcaseOutcomeWrite,
+  SHOWCASE_OUTCOME_WRITE_ATTEMPTS,
+  type ShowcaseOutcome,
+} from "./lib/showcaseFeature.ts";
 import { buildCatalogStageTimeline } from "./lib/catalogStageTimeline.ts";
 import { PRODUCT_REFERENCE_ROLES, isSareeReferenceSet, missingRequiredReferenceLabels, selectCurrentCatalogProductReferences } from "./lib/referencePolicy.ts";
 
@@ -67,6 +73,7 @@ function assertQueryResults(results: unknown[], context: string) {
 // Shared with the pose plan itself: a private copy silently mapped a rejected
 // sixth frame onto the close-up rule when the plan grew past five poses.
 const POSE_IDS = REQUIRED_POSE_IDS;
+const SHOWCASE_POSE_INDEX = REQUIRED_POSE_IDS.indexOf("showcase") + 1;
 
 /**
  * The pose indexes this work item was actually queued with.
@@ -87,6 +94,125 @@ export function poseIndexesFromRows(...rowSets: Array<ReadonlyArray<{ pose_index
   return indexes.size
     ? [...indexes].sort((left, right) => left - right)
     : REQUIRED_POSE_IDS.map((_id, position) => position + 1);
+}
+
+/**
+ * Record how a sixth frame's chosen subject was received.
+ *
+ * Signals are the operator's own actions - approving a pose version, rejecting
+ * one, asking for a regeneration, or automatic QA refusing it - keyed by the
+ * feature region and shot type the analysis picked, never by SKU. Nothing here
+ * can block the decision that produced it: a feedback write outage must leave
+ * the review, regeneration or QA result successful.
+ */
+export async function recordShowcaseFeatureOutcome(
+  service: SupabaseClient,
+  args: {
+    organizationId: string;
+    sessionId: string;
+    poseIndex: number;
+    poseType?: string;
+    outcome: ShowcaseOutcome;
+    qualityScore?: number | null;
+  },
+) {
+  try {
+    const organizationId = text(args.organizationId);
+    const sessionId = text(args.sessionId);
+    if (!organizationId || !sessionId) return;
+    // Only the showcase frame carries a chosen subject.
+    const isShowcase = text(args.poseType) === "showcase" ||
+      (!text(args.poseType) && args.poseIndex === SHOWCASE_POSE_INDEX);
+    if (!isShowcase) return;
+
+    const { data: session, error: sessionError } = await service.from("catalog_sessions")
+      .select("session_data")
+      .eq("organization_id", organizationId)
+      .eq("session_id", sessionId)
+      .maybeSingle();
+    if (sessionError) {
+      console.error(`Could not load the session for showcase feedback: ${sessionError.message}`);
+      return;
+    }
+    const sessionData = asRecord(session?.session_data);
+    // The effective shot, not the planned one: a close-up collision widens the
+    // frame, and scoring the tight framing that was never generated would teach
+    // the next analysis the opposite of what happened.
+    const shot = effectiveShowcaseShot(sessionData.creativeDirection);
+    if (!shot) return;
+    const { plan, shotType } = shot;
+    const productCategory = text(sessionData.category);
+    if (!productCategory) return;
+    const garmentFamily = text(asRecord(sessionData.productIdentity).garmentFamily);
+
+    const match = () => service.from("showcase_feature_outcomes")
+      .select("id,selected_count,rejected_count,regenerated_count,qa_failed_count,avg_quality,created_at")
+      .eq("organization_id", organizationId)
+      .eq("product_category", productCategory)
+      .eq("garment_family", garmentFamily)
+      .eq("feature_region", plan.featureRegion)
+      .eq("shot_type", shotType);
+
+    for (let attempt = 1; attempt <= SHOWCASE_OUTCOME_WRITE_ATTEMPTS; attempt += 1) {
+      const { data, error } = await match().order("created_at", { ascending: true }).limit(4);
+      if (error) {
+        console.error(`Could not load showcase feedback rows: ${error.message}`);
+        return;
+      }
+      const write = planShowcaseOutcomeWrite(data || [], args.outcome, args.qualityScore);
+      const now = new Date().toISOString();
+      if (write.action === "insert") {
+        const { error: insertError } = await service.from("showcase_feature_outcomes").insert({
+          organization_id: organizationId,
+          product_category: productCategory,
+          garment_family: garmentFamily,
+          feature_region: plan.featureRegion,
+          shot_type: shotType,
+          selected_count: write.next.selectedCount,
+          rejected_count: write.next.rejectedCount,
+          regenerated_count: write.next.regeneratedCount,
+          qa_failed_count: write.next.qaFailedCount,
+          avg_quality: write.next.avgQuality,
+          last_feedback_at: now,
+        });
+        if (!insertError) return;
+        // Only a lost unique-key race is worth retrying: the winning row now
+        // exists and the next pass updates it. Any other error repeats forever,
+        // so report it immediately rather than after four silent attempts.
+        if (String((insertError as { code?: string }).code || "") !== "23505") {
+          console.error(`Could not record showcase feedback: ${insertError.message}`);
+          return;
+        }
+        if (attempt === SHOWCASE_OUTCOME_WRITE_ATTEMPTS) {
+          console.error(`Could not record showcase feedback after a contended insert: ${insertError.message}`);
+        }
+        continue;
+      }
+      const { data: updated, error: updateError } = await service.from("showcase_feature_outcomes").update({
+        selected_count: write.next.selectedCount,
+        rejected_count: write.next.rejectedCount,
+        regenerated_count: write.next.regeneratedCount,
+        qa_failed_count: write.next.qaFailedCount,
+        avg_quality: write.next.avgQuality,
+        last_feedback_at: now,
+        updated_at: now,
+      }).eq("id", write.id)
+        // Compare-and-set: a concurrent write must not be silently overwritten.
+        .eq("selected_count", write.expected.selectedCount)
+        .eq("rejected_count", write.expected.rejectedCount)
+        .eq("regenerated_count", write.expected.regeneratedCount)
+        .eq("qa_failed_count", write.expected.qaFailedCount)
+        .select("id")
+        .maybeSingle();
+      if (updateError) {
+        console.error(`Could not record showcase feedback: ${updateError.message}`);
+        return;
+      }
+      if (updated?.id) return;
+    }
+  } catch (error) {
+    console.error(`Could not record showcase feedback: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export function humanProductLearningGuidance(comments: string) {
@@ -661,6 +787,16 @@ export async function reviewCatalogQc(
       .eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).eq("approval_status", "approved");
     if (versionCommentError) throw new Error(versionCommentError.message);
   }
+  // Approving the whole set is the strongest signal that its sixth frame sold
+  // the right feature; rejecting it is not, because the fault may be elsewhere.
+  if (decision === "passed") {
+    await recordShowcaseFeatureOutcome(service, {
+      organizationId: workspace.organization.id,
+      sessionId: text(item.catalog_session_id),
+      poseIndex: SHOWCASE_POSE_INDEX,
+      outcome: "selected",
+    });
+  }
   return { success: true };
 }
 
@@ -679,7 +815,7 @@ export async function reviewCatalogPose(
 
   const [{ data: item, error: itemError }, { data: version, error: versionError }] = await Promise.all([
     service.from("catalog_work_items")
-      .select("id,sku_name,request_code,planning_request_id,planning_batch_id,generation_job_id,generation_status,qc_status,generation_assigned_member_id,created_by_member_id")
+      .select("id,sku_name,request_code,planning_request_id,planning_batch_id,generation_job_id,catalog_session_id,generation_status,qc_status,generation_assigned_member_id,created_by_member_id")
       .eq("organization_id", workspace.organization.id).eq("id", workItemId).maybeSingle(),
     service.from("catalog_pose_asset_versions")
       .select("id,pose_index,version_number,generation_id,generation_status,approval_status,original_url,preview_url,storage_path,storage_backend")
@@ -873,6 +1009,12 @@ export async function reviewCatalogPose(
     }).eq("organization_id", workspace.organization.id).eq("id", workItemId));
   }
   assertQueryResults(await Promise.all(operations), "Could not finish the pose review audit trail");
+  await recordShowcaseFeatureOutcome(service, {
+    organizationId: workspace.organization.id,
+    sessionId: text(item.catalog_session_id),
+    poseIndex: Number(version.pose_index),
+    outcome: decision === "approved" ? "selected" : "rejected",
+  });
   if (decision === "rejected") {
     await recordHumanProductLearningRule({
       service,

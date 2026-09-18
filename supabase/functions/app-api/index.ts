@@ -59,10 +59,11 @@ import {
   type VisionHopAttempt,
   type VisionProviderFailure,
 } from "./lib/aiModelPolicy.ts";
-import { normalizeBottomWearMode } from "./lib/garmentPoses.ts";
+import { coarseGarmentFamilyForCategory, normalizeBottomWearMode } from "./lib/garmentPoses.ts";
 import { selectReusableLearningRules } from "./lib/learningRules.ts";
 import { selectFashionKnowledgeGuidance } from "./lib/fashionKnowledge.ts";
 import { selectPromptPatterns } from "./lib/promptPatterns.ts";
+import { effectiveShowcaseShot, selectShowcaseFeedbackGuidance } from "./lib/showcaseFeature.ts";
 import {
   buildGenerationMemory,
   extractLearnedPromptPatterns,
@@ -98,6 +99,7 @@ import {
   markListingStarted,
   reconcileExistingGenerations,
   recordHumanProductLearningRule,
+  recordShowcaseFeatureOutcome,
   reviewCatalogQc,
   reviewCatalogPose,
   updateCatalogWorkItem,
@@ -1559,16 +1561,17 @@ async function analyze(request: Request, args: JsonRecord) {
   // up to the cache's thirty days. It stays out of the fingerprint on purpose -
   // that is queue-time validation of the references, and saving a plan writes a
   // decision, which would change the fingerprint and reject its own session.
-  const [housePreferences, fashionKnowledge, analysisLearning, policy] = await Promise.all([
+  const [housePreferences, fashionKnowledge, analysisLearning, showcaseFeedback, policy] = await Promise.all([
     stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion")),
     fashionKnowledgeBrief(orgId, String(args.category || "")),
     analysisLearningBrief(orgId, String(args.category || "ethnic/fusion")),
+    showcaseFeedbackBrief(orgId, String(args.category || "ethnic/fusion")),
     resolveVisionPolicy(orgId, { purpose: "product_truth", garmentFamily: String(args.category || "") }),
   ]);
   let usedPolicy = policy;
   const policyFingerprint = visionPolicyFingerprint(policy);
   const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}|${policyFingerprint}`);
-  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${policyFingerprint}:${smallHash(housePreferences)}:${smallHash(fashionKnowledge)}:${smallHash(analysisLearning)}`;
+  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${policyFingerprint}:${smallHash(housePreferences)}:${smallHash(fashionKnowledge)}:${smallHash(analysisLearning)}:${smallHash(showcaseFeedback)}`;
   let cacheHit = false;
   let normalized: ReturnType<typeof normalizeAnalysis> | null = null;
   const forceRefresh = args.forceRefresh === true;
@@ -1594,7 +1597,7 @@ async function analyze(request: Request, args: JsonRecord) {
     parts.push({ text: buildCombinedAnalysisPrompt({
       skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
       category: String(args.category || "ethnic/fusion"), modelDirection: String(args.modelDirection || ""),
-      sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences, fashionKnowledge, analysisLearning,
+      sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences, fashionKnowledge, analysisLearning, showcaseFeedback,
     }) });
 
     let result: VisionResult;
@@ -2147,7 +2150,10 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     hasStyleReference: (Array.isArray(sessionData.references) ? sessionData.references : []).some((entry) => String((entry as JsonRecord)?.role || "") === "style_reference"),
     seatedPoseRequired: String((sessionData.creativeDirection as JsonRecord | undefined)?.seatedPoseRequired || ""),
     closeupMode: String((sessionData.creativeDirection as JsonRecord | undefined)?.closeupMode || ""),
-    showcaseIntent: String((sessionData.creativeDirection as JsonRecord | undefined)?.showcaseIntent || ""),
+    // The frame that was actually generated, not the one originally planned: a
+    // close-up collision widens it, and learning a framing that never shipped is
+    // worse than learning nothing.
+    showcaseShotType: effectiveShowcaseShot(sessionData.creativeDirection)?.shotType || "",
     poses: poses.map((entry) => ({
       poseIndex: Number(entry.pose_index || 0),
       poseType: String(entry.pose_type || ((entry.generation_data || {}) as JsonRecord).id || ""),
@@ -2197,6 +2203,21 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     });
   } catch (error) {
     console.error(`Could not record house prompt patterns: ${errorMessage(error)}`);
+  }
+  // A sixth frame that automatic QA refused is evidence against that subject and
+  // framing. A completed one is not yet evidence for it - only a human keeping
+  // it is, which the catalog review paths record.
+  const showcasePose = poses.find((pose) => (
+    String(pose.pose_type || ((pose.generation_data || {}) as JsonRecord).id || "") === "showcase"
+  ));
+  if (showcasePose && String(showcasePose.status || "") === "failed") {
+    await recordShowcaseFeatureOutcome(service, {
+      organizationId: String(job.org_id || ""),
+      sessionId: String(job.session_id || ""),
+      poseIndex: Number(showcasePose.pose_index || 0),
+      poseType: "showcase",
+      outcome: "qa_failed",
+    });
   }
   if (job.batch_id) {
     const batchId = String(job.batch_id);
@@ -2451,6 +2472,7 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     housePreferences: await stylingPreferenceBrief(orgId, category),
     fashionKnowledge: await fashionKnowledgeBrief(orgId, category),
     analysisLearning: await analysisLearningBrief(orgId, category),
+    showcaseFeedback: await showcaseFeedbackBrief(orgId, category),
   }) });
 
   const result = await visionJson(policy, parts);
@@ -3502,6 +3524,13 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
   const previousOutputRetained = Boolean(pose.output_url || pose.storage_path);
   const poseGenerationData = (pose.generation_data || {}) as JsonRecord;
   const regenerationRequestedAt = new Date().toISOString();
+  await recordShowcaseFeatureOutcome(service, {
+    organizationId: workspace.organization.id,
+    sessionId: String(pose.session_id || ""),
+    poseIndex: Number(pose.pose_index),
+    poseType: String(pose.pose_type || ""),
+    outcome: "regenerated",
+  });
   const regenerationResults = await Promise.all([
     service.from("session_generations").update({
       status: "queued", attempt_count: 0, qa_status: "pending", error: "",
@@ -5051,6 +5080,11 @@ async function analyzeCatalogVariant(
     housePreferences: await stylingPreferenceBrief(String(batch.organization_id), category),
     fashionKnowledge: await fashionKnowledgeBrief(String(batch.organization_id), category),
     analysisLearning: await analysisLearningBrief(String(batch.organization_id), category),
+    showcaseFeedback: await showcaseFeedbackBrief(
+      String(batch.organization_id),
+      category,
+      String(asBaseAnalysisGarmentFamily(batch)),
+    ),
   }) });
   const result = await visionJson(policy, parts, { onAttempt });
   const normalized = normalizeAnalysis(result.json, category, {
@@ -5282,6 +5316,47 @@ async function fashionKnowledgeBrief(orgId: string, category = "", garmentFamily
     }).guidance;
   } catch (error) {
     console.error(`Could not load fashion knowledge: ${error instanceof Error ? error.message : String(error)}`);
+    return "";
+  }
+}
+
+/**
+ * What this team kept and threw away for the sixth frame, for the analysis that
+ * is about to choose the next one. Advice only - the read failing must never
+ * block an analysis, and the prompt says product references still decide.
+ */
+/** The family a catalog batch already established, from its base analysis. */
+function asBaseAnalysisGarmentFamily(batch: JsonRecord) {
+  const memory = (batch.catalog_memory || {}) as JsonRecord;
+  const baseAnalysis = (memory.baseAnalysis || {}) as JsonRecord;
+  return String(((baseAnalysis.productIdentity || {}) as JsonRecord).garmentFamily || "");
+}
+
+async function showcaseFeedbackBrief(orgId: string, category = "", garmentFamily = "") {
+  if (!/^[0-9a-f-]{36}$/i.test(orgId) || !category.trim()) return "";
+  // Before analysis has run the declared category is the only family signal, and
+  // a category too broad to decide yields "" - which matches only category-wide
+  // rows rather than borrowing another family's taste.
+  const family = garmentFamily.trim() || coarseGarmentFamilyForCategory(category);
+  try {
+    const { data, error } = await service.from("showcase_feature_outcomes")
+      .select("id,organization_id,product_category,garment_family,feature_region,shot_type,selected_count,rejected_count,regenerated_count,qa_failed_count,avg_quality")
+      .eq("organization_id", orgId)
+      .eq("product_category", category)
+      .eq("garment_family", family)
+      .order("last_feedback_at", { ascending: false })
+      .limit(40);
+    if (error) {
+      console.error(`Could not load showcase feedback: ${error.message}`);
+      return "";
+    }
+    return selectShowcaseFeedbackGuidance(data || [], {
+      organizationId: orgId,
+      productCategory: category,
+      garmentFamily: family,
+    }).guidance;
+  } catch (error) {
+    console.error(`Could not load showcase feedback: ${errorMessage(error)}`);
     return "";
   }
 }
