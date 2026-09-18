@@ -41,10 +41,10 @@ Status meanings:
 
 | Requirement | Implemented behavior | Status and evidence |
 | --- | --- | --- |
-| Stable six-pose structure | Pose indexes 1–6 represent full, angle/side, back-reference, creative, and close-up outputs from the persisted pose plan. | **Implemented** — approval cannot pass unless all six latest versions are complete. |
+| Stable six-pose structure | Pose indexes 1–6 represent full, angle/side, back-reference, creative, close-up, and garment-led showcase outputs from the persisted pose plan. | **Implemented** — approval cannot pass unless all six latest versions are complete. |
 | Preview/original/status/version/time/model/prompt | Immutable `catalog_pose_asset_versions` records contain stable storage path, preview/original/final URL fields, generation status, version, timestamp, model, prompt, and metadata. | **Implemented** — existing pose rows are backfilled without copying binaries. |
 | Approval, comments, and regeneration history | Latest-version-only human reviews are stored separately; version/review/event history remains visible after regeneration. | **Implemented** — stale-version review is rejected server-side. |
-| SKU-level Listing Team package | Final approval freezes the five exact versions into one revisioned handoff and exposes a stable authenticated workflow/package link plus individual signed asset links. | **Implemented; live gate** — package immutability and delivery behavior need the deployed acceptance run. |
+| SKU-level Listing Team package | Final approval freezes every pose version the shoot was queued with into one revisioned handoff and exposes a stable authenticated workflow/package link plus individual signed asset links. | **Implemented; live gate** — package immutability and delivery behavior need the deployed acceptance run. |
 | Download | Operators can download an individual pose or a full pose-set ZIP; backend-aware readers support Supabase and historical Firebase objects. | **Implemented** — browser and Edge download paths. |
 
 ## Daily approval handoff

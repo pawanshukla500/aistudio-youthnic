@@ -2,7 +2,7 @@
 
 Production additions now include grounded national/state-wise event intelligence, configurable Supabase Cron monthly reports and advance reminders, instruction-aware pose regeneration, readiness state tracking, OpenAI organization Usage/Costs synchronization, 14-day dashboard analytics, self-service profiles, and an optimized GitHub Actions → Cloud Run release path. See [Production deployment](docs/PRODUCTION_DEPLOYMENT.md) for required secrets, migration/deployment commands, and the low-cost Cloud Run configuration.
 
-Youthnic AI Studio creates a consistent six-image fashion catalog photoshoot from product references. Firebase owns authentication and media storage. Supabase owns the application database, authorization, queues, schedules, learning data, and server-side AI orchestration.
+Youthnic AI Studio creates a consistent six-image fashion catalog photoshoot from product references. Firebase owns authentication, and remains readable for historical media during the storage migration. Supabase owns media storage for new uploads and generated images, plus the application database, authorization, queues, schedules, learning data, and server-side AI orchestration.
 
 Convex is no longer a runtime dependency of this application.
 

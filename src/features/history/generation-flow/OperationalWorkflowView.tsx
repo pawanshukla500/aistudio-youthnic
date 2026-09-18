@@ -222,9 +222,9 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
   const currentStage = data.stages.find((stage) => stage.status === "current");
   const activeAction = data.actions.find((action) => action.enabled);
   const completedPoses = data.poses.filter((pose) => pose.current?.generation_status === "completed").length;
-  // Read the shoot's own pose count rather than hard-coding it, so a set queued
-  // before the sixth frame existed still reports out of five.
-  const totalPoses = data.poses.length || 6;
+  // The backend reports the pose count this shoot was queued with, so a set
+  // queued before the sixth frame existed still reports out of five.
+  const totalPoses = data.progress.totalPoseCount || data.poses.length;
   const packageIsDelivered = Boolean(item.listing_sent_at || ["sent_to_listing_team", "listing_in_progress", "listed"].includes(item.workflow_stage));
   const workflowElapsedSeconds = elapsedSeconds(workflowStartedAt, workflowFinishedAt || clock);
   const generationElapsedSeconds = elapsedSeconds(item.generation_started_at, item.generation_completed_at || clock);

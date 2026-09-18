@@ -134,7 +134,12 @@ assert.match(edge, /existingSkus\.add\(normalizedSku\)[\s\S]*clean\.push\(varian
 assert.match(migration, /'catalog\.assign'[\s\S]*'catalog\.handoff\.manage'[\s\S]*'catalog\.listing\.complete'/, "Granular catalog permissions are not provisioned");
 assert.match(migration, /role\.slug = 'listing-team'[\s\S]*'planning\.approve'[\s\S]*'planning\.manage'/, "Legacy Listing Team over-privilege is not removed");
 assert.match(catalogApi, /decision === "rejected" && !comments/, "QC rejection comments are not required");
-assert.match(catalogApi, /\[1, 2, 3, 4, 5\]\.some\(\(poseIndex\) => !completedPoseIndexes\.has\(poseIndex\)\)/, "Five completed pose versions are not required for approval");
+// The gate must follow the pose set the work item was queued with, so a
+// five-pose shoot stays approvable and a six-pose one cannot pass without its
+// sixth frame. A hard-coded index list silently reintroduces that bug.
+assert.match(catalogApi, /expectedPoseIndexes\.some\(\(poseIndex\) => !completedPoseIndexes\.has\(poseIndex\)\)/, "Approval does not require every pose this work item was queued with");
+assert.match(catalogApi, /poseIndexesFromRows\(plannedPoses, versions\)/, "The approval gate does not derive its pose set from the work item's own rows");
+assert.doesNotMatch(catalogApi, /\[1, 2, 3, 4, 5\]\.(?:some|map|every)\(/, "A hard-coded five-pose index list is back in the catalog API");
 assert.match(catalogApi, /export async function reviewCatalogPose[\s\S]*related_asset_version_id/, "Per-pose approval/rejection is not implemented and linked to activity history");
 assert.match(catalogApi, /latestVersion\.id !== assetVersionId[\s\S]*Only the latest version of a pose can be reviewed/, "Historical pose versions can still be reviewed as current");
 assert.match(catalogApi, /approval_status === "rejected"[\s\S]*must be regenerated or approved/, "Final set approval does not block a rejected latest pose");

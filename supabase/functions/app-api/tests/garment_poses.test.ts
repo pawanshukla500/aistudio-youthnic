@@ -80,6 +80,22 @@ Deno.test("kurta family splits on recorded bottom wear and recorded length", () 
   );
 });
 
+Deno.test("a co-ord set follows the rest of the garment, not the word itself", () => {
+  // An ethnic co-ord is a kurta-family set; a western one must not be.
+  assertEquals(
+    detectGarmentPoseFamily({
+      productIdentity: { garmentFamily: "other", category: "co-ord set", bottomWearDetails: "none - standalone garment", length: "ankle-length" },
+    }),
+    "long_kurti",
+  );
+  assertEquals(
+    detectGarmentPoseFamily({
+      productIdentity: { garmentFamily: "western_or_casual", category: "western co-ord set", bottomWearDetails: "none - standalone garment" },
+    }),
+    "western_casual",
+  );
+});
+
 Deno.test("bottom-wear classification reads the positive half of the specification", () => {
   assertEquals(classifyBottomCut("Farshi Pajama, extreme volume; NOT palazzo, NOT lehenga"), "farshi");
   assertEquals(classifyBottomCut("Palazzo, wide straight legs; NOT farshi"), "palazzo");
@@ -250,6 +266,62 @@ Deno.test("a standalone top gets playful, set-matched showcase direction without
   assertStringIncludes(prompt, "MATCH THE POSE TO THE SET");
   assertStringIncludes(prompt, "SHOWCASE FRAME HARD RULE (PLAYFUL, SET-MATCHED)");
   assertStringIncludes(prompt, "The product references prove no bottom garment ships with this SKU.");
+});
+
+Deno.test("a top-only kurta set never gets a complete-set showcase rule", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "KURTA-SET-01",
+    productDetails: "Kurta set with palazzo",
+    pose: pose("showcase", 6) as never,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        bottomWearDetails: "Palazzo, wide straight legs; NOT farshi",
+      },
+      // The analysis wrote a complete-set brief before the shoot was configured.
+      creativeDirection: { showcaseIntent: "set_full_length" },
+      bottomWearMode: "top_only",
+    },
+    references: [{ role: "front" }],
+  });
+  assertEquals(prompt.includes("SHOWCASE FRAME HARD RULE (COMPLETE SET)"), false);
+  assertStringIncludes(prompt, "SHOWCASE FRAME HARD RULE (TRUE FALL AND LENGTH)");
+  assertStringIncludes(prompt, "THIS SECTION OUTRANKS THE POSE BRIEF");
+});
+
+Deno.test("a saree recognised only by category still gets no bottom-wear block", () => {
+  // garmentFamily never resolved past the broad category, so the exact match is
+  // false while the pose taxonomy still reads this as a saree.
+  const prompt = composeGenerationPrompt({
+    skuName: "SAREE-01",
+    productDetails: "Traditional silk saree",
+    pose: pose("full_front", 1) as never,
+    session: {
+      category: "saree",
+      productIdentity: { garmentFamily: "unknown", category: "saree", bottomWearDetails: "none - standalone garment" },
+    },
+    references: [{ role: "front" }, { role: "back" }],
+  });
+  assertStringIncludes(prompt, "GARMENT POSE GRAMMAR (SAREE ETHNIC)");
+  assertEquals(prompt.includes("TOP-ONLY PRODUCT"), false);
+  assertEquals(prompt.includes("ABSOLUTE PROHIBITION ON INVENTING A MATCHING SET"), false);
+  assertEquals(prompt.includes("LOCKED BOTTOM WEAR ARCHITECTURE"), false);
+});
+
+Deno.test("an explicit top-only mode also rewrites the stored sixth-frame brief", () => {
+  const productIdentity = {
+    garmentFamily: "kurta_or_kurti_set",
+    bottomWearDetails: "Palazzo, wide straight legs, matching print",
+  };
+  const withBottoms = getPoseSlots({ productIdentity });
+  assertStringIncludes(withBottoms[5].title, "Top & Bottom");
+
+  const topOnly = getPoseSlots({ productIdentity, bottomWearMode: "top_only" });
+  assertEquals(topOnly[5].title.includes("Top & Bottom"), false);
+  assertEquals(
+    topOnly[5].productVisibilityRules.some((rule) => rule.includes("waistband")),
+    false,
+  );
 });
 
 Deno.test("an explicit recorded showcase intent outranks the inferred one", () => {

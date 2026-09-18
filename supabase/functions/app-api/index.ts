@@ -2085,7 +2085,7 @@ async function nextJob(args: JsonRecord) {
 async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonRecord[]) {
   const completed = poses.filter((pose) => pose.status === "completed").length;
   const failed = poses.filter((pose) => pose.status === "failed").length;
-  // A complete five-pose delivery is an operational result, not fidelity
+  // A complete pose-set delivery is an operational result, not fidelity
   // evidence. In particular, Gemini outages intentionally leave paid images
   // unverified. Keep that distinction in the immutable observation ledger so
   // it can never later be mistaken for high-quality training data.
@@ -2454,7 +2454,9 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
   }) });
 
   const result = await visionJson(policy, parts);
-  const normalized = normalizeAnalysis(result.json, category);
+  const normalized = normalizeAnalysis(result.json, category, {
+    bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+  });
 
   // Store baseAnalysis into catalog_memory
   try {
@@ -5051,7 +5053,9 @@ async function analyzeCatalogVariant(
     analysisLearning: await analysisLearningBrief(String(batch.organization_id), category),
   }) });
   const result = await visionJson(policy, parts, { onAttempt });
-  const normalized = normalizeAnalysis(result.json, category);
+  const normalized = normalizeAnalysis(result.json, category, {
+    bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+  });
 
   // Store baseAnalysis into catalog_memory so subsequent SKUs reuse it
   try {
@@ -5766,7 +5770,9 @@ async function queueCatalogVariantGeneration(
 
   const analysisHashes = await catalogAnalysisFingerprint(batch, variant, references);
   const storedNormalized = variant.ai_analysis
-    ? normalizeAnalysis(variant.ai_analysis as JsonRecord, category)
+    ? normalizeAnalysis(variant.ai_analysis as JsonRecord, category, {
+      bottomWearMode: generationSettings.bottomWear ?? generationSettings.bottomWearMode,
+    })
     : null;
   const hasCurrentAnalysis = variant.analysis_status === "ready"
     && variant.analysis_fingerprint === analysisHashes.fingerprint
@@ -6787,7 +6793,7 @@ function catalogProductionReportHtml(organizationName: string, reportDate: strin
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:960px;margin:0 auto;border-collapse:collapse">
       <tr><td style="border-radius:18px;background:#4f2457;padding:26px">
         <div style="font:700 11px/1.5 Arial,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#f0c9f2">Catalog approval handoff</div>
-        <div style="font:700 24px/1.3 Arial,sans-serif;color:#ffffff;padding-top:5px">Approved five-pose packages</div>
+        <div style="font:700 24px/1.3 Arial,sans-serif;color:#ffffff;padding-top:5px">Approved pose packages</div>
         <div style="font:400 13px/1.6 Arial,sans-serif;color:#eadfea;padding-top:6px">${escapeHtml(organizationName)} · business date ${escapeHtml(reportDate)} · ${rows.length} SKU${rows.length === 1 ? "" : "s"}</div>
       </td></tr>
       <tr><td style="padding:14px 8px 0;font:400 12px/1.6 Arial,sans-serif;color:#655d6b">These SKU sets passed final human review and are ready for marketplace listing. Late, weekend, and holiday approvals are included in the next configured business-day digest.</td></tr>
@@ -7160,7 +7166,7 @@ async function runCatalogProductionAutomationOperation(request: Request) {
           if (!retryContext.rows.length) {
             await service.from("catalog_report_deliveries").update({
               status: "failed",
-              error_message: "Retry paused because the previously selected handoff no longer has a complete five-pose package.",
+              error_message: "Retry paused because the previously selected handoff no longer has a complete pose package.",
               next_retry_at: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
               updated_at: new Date().toISOString(),
             }).eq("id", failedDelivery.id).eq("organization_id", orgId);
@@ -7343,7 +7349,7 @@ async function sendCatalogHandoffDigestOperation(request: Request, args: JsonRec
     forceResend = true;
   }
   const context = await catalogDigestContext(workspace.organization.id, workspace.organization.name, { handoffIds });
-  if (!context.rows.length) throw new Error("No approved, undelivered five-pose packages are ready.");
+  if (!context.rows.length) throw new Error("No approved, undelivered pose packages are ready.");
   if (!context.recipients.length) throw new Error("No active member in the configured recipient team or custom handoff recipient is available.");
   const effectiveReportDate = resendReportDate || context.reportDate;
   const effectiveSubject = `${workspace.organization.name} · ${context.rows.length} approved catalog package${context.rows.length === 1 ? "" : "s"} · ${effectiveReportDate}`;

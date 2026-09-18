@@ -63,10 +63,13 @@ const BENGALI_SAREE_RE =
   /\b(bengali|bangla(?:deshi)?|bengal|tant|taant|jamdani|dhakai|garad|garod|korial|baluchari|swarnachari|kantha|lal\s*paar|laal\s*paar|red\s*and\s*white\s*saree|shantipuri|begumpuri|murshidabad|bishnupuri|atpoure|aatpoure|athpourey|aanchal|anchal)\b/i;
 const SAREE_RE = /\bsarees?\b|\bsari\b/i;
 const LEHENGA_RE = /\b(lehenga|lehanga|ghagra|chaniya\s*choli)\b/i;
-const KURTA_RE = /\b(kurta|kurti|kurtha|kurtis|kurtas|salwar\s*suit|churidar\s*suit|anarkali|co-?ord)\b/i;
+const KURTA_RE = /\b(kurta|kurti|kurtha|kurtis|kurtas|salwar\s*suit|churidar\s*suit|anarkali)\b/i;
+// A co-ord set is ethnic or western depending on the rest of the garment, so it
+// only joins the kurta family when nothing western is claimed alongside it.
+const COORD_RE = /\bco-?ord(?:inate)?s?\b/i;
 const TOP_ONLY_RE = /\b(top|tee|t-?shirt|shirt|blouse|crop\s*top|tunic|camisole|corset|bustier|peplum)\b/i;
 const DRESS_RE = /\b(dress|gown|maxi|midi\s*dress|jumpsuit|kaftan|kaftaan|caftan)\b/i;
-const WESTERN_RE = /\b(western|casual|denim|jeans|co-?ord\s*set|athleisure|street\s*wear)\b/i;
+const WESTERN_RE = /\b(western|casual|denim|jeans|athleisure|street\s*wear)\b/i;
 
 /** Lengths that read as a short/cropped upper garment rather than a long kurti. */
 const SHORT_LENGTH_RE =
@@ -201,7 +204,9 @@ export function detectGarmentPoseFamily(args: {
 
   if (LEHENGA_RE.test(haystack)) return "lehenga";
 
-  const looksKurta = garmentFamily.includes("kurta") || garmentFamily.includes("kurti") || KURTA_RE.test(haystack);
+  const looksWestern = garmentFamily === "western_or_casual" || WESTERN_RE.test(haystack);
+  const looksKurta = garmentFamily.includes("kurta") || garmentFamily.includes("kurti") ||
+    KURTA_RE.test(haystack) || (COORD_RE.test(haystack) && !looksWestern);
   if (looksKurta) {
     if (hasBottomWearInAnalysis(product)) return "kurta_set";
     if (isShortUpperGarment(product, haystack)) return "short_kurti_top";
@@ -209,8 +214,10 @@ export function detectGarmentPoseFamily(args: {
   }
 
   if (DRESS_RE.test(haystack) || garmentFamily === "dress") return "dress";
+  // A cropped top takes the playful short-top grammar whether it is ethnic or
+  // western, so this stays ahead of the broader western/casual bucket.
   if (TOP_ONLY_RE.test(haystack)) return "short_kurti_top";
-  if (garmentFamily === "western_or_casual" || WESTERN_RE.test(haystack)) return "western_casual";
+  if (looksWestern) return "western_casual";
   return "other";
 }
 

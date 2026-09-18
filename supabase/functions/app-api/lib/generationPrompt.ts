@@ -453,6 +453,9 @@ function bottomWearSection(args: {
   isSaree: boolean;
   hasBottomReference: boolean;
 }) {
+  // `isSaree` is the caller's exact garmentFamily match widened by the pose
+  // family, so a session analysed under "ethnic/fusion" that the taxonomy
+  // recognises as a saree is never handed bottom-wear instructions.
   if (args.isSaree) return "";
   if (!args.bottomWear.includesBottomWear) {
     const reason = args.bottomWear.mode === "top_only"
@@ -462,7 +465,8 @@ function bottomWearSection(args: {
 - This SKU is the upper garment only. ${reason}
 - STRICTLY FORBIDDEN: rendering coordinated or "matching" bottom wear. Never give the bottoms this product's print, motif, embroidery, border, colour blocking, fabric or trim, and never render anything that would read as a second product piece the customer expects to receive.
 - Style the model in one simple, plain, solid, unbranded bottom in a quiet neutral tone that suits the garment and the set (or the bottom the approved styling plan names). It stays visually subordinate at all times.
-- Frame every pose so the upper garment - its neckline, sleeves, fit, print and hem line - remains the subject.${args.bottomWear.mode === "top_only" && args.bottomWear.recordedInAnalysis ? "\n- The analysis recorded bottom-wear details for this SKU, but the shoot is configured TOP ONLY. Present the top as the product and keep the bottom neutral and non-matching." : ""}`;
+- Frame every pose so the upper garment - its neckline, sleeves, fit, print and hem line - remains the subject.
+- THIS SECTION OUTRANKS THE POSE BRIEF: the pose plan below was written from the product analysis and may still name bottom wear, a "complete set", or a waistband-to-hem read. Ignore every such instruction and follow this section instead.${args.bottomWear.mode === "top_only" && args.bottomWear.recordedInAnalysis ? "\n- The analysis recorded bottom-wear details for this SKU, but the shoot is configured TOP ONLY. Present the top as the product and keep the bottom neutral and non-matching." : ""}`;
   }
   const guard = bottomWearSubstitutionGuard(args.bottomWear.cutClass);
   return `LOCKED BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT - HIGHEST FIDELITY:
@@ -485,10 +489,18 @@ function showcaseIntentFor(args: {
   includesBottomWear: boolean;
 }): ShowcaseIntent {
   const recorded = normalizeShowcaseIntent(args.creative.showcaseIntent ?? args.creative.showcase_intent);
-  if (recorded) return recorded;
   if (isSareePoseFamily(args.family)) return "saree_drape";
-  if (args.includesBottomWear || args.family === "kurta_set" || args.family === "lehenga") return "set_full_length";
-  if (args.family === "short_kurti_top" || args.family === "western_casual") return "playful_backdrop";
+  // A complete-set frame is only coherent when this shoot actually renders the
+  // bottom. Without that, "set_full_length" would demand a waistband-to-hem read
+  // of a bottom the same prompt forbids, whether the intent was recorded by the
+  // analysis or inferred from the garment family.
+  if (!args.includesBottomWear && (recorded === "set_full_length" || !recorded)) {
+    return args.family === "short_kurti_top" || args.family === "western_casual"
+      ? "playful_backdrop"
+      : "full_length_silhouette";
+  }
+  if (recorded) return recorded;
+  if (args.includesBottomWear) return "set_full_length";
   return "full_length_silhouette";
 }
 
@@ -550,6 +562,9 @@ export function composeGenerationPrompt(args: {
     productIdentity: product,
   });
   const isShowcase = args.pose.id === "showcase";
+  // Exact garmentFamily drives the saree truth blocks; the pose taxonomy is
+  // broader, and a shoot either taxonomy calls a saree has no bottom wear.
+  const isSareeShoot = isSaree || isSareePoseFamily(poseFamily);
   const productCoreJson = compactJson(
     isTrueBack
       ? rearOnlyProductCore(product, bottomWear.includesBottomWear)
@@ -716,7 +731,7 @@ Embroidery geometry: ${embroideryGeometryJson}
 - Reproduce embroidery as the same internal geometry: same lattice or motif structure, same count and rhythm of repeated units, same borders, same coverage area, and the same relationship to the neckline, tie, drawstring and tassel.
 - If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".`)}
 
-${bottomWearSection({ bottomWear, isSaree, hasBottomReference })}
+${bottomWearSection({ bottomWear, isSaree: isSareeShoot, hasBottomReference })}
 
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
 ${creativeJson}
@@ -811,7 +826,9 @@ ${rules.map((rule) => `- ${rule}`).join("\n")}
 - Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
 ${bottomWear.includesBottomWear
     ? "- ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION: it is strictly forbidden to alter or replace the recorded bottom-wear cut, silhouette, volume, colour or print, or to reduce bold motifs to solid colour or tiny dots. Customers buy the complete set and expect the exact silhouette, colour and motif pattern shown in the product references."
-    : "- ABSOLUTE PROHIBITION ON INVENTING A MATCHING SET: it is strictly forbidden to render coordinated bottom wear that repeats this product's print, motif, embroidery, border, colour blocking or fabric. The bottom stays plain, neutral and clearly styling, never a second product piece."}
+    : isSareeShoot
+      ? "- Never substitute or restyle the saree drape, pallu placement, pleat stack or border geometry."
+      : "- ABSOLUTE PROHIBITION ON INVENTING A MATCHING SET: it is strictly forbidden to render coordinated bottom wear that repeats this product's print, motif, embroidery, border, colour blocking or fabric. The bottom stays plain, neutral and clearly styling, never a second product piece."}
 - STRICT PROHIBITION ON COPYING PRE-SHOOT BACKGROUNDS: Never copy or reproduce pre-shoot background walls, terracotta arches, urns, clay pots, plants, courtyard structures, or outdoor scenery from the product reference images into the generated image.
 - Never change the backdrop wall color, texture, floor, or lighting from what was established in Pose 1.
 - Never add random background props (brass urlis, urns, flower petals, pedestals) not present in Pose 1.

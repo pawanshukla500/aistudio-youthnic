@@ -140,6 +140,9 @@ export function OutputSettings({
               <option value="top_only">Top only · never invent matching bottom wear</option>
             </select>
             <p className="mt-1.5 text-[11px] leading-4 text-secondary">Kurti/kurta sets with pants, palazzo, skirt or salwar get full-body poses showing both pieces. Top-only keeps the bottom plain and neutral so it never reads as part of the product.</p>
+            {value.bottomWear !== "auto" && (
+              <p className="mt-1 text-[11px] leading-4 text-secondary">This setting is applied at generation time and overrides any bottom-wear wording left in the pose plan below, so you do not need to re-run the analysis after changing it.</p>
+            )}
           </div>
           <label className="flex cursor-pointer items-center justify-between border-t border-outline-variant/30 pt-4">
             <span>

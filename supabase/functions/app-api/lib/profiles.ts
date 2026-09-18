@@ -6,7 +6,9 @@ import {
   type GarmentPoseFamily,
   hasBottomWearInAnalysis,
   isSareePoseFamily,
+  normalizeBottomWearMode,
   recordedBottomWearText,
+  resolveBottomWearPresentation,
 } from "./garmentPoses.ts";
 
 // Print and embroidery are what make a garment this SKU rather than a similar
@@ -397,6 +399,8 @@ export type PoseSlotContext = {
   productDetails?: string;
   skuName?: string;
   poseFamily?: GarmentPoseFamily;
+  /** "auto" | "included" | "top_only". An explicit choice outranks the analysis. */
+  bottomWearMode?: unknown;
 };
 
 function poseSlotContext(input: string | PoseSlotContext): PoseSlotContext {
@@ -535,9 +539,15 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
   const context = poseSlotContext(input);
   const family = poseFamilyFor(context);
   const isSaree = isSareePoseFamily(family);
-  const hasBottoms = hasBottomWearInAnalysis(
-    context.productIdentity ?? {},
-  ) || family === "kurta_set" || family === "lehenga";
+  // The sixth frame's brief must agree with how the shoot will actually be
+  // rendered, so a top-only shoot never stores a "show the bottom wear" brief.
+  const hasBottoms = resolveBottomWearPresentation({
+    mode: context.bottomWearMode,
+    productIdentity: context.productIdentity ?? {},
+  }).includesBottomWear || (
+    normalizeBottomWearMode(context.bottomWearMode) !== "top_only" &&
+    (family === "kurta_set" || family === "lehenga")
+  );
 
   return [
     {
@@ -1188,7 +1198,7 @@ export function assertSareeGenerationReady(session: unknown) {
   }
 }
 
-export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
+export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, options: { bottomWearMode?: unknown } = {}) {
   const product = objectValue(raw.productIdentity ?? raw.product_identity);
   const creative = objectValue(raw.creativeDirection ?? raw.creative_direction);
   const model = objectValue(raw.modelIdentity ?? raw.model_identity);
@@ -1268,7 +1278,7 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
     showcaseIntent: normalizeShowcaseIntent(creative.showcaseIntent ?? creative.showcase_intent),
   };
   const modelIdentity = {
-    castingDirection: stringValue(model.castingDirection ?? model.casting_direction, "One consistent adult fashion model across all five images, reading as a youthful young adult with a naturally pretty, warm, approachable face"),
+    castingDirection: stringValue(model.castingDirection ?? model.casting_direction, "One consistent adult fashion model across every image in the set, reading as a youthful young adult with a naturally pretty, warm, approachable face"),
     face: stringValue(model.face, "Keep the exact same recognizable face across the complete set - identical face shape, eyes, eyebrows, nose, lips, and jawline as established in Pose 1"),
     faceRealism: stringValue(
       model.faceRealism ?? model.face_realism,
@@ -1284,6 +1294,7 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string) {
     productIdentity,
     garmentFamily: productIdentity.garmentFamily,
     category: productIdentity.category || categoryFallback,
+    bottomWearMode: options.bottomWearMode,
   });
   const posePlan: StudioPose[] = poseSlots.map((fallback, index) => {
     const candidate = objectValue(poses.find((pose) => objectValue(pose).id === fallback.id) ?? poses[index]);
