@@ -37,7 +37,9 @@ const REQUIRED_POSE_COUNT = 6;
 const AUTO_ANALYZE_DELAY_MS = 900;
 
 const defaultOptions: OutputOptions = {
-  model: "gpt-image-2.5-flare-2026-09-08",
+  // Empty on purpose: the shoot follows the organization's configured route
+  // until someone deliberately overrides it for this session.
+  model: "",
   modelIdentity: "Same adult South Asian female fashion model across every pose",
   aspectRatio: "3:4",
   imageSize: "2K",
@@ -104,18 +106,13 @@ export function Studio() {
   const { data: queuePosition, error: _queuePositionError } = useQuery(api.jobs.getQueuePosition, submittedJobId && submittedJob?.status === "queued" ? { jobId: submittedJobId } : "skip");
   const { data: effectiveRouting } = useQuery(api.ai.getEffectiveRouting, organization?._id ? { organizationId: organization._id } : "skip");
 
-  const rawOrgModel = (effectiveRouting as any)?.imageGeneration?.model as OutputOptions["model"] | undefined;
-  const orgModel = rawOrgModel === "gpt-image-2" ? "gpt-image-2.5-flare-2026-09-08" : rawOrgModel;
-  const orgModelLabel = rawOrgModel === "gpt-image-2"
-    ? "GPT Image 2.5 Flare (2026-09-08 · Default)"
-    : (effectiveRouting as any)?.imageGeneration?.displayLabel as string | undefined;
-  const userOverrodeModelRef = useRef(false);
-
-  useEffect(() => {
-    if (orgModel && !userOverrodeModelRef.current) {
-      setOptions((prev) => (prev.model === orgModel ? prev : { ...prev, model: orgModel }));
-    }
-  }, [orgModel]);
+  // Whatever Administration actually routes to, reported as-is. Rewriting one
+  // approved model into another here made this panel show an "Admin route" the
+  // organization had not chosen, and sent that model as an explicit per-request
+  // override that outranked the real policy at queue time.
+  const orgModel = (effectiveRouting as any)?.imageGeneration?.model as OutputOptions["model"] | undefined;
+  const orgModelLabel = (effectiveRouting as any)?.imageGeneration?.displayLabel as string | undefined;
+  const orgModelOptions = ((effectiveRouting as any)?.imageGeneration?.allowedModels || []) as Array<{ id: OutputOptions["model"]; label: string }>;
 
   const allReferences = useMemo(
     () => [...Object.values(productReferences).filter(Boolean), ...(modelReference ? [modelReference] : []), ...styleReferences] as StudioReference[],
@@ -200,9 +197,6 @@ export function Studio() {
   };
 
   const updateOptions = (next: OutputOptions) => {
-    if (next.model !== options.model) {
-      userOverrodeModelRef.current = true;
-    }
     if (
       next.modelIdentity !== options.modelIdentity ||
       next.backgroundStyle !== options.backgroundStyle
@@ -642,7 +636,7 @@ export function Studio() {
           </section>
 
           <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm">
-            <OutputSettings value={options} onChange={updateOptions} orgModel={orgModel} orgModelLabel={orgModelLabel} />
+            <OutputSettings value={options} onChange={updateOptions} orgModel={orgModel} orgModelLabel={orgModelLabel} orgModelOptions={orgModelOptions} />
           </section>
 
           <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all overflow-hidden">

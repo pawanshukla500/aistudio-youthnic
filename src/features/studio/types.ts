@@ -274,7 +274,10 @@ export type StudioAnalysis = {
 export type { StylingPlanProfile };
 
 export type OutputOptions = {
+  // "" means no per-request override: the organization's configured route in
+  // Administration decides, which is the default for every new shoot.
   model:
+    | ""
     | "gpt-image-2.5-flare-2026-09-08"
     | "gpt-image-2.5-flare"
     | "gpt-image-2.5-sunburst"

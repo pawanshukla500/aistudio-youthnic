@@ -26,6 +26,7 @@ import {
   AI_PROVIDERS,
   aiModelDisplayLabel,
   aiModelHelpText,
+  allowedModelsForPurpose,
   allowedThinkingLevels,
   assertAllowedAiModelRoute,
   classifyVisionProviderFailure,
@@ -48,6 +49,7 @@ import {
   productTruthRouteChain,
   promotionFallbackRoute,
   providerSecretName,
+  resolveStoredImageGenerationRoute,
   runVisionProviderChain,
   selectConfiguredVisionRoutes,
   shouldRetrySameVisionRoute,
@@ -771,25 +773,13 @@ async function resolveImageGenerationPolicy(orgId: string): Promise<ImageGenerat
   // available. We never write or trust an unvalidated model in this path.
   if (error?.code === "42P01") return fallback;
   if (error) throw new Error(`Could not load the organization image-generation policy: ${error.message}`);
-  if (!data || data.primary_model === "gpt-image-2") return fallback;
-  if (data.fallback_enabled === true) {
-    throw new Error("Stored image-generation routing is invalid. Clear its fallback and choose an approved OpenAI GPT Image model in Administration.");
-  }
-  try {
-    const primary = assertAllowedAiModelRoute({
-      provider: String(data.primary_provider || ""),
-      model: String(data.primary_model || ""),
-      thinkingLevel: String(data.primary_reasoning || ""),
-    }, "image_generation");
-    return {
-      ...primary,
-      purpose: "image_generation",
-      revision: Math.max(1, Number(data.revision || 1)),
-      source: "organization",
-    };
-  } catch {
-    throw new Error("Stored image-generation routing is invalid. Choose an approved OpenAI GPT Image model in Administration.");
-  }
+  // Only an absent policy falls back. A stored model is the administrator's
+  // explicit choice and is validated like any other: silently swapping one
+  // approved model for another made Administration display a setting the rest
+  // of the system ignored.
+  const stored = resolveStoredImageGenerationRoute(data);
+  if (!stored) return fallback;
+  return { ...stored, purpose: "image_generation", source: "organization" };
 }
 
 function requiredEnv(name: string) {
@@ -1974,8 +1964,11 @@ async function queueGeneration(request: Request, args: JsonRecord) {
   let model = imageGenerationPolicy.model;
   if (requestedModel) {
     try {
+      // Validate against the organization's own provider, not a hard-coded one:
+      // that is the allow-list the Studio picker is served, so a model offered
+      // there is a model this path accepts instead of silently discarding.
       const validated = assertAllowedAiModelRoute({
-        provider: "openai",
+        provider: imageGenerationPolicy.provider,
         model: requestedModel,
         thinkingLevel: "none",
       }, "image_generation");
@@ -5988,8 +5981,11 @@ async function queueCatalogVariantGeneration(
   let model = imageGenerationPolicy.model;
   if (requestedModel) {
     try {
+      // Validate against the organization's own provider, not a hard-coded one:
+      // that is the allow-list the Studio picker is served, so a model offered
+      // there is a model this path accepts instead of silently discarding.
       const validated = assertAllowedAiModelRoute({
-        provider: "openai",
+        provider: imageGenerationPolicy.provider,
         model: requestedModel,
         thinkingLevel: "none",
       }, "image_generation");
@@ -7917,6 +7913,12 @@ Deno.serve(async (request) => {
             thinkingLevel: imagePolicy.thinkingLevel,
             displayLabel: aiModelDisplayLabel(imagePolicy.model),
             source: imagePolicy.source,
+            // Served rather than hard-coded in the client so the Studio picker
+            // cannot offer a model this organization's provider would reject.
+            allowedModels: allowedModelsForPurpose(imagePolicy.provider, "image_generation").map((model) => ({
+              id: model,
+              label: aiModelDisplayLabel(model),
+            })),
           },
         };
       },

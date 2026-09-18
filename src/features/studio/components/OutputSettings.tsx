@@ -18,15 +18,23 @@ export function OutputSettings({
   onChange,
   orgModel,
   orgModelLabel,
+  orgModelOptions,
 }: {
   value: OutputOptions;
   onChange: (value: OutputOptions) => void;
   orgModel?: OutputOptions["model"];
   orgModelLabel?: string;
+  /** Models this organization's provider actually accepts, served by the API. */
+  orgModelOptions?: Array<{ id: OutputOptions["model"]; label: string }>;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const set = <K extends keyof OutputOptions>(key: K, next: OutputOptions[K]) => onChange({ ...value, [key]: next });
-  const activeModel = value.model || orgModel || "gpt-image-2.5-flare-2026-09-08";
+  // No override means the organization's route is what will run.
+  const activeModel = value.model || orgModel || "";
+  // Offering a model the provider would reject makes the choice a no-op, so the
+  // served list wins and the static one is only a pre-routing placeholder.
+  const modelOptions = orgModelOptions?.length ? orgModelOptions : MODEL_OPTIONS;
+  const labelFor = (id: string) => modelOptions.find((option) => option.id === id)?.label || id;
 
   return (
     <div className="w-full">
@@ -42,7 +50,7 @@ export function OutputSettings({
           <div>
             <h2 className="text-base font-bold text-on-surface">Output settings</h2>
             <p className="mt-0.5 text-xs text-secondary">
-              Image generation · {activeModel} · {value.aspectRatio} · {value.imageSize} · {value.quality} quality
+              Image generation · {activeModel ? labelFor(activeModel) : "organization route"} · {value.aspectRatio} · {value.imageSize} · {value.quality} quality
             </p>
           </div>
         </div>
@@ -63,27 +71,30 @@ export function OutputSettings({
               )}
             </div>
             <select
-              value={activeModel}
+              value={value.model}
               onChange={(event) => set("model", event.target.value as OutputOptions["model"])}
               className="h-10 w-full rounded-md border border-outline-variant bg-white px-3 text-sm outline-none focus:border-primary"
             >
-              {MODEL_OPTIONS.map((opt) => (
+              <option value="">
+                {orgModel
+                  ? `Organization route · ${orgModelLabel || labelFor(orgModel)}`
+                  : "Organization route (set in Administration)"}
+              </option>
+              {modelOptions.map((opt) => (
                 <option key={opt.id} value={opt.id}>
                   {opt.label}{orgModel === opt.id ? " · Active Org Route" : ""}
                 </option>
               ))}
-              {!MODEL_OPTIONS.some((opt) => opt.id === activeModel) && (
-                <option value={activeModel}>
-                  {activeModel}{orgModel === activeModel ? " · Active Org Route" : ""}
-                </option>
+              {Boolean(value.model) && !modelOptions.some((opt) => opt.id === value.model) && (
+                <option value={value.model}>{value.model}</option>
               )}
             </select>
             <p className="mt-1.5 text-[11px] leading-4 text-secondary">
               {value.model && orgModel && value.model !== orgModel
-                ? `Custom override selected for this session. Organization default set in Administration is ${orgModelLabel || orgModel}.`
+                ? `Overriding this shoot only. Your organization's route in Administration stays ${orgModelLabel || labelFor(orgModel)}.`
                 : orgModel
-                  ? `Using your organization's configured default model (${orgModelLabel || orgModel}) from Administration.`
-                  : "Your organization’s server-side routing is automatically applied unless overridden."}
+                  ? `Using your organization's route from Administration: ${orgModelLabel || labelFor(orgModel)}.`
+                  : "No organization route is configured yet, so the system default applies. Set one in Administration."}
             </p>
           </div>
           <div>
