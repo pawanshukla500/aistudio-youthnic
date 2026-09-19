@@ -5,6 +5,9 @@ const apiSource = Deno.readTextFileSync(new URL("../index.ts", import.meta.url))
 const backendSource = Deno.readTextFileSync(
   new URL("../../../../src/lib/backend.ts", import.meta.url),
 );
+const studioSource = Deno.readTextFileSync(
+  new URL("../../../../src/features/studio/Studio.tsx", import.meta.url),
+);
 const migration = Deno.readTextFileSync(
   new URL("../../../migrations/20260919090000_one_active_job_per_session.sql", import.meta.url),
 );
@@ -79,4 +82,11 @@ Deno.test("History shows the run being viewed, not every run on the session", ()
   assertStringIncludes(backendSource, "`${jobId}:pose:`");
   // Rows predating generation_data.jobId must still render.
   assertStringIncludes(backendSource, "rowsForThisJob.length > 0 ? rowsForThisJob : allPoseRows");
+});
+
+Deno.test("a second submit says the shoot was already running", () => {
+  // Reporting "submitted successfully" for a run that was already going reads
+  // as a new job the operator then waits for and never sees.
+  assertStringIncludes(studioSource, "result.alreadyQueued");
+  assertStringIncludes(studioSource, "already generating");
 });
