@@ -279,7 +279,17 @@ export const PRODUCT_TRUTH_TIMEOUT_MS = 40_000;
 export const PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS = 25_000;
 export const VISION_PROVIDER_TIMEOUT_MS = 50_000;
 export const VISION_GATEWAY_BUDGET_MS = 145_000;
+/** Held back inside the chain: parsing a hop's reply and recording the attempt. */
 export const VISION_GATEWAY_RESERVE_MS = 5_000;
+/**
+ * Held back outside the chain, and distinct from the reserve above.
+ *
+ * `runVisionProviderChain` starts its clock when the chain starts, so auth, the
+ * workspace RPC, loading the reference images and the response trip home are
+ * all invisible to the per-hop reserve. They still consume the client's wait,
+ * so the gateway budget gives them their own allowance.
+ */
+export const VISION_REQUEST_OVERHEAD_MS = 5_000;
 export const PRODUCT_TRUTH_MIN_SLICE_MS = 10_000;
 export const VISION_HOP_MIN_MS = 8_000;
 export const VISION_ROUTE_PROMOTION_THRESHOLD = 4;
@@ -358,19 +368,19 @@ export function productTruthHopTimeoutMs(
  * `VISION_GATEWAY_BUDGET_MS` is 145s. Returning after the client has
  * disconnected still drops hop 2.
  *
- * The cap holds back `VISION_GATEWAY_RESERVE_MS` rather than spending the whole
- * client wait. `runVisionProviderChain` starts its clock when the chain starts,
- * so auth, the workspace RPC, loading the reference images and the response trip
- * home all sit outside the per-hop reserve. Budgeting the client's full wait let
- * a hop still be running at the instant the browser aborted, which surfaces as
- * "Analysis was interrupted before OpenAI could finish" on a run the server
- * would have completed.
+ * The cap holds back `VISION_REQUEST_OVERHEAD_MS` rather than spending the whole
+ * client wait, because everything outside `runVisionProviderChain` is invisible
+ * to that function's own reserve. Budgeting the full wait let a hop still be
+ * running at the instant the browser aborted, which surfaces as "Analysis was
+ * interrupted before OpenAI could finish" on a run the server would have
+ * completed. A hop that finishes 5s earlier and is actually delivered beats one
+ * that runs longer and has its answer thrown away.
  */
 export function productTruthGatewayBudgetMs(configured?: number) {
   const value = Number.isFinite(configured) && (configured as number) >= 20_000
     ? Math.round(configured as number)
     : VISION_GATEWAY_BUDGET_MS;
-  return Math.min(value, STUDIO_INVOKE_BUDGET_MS - VISION_GATEWAY_RESERVE_MS);
+  return Math.min(value, STUDIO_INVOKE_BUDGET_MS - VISION_REQUEST_OVERHEAD_MS);
 }
 
 export function productTruthRouteChain(
