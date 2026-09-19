@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
+  claimGenerationRun,
   isDuplicateJobInsert,
   queueReuseResponse,
   scopePoseRowsToJob,
@@ -83,4 +84,92 @@ Deno.test("only a unique violation is answered with the winning run", () => {
   assertEquals(isDuplicateJobInsert({}), false);
   assertEquals(isDuplicateJobInsert(null), false);
   assertEquals(isDuplicateJobInsert(undefined), false);
+});
+
+type Call = "insertJob" | "insertPoses" | "findActiveRun";
+
+function ops(overrides: {
+  jobError?: { code?: string; message?: string } | null;
+  poseError?: { message?: string } | null;
+  winner?: { job_id: string; provider?: string; model?: string } | null;
+} = {}) {
+  const calls: Call[] = [];
+  return {
+    calls,
+    handlers: {
+      insertJob: () => {
+        calls.push("insertJob");
+        return Promise.resolve({ error: overrides.jobError ?? null });
+      },
+      insertPoses: () => {
+        calls.push("insertPoses");
+        return Promise.resolve({ error: overrides.poseError ?? null });
+      },
+      findActiveRun: () => {
+        calls.push("findActiveRun");
+        return Promise.resolve(overrides.winner ?? null);
+      },
+    },
+  };
+}
+
+Deno.test("a clean claim writes the job and then its poses, once each", async () => {
+  const { calls, handlers } = ops();
+  assertEquals(await claimGenerationRun(handlers), null);
+  // Exactly one job and one pose set: the duplication being fixed was two of each.
+  assertEquals(calls, ["insertJob", "insertPoses"]);
+});
+
+Deno.test("a lost race returns the winner and writes no poses", async () => {
+  const { calls, handlers } = ops({
+    jobError: { code: "23505", message: "duplicate key value violates unique constraint" },
+    winner: { job_id: "job_winner", provider: "openai", model: "gpt-image-2" },
+  });
+  const result = await claimGenerationRun(handlers);
+  assertEquals(result?.jobId, "job_winner");
+  assertEquals(result?.alreadyQueued, true);
+  // The whole point: the loser must not add a second pose set to the session.
+  assertEquals(calls.includes("insertPoses"), false);
+  assertEquals(calls, ["insertJob", "findActiveRun"]);
+});
+
+Deno.test("a unique violation with no winner surfaces rather than silently passing", async () => {
+  const { calls, handlers } = ops({
+    jobError: { code: "23505", message: "duplicate key value violates unique constraint" },
+    winner: null,
+  });
+  let message = "";
+  try {
+    await claimGenerationRun(handlers);
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  assertEquals(message.includes("duplicate key"), true);
+  assertEquals(calls.includes("insertPoses"), false);
+});
+
+Deno.test("any other job failure is raised without looking for a winner", async () => {
+  const { calls, handlers } = ops({ jobError: { code: "23503", message: "foreign key violation" } });
+  let message = "";
+  try {
+    await claimGenerationRun(handlers);
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  assertEquals(message, "foreign key violation");
+  assertEquals(calls, ["insertJob"]);
+});
+
+Deno.test("a pose set that fails to insert fails the claim", async () => {
+  // It used to be logged and swallowed, leaving a job the worker could never
+  // advance and nobody was told about.
+  const { calls, handlers } = ops({ poseError: { message: "permission denied" } });
+  let message = "";
+  try {
+    await claimGenerationRun(handlers);
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  assertEquals(message, "Could not queue the pose set for this session: permission denied");
+  assertEquals(calls, ["insertJob", "insertPoses"]);
 });

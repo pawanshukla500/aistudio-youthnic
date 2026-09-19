@@ -85,3 +85,40 @@ export function queueReuseResponse(job: ActiveJobLike): QueueReuseResponse {
 export function isDuplicateJobInsert(error: { code?: unknown } | null | undefined): boolean {
   return String(error?.code || "") === "23505";
 }
+
+/**
+ * The three writes the claim sequence performs, supplied by the caller.
+ *
+ * Passing operations rather than a client keeps the decisions here - which are
+ * what decide whether a submit spends money twice - executable in a test,
+ * without this module having to describe Supabase's query builder.
+ */
+export type RunClaimOps = {
+  insertJob(): PromiseLike<{ error: { code?: unknown; message?: string } | null }>;
+  insertPoses(): PromiseLike<{ error: { message?: string } | null }>;
+  findActiveRun(): PromiseLike<ActiveJobLike | null>;
+};
+
+/**
+ * Write the job and its pose rows, or hand back the run that beat us to it.
+ *
+ * Returns the reuse response when another request won the race, and null when
+ * this call created the run. A pose set that fails to insert throws: a job with
+ * nothing to generate is worse than no job, and it used to be logged and
+ * swallowed.
+ */
+export async function claimGenerationRun(ops: RunClaimOps): Promise<QueueReuseResponse | null> {
+  const { error: jobError } = await ops.insertJob();
+  if (jobError) {
+    if (isDuplicateJobInsert(jobError)) {
+      const winner = await ops.findActiveRun();
+      if (winner) return queueReuseResponse(winner);
+    }
+    throw new Error(String(jobError.message || "Could not create the generation job."));
+  }
+  const { error: poseError } = await ops.insertPoses();
+  if (poseError) {
+    throw new Error(`Could not queue the pose set for this session: ${poseError.message}`);
+  }
+  return null;
+}
