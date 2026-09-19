@@ -29,10 +29,10 @@ Deno.test("queueing a session already in flight returns that job instead of a se
   assertStringIncludes(fn, 'from("generation_jobs")');
   assertStringIncludes(fn, '.eq("session_id", sessionId)');
   assertStringIncludes(fn, ".in(\"status\", ACTIVE_GENERATION_JOB_STATUSES)");
-  assertStringIncludes(fn, "alreadyQueued: true");
+  assertStringIncludes(fn, "queueReuseResponse(activeJob)");
   // The short circuit has to come before the insert, or it changes nothing.
   assert(
-    fn.indexOf("alreadyQueued: true") < fn.indexOf('from("session_generations").insert'),
+    fn.indexOf("queueReuseResponse(activeJob)") < fn.indexOf('from("session_generations").insert'),
     "the in-flight check must run before the pose rows are written",
   );
 });
@@ -80,12 +80,7 @@ Deno.test("the migration clears existing conflicts without deleting anything", (
 Deno.test("History shows the run being viewed, not every run on the session", () => {
   // session_generations is keyed on the session, so a session queued twice held
   // both runs' rows and the card rendered twelve frames for a six-pose shoot.
-  assertStringIncludes(backendSource, "const rowsForThisJob = allPoseRows.filter");
-  assertStringIncludes(backendSource, "generation_data).jobId");
-  assertStringIncludes(backendSource, "`${jobId}:pose:`");
-  // Rows predating generation_data.jobId must still render; the conditions for
-  // that are asserted in "a job with no rows of its own shows none".
-  assertStringIncludes(backendSource, "allPoseRows");
+  assertStringIncludes(backendSource, "scopePoseRowsToJob");
 });
 
 Deno.test("a second submit says the shoot was already running", () => {
@@ -99,9 +94,9 @@ Deno.test("a lost queue race returns the winning job, not a constraint error", (
   // Two submits can both clear the in-flight check and race to the insert. The
   // index refuses the loser, which is right; surfacing a raw 23505 is not.
   const fn = queueGenerationSource();
-  assertStringIncludes(fn, 'jobError.code === "23505"');
+  assertStringIncludes(fn, "isDuplicateJobInsert(jobError)");
   assert(
-    fn.indexOf('jobError.code === "23505"') < fn.indexOf("throw new Error(jobError.message)"),
+    fn.indexOf("isDuplicateJobInsert(jobError)") < fn.indexOf("throw new Error(jobError.message)"),
     "the race must be resolved before the raw error is raised",
   );
 });
@@ -122,11 +117,9 @@ Deno.test("the migration retires a superseded job's waiting poses too", () => {
 Deno.test("a job with no rows of its own shows none, not another run's", () => {
   // The fallback exists for rows written before generation_data.jobId. A new
   // job whose rows have not landed yet must not borrow the previous run's.
-  assertStringIncludes(backendSource, "sessionRowsNameAJob");
-  assertStringIncludes(
-    backendSource,
-    "rowsForThisJob.length > 0 || sessionRowsNameAJob ? rowsForThisJob : allPoseRows",
-  );
+  // The rule itself is executed against real rows in generation_runs.test.ts;
+  // this only pins that the query layer uses it.
+  assertStringIncludes(backendSource, "scopePoseRowsToJob(posesResult.data || [], jobId)");
 });
 
 Deno.test("the colorway check looks at every product reference, not just the front", () => {

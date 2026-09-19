@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import * as ExcelJS from "https://esm.sh/exceljs@4.4.0";
 import { encodeBase64, decodeBase64 } from "jsr:@std/encoding/base64";
 import { deleteFirebaseObject, downloadFirebaseObject, uploadFirebaseObject, createFirebaseUser, updateFirebaseUser, deleteFirebaseUser } from "./firebase-admin.ts";
+import { isDuplicateJobInsert, queueReuseResponse } from "../../../src/lib/generationRuns.ts";
 import {
   ANALYSIS_VERSION,
   CONSISTENCY_RULES,
@@ -1966,13 +1967,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     // The worker may have been idle when the first kick was lost, so nudge it
     // rather than leaving the caller with a job nobody is advancing.
     scheduleBackground(kickWorker());
-    return {
-      success: true,
-      jobId: String(activeJob.job_id),
-      provider: String(activeJob.provider || ""),
-      model: String(activeJob.model || ""),
-      alreadyQueued: true,
-    };
+    return queueReuseResponse(activeJob);
   }
   const sessionData = session.session_data as JsonRecord;
   const poses = (Array.isArray(args.poses) ? args.poses : sessionData.posePlan) as StudioPose[];
@@ -2039,7 +2034,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     // unique index refuses the loser, which is the outcome we want, but a raw
     // constraint error is not: finish the same way the check does and hand back
     // the run that won.
-    if (jobError.code === "23505") {
+    if (isDuplicateJobInsert(jobError)) {
       const { data: winner } = await service.from("generation_jobs")
         .select("job_id,provider,model")
         .eq("session_id", sessionId)
@@ -2049,13 +2044,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
         .maybeSingle();
       if (winner) {
         scheduleBackground(kickWorker());
-        return {
-          success: true,
-          jobId: String(winner.job_id),
-          provider: String(winner.provider || ""),
-          model: String(winner.model || ""),
-          alreadyQueued: true,
-        };
+        return queueReuseResponse(winner);
       }
     }
     throw new Error(jobError.message);
