@@ -498,7 +498,17 @@ export function Studio() {
       setCategory("ethnic/fusion");
       setOptions(defaultOptions);
       setSubmittedJobId(result.jobId);
-      setNotice({ tone: "success", text: "Generation submitted successfully. Studio is ready for your next product.", jobId: result.jobId });
+      setNotice({
+        tone: "success",
+        // Submitting twice now returns the run already going rather than
+        // starting a second one, so say which of the two happened: "submitted"
+        // on a shoot that was already running reads as a new job that never
+        // appears.
+        text: result.alreadyQueued
+          ? "This shoot was already generating, so we reopened that run instead of starting a second one. Studio is ready for your next product."
+          : "Generation submitted successfully. Studio is ready for your next product.",
+        jobId: result.jobId,
+      });
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not queue generation." });
     } finally {
