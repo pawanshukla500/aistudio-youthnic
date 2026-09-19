@@ -16,6 +16,26 @@ export const PRODUCT_REFERENCE_ROLES = [
   "saree_blouse_back_piece",
 ] as const;
 
+/** How many references the colorway structure check will look at. */
+export const MAX_COLORWAY_CHECK_REFERENCES = 6;
+
+/**
+ * The references the colorway shortcut must see before it may reuse another
+ * SKU's garment truth.
+ *
+ * It used to look at the front image alone, so a variant differing only in its
+ * back, its bottom wear or its dupatta passed the structure check unseen and was
+ * generated as the base garment. Every product reference is a place such a
+ * difference can live; style and model references are not, and are left out so
+ * this stays cheaper than a full analysis.
+ */
+export function colorwayCheckReferences<T extends { role: string }>(references: T[]): T[] {
+  const product = references.filter((reference) =>
+    (PRODUCT_REFERENCE_ROLES as readonly string[]).includes(reference.role)
+  );
+  return (product.length > 0 ? product : references).slice(0, MAX_COLORWAY_CHECK_REFERENCES);
+}
+
 export const SAREE_REFERENCE_ROLES = [
   "saree_front_drape",
   "saree_back_drape",

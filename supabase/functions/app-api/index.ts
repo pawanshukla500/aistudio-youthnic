@@ -80,6 +80,7 @@ import {
 import { firebaseCatalogPath, supabaseCatalogPath } from "./lib/catalogStoragePaths.ts";
 import {
   MAX_IMAGE_REFERENCES,
+  colorwayCheckReferences,
   PRODUCT_REFERENCE_ROLES,
   canUsePoseOneAnchor,
   canonicalReferences,
@@ -2033,8 +2034,33 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     aspect_ratio: String(args.aspectRatio || "3:4"), image_size: String(args.imageSize || "2K"), quality,
     pose_qa: Boolean(args.poseQa), estimated_cost_usd: 0.25, actual_cost_usd: analysisCostUsd, created_at: now, updated_at: now,
   });
-  if (jobError) throw new Error(jobError.message);
-  
+  if (jobError) {
+    // Two submits can both clear the check above and race to here. The partial
+    // unique index refuses the loser, which is the outcome we want, but a raw
+    // constraint error is not: finish the same way the check does and hand back
+    // the run that won.
+    if (jobError.code === "23505") {
+      const { data: winner } = await service.from("generation_jobs")
+        .select("job_id,provider,model")
+        .eq("session_id", sessionId)
+        .in("status", ACTIVE_GENERATION_JOB_STATUSES)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (winner) {
+        scheduleBackground(kickWorker());
+        return {
+          success: true,
+          jobId: String(winner.job_id),
+          provider: String(winner.provider || ""),
+          model: String(winner.model || ""),
+          alreadyQueued: true,
+        };
+      }
+    }
+    throw new Error(jobError.message);
+  }
+
   if (session.planning_request_id) {
     await service.from("catalog_work_items").update({
       generation_job_id: jobId,
@@ -2453,13 +2479,14 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
 
   // Token optimization: If base product analysis already exists for the batch, extract colorway only
   if (baseAnalysis && baseAnalysis.productIdentity?.garmentFamily) {
-    const frontRef = references.find((r) => ["front", "saree_front_drape"].includes(r.role)) || references[0];
-    const loadedRefs = frontRef ? await loadAvailableReferences([frontRef], orgId, category) : [];
+    const loadedRefs = await loadAvailableReferences(colorwayCheckReferences(references), orgId, category);
     if (loadedRefs.length > 0) {
-      const manifest = [{ number: 1, role: roleLabel(loadedRefs[0].role) }];
+      const manifest = loadedRefs.map((reference, index) => ({ number: index + 1, role: roleLabel(reference.role) }));
       const parts: JsonRecord[] = [
-        { text: `IMAGE 1: ${roleLabel(loadedRefs[0].role)}` },
-        { inlineData: { mimeType: loadedRefs[0].mimeType, data: loadedRefs[0].base64 } },
+        ...loadedRefs.flatMap((reference, index) => ([
+          { text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` },
+          { inlineData: { mimeType: reference.mimeType, data: reference.base64 } },
+        ])),
         {
           text: buildColorwayAnalysisPrompt({
             skuName: String(variant?.sku_name || "Variant"),
@@ -5046,13 +5073,14 @@ async function analyzeCatalogVariant(
   // do not waste tokens re-analyzing the identical cut, silhouette, structure, and pose plan.
   // Instead, run a lightweight colorway analysis and merge into the base garment!
   if (baseAnalysis && baseAnalysis.productIdentity?.garmentFamily) {
-    const frontRef = references.find((r) => ["front", "saree_front_drape"].includes(r.role)) || references[0];
-    const loadedRefs = frontRef ? await loadAvailableReferences([frontRef], String(batch.organization_id), category) : [];
+    const loadedRefs = await loadAvailableReferences(colorwayCheckReferences(references), String(batch.organization_id), category);
     if (loadedRefs.length > 0) {
-      const manifest = [{ number: 1, role: roleLabel(loadedRefs[0].role) }];
+      const manifest = loadedRefs.map((reference, index) => ({ number: index + 1, role: roleLabel(reference.role) }));
       const parts: JsonRecord[] = [
-        { text: `IMAGE 1: ${roleLabel(loadedRefs[0].role)}` },
-        { inlineData: { mimeType: loadedRefs[0].mimeType, data: loadedRefs[0].base64 } },
+        ...loadedRefs.flatMap((reference, index) => ([
+          { text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` },
+          { inlineData: { mimeType: reference.mimeType, data: reference.base64 } },
+        ])),
         {
           text: buildColorwayAnalysisPrompt({
             skuName: String(variant.sku_name || "Variant"),

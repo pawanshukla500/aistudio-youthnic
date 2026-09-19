@@ -1185,8 +1185,12 @@ export function normalizeSareeDrapePlan(
  * already running produced a second job and a second set of pose rows against
  * the same session, so every pose was generated and billed twice. The partial
  * unique index on generation_jobs uses this same set.
+ *
+ * "cancelling" belongs here: the worker still claims such a job and only stops
+ * once it reaches finalizeCancelledJob, so a replacement started in that window
+ * spends alongside it. It is transient, so it blocks the next run only briefly.
  */
-export const ACTIVE_GENERATION_JOB_STATUSES = ["queued", "processing"] as const;
+export const ACTIVE_GENERATION_JOB_STATUSES = ["queued", "processing", "cancelling"] as const;
 
 export const REQUIRED_POSE_IDS = [
   "full_front",

@@ -257,11 +257,17 @@ async function getJob(jobId: string) {
   // written before generation_data.jobId existed fall back to the whole set so
   // older shoots still display.
   const allPoseRows = posesResult.data || [];
-  const rowsForThisJob = allPoseRows.filter((entry: any) =>
+  const ownsJob = (entry: any) =>
     String(record(entry.generation_data).jobId || "") === jobId ||
-    String(entry.generation_id || "").startsWith(`${jobId}:pose:`)
+    String(entry.generation_id || "").startsWith(`${jobId}:pose:`);
+  const rowsForThisJob = allPoseRows.filter(ownsJob);
+  // Fall back only when no row in the session names a job at all, which means
+  // the rows predate generation_data.jobId. A job whose own rows simply have
+  // not been written yet must show none, not another run's.
+  const sessionRowsNameAJob = allPoseRows.some((entry: any) =>
+    Boolean(record(entry.generation_data).jobId) || String(entry.generation_id || "").includes(":pose:")
   );
-  const scopedPoseRows = rowsForThisJob.length > 0 ? rowsForThisJob : allPoseRows;
+  const scopedPoseRows = rowsForThisJob.length > 0 || sessionRowsNameAJob ? rowsForThisJob : allPoseRows;
   const poseRows = await Promise.all(scopedPoseRows.map(async (entry) => {
     const resolved = await resolveAssetRow(entry, "output_url");
     const generationData = record(resolved.generation_data);
