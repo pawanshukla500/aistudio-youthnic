@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import * as ExcelJS from "https://esm.sh/exceljs@4.4.0";
 import { encodeBase64, decodeBase64 } from "jsr:@std/encoding/base64";
 import { deleteFirebaseObject, downloadFirebaseObject, uploadFirebaseObject, createFirebaseUser, updateFirebaseUser, deleteFirebaseUser } from "./firebase-admin.ts";
+import { claimGenerationRun, queueReuseResponse } from "../../../src/lib/generationRuns.ts";
 import {
   ANALYSIS_VERSION,
   CONSISTENCY_RULES,
@@ -1954,25 +1955,22 @@ async function queueGeneration(request: Request, args: JsonRecord) {
   // six-pose shoot. A slow queue call that the gateway cuts off makes pressing
   // Generate again an ordinary thing to do, so this has to be idempotent rather
   // than merely discouraged. Hand back the run already in flight.
-  const { data: activeJob, error: activeJobError } = await service.from("generation_jobs")
-    .select("job_id,provider,model")
-    .eq("session_id", sessionId)
-    .in("status", ACTIVE_GENERATION_JOB_STATUSES)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (activeJobError) throw new Error(activeJobError.message);
+  const activeRunForSession = async () => {
+    const { data } = await service.from("generation_jobs")
+      .select("job_id,provider,model")
+      .eq("session_id", sessionId)
+      .in("status", ACTIVE_GENERATION_JOB_STATUSES)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return data || null;
+  };
+  const activeJob = await activeRunForSession();
   if (activeJob) {
     // The worker may have been idle when the first kick was lost, so nudge it
     // rather than leaving the caller with a job nobody is advancing.
     scheduleBackground(kickWorker());
-    return {
-      success: true,
-      jobId: String(activeJob.job_id),
-      provider: String(activeJob.provider || ""),
-      model: String(activeJob.model || ""),
-      alreadyQueued: true,
-    };
+    return queueReuseResponse(activeJob);
   }
   const sessionData = session.session_data as JsonRecord;
   const poses = (Array.isArray(args.poses) ? args.poses : sessionData.posePlan) as StudioPose[];
@@ -2027,40 +2025,34 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     sessionId,
     planningRequestId: String(session.planning_request_id || ""),
   });
-  const { error: jobError } = await service.from("generation_jobs").insert({
+  const jobRow = {
     job_id: jobId, user_id: workspace.user.firebaseUid, user_email: workspace.user.email, org_id: workspace.organization.id,
     status: "queued", readiness_status: "ready", readiness_reasons: [], sku_name: jobData.skuName, session_id: sessionId, job_data: jobData,
     planning_request_id: session.planning_request_id, total_poses: enabled.length, provider: imageGenerationPolicy.provider, model,
     aspect_ratio: String(args.aspectRatio || "3:4"), image_size: String(args.imageSize || "2K"), quality,
     pose_qa: Boolean(args.poseQa), estimated_cost_usd: 0.25, actual_cost_usd: analysisCostUsd, created_at: now, updated_at: now,
+  };
+  const poseRows = enabled.map((pose, index) => ({
+    session_id: sessionId, generation_id: `${jobId}:pose:${index + 1}`, pose_index: index + 1,
+    title: pose.title, pose_type: pose.id, instructions: pose.prompt, status: "queued", attempt_count: 0,
+    generation_data: { ...pose, poseNumber: index + 1, jobId },
+  }));
+  // Two submits can both clear the check above and race to here; the partial
+  // unique index refuses the loser and this turns that into the winning run
+  // rather than a raw constraint error. A pose set that fails to insert throws,
+  // because a job with nothing to generate cannot report that itself.
+  const raceWinner = await claimGenerationRun({
+    insertJob: () => service.from("generation_jobs").insert(jobRow),
+    insertPoses: () => service.from("session_generations").insert(poseRows),
+    findActiveRun: activeRunForSession,
   });
-  if (jobError) {
-    // Two submits can both clear the check above and race to here. The partial
-    // unique index refuses the loser, which is the outcome we want, but a raw
-    // constraint error is not: finish the same way the check does and hand back
-    // the run that won.
-    if (jobError.code === "23505") {
-      const { data: winner } = await service.from("generation_jobs")
-        .select("job_id,provider,model")
-        .eq("session_id", sessionId)
-        .in("status", ACTIVE_GENERATION_JOB_STATUSES)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (winner) {
-        scheduleBackground(kickWorker());
-        return {
-          success: true,
-          jobId: String(winner.job_id),
-          provider: String(winner.provider || ""),
-          model: String(winner.model || ""),
-          alreadyQueued: true,
-        };
-      }
-    }
-    throw new Error(jobError.message);
+  if (raceWinner) {
+    scheduleBackground(kickWorker());
+    return raceWinner;
   }
 
+  // After the rows exist, so a work item never points at a job whose poses
+  // failed to land.
   if (session.planning_request_id) {
     await service.from("catalog_work_items").update({
       generation_job_id: jobId,
@@ -2069,16 +2061,6 @@ async function queueGeneration(request: Request, args: JsonRecord) {
       generation_started_at: now
     }).eq("planning_request_id", session.planning_request_id);
   }
-
-  const poseRows = enabled.map((pose, index) => ({
-    session_id: sessionId, generation_id: `${jobId}:pose:${index + 1}`, pose_index: index + 1,
-    title: pose.title, pose_type: pose.id, instructions: pose.prompt, status: "queued", attempt_count: 0,
-    generation_data: { ...pose, poseNumber: index + 1, jobId },
-  }));
-  // A job whose poses never landed has nothing for the worker to generate and
-  // no way to report that, so this cannot stay a console line.
-  const { error: poseError } = await service.from("session_generations").insert(poseRows);
-  if (poseError) throw new Error(`Could not queue the pose set for this session: ${poseError.message}`);
   const sessionUpdate = service.from("catalog_sessions").update({
     job_id: jobId,
     status: "generating",

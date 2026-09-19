@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import { resolveCatalogAssetUrl } from "./catalogStorage";
 import { visibleGenerationDetailedStatus } from "./generationStatus";
 import { functionInvokeErrorMessage, appApiInvokeTimeoutMs, isGatewayCutFailure, isRetryableInvokeOperation } from "./errors";
+import { scopePoseRowsToJob } from "./generationRuns";
 import { ANALYSIS_RUN_KINDS, attributeJobCostRuns, rollupSessionCost, type CostRun } from "./sessionCost";
 
 export type Id<_Table extends string> = string;
@@ -253,21 +254,8 @@ async function getJob(jobId: string) {
   const generatedAssets = await Promise.all((assetsResult.data || []).map((entry) => resolveAssetRow(entry)));
   // session_generations is keyed on the session, not the job, so a session that
   // was queued twice holds both runs' pose rows and this card rendered all of
-  // them - twelve frames for a six-pose shoot. Show the run being viewed. Rows
-  // written before generation_data.jobId existed fall back to the whole set so
-  // older shoots still display.
-  const allPoseRows = posesResult.data || [];
-  const ownsJob = (entry: any) =>
-    String(record(entry.generation_data).jobId || "") === jobId ||
-    String(entry.generation_id || "").startsWith(`${jobId}:pose:`);
-  const rowsForThisJob = allPoseRows.filter(ownsJob);
-  // Fall back only when no row in the session names a job at all, which means
-  // the rows predate generation_data.jobId. A job whose own rows simply have
-  // not been written yet must show none, not another run's.
-  const sessionRowsNameAJob = allPoseRows.some((entry: any) =>
-    Boolean(record(entry.generation_data).jobId) || String(entry.generation_id || "").includes(":pose:")
-  );
-  const scopedPoseRows = rowsForThisJob.length > 0 || sessionRowsNameAJob ? rowsForThisJob : allPoseRows;
+  // them - twelve frames for a six-pose shoot.
+  const scopedPoseRows = scopePoseRowsToJob(posesResult.data || [], jobId);
   const poseRows = await Promise.all(scopedPoseRows.map(async (entry) => {
     const resolved = await resolveAssetRow(entry, "output_url");
     const generationData = record(resolved.generation_data);
