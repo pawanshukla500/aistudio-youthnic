@@ -12,6 +12,9 @@ const outputSettingsSource = Deno.readTextFileSync(
   new URL("../../../../src/features/studio/components/OutputSettings.tsx", import.meta.url),
 );
 const apiSource = Deno.readTextFileSync(new URL("../index.ts", import.meta.url));
+const backendSource = Deno.readTextFileSync(
+  new URL("../../../../src/lib/backend.ts", import.meta.url),
+);
 
 Deno.test("an administrator's stored GPT Image 2 route is the route that runs", () => {
   const resolved = resolveStoredImageGenerationRoute({
@@ -152,8 +155,12 @@ Deno.test("a failed routing lookup is reported, not rendered as no route configu
   assertEquals(studioSource.includes("error: effectiveRoutingError"), true);
   assertEquals(studioSource.includes("routingStatus={routingStatus}"), true);
   assertEquals(studioSource.includes("routingError={effectiveRoutingError?.message}"), true);
+  // With no data at all, the error is what the panel reports - never "loading"
+  // forever and never "no route configured".
   const status = studioSource.slice(studioSource.indexOf("const routingStatus:"));
-  assertEquals(status.slice(0, status.indexOf(";")).includes('effectiveRoutingError\n    ? "error"'), true);
+  const expression = status.slice(0, status.indexOf(";"));
+  assertEquals(/effectiveRoutingError\s*\n?\s*\?\s*"error"/.test(expression), true);
+  assertEquals(expression.includes('"loading"'), true);
 });
 
 Deno.test("an override the route would not accept is flagged rather than shown as live", () => {
@@ -162,4 +169,29 @@ Deno.test("an override the route would not accept is flagged rather than shown a
   // An empty served list means we cannot judge the override, so we must not
   // claim it will be rejected.
   assertEquals(outputSettingsSource.includes("modelOptions.length > 0 && !modelOptions.some"), true);
+});
+
+Deno.test("a route already loaded survives a later transient failure", () => {
+  // useQuery keeps the last good value when a refresh fails, so ordering the
+  // error first blanked a panel that still held the route: the picker went
+  // disabled and read "route unavailable" while the badge beside it named the
+  // configured model.
+  const status = studioSource.slice(studioSource.indexOf("const routingStatus:"));
+  const expression = status.slice(0, status.indexOf(";"));
+  assertEquals(/effectiveRouting\s*\n?\s*\?\s*"ready"/.test(expression), true);
+  assertEquals(/effectiveRoutingError\s*\n?\s*\?\s*"error"/.test(expression), true);
+  // Data must be tested before the error, not after it.
+  assertEquals(
+    expression.indexOf("effectiveRouting\n") < expression.indexOf("effectiveRoutingError"),
+    true,
+  );
+});
+
+Deno.test("only an allow-listed read is repeated, and only on a gateway cut", () => {
+  assertEquals(backendSource.includes("isRetryableInvokeOperation(operation)"), true);
+  assertEquals(backendSource.includes("gatewayCut"), true);
+  // Both conditions must hold before a second call goes out.
+  assertEquals(backendSource.includes("if (!cut || !isRetryableInvokeOperation(operation)) throw reason;"), true);
+  // One retry, not a loop.
+  assertEquals(backendSource.split("invokeAppApiOnce<T>(operation, args)").length - 1, 2);
 });
