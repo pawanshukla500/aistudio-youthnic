@@ -588,9 +588,14 @@ Deno.test("product-truth failover is OpenAI Luna, keeps Terra, and omits Gemini"
   );
 });
 
-Deno.test("product-truth hop budget matches the 140s Studio analyze timeout", () => {
-  assertEquals(productTruthGatewayBudgetMs(145_000), STUDIO_INVOKE_BUDGET_MS);
-  assertEquals(productTruthGatewayBudgetMs(), STUDIO_INVOKE_BUDGET_MS);
+Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
+  // Spending the client's whole wait let the server still be working when the
+  // browser aborted: the chain's clock starts after auth, the workspace RPC and
+  // reference loading, so none of that is covered by the per-hop reserve.
+  const reserved = STUDIO_INVOKE_BUDGET_MS - VISION_GATEWAY_RESERVE_MS;
+  assertEquals(productTruthGatewayBudgetMs(145_000), reserved);
+  assertEquals(productTruthGatewayBudgetMs(), reserved);
+  assert(productTruthGatewayBudgetMs() < STUDIO_INVOKE_BUDGET_MS);
   assertEquals(
     isSlowProductTruthHop({ provider: "meta", model: "muse-spark-1.3" }),
     true,

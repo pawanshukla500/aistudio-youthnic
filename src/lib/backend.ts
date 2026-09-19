@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "./supabase";
 import { resolveCatalogAssetUrl } from "./catalogStorage";
 import { visibleGenerationDetailedStatus } from "./generationStatus";
-import { functionInvokeErrorMessage, appApiInvokeTimeoutMs } from "./errors";
+import { functionInvokeErrorMessage, appApiInvokeTimeoutMs, isGatewayCutFailure, isRetryableInvokeOperation } from "./errors";
 import { ANALYSIS_RUN_KINDS, attributeJobCostRuns, rollupSessionCost, type CostRun } from "./sessionCost";
 
 export type Id<_Table extends string> = string;
@@ -51,7 +51,10 @@ function messageFromFunctionError(error: unknown) {
   return candidate.message || "Supabase request failed.";
 }
 
-export async function invokeAppApi<T = unknown>(operation: string, args: Record<string, unknown> = {}): Promise<T> {
+/** Gap before the single retry, long enough for a competing call to finish. */
+const GATEWAY_RETRY_DELAY_MS = 1_500;
+
+async function invokeAppApiOnce<T>(operation: string, args: Record<string, unknown>) {
   const timeoutMs = appApiInvokeTimeoutMs(operation);
   const invokeOptions: {
     body: { operation: string; args: Record<string, unknown> };
@@ -66,7 +69,7 @@ export async function invokeAppApi<T = unknown>(operation: string, args: Record<
   if (error) {
     const fallbackMessage = messageFromFunctionError(error);
     const context = (error as { context?: Response }).context;
-    let status: number | null = context?.status ?? null;
+    const status: number | null = context?.status ?? null;
     let bodyError: string | undefined;
     let bodyText: string | undefined;
     if (context) {
@@ -81,16 +84,30 @@ export async function invokeAppApi<T = unknown>(operation: string, args: Record<
         }
       }
     }
-    throw new Error(functionInvokeErrorMessage({
-      operation,
-      fallbackMessage,
-      status,
-      bodyError,
-      bodyText,
-    }));
+    const failure = { status, bodyError, bodyText, fallbackMessage };
+    const thrown = new Error(functionInvokeErrorMessage({ operation, ...failure })) as Error & {
+      gatewayCut?: boolean;
+    };
+    thrown.gatewayCut = isGatewayCutFailure(failure);
+    throw thrown;
   }
   if (data?.error) throw new Error(String(data.error));
   return (data?.data ?? data) as T;
+}
+
+export async function invokeAppApi<T = unknown>(operation: string, args: Record<string, unknown> = {}): Promise<T> {
+  try {
+    return await invokeAppApiOnce<T>(operation, args);
+  } catch (reason) {
+    // Only a side-effect-free read may be repeated, and only when the gateway
+    // cut the call rather than the operation itself failing. Everything the
+    // Studio queues is a mutation, so a blind retry here would double-charge a
+    // generation; the allow-list in errors.ts is what keeps that impossible.
+    const cut = (reason as { gatewayCut?: boolean } | null)?.gatewayCut === true;
+    if (!cut || !isRetryableInvokeOperation(operation)) throw reason;
+    await new Promise((resolve) => setTimeout(resolve, GATEWAY_RETRY_DELAY_MS));
+    return await invokeAppApiOnce<T>(operation, args);
+  }
 }
 
 function milliseconds(value: unknown) {

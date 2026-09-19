@@ -116,10 +116,16 @@ export function Studio() {
   // Discarding this error let a failed lookup render as "no route configured",
   // which is the opposite of what it means: the organization has a route, it is
   // invalid, and queueing throws on the same policy. Report it instead.
-  const routingStatus: "loading" | "ready" | "error" = effectiveRoutingError
-    ? "error"
-    : effectiveRouting
-      ? "ready"
+  //
+  // Data outranks a later error, though. useQuery keeps the last good value
+  // when a refresh fails, so a transient gateway cut on this one small read
+  // would otherwise blank a route the panel already holds - disabling the
+  // picker and reading "route unavailable" while the badge beside it still
+  // named the configured model.
+  const routingStatus: "loading" | "ready" | "error" = effectiveRouting
+    ? "ready"
+    : effectiveRoutingError
+      ? "error"
       : "loading";
 
   const allReferences = useMemo(

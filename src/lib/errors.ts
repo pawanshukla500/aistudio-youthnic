@@ -11,6 +11,40 @@ const ANALYZE_OPERATIONS = new Set([
   "analysis.analyzeReferences",
 ]);
 
+/**
+ * Reads with no side effects, safe to repeat when the gateway cuts us off.
+ *
+ * `ai.routing.effective` is the only useQuery endpoint that goes through the
+ * Edge Function rather than PostgREST, so it is the one read that queues behind
+ * a long analyze or generation and gets a 504 for it. One retry turns that into
+ * a delay instead of an unusable panel. Never list a mutation here.
+ */
+const RETRYABLE_READ_OPERATIONS = new Set([
+  "ai.routing.effective",
+]);
+
+export function isRetryableInvokeOperation(operation: string) {
+  return RETRYABLE_READ_OPERATIONS.has(operation);
+}
+
+export type InvokeFailureShape = {
+  status?: number | null;
+  bodyError?: string;
+  bodyText?: string;
+  fallbackMessage?: string;
+};
+
+/** The gateway or client gave up, as opposed to the operation itself failing. */
+export function isGatewayCutFailure(args: InvokeFailureShape): boolean {
+  const status = args.status ?? null;
+  const text = String(args.bodyText || "");
+  const haystack = `${args.fallbackMessage || ""} ${text} ${args.bodyError || ""}`.toLowerCase();
+  return status === 504 ||
+    text.includes("504") ||
+    haystack.includes("gateway timeout") ||
+    haystack.includes("failed to send a request to the edge function");
+}
+
 /** Must cover VISION_GATEWAY_BUDGET_MS so a single OpenAI Luna hop can finish. */
 export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
 
@@ -39,13 +73,14 @@ export function functionInvokeErrorMessage(args: {
   const status = args.status ?? null;
   const text = String(args.bodyText || "");
   const haystack = `${args.fallbackMessage} ${text} ${args.bodyError || ""}`.toLowerCase();
-  const gatewayCut = status === 504 ||
-    text.includes("504") ||
-    haystack.includes("gateway timeout") ||
-    haystack.includes("failed to send a request to the edge function");
 
-  if (gatewayCut) {
+  if (isGatewayCutFailure(args)) {
     if (ANALYZE_OPERATIONS.has(args.operation)) return ANALYZE_GATEWAY_CUT_MESSAGE;
+    // A read that runs one query has no images to shrink and no model settings
+    // to speed up, so the generic advice below would be unactionable.
+    if (isRetryableInvokeOperation(args.operation)) {
+      return `The server was busy and did not answer '${args.operation}' in time. A long analysis or generation usually holds it up; it clears on its own.`;
+    }
     return `The server timed out while processing '${args.operation}'. Please retry with smaller images or faster AI model settings.`;
   }
 
