@@ -1178,6 +1178,16 @@ export function normalizeSareeDrapePlan(
   };
 }
 
+/**
+ * Job states in which the worker will still spend money on a session.
+ *
+ * A session may have at most one job in these states. Queueing one that is
+ * already running produced a second job and a second set of pose rows against
+ * the same session, so every pose was generated and billed twice. The partial
+ * unique index on generation_jobs uses this same set.
+ */
+export const ACTIVE_GENERATION_JOB_STATUSES = ["queued", "processing"] as const;
+
 export const REQUIRED_POSE_IDS = [
   "full_front",
   "angled",
@@ -1641,13 +1651,48 @@ Analyze the supplied reference image(s) to identify ONLY the colorway details fo
 SKU: ${args.skuName}
 ${manifest}
 
+FIRST, check that assumption against the image. This shortcut reuses the
+collection's existing garment truth and only repaints it, so if this SKU differs
+from the collection in ANY way other than colour - a different print or motif
+layout, a different border, neckline, sleeve or hem, a different silhouette, a
+different bottom-wear cut, or an added or removed dupatta - say so, because the
+reused truth would then describe a garment this SKU is not.
+Report colour differences as a match: a recoloured version of the same design is
+exactly what this path is for.
+
 Return JSON with this exact schema:
 {
+  "structureMatchesBase": true or false — false if anything but the colours differs from the established style,
+  "structureDifferences": ["each non-colour difference you can see, empty when structureMatchesBase is true"],
   "mainColor": "exact primary dominant color name (e.g. Royal Blue, Crimson Red, Mustard Yellow)",
   "secondaryColors": ["secondary accent color", "border/trim color", "underlying tone"],
   "accentColors": ["small secondary accent colors in motifs or embroidery"],
   "bottomWearColor": "exact color of bottom wear if present in this variant (e.g. Matching Royal Blue, Off-white, Gold, Fuchsia Pink) or empty if no bottom wear"
 }`;
+}
+
+/**
+ * Whether the colorway shortcut may be used for this variant at all.
+ *
+ * The shortcut reuses the base SKU's garment truth and repaints it, so it is
+ * only correct when the variant really is the same garment in another colour.
+ * A variant that differs in print, border, neckline or cut would otherwise be
+ * generated as the base garment wearing the variant's colours - the product's
+ * own reference images never having been looked at for anything but colour.
+ * Absent or unparseable fields fail closed, so an older model that does not
+ * answer the question gets the full analysis rather than a silent reuse.
+ */
+export function colorwayDeltaIsSafe(colorResult: JsonRecord): {
+  safe: boolean;
+  differences: string[];
+} {
+  const raw = colorResult.structureMatchesBase ?? colorResult.structure_matches_base;
+  const differencesRaw = (colorResult.structureDifferences || colorResult.structure_differences) as unknown[];
+  const differences = Array.isArray(differencesRaw)
+    ? differencesRaw.map((entry) => String(entry || "").trim()).filter(Boolean)
+    : [];
+  const matches = raw === true || String(raw).trim().toLowerCase() === "true";
+  return { safe: matches && differences.length === 0, differences };
 }
 
 export function mergeVariantColorways(

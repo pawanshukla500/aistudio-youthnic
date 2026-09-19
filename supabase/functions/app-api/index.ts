@@ -8,10 +8,12 @@ import {
   assertSareeGenerationReady,
   buildColorwayAnalysisPrompt,
   buildCombinedAnalysisPrompt,
+  colorwayDeltaIsSafe,
   mergeVariantColorways,
   normalizeAnalysis,
   normalizeStylingPlan,
   parseJsonResponse,
+  ACTIVE_GENERATION_JOB_STATUSES,
   REQUIRED_POSE_IDS,
   sareeAnalysisIssues,
   smallHash,
@@ -1945,6 +1947,32 @@ async function queueGeneration(request: Request, args: JsonRecord) {
   const { data: session, error: sessionError } = await service.from("catalog_sessions").select("*").eq("session_id", sessionId).eq("organization_id", workspace.organization.id).single();
   if (sessionError || !session) throw new Error("The analyzed generation session is missing or belongs to another organization.");
   if (args.analysisFingerprint && String(args.analysisFingerprint) !== session.analysis_fingerprint) throw new Error("References changed after analysis. Rebuild the current analysis and pose plan before generation.");
+  // Queueing a session that is already running used to start a second job and
+  // insert a second set of pose rows against the same session_id, so every pose
+  // was generated - and billed - twice, and History showed twelve frames for a
+  // six-pose shoot. A slow queue call that the gateway cuts off makes pressing
+  // Generate again an ordinary thing to do, so this has to be idempotent rather
+  // than merely discouraged. Hand back the run already in flight.
+  const { data: activeJob, error: activeJobError } = await service.from("generation_jobs")
+    .select("job_id,provider,model")
+    .eq("session_id", sessionId)
+    .in("status", ACTIVE_GENERATION_JOB_STATUSES)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (activeJobError) throw new Error(activeJobError.message);
+  if (activeJob) {
+    // The worker may have been idle when the first kick was lost, so nudge it
+    // rather than leaving the caller with a job nobody is advancing.
+    scheduleBackground(kickWorker());
+    return {
+      success: true,
+      jobId: String(activeJob.job_id),
+      provider: String(activeJob.provider || ""),
+      model: String(activeJob.model || ""),
+      alreadyQueued: true,
+    };
+  }
   const sessionData = session.session_data as JsonRecord;
   const poses = (Array.isArray(args.poses) ? args.poses : sessionData.posePlan) as StudioPose[];
   const enabled = poses.filter((pose) => pose.enabled !== false && pose.prompt?.trim());
@@ -2021,8 +2049,10 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     title: pose.title, pose_type: pose.id, instructions: pose.prompt, status: "queued", attempt_count: 0,
     generation_data: { ...pose, poseNumber: index + 1, jobId },
   }));
+  // A job whose poses never landed has nothing for the worker to generate and
+  // no way to report that, so this cannot stay a console line.
   const { error: poseError } = await service.from("session_generations").insert(poseRows);
-  if (poseError) console.error(poseError.message);
+  if (poseError) throw new Error(`Could not queue the pose set for this session: ${poseError.message}`);
   const sessionUpdate = service.from("catalog_sessions").update({
     job_id: jobId,
     status: "generating",
@@ -2441,13 +2471,20 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
         },
       ];
       const result = await visionJson(policy, parts);
-      const merged = mergeVariantColorways(baseAnalysis, result.json, String(variant?.sku_name || ""));
-      return {
-        analysisResult: merged,
-        usage: result.raw.usageMetadata || result.raw.usage,
-        policy: visionPolicySnapshot(policy, result.attempts),
-        isColorwayDelta: true,
-      };
+      // Only repaint the collection's garment truth when this SKU really is that
+      // garment in another colour. Anything else falls through to the full
+      // analysis below, which reads the variant's own references properly.
+      const delta = colorwayDeltaIsSafe(result.json);
+      if (delta.safe) {
+        const merged = mergeVariantColorways(baseAnalysis, result.json, String(variant?.sku_name || ""));
+        return {
+          analysisResult: merged,
+          usage: result.raw.usageMetadata || result.raw.usage,
+          policy: visionPolicySnapshot(policy, result.attempts),
+          isColorwayDelta: true,
+        };
+      }
+      console.log(`Colorway shortcut declined for ${String(variant?.sku_name || "variant")}: ${delta.differences.join("; ") || "structure match not confirmed"}`);
     }
   }
 
@@ -5027,6 +5064,12 @@ async function analyzeCatalogVariant(
         },
       ];
       const result = await visionJson(policy, parts, { onAttempt });
+      const delta = colorwayDeltaIsSafe(result.json);
+      if (!delta.safe) {
+        // The variant is not just a recolour, so the collection's truth would
+        // describe a garment this SKU is not. Fall through to the full analysis.
+        console.log(`Colorway shortcut declined for ${String(variant.sku_name || "variant")}: ${delta.differences.join("; ") || "structure match not confirmed"}`);
+      } else {
       const merged = mergeVariantColorways(baseAnalysis, result.json, String(variant.sku_name || ""));
       const normalized = applyCatalogMemory(batch, merged);
 
@@ -5056,6 +5099,7 @@ async function analyzeCatalogVariant(
         usage: result.raw.usageMetadata || result.raw.usage,
         isColorwayDelta: true,
       };
+      }
     }
   }
 

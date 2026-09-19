@@ -251,7 +251,18 @@ async function getJob(jobId: string) {
   const resolvedJob = await resolveJobAssetReferences(job);
   const summary = jobSummary(resolvedJob);
   const generatedAssets = await Promise.all((assetsResult.data || []).map((entry) => resolveAssetRow(entry)));
-  const poseRows = await Promise.all((posesResult.data || []).map(async (entry) => {
+  // session_generations is keyed on the session, not the job, so a session that
+  // was queued twice holds both runs' pose rows and this card rendered all of
+  // them - twelve frames for a six-pose shoot. Show the run being viewed. Rows
+  // written before generation_data.jobId existed fall back to the whole set so
+  // older shoots still display.
+  const allPoseRows = posesResult.data || [];
+  const rowsForThisJob = allPoseRows.filter((entry: any) =>
+    String(record(entry.generation_data).jobId || "") === jobId ||
+    String(entry.generation_id || "").startsWith(`${jobId}:pose:`)
+  );
+  const scopedPoseRows = rowsForThisJob.length > 0 ? rowsForThisJob : allPoseRows;
+  const poseRows = await Promise.all(scopedPoseRows.map(async (entry) => {
     const resolved = await resolveAssetRow(entry, "output_url");
     const generationData = record(resolved.generation_data);
     const regenerationHistory = Array.isArray(resolved.regeneration_history) ? resolved.regeneration_history as Record<string, any>[] : [];

@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import {
   buildColorwayAnalysisPrompt,
+  colorwayDeltaIsSafe,
   mergeVariantColorways,
   normalizeAnalysis,
 } from "../lib/profiles.ts";
@@ -75,4 +76,49 @@ Deno.test("mergeVariantColorways preserves bottom wear cut and records variant b
   assertStringIncludes(merged.productIdentity.bottomWearDetails, "Farshi Pajama with wide flared straight legs");
   assertStringIncludes(merged.productIdentity.bottomWearDetails, "NOT dhoti pants");
   assertStringIncludes(merged.productIdentity.bottomWearDetails, "Variant Colorway: emerald green");
+});
+
+Deno.test("the colorway shortcut is refused unless the variant is only a recolour", () => {
+  // It reuses the collection's garment truth and repaints it, so a variant that
+  // differs in print or cut would be generated as the base garment in the
+  // variant's colours - its own references never read for anything but colour.
+  assertEquals(
+    colorwayDeltaIsSafe({ structureMatchesBase: true, structureDifferences: [], mainColor: "Wine" }).safe,
+    true,
+  );
+  const changed = colorwayDeltaIsSafe({
+    structureMatchesBase: false,
+    structureDifferences: ["different border width", "V neckline instead of round"],
+    mainColor: "Wine",
+  });
+  assertEquals(changed.safe, false);
+  assertEquals(changed.differences.length, 2);
+});
+
+Deno.test("an unanswered structure question fails closed", () => {
+  // An older model that ignores the new field must get the full analysis, not a
+  // silent reuse of another SKU's garment truth.
+  assertEquals(colorwayDeltaIsSafe({ mainColor: "Wine" }).safe, false);
+  assertEquals(colorwayDeltaIsSafe({}).safe, false);
+  assertEquals(colorwayDeltaIsSafe({ structureMatchesBase: "yes" }).safe, false);
+  // Claiming a match while listing differences is a contradiction; trust the
+  // differences, because that is the answer that keeps the product truthful.
+  assertEquals(
+    colorwayDeltaIsSafe({ structureMatchesBase: true, structureDifferences: ["added dupatta"] }).safe,
+    false,
+  );
+  // A string "true" is accepted: some providers quote booleans.
+  assertEquals(colorwayDeltaIsSafe({ structureMatchesBase: "true" }).safe, true);
+});
+
+Deno.test("the colorway prompt asks the model to check the structure first", () => {
+  const prompt = buildColorwayAnalysisPrompt({
+    skuName: "BT240-Totapuri-Wine",
+    garmentFamily: "kurta set",
+    referenceManifest: [{ number: 1, role: "front" }],
+  });
+  assertStringIncludes(prompt, "structureMatchesBase");
+  assertStringIncludes(prompt, "structureDifferences");
+  // A recolour is the case the shortcut exists for and must still be allowed.
+  assertStringIncludes(prompt, "Report colour differences as a match");
 });
