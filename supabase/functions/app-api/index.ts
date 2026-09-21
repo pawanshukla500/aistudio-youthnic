@@ -7915,7 +7915,8 @@ async function importMigrationArchiveOperation(request: Request, args: JsonRecor
 }
 
 const serverPort = Number(Deno.env.get("PORT") || 9000);
-Deno.serve({ port: serverPort, hostname: "0.0.0.0" }, async (request) => {
+const serverHost = Deno.env.get("BIND_HOST") || "::";
+const appRequestHandler = async (request: Request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method === "GET") return new Response("ok", { status: 200, headers: corsHeaders });
   if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
@@ -8137,4 +8138,11 @@ Deno.serve({ port: serverPort, hostname: "0.0.0.0" }, async (request) => {
     console.error("app-api request failed", errorMessage(error));
     return json({ error: errorMessage(error) }, 200);
   }
-});
+};
+
+try {
+  Deno.serve({ port: serverPort, hostname: serverHost }, appRequestHandler);
+} catch {
+  Deno.serve({ port: serverPort, hostname: "0.0.0.0" }, appRequestHandler);
+}
+
