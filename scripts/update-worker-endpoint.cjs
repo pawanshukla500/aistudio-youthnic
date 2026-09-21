@@ -29,7 +29,7 @@ begin
   end if;
 
   perform net.http_post(
-    url := 'https://envoy-production-37ba.up.railway.app/functions/v1/app-api',
+    url := 'https://functions-production-b062.up.railway.app/app-api',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
       'Authorization', 'Bearer ' || worker_secret
@@ -40,7 +40,9 @@ begin
 end;
 $$;
     `);
-    console.log('Successfully updated private.dispatch_app_worker to Railway Envoy endpoint!');
+    console.log('Successfully updated private.dispatch_app_worker to Railway direct functions endpoint!');
+    await client.query("select private.dispatch_app_worker('worker');");
+    console.log('Worker dispatch test query executed without error!');
   } catch (e) {
     console.error('Error updating function:', e.message);
   }
