@@ -7914,8 +7914,10 @@ async function importMigrationArchiveOperation(request: Request, args: JsonRecor
   return { imported: rows.length };
 }
 
-Deno.serve(async (request) => {
+const serverPort = Number(Deno.env.get("PORT") || 9000);
+Deno.serve({ port: serverPort, hostname: "0.0.0.0" }, async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (request.method === "GET") return new Response("ok", { status: 200, headers: corsHeaders });
   if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
   try {
     const body = await request.json().catch(() => ({})) as JsonRecord;
