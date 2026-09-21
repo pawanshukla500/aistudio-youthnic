@@ -16,6 +16,10 @@ if (!supabaseUrl || !supabasePublishableKey) {
  * current Firebase ID token on every request and enforces organization access
  * with PostgreSQL RLS; no second browser auth session is created.
  */
+const supabaseFunctionsUrl =
+  import.meta.env.VITE_SUPABASE_FUNCTIONS_URL?.trim() ||
+  "https://functions-production-b062.up.railway.app";
+
 export const supabase = createClient<Database>(supabaseUrl, supabasePublishableKey, {
   accessToken: async () => firebaseAuth.currentUser?.getIdToken(false) ?? null,
   auth: {
@@ -24,3 +28,11 @@ export const supabase = createClient<Database>(supabaseUrl, supabasePublishableK
     persistSession: false,
   },
 });
+
+if (supabaseFunctionsUrl) {
+  try {
+    (supabase as unknown as { functionsUrl: URL }).functionsUrl = new URL(supabaseFunctionsUrl);
+  } catch {
+    // Keep standard gateway URL if parsing fails
+  }
+}
