@@ -69,9 +69,9 @@ jobs:
             echo "Skipping remote type generation check (no credentials provided)."
             exit 0
           fi
-          if ! cmp -s src/database.types.ts generated.types.ts; then
+          if ! diff -q -B -w src/database.types.ts generated.types.ts >/dev/null 2>&1; then
             echo "::error::Supabase types are out of sync! The database schema has changed but src/database.types.ts was not updated."
-            diff -u src/database.types.ts generated.types.ts | head -n 100 || true
+            diff -u -B -w src/database.types.ts generated.types.ts | head -n 100 || true
             exit 1
           fi
         env:
