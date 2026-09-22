@@ -1,0 +1,28 @@
+name: Migrate Supabase Storage to Firebase
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate-storage:
+    name: Transfer Blobs from Supabase Cloud to Firebase Storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run Storage Migration
+        run: node scripts/migrate-supabase-storage-to-firebase.mjs
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          RAILWAY_DATABASE_URL: ${{ secrets.RAILWAY_DATABASE_URL }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
