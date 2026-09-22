@@ -119,26 +119,6 @@ jobs:
         run: |
           supabase db push --db-url "$RAILWAY_DATABASE_URL"
 
-      - name: Link legacy Supabase project (fallback)
-        if: env.RAILWAY_DATABASE_URL == '' && env.SUPABASE_PROJECT_REF != ''
-        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
-
-      - name: Repair remote migration history (legacy)
-        if: env.RAILWAY_DATABASE_URL == '' && env.SUPABASE_PROJECT_REF != ''
-        run: supabase migration repair --status reverted 20260730160238 20260730160242 20260730161513 20260801110407 20260801154448 20260801155825 20260801160311 20260801160534 20260802072834 20260802084640 20260802085604 20260802093311 20260802093314 20260802093404 20260802093407 --linked || true
-
-      - name: Preview pending migrations (legacy)
-        if: env.RAILWAY_DATABASE_URL == '' && env.SUPABASE_PROJECT_REF != ''
-        run: supabase db push --linked --dry-run
-
-      - name: Apply database migrations (legacy)
-        if: env.RAILWAY_DATABASE_URL == '' && env.SUPABASE_PROJECT_REF != ''
-        run: supabase db push --linked
-
-      - name: Deploy application Edge Function
-        if: env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
-        run: supabase functions deploy app-api --project-ref "$SUPABASE_PROJECT_REF" --use-api || true
-
   test-and-deploy:
     name: Deploy web app to Cloud Run
     needs: [deploy-supabase]

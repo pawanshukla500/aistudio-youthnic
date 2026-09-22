@@ -70,7 +70,7 @@ Requirements:
 - Node.js and npm
 - Firebase project `ai-studio-app-be068` with Email/Password Authentication enabled
 - Firebase Storage bucket `ai-studio-app-be068.firebasestorage.app`
-- Supabase project `cyygmyiqgdzgeoayxbro`
+- Railway Supabase stack (PostgreSQL, PostgREST, Gotrue, Realtime, Envoy gateway, and Functions)
 
 Install dependencies:
 
@@ -88,8 +88,9 @@ VITE_FIREBASE_STORAGE_BUCKET=...
 VITE_FIREBASE_MESSAGING_SENDER_ID=...
 VITE_FIREBASE_APP_ID=...
 VITE_FIREBASE_MEASUREMENT_ID=...
-VITE_SUPABASE_URL=https://cyygmyiqgdzgeoayxbro.supabase.co
+VITE_SUPABASE_URL=https://envoy-production-37ba.up.railway.app
 VITE_SUPABASE_PUBLISHABLE_KEY=...
+VITE_SUPABASE_FUNCTIONS_URL=https://functions-production-b062.up.railway.app
 ```
 
 The verification and migration scripts can also use `FIREBASE_SERVICE_ACCOUNT`, `OPENAI_API_KEY`, and `GEMINI_API_KEY` from the local environment. Production backend secrets must be installed as encrypted Supabase Edge Function secrets, never exposed through `VITE_` variables.
@@ -127,13 +128,12 @@ Validate the launcher without starting the server:
 
 ## Supabase deployment
 
-Database migrations are in `supabase/migrations/`. The server runtime is in `supabase/functions/app-api/`.
+Database migrations are in `supabase/migrations/`. The server runtime is in `supabase/functions/app-api/` and runs on Railway.
 
-With a Supabase CLI account that has access to the production project:
+To apply database migrations to Railway Postgres:
 
 ```powershell
-npx.cmd supabase db push --project-ref cyygmyiqgdzgeoayxbro
-npx.cmd supabase functions deploy app-api --project-ref cyygmyiqgdzgeoayxbro --no-verify-jwt
+npx.cmd supabase db push --db-url $env:RAILWAY_DATABASE_URL
 ```
 
 Legacy JWT verification is disabled for this function because `app-api` validates Firebase ID tokens and applies Supabase RLS itself. Internal cron calls additionally require `CATALOG_WORKER_SECRET`.
