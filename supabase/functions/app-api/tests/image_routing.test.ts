@@ -7,14 +7,14 @@ import {
 
 const studioSource = Deno.readTextFileSync(
   new URL("../../../../src/features/studio/Studio.tsx", import.meta.url),
-);
+).replace(/\r\n/g, "\n");
 const outputSettingsSource = Deno.readTextFileSync(
   new URL("../../../../src/features/studio/components/OutputSettings.tsx", import.meta.url),
-);
-const apiSource = Deno.readTextFileSync(new URL("../index.ts", import.meta.url));
+).replace(/\r\n/g, "\n");
+const apiSource = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
 const backendSource = Deno.readTextFileSync(
   new URL("../../../../src/lib/backend.ts", import.meta.url),
-);
+).replace(/\r\n/g, "\n");
 
 Deno.test("an administrator's stored GPT Image 2 route is the route that runs", () => {
   const resolved = resolveStoredImageGenerationRoute({

@@ -2,16 +2,16 @@ import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { ACTIVE_GENERATION_JOB_STATUSES } from "../lib/profiles.ts";
 import { colorwayCheckReferences, MAX_COLORWAY_CHECK_REFERENCES } from "../lib/referencePolicy.ts";
 
-const apiSource = Deno.readTextFileSync(new URL("../index.ts", import.meta.url));
+const apiSource = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
 const backendSource = Deno.readTextFileSync(
   new URL("../../../../src/lib/backend.ts", import.meta.url),
-);
+).replace(/\r\n/g, "\n");
 const studioSource = Deno.readTextFileSync(
   new URL("../../../../src/features/studio/Studio.tsx", import.meta.url),
-);
+).replace(/\r\n/g, "\n");
 const migration = Deno.readTextFileSync(
   new URL("../../../migrations/20260919090000_one_active_job_per_session.sql", import.meta.url),
-);
+).replace(/\r\n/g, "\n");
 
 function queueGenerationSource() {
   const start = apiSource.indexOf("async function queueGeneration(");
