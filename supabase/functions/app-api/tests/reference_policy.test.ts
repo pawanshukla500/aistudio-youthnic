@@ -128,6 +128,7 @@ Deno.test("Pose 1 anchor eligibility handles verification and unverified default
   assertEquals(canUsePoseOneAnchor("saree", "automatically_verified"), true);
   assertEquals(canUsePoseOneAnchor("saree", "human_approved"), true);
   assertEquals(canUsePoseOneAnchor("dress", "passed"), true);
+  assertEquals(canUsePoseOneAnchor("dress", "requires_human_review"), true);
   assertEquals(canUsePoseOneAnchor("dress", "unverified"), true);
   assertEquals(canUsePoseOneAnchor("dress", "unverified", false), true);
   assertEquals(canUsePoseOneAnchor("box shirt", "unverified"), true);

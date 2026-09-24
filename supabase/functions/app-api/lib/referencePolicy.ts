@@ -285,6 +285,8 @@ export function canUsePoseOneAnchor(garmentFamily: string, qaStatus: unknown, qa
   if (["automatically_verified", "human_approved"].includes(status)) return true;
   if (["rejected_by_qa", "failed"].includes(status)) return false;
   if (qaEnabled === false) return true;
-  return garmentFamily.toLowerCase() !== "saree" && ["passed", "unverified", ""].includes(status);
+  // A non-saree Pose 1 that QA only flagged for review is still the best continuity
+  // anchor available; dropping it makes poses 2-6 drift in set, light and model.
+  return garmentFamily.toLowerCase() !== "saree" && ["passed", "unverified", "requires_human_review", ""].includes(status);
 }
 

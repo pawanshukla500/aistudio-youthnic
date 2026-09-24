@@ -1,7 +1,12 @@
+// Product references are the only stored copy and feed both analysis and image
+// generation, so keep enough resolution for weave, zari and small motifs.
+export const REFERENCE_MAX_DIMENSION = 2048;
+export const REFERENCE_JPEG_QUALITY = 0.92;
+
 export async function resizeImageFile(
   file: File,
-  maxDimension: number = 1280,
-  quality: number = 0.85
+  maxDimension: number = REFERENCE_MAX_DIMENSION,
+  quality: number = REFERENCE_JPEG_QUALITY
 ): Promise<File> {
   if (!file.type.startsWith("image/") || file.type === "image/svg+xml") {
     return file;
@@ -44,6 +49,9 @@ export async function resizeImageFile(
         // Fill background with white to avoid black backgrounds for transparent PNGs/WebPs
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, width, height);
+        // High-quality smoothing avoids aliasing and moire on fine prints when downscaling.
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
         ctx.drawImage(img, 0, 0, width, height);
 
         canvas.toBlob(

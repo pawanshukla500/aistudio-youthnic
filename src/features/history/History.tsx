@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Ban, ChevronDown, ChevronUp, Download, Image as ImageIcon, Images, RefreshCcw, Search, Trash2, Loader2, Clock, AlertCircle, X, Brain } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Ban, ChevronDown, ChevronUp, Download, Image as ImageIcon, Images, RefreshCcw, Search, Trash2, Loader2, Clock, AlertCircle, X, Brain, Check, ThumbsDown, Undo2, Columns2, ChevronLeft, ChevronRight, ListChecks } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, getJobReferenceImages, invokeAppApi, useMutation, useQuery, type Id } from "../../lib/backend";
 import { useWorkspace } from "../../lib/WorkspaceContext";
@@ -106,6 +106,32 @@ function visiblePoseAsset(pose: any) {
   return { ...pose, outputUrl: visiblePoseOutputUrl(pose), storagePath: visiblePoseStoragePath(pose) };
 }
 
+const ACTIVE_JOB_STATUSES = ["queued", "processing", "cancelling"];
+
+// Mirrors the per-pose Regenerate button on the job grid: a failed pose or a
+// delivered image, within 24 hours, while the job itself is idle.
+function canRegeneratePose(pose: any, jobStatus: string) {
+  return (pose.status === "failed" || (pose.status === "completed" && Boolean(visiblePoseOutputUrl(pose))))
+    && Boolean(pose.completedAt) && Date.now() - pose.completedAt < 86400000
+    && !ACTIVE_JOB_STATUSES.includes(jobStatus);
+}
+
+function approvalBadge(status: string) {
+  if (status === "approved") return { label: "Approved", className: "bg-emerald-600/90 text-white" };
+  if (status === "rejected") return { label: "Rejected", className: "bg-red-600/90 text-white" };
+  return null;
+}
+
+type BatchEntry = {
+  poseId: string;
+  poseNumber: number;
+  title: string;
+  state: "waiting" | "submitting" | "submitted" | "failed" | "skipped";
+  instructions: string;
+  poseQa: boolean;
+  error?: string;
+};
+
 function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const navigate = useNavigate();
   const { data: job, error: _jobError } = useQuery(api.jobs.get, { jobId });
@@ -113,9 +139,28 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const { user } = workspace;
   const regeneratePose = useMutation(api.generation.regeneratePose);
   const rerunQa = useMutation(api.jobs.rerunQa);
+  const approvePose = useMutation(api.jobs.approve);
+  const canApprove = workspace.isAdmin || workspace.permissions.includes("planning.manage");
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [approvalError, setApprovalError] = useState<{ poseId: string; message: string } | null>(null);
+  const [compareWithPrevious, setCompareWithPrevious] = useState(false);
+  const [batchSelection, setBatchSelection] = useState<string[]>([]);
+  const [batchNote, setBatchNote] = useState("");
+  const [batchPoseQa, setBatchPoseQa] = useState(false);
+  const [batchEntries, setBatchEntries] = useState<BatchEntry[]>([]);
+  // The server refuses a pose regeneration while the job is queued/processing,
+  // and each regeneration re-queues the whole job, so a batch has to go one
+  // pose at a time: submit, wait for the job to settle, then submit the next.
+  const batchWaitRef = useRef<{ poseId: string; previousCompletedAt: number; sawActive: boolean } | null>(null);
+  const batchSubmittingRef = useRef(false);
   const [regeneratingId, setRegeneratingId] = useState<Id<"generationPoses"> | null>(null);
-  const [isZipping, setIsZipping] = useState(false);
-  const [selectedPose, setSelectedPose] = useState<any | null>(null);
+  const [zipping, setZipping] = useState<"" | "all" | "approved">("");
+  const [selectedPoseSnapshot, setSelectedPose] = useState<any | null>(null);
+  // Read the open pose from the live job so QA re-runs and retries show up in
+  // the preview; the snapshot only covers a pose that has since disappeared.
+  const selectedPose = selectedPoseSnapshot
+    ? (job?.poses?.find((pose: any) => pose._id === selectedPoseSnapshot._id) ?? selectedPoseSnapshot)
+    : null;
   const [regenerateTarget, setRegenerateTarget] = useState<any | null>(null);
   const [extraInstructions, setExtraInstructions] = useState("");
   const [regeneratePoseQa, setRegeneratePoseQa] = useState(false);
@@ -230,16 +275,18 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     }
   };
   
-  const downloadZip = async () => {
+  const downloadZip = async (approvedOnly = false) => {
     if (!job) return;
     try {
-      setIsZipping(true);
+      setZipping(approvedOnly ? "approved" : "all");
+      setDownloadError("");
       const zip = new JSZip();
 
-      const storedPoses = job.poses.filter((pose: any) => Boolean(visiblePoseOutputUrl(pose)));
+      const storedPoses = job.poses.filter((pose: any) => Boolean(visiblePoseOutputUrl(pose)) && (!approvedOnly || pose.approvalStatus === "approved"));
       if (storedPoses.length === 0) return;
 
-      const folder = zip.folder(`Youthnic_${job.skuId || "Generation"}`);
+      const archiveName = `Youthnic_${job.skuId || "Generation"}${approvedOnly ? "_approved" : ""}`;
+      const folder = zip.folder(archiveName);
       if (!folder) return;
 
       // One batched call fetches every pose's bytes in a single round trip (the server fetches
@@ -263,6 +310,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         }
       }
 
+      const missingPoses: number[] = [];
       const promises = storedPoses.map(async (pose: any, i: number) => {
         try {
           const asset = visiblePoseAsset(pose);
@@ -274,21 +322,133 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           else if (blob.type === "image/webp") ext = "webp";
 
           const safeTitle = String(pose.title || "pose").replace(/[^a-z0-9]/gi, '_').toLowerCase();
-          const filename = `${i + 1}_${safeTitle}.${ext}`;
+          // Name by pose number so a missing pose never shifts later files'
+          // marketplace upload order.
+          const filename = `${Number(pose.poseNumber) || i + 1}_${safeTitle}.${ext}`;
           folder.file(filename, blob);
         } catch (err) {
           console.error("Failed to fetch image for ZIP", err);
+          missingPoses.push(Number(pose.poseNumber) || i + 1);
         }
       });
 
       await Promise.all(promises);
+      if (missingPoses.length === storedPoses.length) throw new Error("None of the images could be downloaded.");
       const content = await zip.generateAsync({ type: "blob" });
-      saveAs(content, `Youthnic_${job.skuId || "Generation"}.zip`);
+      saveAs(content, `${archiveName}.zip`);
+      if (missingPoses.length) {
+        setDownloadError(`ZIP saved, but ${missingPoses.length} of ${storedPoses.length} images could not be downloaded: pose ${missingPoses.sort((a, b) => a - b).join(", ")}. Try the ZIP again or download them individually.`);
+      }
     } catch (err) {
       console.error("Error generating zip", err);
+      setDownloadError(err instanceof Error ? `ZIP download failed: ${err.message}` : "ZIP download failed.");
     } finally {
-      setIsZipping(false);
+      setZipping("");
     }
+  };
+
+  const setApproval = async (pose: any, status: "approved" | "rejected" | "pending") => {
+    if (!pose?.generationId) return;
+    setApprovingId(pose._id);
+    setApprovalError(null);
+    try {
+      await approvePose({ generationId: pose.generationId, status });
+    } catch (reason) {
+      setApprovalError({ poseId: pose._id, message: reason instanceof Error ? reason.message : "Could not update the approval." });
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const navigablePoses: any[] = (job?.poses || []).filter((pose: any) => Boolean(visiblePoseOutputUrl(pose) || latestRejected(pose)));
+  const selectedNavIndex = selectedPose ? navigablePoses.findIndex((pose) => pose._id === selectedPose._id) : -1;
+  const previousNavPose = selectedNavIndex > 0 ? navigablePoses[selectedNavIndex - 1] : null;
+  const nextNavPose = selectedNavIndex >= 0 && selectedNavIndex < navigablePoses.length - 1 ? navigablePoses[selectedNavIndex + 1] : null;
+
+  // Keyboard handler is refreshed every render so it always sees the live pose,
+  // while the window listener itself is only attached while the preview is open.
+  const previewKeyHandler = useRef<(event: KeyboardEvent) => void>(() => {});
+  useEffect(() => {
+    previewKeyHandler.current = (event: KeyboardEvent) => {
+      if (!selectedPose || regenerateTarget) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSelectedPose(null);
+      } else if (event.key === "ArrowLeft" && previousNavPose) {
+        event.preventDefault();
+        setSelectedPose(previousNavPose);
+      } else if (event.key === "ArrowRight" && nextNavPose) {
+        event.preventDefault();
+        setSelectedPose(nextNavPose);
+      } else if ((event.key === "d" || event.key === "D") && visiblePoseOutputUrl(selectedPose) && downloadingPoseId !== selectedPose._id) {
+        event.preventDefault();
+        void downloadPose(selectedPose);
+      }
+    };
+  });
+  const previewOpen = Boolean(selectedPoseSnapshot);
+  useEffect(() => {
+    if (!previewOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => previewKeyHandler.current(event);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [previewOpen]);
+
+  const batchRunning = batchEntries.some((entry) => entry.state === "waiting" || entry.state === "submitting");
+  useEffect(() => {
+    if (!job || batchSubmittingRef.current) return;
+    const jobActive = ACTIVE_JOB_STATUSES.includes(job.status);
+    const wait = batchWaitRef.current;
+    if (wait) {
+      if (jobActive) { wait.sawActive = true; return; }
+      // A poll from before the submission can still report the job as idle;
+      // only move on once the server has visibly picked the previous pose up.
+      const waitedPose = job.poses.find((pose: any) => pose._id === wait.poseId);
+      if (!wait.sawActive && waitedPose && waitedPose.completedAt === wait.previousCompletedAt) return;
+      batchWaitRef.current = null;
+    }
+    if (jobActive) return;
+    const next = batchEntries.find((entry) => entry.state === "waiting");
+    if (!next) return;
+    const pose = job.poses.find((entry: any) => entry._id === next.poseId);
+    const markEntry = (patch: Partial<BatchEntry>) => setBatchEntries((entries) => entries.map((entry) => entry.poseId === next.poseId ? { ...entry, ...patch } : entry));
+    batchSubmittingRef.current = true;
+    markEntry({ state: "submitting" });
+    void regeneratePose({ poseId: next.poseId, requestedBy: user._id, poseQa: next.poseQa, extraInstructions: next.instructions })
+      .then(() => {
+        batchWaitRef.current = { poseId: next.poseId, previousCompletedAt: Number(pose?.completedAt || 0), sawActive: false };
+        batchSubmittingRef.current = false;
+        markEntry({ state: "submitted" });
+      })
+      .catch((reason) => {
+        batchSubmittingRef.current = false;
+        markEntry({ state: "failed", error: reason instanceof Error ? reason.message : "Could not queue this regeneration." });
+      });
+  }, [job, batchEntries, regeneratePose, user._id]);
+
+  const startBatchRegeneration = () => {
+    if (!job) return;
+    const eligible = job.poses
+      .filter((pose: any) => batchSelection.includes(pose._id) && canRegeneratePose(pose, job.status))
+      .sort((left: any, right: any) => left.poseNumber - right.poseNumber);
+    if (!eligible.length) return;
+    batchWaitRef.current = null;
+    setBatchEntries(eligible.map((pose: any) => ({
+      poseId: pose._id,
+      poseNumber: pose.poseNumber,
+      title: pose.title,
+      state: "waiting" as const,
+      instructions: batchNote.trim(),
+      poseQa: batchPoseQa,
+    })));
+    setBatchSelection([]);
+  };
+
+  const stopBatchRegeneration = () => {
+    setBatchEntries((entries) => entries.map((entry) => entry.state === "waiting" ? { ...entry, state: "skipped", error: "Stopped before it was queued." } : entry));
   };
   
   if (job === undefined) {
@@ -306,6 +466,15 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const selectedOutputUrl = selectedPose ? visiblePoseOutputUrl(selectedPose) : "";
   const selectedRetainedPrevious = selectedPose ? hasRetainedPreviousVersion(selectedPose) : false;
   const selectedQaStatus = selectedPose ? visibleQaStatus(selectedPose) : "";
+  const approvedPoseCount = job.poses.filter((pose: any) => pose.approvalStatus === "approved" && Boolean(visiblePoseOutputUrl(pose))).length;
+  const selectedCanBeReviewed = Boolean(selectedPose?.generationId && selectedPose.status === "completed" && selectedPose.outputUrl);
+  const selectedPreviousUrl = selectedPose && !selectedRetainedPrevious ? String(selectedPose.previousVersionUrl || "") : "";
+  const showCompare = Boolean(compareWithPrevious && selectedPreviousUrl && selectedOutputUrl);
+  const jobIsActive = ACTIVE_JOB_STATUSES.includes(job.status);
+  const batchEligiblePoses = job.poses.filter((pose: any) => canRegeneratePose(pose, job.status));
+  const batchSelectedCount = batchEligiblePoses.filter((pose: any) => batchSelection.includes(pose._id)).length;
+  const batchSelectable = !jobIsActive && !batchRunning && batchEligiblePoses.length > 0;
+  const toggleBatchPose = (poseId: string) => setBatchSelection((current) => current.includes(poseId) ? current.filter((id) => id !== poseId) : [...current, poseId]);
 
   return (
     <div className="border-t border-outline-variant/30 bg-surface-container-lowest/50 p-6">
@@ -357,12 +526,21 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             {isCloning ? "Cloning..." : "Clone Session"}
           </button>
           <button
-            onClick={downloadZip}
-            disabled={isZipping || !job.poses.some((pose: any) => Boolean(visiblePoseOutputUrl(pose)))}
+            onClick={() => void downloadZip()}
+            disabled={Boolean(zipping) || !job.poses.some((pose: any) => Boolean(visiblePoseOutputUrl(pose)))}
             className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
           >
-            {isZipping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronDown className="h-3.5 w-3.5" />}
-            {isZipping ? "Zipping..." : "Download ZIP"}
+            {zipping === "all" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            {zipping === "all" ? "Zipping..." : "Download ZIP"}
+          </button>
+          <button
+            onClick={() => void downloadZip(true)}
+            disabled={Boolean(zipping) || approvedPoseCount === 0}
+            title={approvedPoseCount === 0 ? "No poses have been approved yet" : `Download the ${approvedPoseCount} approved image${approvedPoseCount === 1 ? "" : "s"}`}
+            className="flex items-center gap-2 rounded-lg border border-emerald-600/30 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+          >
+            {zipping === "approved" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+            {zipping === "approved" ? "Zipping..." : `Download approved only${approvedPoseCount ? ` (${approvedPoseCount})` : ""}`}
           </button>
         </div>
       </div>
@@ -394,11 +572,77 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-5">
+      {batchSelectable && (
+        <div className="mb-5 rounded-xl border border-outline-variant/40 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <ListChecks className="h-4 w-4 text-primary" />
+              <p className="text-xs font-bold text-on-surface">Batch regenerate</p>
+              <span className="text-[11px] text-secondary">{batchSelectedCount ? `${batchSelectedCount} of ${batchEligiblePoses.length} eligible poses selected` : "Tick the poses below to regenerate them with one shared note."}</span>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setBatchSelection(batchEligiblePoses.map((pose: any) => pose._id))} className="rounded-lg border border-outline-variant px-2.5 py-1 text-[11px] font-bold text-secondary hover:bg-surface-container">Select all eligible</button>
+              {batchSelectedCount > 0 && <button type="button" onClick={() => setBatchSelection([])} className="rounded-lg border border-outline-variant px-2.5 py-1 text-[11px] font-bold text-secondary hover:bg-surface-container">Clear</button>}
+            </div>
+          </div>
+          {batchSelectedCount > 0 && (
+            <div className="mt-3 space-y-2">
+              <textarea maxLength={1000} rows={3} value={batchNote} onChange={(event) => setBatchNote(event.target.value)} placeholder="Shared correction for every selected pose. Leave blank to retry with the existing locked shoot plan." className="w-full resize-y rounded-xl border border-outline-variant p-3 text-sm leading-6 text-on-surface outline-none focus:border-primary" />
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs font-semibold text-secondary"><input type="checkbox" checked={batchPoseQa} onChange={(event) => setBatchPoseQa(event.target.checked)} className="accent-primary" /> Run Gemini consistency QA on regenerated poses (optional)</label>
+                <span className="text-[10px] text-secondary">{batchNote.length}/1000</span>
+              </div>
+              {batchEligiblePoses.some((pose: any) => pose.poseNumber === 1 && batchSelection.includes(pose._id)) && (
+                <p className="rounded-lg border border-warning/30 bg-warning/5 p-2.5 text-[11px] leading-4 text-warning-dark"><AlertCircle className="mr-1 inline h-3 w-3 align-text-bottom" /> Pose 1 is the face and shoot anchor — regenerating it can change the model's face for the whole set.</p>
+              )}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-[10px] leading-4 text-secondary">Poses are queued one at a time: each waits for the previous regeneration to finish. Keep this job open until the last one is queued.</p>
+                <button type="button" onClick={startBatchRegeneration} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white hover:bg-primary-dark"><RefreshCcw className="h-3.5 w-3.5" /> Regenerate {batchSelectedCount} pose{batchSelectedCount === 1 ? "" : "s"}</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {batchEntries.length > 0 && (
+        <div className="mb-5 rounded-xl border border-outline-variant/40 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <p className="flex items-center gap-2 text-xs font-bold text-on-surface">
+              {batchRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> : <ListChecks className="h-3.5 w-3.5 text-primary" />}
+              Batch regeneration {batchRunning ? "in progress" : "finished queueing"}
+              <span className="font-normal text-secondary">· {batchEntries.filter((entry) => entry.state === "submitted").length} queued{batchEntries.some((entry) => entry.state === "failed") ? ` · ${batchEntries.filter((entry) => entry.state === "failed").length} failed` : ""}</span>
+            </p>
+            {batchRunning
+              ? <button type="button" onClick={stopBatchRegeneration} className="rounded-lg border border-outline-variant px-2.5 py-1 text-[11px] font-bold text-secondary hover:bg-surface-container">Stop after current</button>
+              : <button type="button" onClick={() => setBatchEntries([])} className="rounded-lg border border-outline-variant px-2.5 py-1 text-[11px] font-bold text-secondary hover:bg-surface-container">Dismiss</button>}
+          </div>
+          <ul className="mt-3 space-y-1.5">
+            {batchEntries.map((entry) => {
+              const livePose = job.poses.find((pose: any) => pose._id === entry.poseId);
+              const label = entry.state === "waiting" ? "Waiting for the previous pose"
+                : entry.state === "submitting" ? "Queueing…"
+                : entry.state === "skipped" ? entry.error || "Skipped"
+                : entry.state === "failed" ? `Failed: ${entry.error || "Could not queue this regeneration."}`
+                : `Queued · now ${livePose?.status || "unknown"}`;
+              return (
+                <li key={entry.poseId} className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg px-2.5 py-1.5 text-[11px] ${entry.state === "failed" ? "bg-danger/5 text-danger" : "bg-surface-container-lowest text-secondary"}`}>
+                  <span className="font-bold text-on-surface">Pose {entry.poseNumber}. {entry.title}</span>
+                  <span>{label}</span>
+                  {entry.state === "submitted" && livePose?.status === "failed" && livePose.error && <span className="text-danger">· {livePose.error}</span>}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-6">
         {job.poses.map((pose: any) => {
           const outputUrl = visiblePoseOutputUrl(pose);
           const retainedPrevious = hasRetainedPreviousVersion(pose);
           const qaStatus = visibleQaStatus(pose);
+          const approval = approvalBadge(pose.approvalStatus);
+          const batchEligible = batchSelectable && canRegeneratePose(pose, job.status);
           return (
             <div key={pose._id} className={`group ${outputUrl || latestRejected(pose) ? "cursor-zoom-in" : "cursor-default"}`} onClick={() => (outputUrl || latestRejected(pose)) && setSelectedPose(pose)}>
               <div className="relative aspect-[3/4] overflow-hidden rounded-xl border border-outline-variant/40 bg-white shadow-sm transition-all duration-300 hover:shadow-md hover:border-primary/40 group-hover:-translate-y-1">
@@ -426,6 +670,12 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 <span className={`absolute left-2.5 top-2.5 rounded-md px-2 py-1 text-[9px] font-bold uppercase shadow-sm backdrop-blur-md ${statusClass(pose.status)}`}>
                   {retainedPrevious ? "Retry failed" : pose.status}
                 </span>
+                {approval && outputUrl && (
+                  <span className={`absolute left-2.5 top-9 flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold uppercase shadow-sm ${approval.className}`}>
+                    {pose.approvalStatus === "approved" ? <Check className="h-2.5 w-2.5" /> : <ThumbsDown className="h-2.5 w-2.5" />}
+                    {approval.label}
+                  </span>
+                )}
                 {retainedPrevious ? (
                   <span className="absolute inset-x-0 bottom-0 bg-slate-800/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white">
                     Prior version retained · {qaStatusLabel(qaStatus)}
@@ -441,7 +691,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 )}
                 {/* A pose rejected by QA never produced an image, so it must stay
                     retryable from here — otherwise a failed shoot is a dead end. */}
-                {(pose.status === "failed" || (pose.status === "completed" && outputUrl)) && pose.completedAt && Date.now() - pose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && (
+                {(pose.status === "failed" || (pose.status === "completed" && outputUrl)) && pose.completedAt && Date.now() - pose.completedAt < 86400000 && !["queued", "processing", "cancelling"].includes(job.status) && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -472,7 +722,20 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   </button>
                 )}
               </div>
-              <h4 className="mt-3 text-xs font-semibold text-on-surface">{pose.poseNumber}. {pose.title}</h4>
+              <div className="mt-3 flex items-start gap-2">
+                {batchEligible && (
+                  <input
+                    type="checkbox"
+                    checked={batchSelection.includes(pose._id)}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={() => toggleBatchPose(pose._id)}
+                    aria-label={`Select pose ${pose.poseNumber} for batch regeneration`}
+                    title="Select for batch regeneration"
+                    className="mt-0.5 shrink-0 accent-primary"
+                  />
+                )}
+                <h4 className="text-xs font-semibold text-on-surface">{pose.poseNumber}. {pose.title}</h4>
+              </div>
               {retainedPrevious && <p className="mt-1 text-[10px] font-bold text-secondary">Current regeneration failed before replacement; prior paid output remains available.</p>}
               {!retainedPrevious && outputUrl && pose.productFidelity > 0 && (
                 <p className={`mt-1 text-[10px] font-bold ${fidelityTone(pose.productFidelity)}`}>
@@ -495,12 +758,60 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         <div className="fixed inset-0 z-[80] grid place-items-center bg-navy-soft/80 p-4" onClick={() => setSelectedPose(null)}>
           <div className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-outline-variant/40 px-5 py-4">
-              <div><p className="text-[10px] font-bold uppercase tracking-widest text-primary">Pose {selectedPose.poseNumber}</p><h3 className="font-syne text-lg font-bold text-on-surface">{selectedPose.title}</h3></div>
-              <button onClick={() => setSelectedPose(null)} className="rounded-lg p-2 text-secondary hover:bg-surface-container"><X className="h-5 w-5" /></button>
+              <div><p className="text-[10px] font-bold uppercase tracking-widest text-primary">Pose {selectedPose.poseNumber}{selectedNavIndex >= 0 ? ` · ${selectedNavIndex + 1} of ${navigablePoses.length}` : ""}</p><h3 className="font-syne text-lg font-bold text-on-surface">{selectedPose.title}</h3></div>
+              <div className="flex items-center gap-1">
+                <span className="mr-2 hidden text-[10px] text-secondary md:inline">← → browse · D download · Esc close</span>
+                {selectedPreviousUrl && selectedOutputUrl && (
+                  <button onClick={() => setCompareWithPrevious((current) => !current)} className={`mr-1 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${compareWithPrevious ? "border-primary bg-soft-blush text-primary" : "border-outline-variant text-secondary hover:bg-surface-container"}`}>
+                    <Columns2 className="h-3.5 w-3.5" /> {compareWithPrevious ? "Hide comparison" : "Compare with previous"}
+                  </button>
+                )}
+                <button onClick={() => previousNavPose && setSelectedPose(previousNavPose)} disabled={!previousNavPose} title="Previous pose (←)" className="rounded-lg p-2 text-secondary hover:bg-surface-container disabled:opacity-30"><ChevronLeft className="h-5 w-5" /></button>
+                <button onClick={() => nextNavPose && setSelectedPose(nextNavPose)} disabled={!nextNavPose} title="Next pose (→)" className="rounded-lg p-2 text-secondary hover:bg-surface-container disabled:opacity-30"><ChevronRight className="h-5 w-5" /></button>
+                <button onClick={() => setSelectedPose(null)} title="Close (Esc)" className="rounded-lg p-2 text-secondary hover:bg-surface-container"><X className="h-5 w-5" /></button>
+              </div>
             </div>
               <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_300px]">
-                <div className="grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-4"><img src={selectedOutputUrl || latestRejected(selectedPose)?.url} alt={selectedPose.title} decoding="async" className="max-h-[76vh] max-w-full object-contain" /></div>
+                {showCompare ? (
+                  <div className="grid min-h-0 grid-cols-2 gap-3 overflow-auto bg-neutral-950 p-4">
+                    <figure className="flex min-h-0 flex-col items-center gap-2">
+                      <figcaption className="rounded-md bg-white/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white/80">Previous version</figcaption>
+                      <img src={selectedPreviousUrl} alt={`${selectedPose.title} — previous version`} decoding="async" className="max-h-[70vh] max-w-full object-contain" />
+                    </figure>
+                    <figure className="flex min-h-0 flex-col items-center gap-2">
+                      <figcaption className="rounded-md bg-primary/80 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white">Current</figcaption>
+                      <img src={selectedOutputUrl} alt={`${selectedPose.title} — current version`} decoding="async" className="max-h-[70vh] max-w-full object-contain" />
+                    </figure>
+                  </div>
+                ) : (
+                  <div className="grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-4"><img src={selectedOutputUrl || latestRejected(selectedPose)?.url} alt={selectedPose.title} decoding="async" className="max-h-[76vh] max-w-full object-contain" /></div>
+                )}
                 <aside className="space-y-4 overflow-auto p-5 text-sm">
+                  {selectedCanBeReviewed && (canApprove || selectedPose.approvalStatus !== "pending") && (
+                    <div className={`rounded-xl border p-4 ${selectedPose.approvalStatus === "approved" ? "border-emerald-600/30 bg-emerald-50" : selectedPose.approvalStatus === "rejected" ? "border-red-600/20 bg-red-50" : "border-outline-variant/40 bg-surface-container-lowest"}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Review decision</p>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${selectedPose.approvalStatus === "approved" ? "bg-emerald-600 text-white" : selectedPose.approvalStatus === "rejected" ? "bg-red-600 text-white" : "bg-amber-50 text-amber-700"}`}>{selectedPose.approvalStatus === "pending" ? "Pending review" : selectedPose.approvalStatus}</span>
+                      </div>
+                      {canApprove && (
+                        selectedPose.approvalStatus === "pending" ? (
+                          <div className="mt-3 grid grid-cols-2 gap-2">
+                            <button onClick={() => void setApproval(selectedPose, "approved")} disabled={approvingId === selectedPose._id} className="flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                              {approvingId === selectedPose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Approve
+                            </button>
+                            <button onClick={() => void setApproval(selectedPose, "rejected")} disabled={approvingId === selectedPose._id} className="flex items-center justify-center gap-1.5 rounded-lg border border-red-600/30 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50">
+                              {approvingId === selectedPose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ThumbsDown className="h-3.5 w-3.5" />} Reject
+                            </button>
+                          </div>
+                        ) : (
+                          <button onClick={() => void setApproval(selectedPose, "pending")} disabled={approvingId === selectedPose._id} className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-outline-variant bg-white px-3 py-2 text-xs font-bold text-secondary hover:bg-surface-container disabled:opacity-50">
+                            {approvingId === selectedPose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />} Undo — back to pending
+                          </button>
+                        )
+                      )}
+                      {approvalError && approvalError.poseId === selectedPose._id && <p className="mt-2 text-[10px] leading-4 text-danger">{approvalError.message}</p>}
+                    </div>
+                  )}
                   {selectedRetainedPrevious && (
                     <div className="rounded-xl border border-warning/30 bg-warning/5 p-4">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-warning-dark">Prior version retained</p>
@@ -589,7 +900,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   </dl>
                   {!selectedPose.usageReported && <p className="mt-3 text-[10px] leading-4 text-warning">This provider response did not include token usage, so no token cost was invented.</p>}
                 </div>
-                {selectedPose.completedAt && Date.now() - selectedPose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && <button onClick={() => { setRegenerateError(""); setExtraInstructions(""); setRegeneratePoseQa(false); setRegenerateTarget(selectedPose); }} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-soft-blush px-4 py-3 font-semibold text-primary hover:bg-primary/15"><RefreshCcw className="h-4 w-4" /> Regenerate with instructions</button>}
+                {selectedPose.completedAt && Date.now() - selectedPose.completedAt < 86400000 && !["queued", "processing", "cancelling"].includes(job.status) && <button onClick={() => { setRegenerateError(""); setExtraInstructions(""); setRegeneratePoseQa(false); setRegenerateTarget(selectedPose); }} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-soft-blush px-4 py-3 font-semibold text-primary hover:bg-primary/15"><RefreshCcw className="h-4 w-4" /> Regenerate with instructions</button>}
                 {selectedOutputUrl && (
                   <button onClick={() => void downloadPose(selectedPose)} disabled={downloadingPoseId === selectedPose._id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
                     {downloadingPoseId === selectedPose._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -652,7 +963,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             {regenerateTarget.poseNumber === 1 && (
               <p className="mt-4 rounded-xl border border-warning/30 bg-warning/5 p-3 text-xs leading-5 text-warning-dark">
                 <AlertCircle className="mr-1.5 inline h-3.5 w-3.5 align-text-bottom" />
-                Pose 1 is the face and shoot anchor for this whole set — poses 2–5 were generated to match it. Regenerating it can change the model's face; if it does, regenerate the other poses afterward so every image still shows the same person.
+                Pose 1 is the face and shoot anchor for this whole set — poses 2–6 were generated to match it. Regenerating it can change the model's face; if it does, regenerate the other poses afterward so every image still shows the same person.
               </p>
             )}
             <label className="mt-6 block text-xs font-bold uppercase tracking-wider text-secondary">Extra instructions<textarea autoFocus maxLength={1000} rows={5} value={extraInstructions} onChange={(event) => setExtraInstructions(event.target.value)} placeholder="Example: Back side should not have hanging/latkan elements. Preserve the plain uploaded back construction exactly." className="mt-2 w-full resize-y rounded-xl border border-outline-variant p-3 text-sm font-normal normal-case leading-6 tracking-normal text-on-surface outline-none focus:border-primary" /></label>
@@ -876,7 +1187,7 @@ export function History() {
                          {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
                       </button>
                    )}
-                   {!['queued', 'processing'].includes(job.status) && (
+                   {!['queued', 'processing', 'cancelling'].includes(job.status) && (
                       <button disabled={busyJobId === job._id} title="Delete generation" onClick={(e) => { e.stopPropagation(); setPendingAction({ type: "delete", jobId: job._id, sku: job.skuName || job.skuId }); }} className="rounded-md p-1.5 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
                          {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                       </button>

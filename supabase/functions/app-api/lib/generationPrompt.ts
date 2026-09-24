@@ -724,7 +724,7 @@ Place the exact uploaded product on one consistent professional adult fashion mo
 Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE (if supplied) or the clean commercial studio direction. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
 
 PHOTOGRAPHIC REALISM - MUST READ AS CAPTURED BY A REAL CAMERA, NEVER AS AI-GENERATED:
-- Camera and optics: full-frame camera, 85mm prime lens around f/5.6, low ISO, real optical depth of field with gradual focus falloff. No fake bokeh, cut-out or halo edges, or pasted-on subject.
+- Camera and optics: full-frame camera with a lens suited to this framing (about 85mm for full-length and three-quarter frames, macro-style close focus for detail crops), low ISO, real optical depth of field with gradual focus falloff. No fake bokeh, cut-out or halo edges, or pasted-on subject.
 - Colour and tone: true-to-life colours and exposure from a restrained professional RAW edit. Accurate, varied skin tones with natural redness and undertones; very fine sensor grain; soft highlight roll-off and detail in the shadows. No HDR, bloom, glow, haze, oversaturation, teal-orange grade, glossy beauty retouch, painterly, illustrated, 3D or CGI look.
 - Real person: an individual, believable face with natural character, not an idealized stock face; relaxed, weight-bearing posture with slight natural asymmetry; correct hands with five fingers, knuckles and nails; natural neck, shoulder and limb proportions. Hair shows individual strands and a few flyaways, never a solid helmet-like mass.
 - Real textile: visible weave or knit, natural creases at elbows, waist and knees, gravity-driven folds, real thickness at hems and seams. No vinyl or plastic sheen unless the fabric is genuinely satin or silk.
@@ -796,7 +796,7 @@ ${bottomWearSection({ bottomWear, isSaree: isSareeShoot, hasBottomReference })}
 
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
 ${creativeJson}
-- Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, camera height and distance, depth of field and colour grade. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
+- Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, and colour grade. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
 - ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS: Never reproduce the background, wall, arches, urns, pots, plants, steps, or environment visible behind the garment in the product reference photos (front, back, bottom, mannequin). The photoshoot set must come exclusively from the STYLE REFERENCE (or Pose 1 anchor / studio specification).
 - BACKDROP AND SET CONTINUITY ACROSS ALL POSES: The exact same photoshoot set (wall color, wall finish, floor, lighting, and any props established by the style reference / Pose 1) must remain identical across every pose in this set without drift or forgetting context.
 ${hasApprovedAnchor
@@ -881,13 +881,13 @@ PROMPT:
 ${boundedText(args.pose.prompt, 1_200)}
 
 REALISTIC INTEGRATION:
-- Treat this as frame ${args.pose.poseNumber} from one photographed contact sheet, not a new image concept. Reuse the same physical set coordinates, time of day, camera family, focal-length character, camera height, exposure, white balance, light direction, shadow density, and color grade established by Pose 1.
+- Treat this as frame ${args.pose.poseNumber} from one photographed contact sheet, not a new image concept. Reuse the same physical set coordinates, time of day, camera family, exposure, white balance, light direction, shadow density, and color grade established by Pose 1.
 - Preserve natural fabric drape, folds, gravity, occlusion, thickness and construction for this exact material and fit.
 - Match locked lighting direction, color temperature, shadows, contact shadows, perspective, lens feel, depth and scene geometry.
 - Keep anatomy realistic and keep hands away from product details.
 - Preserve believable pores, flyaway hairs, fabric microtexture, seam depth, edge transitions, optical depth of field, and grounded foot/contact shadows. Avoid waxy skin, over-smoothed fabric, duplicated motifs, over-sharpening, floating garments, plastic texture, and other synthetic AI tells.
 ${faceRequired ? `- Render the eyes with correct anatomy: two naturally shaped, correctly positioned eyes with realistic iris detail, natural catchlights, and a correctly aligned gaze - never crossed, misaligned, melted, or malformed.
-- Render teeth naturally: a real, slightly imperfect smile with naturally aligned teeth in the correct count - never uniformly perfect, fused, extra, missing, or warped.
+- Follow the planned expression; do not force a smile. If teeth show, render them naturally aligned in the correct count - never uniformly perfect, fused, extra, missing, or warped.
 - Skin must show real photographic micro-detail (pores, faint texture variation) rather than an airbrushed, plastic, or over-smoothed "beauty filter" look.` : ""}
 
 PROHIBITED UNRELATED CHANGES:

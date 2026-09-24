@@ -136,6 +136,10 @@ const MAX_REFERENCES = MAX_IMAGE_REFERENCES;
 const MAX_GENERATION_ATTEMPTS = 3;
 const QA_VERSION = "saree-qa-v14-listing-grade";
 const WORKER_LEASE_MS = 4 * 60_000;
+const WORKER_LEASE_HEARTBEAT_MS = 60_000;
+const PREFLIGHT_FAILED_RETRY_MS = 6 * 60 * 60_000;
+// A single image request can legitimately take minutes; past this it is hung.
+const IMAGE_REQUEST_TIMEOUT_MS = 5 * 60_000;
 const TIER_ONE_RETRY_FLOOR_MS = 30_000;
 
 const corsHeaders = {
@@ -320,11 +324,25 @@ async function attachAiRunsToSession(args: {
 async function analysisCostUsdFor(args: { organizationId: string; sessionId: string; planningRequestId?: string }) {
   const filters = [`session_id.eq.${args.sessionId}`];
   if (args.planningRequestId) filters.push(`planning_request_id.eq.${args.planningRequestId}`);
-  const { data, error } = await service.from("ai_runs")
+  // Analysis already charged to an earlier job for this product or session must
+  // not be charged again to every re-run; count only runs since the last job.
+  const previousJobFilters = [`session_id.eq.${args.sessionId}`];
+  if (args.planningRequestId) previousJobFilters.push(`planning_request_id.eq.${args.planningRequestId}`);
+  const { data: previousJob, error: previousJobError } = await service.from("generation_jobs")
+    .select("created_at")
+    .eq("org_id", args.organizationId)
+    .or(previousJobFilters.join(","))
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (previousJobError) console.error(`Could not load the previous job for analysis cost: ${previousJobError.message}`);
+  let query = service.from("ai_runs")
     .select("cost_usd,run_kind,session_id,planning_request_id")
     .eq("organization_id", args.organizationId)
     .in("run_kind", [...ANALYSIS_RUN_KINDS])
     .or(filters.join(","));
+  if (previousJob?.created_at) query = query.gt("created_at", String(previousJob.created_at));
+  const { data, error } = await query;
   if (error) {
     console.error(`Could not load analysis cost: ${error.message}`);
     return 0;
@@ -1797,6 +1815,7 @@ async function generateImage(args: { prompt: string; model: string; size: string
 
   const response = await fetch(apiUrl, {
     method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body,
+    signal: AbortSignal.timeout(IMAGE_REQUEST_TIMEOUT_MS),
   });
   const responseText = await response.text();
   let data: JsonRecord = {};
@@ -1820,8 +1839,11 @@ async function generateImage(args: { prompt: string; model: string; size: string
   if (!item?.b64_json && !item?.url) throw new Error(`${isReve ? 'Reve' : 'OpenAI'} returned no image data.`);
   if (item.b64_json) {
     const bytes = decodeBase64(String(item.b64_json));
+    // OpenAI is asked for JPEG above; sniff the bytes so a provider that ignores
+    // output_format is still stored and sent to QA under its real type.
+    const mimeType = bytes[0] === 0xff && bytes[1] === 0xd8 ? "image/jpeg" : "image/png";
     return {
-      blob: new Blob([bytes], { type: "image/png" }), base64: String(item.b64_json), mimeType: "image/png",
+      blob: new Blob([bytes], { type: mimeType }), base64: String(item.b64_json), mimeType,
       requestId, usage, costUsd,
     };
   }
@@ -2281,6 +2303,32 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   scheduleBackground(kickWorker());
 }
 
+// Generation plus QA can outlast one lease (vision fallbacks alone may take
+// minutes). Without renewal, stale-job recovery requeued the pose while this
+// worker was still running and the same image was generated and billed twice.
+function startLeaseHeartbeat(jobId: unknown) {
+  const timer = setInterval(() => {
+    void service.from("generation_jobs")
+      .update({ lock_expires_at: new Date(Date.now() + WORKER_LEASE_MS).toISOString() })
+      .eq("job_id", String(jobId || ""))
+      .in("status", ["processing", "cancelling"])
+      .then(({ error }) => { if (error) console.error(`Could not renew worker lease: ${error.message}`); });
+  }, WORKER_LEASE_HEARTBEAT_MS);
+  return () => clearInterval(timer);
+}
+
+// cancelJob finalizes a job while a worker may still be mid-pose. Re-read the
+// status before any path puts the job back in the queue, so a stopped job is
+// not claimed again and billed for its remaining poses.
+async function jobIsStopping(jobId: unknown) {
+  const { data, error } = await service.from("generation_jobs").select("status").eq("job_id", String(jobId || "")).maybeSingle();
+  if (error) {
+    console.error(`Could not re-read job status before requeue: ${error.message}`);
+    return false;
+  }
+  return ["cancelling", "cancelled"].includes(String(data?.status || ""));
+}
+
 async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRecord, message: string, failureCode = "pose_consistency_failed") {
   const now = new Date().toISOString();
   await service.from("session_generations").update({ status: "failed", qa_status: "failed", error: message.slice(0, 1000), updated_at: now }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
@@ -2310,6 +2358,10 @@ async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRe
   // A later failure therefore keeps the shoot running and the set is delivered
   // partially for review instead of discarding images already paid for.
   if (remaining.length && Number(pose.pose_index) !== 1) {
+    if (await jobIsStopping(job.job_id)) {
+      await finalizeCancelledJob(job);
+      return;
+    }
     await Promise.all([
       service.from("generation_jobs").update({
         status: "queued", available_at: now, locked_at: null, lock_expires_at: null,
@@ -2377,6 +2429,14 @@ async function deferPoseRetry(args: {
   const usagePatch = args.usage
     ? accumulatedUsage(args.pose, args.usage, String(args.providerRequestId || ""), args.attemptCost)
     : {};
+  if (await jobIsStopping(args.job.job_id)) {
+    // Keep the spend of the attempt that was already in flight, then settle the stop.
+    await service.from("generation_jobs").update({
+      actual_cost_usd: Number(args.job.actual_cost_usd || 0) + args.attemptCost + Number(args.qaCost || 0), updated_at: now,
+    }).eq("job_id", args.job.job_id);
+    await finalizeCancelledJob(args.job);
+    return { processed: true, cancelled: true, jobId: args.job.job_id, pose: args.pose.pose_index };
+  }
   await Promise.all([
     service.from("session_generations").update({
       status: "queued", qa_status: "pending", error: retryMessage,
@@ -3056,6 +3116,7 @@ async function processWorker(request: Request, args: JsonRecord) {
   let qaAttemptCost = 0;
   let attemptUsage: ProviderUsage | undefined;
   let providerRequestId = "";
+  const stopLeaseHeartbeat = startLeaseHeartbeat(job.job_id);
   try {
     const compiled = await compilePosePrompt(job, session, sessionData, pose, poseData, selected, storedPoseData);
     const prompt = compiled.prompt;
@@ -3088,7 +3149,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     const generatedStarted = Date.now();
     const generated = await generateImage({
       prompt, model: imageGenerationRoute.model, size: normalizeImageSize(String(job.aspect_ratio || "3:4"), String(job.image_size || "2K"), imageGenerationRoute.model),
-      quality: String(job.quality || "medium"), references: selected,
+      quality: String(job.quality || "high"), references: selected,
     });
     attemptUsage = generated.usage;
     providerRequestId = generated.requestId;
@@ -3307,6 +3368,8 @@ async function processWorker(request: Request, args: JsonRecord) {
     if (!permanentProviderError(error) && attempt < MAX_GENERATION_ATTEMPTS) {
       return deferPoseRetry({ job, pose, attempt, message: lastError, corrections: qaCorrections, rejectedAttempts, attemptCost, qaCost: qaAttemptCost, usage: attemptUsage, providerRequestId, error });
     }
+  } finally {
+    stopLeaseHeartbeat();
   }
   // Last attempt: the archive and the QA history have to be written here, because
   // failPoseAndJob only touches pose status and never rewrites generation_data.
@@ -3397,6 +3460,15 @@ async function approvePose(request: Request, args: JsonRecord) {
   if (!["approved", "rejected", "pending"].includes(status)) {
     throw new Error("Invalid approval status");
   }
+
+  // The service client bypasses RLS, so confirm the pose belongs to this
+  // organization before writing; the old order updated first and checked after.
+  const { data: ownedPose, error: ownedPoseError } = await service.from("session_generations")
+    .select("session_id").eq("generation_id", generationId).maybeSingle();
+  if (ownedPoseError || !ownedPose) throw new Error("Could not update approval status or pose not found.");
+  const { data: ownerSession, error: ownerSessionError } = await service.from("catalog_sessions")
+    .select("session_id").eq("session_id", ownedPose.session_id).eq("organization_id", workspace.organization.id).maybeSingle();
+  if (ownerSessionError || !ownerSession) throw new Error("Could not update approval status or pose not found.");
 
   const { data: pose, error: poseError } = await service.from("session_generations")
     .update({
@@ -3541,6 +3613,24 @@ async function cancelJob(request: Request, args: JsonRecord) {
   return { success: true };
 }
 
+// A session can hold several jobs once it has been re-run, so ".single()" on
+// session_id threw "multiple rows" and broke regenerate/QA for that session.
+// Resolve the job that produced this pose, falling back to the newest one.
+async function jobForPose(pose: JsonRecord, organizationId: string) {
+  const generationId = String(pose.generation_id || "");
+  const ownerJobId = String(((pose.generation_data || {}) as JsonRecord).jobId || "")
+    || (generationId.includes(":pose:") ? generationId.split(":pose:")[0] : "");
+  if (ownerJobId) {
+    const { data, error } = await service.from("generation_jobs").select("*").eq("job_id", ownerJobId).eq("org_id", organizationId).maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data) return data as JsonRecord;
+  }
+  const { data, error } = await service.from("generation_jobs").select("*").eq("session_id", String(pose.session_id || "")).eq("org_id", organizationId)
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data as JsonRecord | null;
+}
+
 async function regeneratePose(request: Request, args: JsonRecord, options: { allowManagedCatalog?: boolean } = {}) {
   const { workspace } = await workspaceFor(request, options.allowManagedCatalog ? undefined : "studio.generate");
   if (options.allowManagedCatalog && !workspace.isAdmin
@@ -3552,10 +3642,12 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
   const { data: pose, error: poseError } = await service.from("session_generations").select("*").eq("generation_id", generationId).single();
   if (poseError) throw new Error(poseError.message);
   if (!pose) throw new Error("Pose not found.");
-  const { data: job, error: jobError } = await service.from("generation_jobs").select("*").eq("session_id", pose.session_id).eq("org_id", workspace.organization.id).single();
-  if (jobError) throw new Error(jobError.message);
+  const job = await jobForPose(pose as JsonRecord, workspace.organization.id);
   if (!job) throw new Error("Generation job not found.");
-  if (["queued", "processing", "cancelling"].includes(job.status)) throw new Error("Wait for the current photoshoot to finish before regenerating a pose.");
+  const { data: activeJobs, error: activeJobsError } = await service.from("generation_jobs").select("job_id")
+    .eq("session_id", pose.session_id).eq("org_id", workspace.organization.id).in("status", ["queued", "processing", "cancelling"]).limit(1);
+  if (activeJobsError) throw new Error(activeJobsError.message);
+  if (["queued", "processing", "cancelling"].includes(String(job.status)) || activeJobs?.length) throw new Error("Wait for the current photoshoot to finish before regenerating a pose.");
   if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid && !options.allowManagedCatalog) throw new Error("You can regenerate only your own generation jobs.");
   const extraInstructions = String(args.extraInstructions || "").trim();
   if (extraInstructions.length > 1000) throw new Error("Regeneration instructions must be 1,000 characters or fewer.");
@@ -3657,11 +3749,11 @@ async function rerunPoseQa(request: Request, args: JsonRecord) {
   const { data: pose, error: poseError } = await service.from("session_generations").select("*").eq("generation_id", generationId).single();
   if (poseError || !pose) throw new Error(poseError?.message || "Pose not found.");
   if (!pose.output_url && !pose.storage_path) throw new Error("This pose has no preserved generated image to review.");
-  const [{ data: job, error: jobError }, { data: session, error: sessionError }] = await Promise.all([
-    service.from("generation_jobs").select("*").eq("session_id", pose.session_id).eq("org_id", workspace.organization.id).single(),
+  const [job, { data: session, error: sessionError }] = await Promise.all([
+    jobForPose(pose as JsonRecord, workspace.organization.id),
     service.from("catalog_sessions").select("*").eq("session_id", pose.session_id).eq("organization_id", workspace.organization.id).single(),
   ]);
-  if (jobError || !job) throw new Error(jobError?.message || "Generation job not found.");
+  if (!job) throw new Error("Generation job not found.");
   if (sessionError || !session) throw new Error(sessionError?.message || "Generation session not found.");
   const sessionData = session.session_data as JsonRecord;
   const references = await loadAvailableReferences(
@@ -5657,9 +5749,14 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
   if (!internalWorkerAuthorized(request)) throw new Error("Catalog preflight authorization failed.");
   let batchId = String(args.batchId || "");
   let requestedId = String(args.requestId || "");
+  // A failed analysis used to be retried on every 2-minute tick forever, paying
+  // for a vision call each time. Retry it at most every PREFLIGHT_FAILED_RETRY_MS;
+  // a reference change marks it stale, which still retries immediately.
+  // Keep in sync with private.dispatch_app_worker('catalog.preflight').
+  const preflightPendingFilter = `analysis_status.in.(pending,stale),and(analysis_status.eq.failed,updated_at.lt.${new Date(Date.now() - PREFLIGHT_FAILED_RETRY_MS).toISOString()})`;
   if (!batchId) {
     const { data: candidate, error: candidateError } = await service.from("planning_requests").select("id,batch_id")
-      .in("analysis_status", ["pending", "stale", "failed"]).not("batch_id", "is", null)
+      .or(preflightPendingFilter).not("batch_id", "is", null)
       .eq("validation_status", "ready").not("front_image_url", "is", null).not("back_image_url", "is", null).order("updated_at").limit(1).maybeSingle();
     if (candidateError) throw new Error(candidateError.message);
     if (!candidate?.batch_id) return { processed: false, reason: "no_pending_preflight" };
@@ -5671,7 +5768,7 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
   if (!batch) return { processed: false, reason: "catalog_missing" };
   let variantsQuery = service.from("planning_requests").select("*").eq("batch_id", batchId).eq("validation_status", "ready").not("front_image_url", "is", null).not("back_image_url", "is", null).order("queue_position");
   if (requestedId) variantsQuery = variantsQuery.eq("id", requestedId);
-  else variantsQuery = variantsQuery.in("analysis_status", ["pending", "stale", "failed"]);
+  else variantsQuery = variantsQuery.or(preflightPendingFilter);
   const { data: variants } = await variantsQuery;
   const variant = (variants || []).find((entry) => !["analyzing"].includes(String(entry.analysis_status || "")));
   if (!variant) return { processed: false, reason: "no_ready_variant" };
@@ -5903,6 +6000,7 @@ async function queueCatalogVariantGeneration(
   const analysisStartedAt = Date.now();
   let analysisPolicy = analysisHashes.policy;
   let analysisAttempts: VisionAttempt[] = [];
+  let analysisUsage: unknown = undefined;
   let normalized: ReturnType<typeof normalizeAnalysis>;
   if (hasCurrentAnalysis) {
     normalized = applyCatalogMemory(batch, storedNormalized!);
@@ -5911,6 +6009,7 @@ async function queueCatalogVariantGeneration(
     normalized = analysis.normalized;
     analysisPolicy = analysis.policy;
     analysisAttempts = analysis.attempts;
+    analysisUsage = analysis.usage;
   }
 
   const { data: workflowItem, error: workflowItemError } = await service.from("catalog_work_items")
@@ -5966,6 +6065,8 @@ async function queueCatalogVariantGeneration(
       updated_at: analyzedAt,
     }).eq("id", variant.id);
     if (analysisUpdateError) throw new Error(analysisUpdateError.message);
+    // Priced the same way as the scheduled preflight, which this run replaces.
+    const inlineAnalysisCost = await pricedVisionUsage({ usage: analysisUsage }, analysisPolicy.provider, analysisPolicy.model);
     await recordAiRun({
       organization_id: batch.organization_id,
       planning_request_id: variant.id,
@@ -5981,8 +6082,9 @@ async function queueCatalogVariantGeneration(
       output_json: normalized,
       status: "completed",
       latency_ms: Date.now() - analysisStartedAt,
-      cost_usd: 0,
-      cost_source: "provider_cost_not_available",
+      cost_usd: inlineAnalysisCost.costUsd, cost_source: inlineAnalysisCost.costSource,
+      input_tokens: inlineAnalysisCost.inTok, input_text_tokens: inlineAnalysisCost.inTok, input_image_tokens: 0, output_tokens: inlineAnalysisCost.outTok,
+      total_tokens: inlineAnalysisCost.totalTok, thoughts_token_count: inlineAnalysisCost.thoughtsTok,
     });
   }
 
@@ -6234,8 +6336,12 @@ async function processCatalog(request: Request, args: JsonRecord) {
   if (activeSessionsError) console.error(activeSessionsError.message);
   if (activeSessions?.length) return { processed: false, reason: "active_session" };
 
+  // A variant another worker claimed moments ago has no job yet and looks stale
+  // here; only recover rows that have sat in queued/processing for a while.
+  const staleCutoff = Date.now() - 10 * 60_000;
   const staleVariantIds = targetVariants
     .filter((row) => ["queued", "processing"].includes(String(row.generation_status)))
+    .filter((row) => (Date.parse(String(row.updated_at || "")) || 0) < staleCutoff)
     .map((row) => row.id);
   if (staleVariantIds.length) {
     await service.from("planning_requests").update({
@@ -6293,8 +6399,25 @@ async function processCatalog(request: Request, args: JsonRecord) {
     }).eq("id", batchId);
     return { processed: false, reason: "styling_plan_unapproved", batchId };
   }
+  // Claim the variant atomically before the (slow) inline analysis. Several
+  // triggers can kick this processor at once; without the claim two of them
+  // picked the same SKU and queued two paid shoots for it.
+  const previousGenerationStatus = String(variant.generation_status || "pending");
+  const { data: claimedRows, error: claimError } = await service.from("planning_requests")
+    .update({ generation_status: "queued", updated_at: new Date().toISOString() })
+    .eq("id", variant.id)
+    .not("generation_status", "in", "(completed,queued,processing,failed)")
+    .select("id");
+  if (claimError) throw new Error(claimError.message);
+  if (!claimedRows?.length) return { processed: false, reason: "variant_claimed_elsewhere", planningRequestId: variant.id };
   try {
-    return await queueCatalogVariantGeneration(batch, variant as JsonRecord, (variants || []) as JsonRecord[], batchId, generationSettings);
+    const queued = await queueCatalogVariantGeneration(batch, variant as JsonRecord, (variants || []) as JsonRecord[], batchId, generationSettings);
+    if (!queued.processed) {
+      // Nothing was queued (e.g. waiting for styling approval): release the claim.
+      await service.from("planning_requests").update({ generation_status: previousGenerationStatus, updated_at: new Date().toISOString() })
+        .eq("id", variant.id).eq("generation_status", "queued");
+    }
+    return queued;
   } catch (error) {
     const failedAt = new Date().toISOString();
     const failureMessage = errorMessage(error);
