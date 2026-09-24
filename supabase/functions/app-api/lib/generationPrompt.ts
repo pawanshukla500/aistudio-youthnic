@@ -709,7 +709,7 @@ export function composeGenerationPrompt(args: {
     return lines.join("\n");
   }).join("\n");
 
-  const prompt = `Create ONE premium photorealistic fashion e-commerce photograph for ${boundedText(args.skuName, 160) || "this product"}.
+  const prompt = `Create ONE real-camera fashion e-commerce photograph for ${boundedText(args.skuName, 160) || "this product"} that is indistinguishable from an unretouched frame of a professional catalog shoot.
 
 REFERENCE MANIFEST IN UPLOAD ORDER:
 ${manifest}
@@ -723,6 +723,13 @@ EDIT GOAL:
 Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${boundedText(args.pose.title, 160)}. The finished image must look like the same real professional photoshoot as every other frame in this set.
 Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE (if supplied) or the clean commercial studio direction. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
 
+PHOTOGRAPHIC REALISM - MUST READ AS CAPTURED BY A REAL CAMERA, NEVER AS AI-GENERATED:
+- Camera and optics: full-frame camera, 85mm prime lens around f/5.6, low ISO, real optical depth of field with gradual focus falloff. No fake bokeh, cut-out or halo edges, or pasted-on subject.
+- Colour and tone: true-to-life colours and exposure from a restrained professional RAW edit. Accurate, varied skin tones with natural redness and undertones; very fine sensor grain; soft highlight roll-off and detail in the shadows. No HDR, bloom, glow, haze, oversaturation, teal-orange grade, glossy beauty retouch, painterly, illustrated, 3D or CGI look.
+- Real person: an individual, believable face with natural character, not an idealized stock face; relaxed, weight-bearing posture with slight natural asymmetry; correct hands with five fingers, knuckles and nails; natural neck, shoulder and limb proportions. Hair shows individual strands and a few flyaways, never a solid helmet-like mass.
+- Real textile: visible weave or knit, natural creases at elbows, waist and knees, gravity-driven folds, real thickness at hems and seams. No vinyl or plastic sheen unless the fabric is genuinely satin or silk.
+- Grounded in the set: one coherent light source direction across face, garment and background; soft contact shadows under the feet; the model physically occupies the room.
+
 LOCKED SUBJECT - MUST NOT CHANGE:
 ${modelJson}
 - Same recognizable face, skin tone, body proportions, hairstyle, hair length/color, makeup, accessories and footwear across the complete set.
@@ -733,7 +740,7 @@ ${hasModelReference
     ? `The image labeled MODEL FACE REFERENCE in the reference manifest above is the exact, non-negotiable face and identity for this model in EVERY pose, including this one - it outranks every other face source, including the approved-pose anchor. Reproduce it as close to pixel-identical as photographically possible: identical facial bone structure, eyes (shape, color, spacing), eyebrows, nose, lips, jawline, skin tone and texture, and hairstyle. Do not idealize, beautify, average, restyle, or blend it with any other face - this must read as the same real person from that reference photo, not merely a similar-looking model.${hasApprovedAnchor ? " Use the APPROVED POSE 1 image only for scene, lighting, and styling continuity - never as a face source." : ""}`
     : hasApprovedAnchor
       ? "The image labeled APPROVED POSE 1 in the reference manifest above is the exact, non-negotiable ground truth for this model's identity. Reproduce the identical facial bone structure, eye shape and color, eyebrow shape, nose, lips, jawline, skin tone and texture, and hairstyle seen in that image - do not idealize, beautify, average, or drift toward a different face."
-      : "This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally beautiful adult face exactly as described in modelIdentity above - every later pose in this set must reproduce this same face."}
+      : "This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally attractive adult face with real individual character (not an idealized, airbrushed, symmetric stock face) exactly as described in modelIdentity above - every later pose in this set must reproduce this same face."}
 ${faceQualityInstruction}
 
 LOCKED PRODUCT - MUST NOT CHANGE:

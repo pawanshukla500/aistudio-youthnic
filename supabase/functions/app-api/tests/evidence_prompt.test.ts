@@ -877,8 +877,8 @@ Deno.test("composeGenerationPrompt locks style-reference jewellery and dual-mode
   assertStringIncludes(memoryPrompt, "Style reference remains set/backdrop authority");
 
   const padded = productDetail.replace(
-    "Create ONE premium photorealistic fashion e-commerce photograph",
-    `${"OVERFLOW ".repeat(4_000)}Create ONE premium photorealistic fashion e-commerce photograph`,
+    "Create ONE real-camera fashion e-commerce photograph",
+    `${"OVERFLOW ".repeat(4_000)}Create ONE real-camera fashion e-commerce photograph`,
   );
   assertEquals(padded.length > IMAGE_PROMPT_SAFE_CHARS, true);
   const compacted = compactFullPromptSafely(padded);

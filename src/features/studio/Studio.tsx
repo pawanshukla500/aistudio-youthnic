@@ -43,7 +43,7 @@ const defaultOptions: OutputOptions = {
   modelIdentity: "Same adult South Asian female fashion model across every pose",
   aspectRatio: "3:4",
   imageSize: "2K",
-  quality: "medium",
+  quality: "high",
   backgroundStyle: "Infer a premium consistent scene from the uploaded style reference",
   bottomWear: "auto",
   poseQa: false,
