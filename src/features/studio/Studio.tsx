@@ -108,7 +108,9 @@ function SessionSubmissionRow({ jobId, latest, onRemove }: { jobId: string; late
   const { data: job, error } = useQuery(api.jobs.get, { jobId }, { poll: !finished });
   const delivery = job ? generationDeliveryProgress(job) : null;
   const terminal = Boolean(job && ["completed", "failed", "cancelled"].includes(job.status));
-  useEffect(() => { if (terminal || job === null) setFinished(true); }, [terminal, job]);
+  // Follows the latest status: a refresh on tab focus that finds the job running
+  // again (e.g. regenerated from another tab) resumes polling.
+  useEffect(() => { if (job !== undefined) setFinished(terminal || job === null); }, [terminal, job]);
   return (
     <li className="flex items-center gap-3 rounded-lg border border-outline-variant/40 bg-white px-3 py-2">
       <div className="h-9 w-9 flex-shrink-0 overflow-hidden rounded-md bg-surface-container">
