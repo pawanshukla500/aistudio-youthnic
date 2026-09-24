@@ -877,20 +877,32 @@ export function useQuery(endpoint: BackendEndpoint, args: Record<string, any> | 
     setValue(undefined);
     setError(null);
     let active = true;
+    // One request at a time: a slow response can no longer overlap the next
+    // poll and land after it, which made progress jump backwards.
+    let inFlight = false;
     const load = () => {
+      if (inFlight) return;
+      inFlight = true;
       void queryBackend(endpoint, JSON.parse(serializedArgs)).then((next) => {
         if (active) { setValue(next); setError(null); }
       }).catch((reason) => {
         if (active) setError(reason instanceof Error ? reason : new Error(String(reason)));
+      }).finally(() => {
+        inFlight = false;
       });
     };
     load();
     const dynamic = endpoint.startsWith("jobs.") || endpoint === api.notifications.list || endpoint.startsWith("catalog.");
-    const interval = dynamic ? window.setInterval(load, 2500) : undefined;
+    // Hidden tabs stop polling and catch up as soon as they are visible again.
+    const poll = () => { if (!document.hidden) load(); };
+    const onVisible = () => { if (!document.hidden) load(); };
+    const interval = dynamic ? window.setInterval(poll, 2500) : undefined;
+    if (dynamic) document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("supabase-backend-refresh", load);
     return () => {
       active = false;
       if (interval) window.clearInterval(interval);
+      if (dynamic) document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("supabase-backend-refresh", load);
     };
   }, [endpoint, serializedArgs]);

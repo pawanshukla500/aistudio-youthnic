@@ -115,7 +115,12 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const rerunQa = useMutation(api.jobs.rerunQa);
   const [regeneratingId, setRegeneratingId] = useState<Id<"generationPoses"> | null>(null);
   const [isZipping, setIsZipping] = useState(false);
-  const [selectedPose, setSelectedPose] = useState<any | null>(null);
+  const [selectedPoseSnapshot, setSelectedPose] = useState<any | null>(null);
+  // Read the open pose from the live job so QA re-runs and retries show up in
+  // the preview; the snapshot only covers a pose that has since disappeared.
+  const selectedPose = selectedPoseSnapshot
+    ? (job?.poses?.find((pose: any) => pose._id === selectedPoseSnapshot._id) ?? selectedPoseSnapshot)
+    : null;
   const [regenerateTarget, setRegenerateTarget] = useState<any | null>(null);
   const [extraInstructions, setExtraInstructions] = useState("");
   const [regeneratePoseQa, setRegeneratePoseQa] = useState(false);
@@ -234,6 +239,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     if (!job) return;
     try {
       setIsZipping(true);
+      setDownloadError("");
       const zip = new JSZip();
 
       const storedPoses = job.poses.filter((pose: any) => Boolean(visiblePoseOutputUrl(pose)));
@@ -263,6 +269,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         }
       }
 
+      const missingPoses: number[] = [];
       const promises = storedPoses.map(async (pose: any, i: number) => {
         try {
           const asset = visiblePoseAsset(pose);
@@ -274,18 +281,26 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           else if (blob.type === "image/webp") ext = "webp";
 
           const safeTitle = String(pose.title || "pose").replace(/[^a-z0-9]/gi, '_').toLowerCase();
-          const filename = `${i + 1}_${safeTitle}.${ext}`;
+          // Name by pose number so a missing pose never shifts later files'
+          // marketplace upload order.
+          const filename = `${Number(pose.poseNumber) || i + 1}_${safeTitle}.${ext}`;
           folder.file(filename, blob);
         } catch (err) {
           console.error("Failed to fetch image for ZIP", err);
+          missingPoses.push(Number(pose.poseNumber) || i + 1);
         }
       });
 
       await Promise.all(promises);
+      if (missingPoses.length === storedPoses.length) throw new Error("None of the images could be downloaded.");
       const content = await zip.generateAsync({ type: "blob" });
       saveAs(content, `Youthnic_${job.skuId || "Generation"}.zip`);
+      if (missingPoses.length) {
+        setDownloadError(`ZIP saved, but ${missingPoses.length} of ${storedPoses.length} images could not be downloaded: pose ${missingPoses.sort((a, b) => a - b).join(", ")}. Try the ZIP again or download them individually.`);
+      }
     } catch (err) {
       console.error("Error generating zip", err);
+      setDownloadError(err instanceof Error ? `ZIP download failed: ${err.message}` : "ZIP download failed.");
     } finally {
       setIsZipping(false);
     }
@@ -394,7 +409,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-6">
         {job.poses.map((pose: any) => {
           const outputUrl = visiblePoseOutputUrl(pose);
           const retainedPrevious = hasRetainedPreviousVersion(pose);
@@ -441,7 +456,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 )}
                 {/* A pose rejected by QA never produced an image, so it must stay
                     retryable from here — otherwise a failed shoot is a dead end. */}
-                {(pose.status === "failed" || (pose.status === "completed" && outputUrl)) && pose.completedAt && Date.now() - pose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && (
+                {(pose.status === "failed" || (pose.status === "completed" && outputUrl)) && pose.completedAt && Date.now() - pose.completedAt < 86400000 && !["queued", "processing", "cancelling"].includes(job.status) && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -589,7 +604,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   </dl>
                   {!selectedPose.usageReported && <p className="mt-3 text-[10px] leading-4 text-warning">This provider response did not include token usage, so no token cost was invented.</p>}
                 </div>
-                {selectedPose.completedAt && Date.now() - selectedPose.completedAt < 86400000 && !["queued", "processing"].includes(job.status) && <button onClick={() => { setRegenerateError(""); setExtraInstructions(""); setRegeneratePoseQa(false); setRegenerateTarget(selectedPose); }} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-soft-blush px-4 py-3 font-semibold text-primary hover:bg-primary/15"><RefreshCcw className="h-4 w-4" /> Regenerate with instructions</button>}
+                {selectedPose.completedAt && Date.now() - selectedPose.completedAt < 86400000 && !["queued", "processing", "cancelling"].includes(job.status) && <button onClick={() => { setRegenerateError(""); setExtraInstructions(""); setRegeneratePoseQa(false); setRegenerateTarget(selectedPose); }} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-soft-blush px-4 py-3 font-semibold text-primary hover:bg-primary/15"><RefreshCcw className="h-4 w-4" /> Regenerate with instructions</button>}
                 {selectedOutputUrl && (
                   <button onClick={() => void downloadPose(selectedPose)} disabled={downloadingPoseId === selectedPose._id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
                     {downloadingPoseId === selectedPose._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -652,7 +667,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             {regenerateTarget.poseNumber === 1 && (
               <p className="mt-4 rounded-xl border border-warning/30 bg-warning/5 p-3 text-xs leading-5 text-warning-dark">
                 <AlertCircle className="mr-1.5 inline h-3.5 w-3.5 align-text-bottom" />
-                Pose 1 is the face and shoot anchor for this whole set — poses 2–5 were generated to match it. Regenerating it can change the model's face; if it does, regenerate the other poses afterward so every image still shows the same person.
+                Pose 1 is the face and shoot anchor for this whole set — poses 2–6 were generated to match it. Regenerating it can change the model's face; if it does, regenerate the other poses afterward so every image still shows the same person.
               </p>
             )}
             <label className="mt-6 block text-xs font-bold uppercase tracking-wider text-secondary">Extra instructions<textarea autoFocus maxLength={1000} rows={5} value={extraInstructions} onChange={(event) => setExtraInstructions(event.target.value)} placeholder="Example: Back side should not have hanging/latkan elements. Preserve the plain uploaded back construction exactly." className="mt-2 w-full resize-y rounded-xl border border-outline-variant p-3 text-sm font-normal normal-case leading-6 tracking-normal text-on-surface outline-none focus:border-primary" /></label>
@@ -876,7 +891,7 @@ export function History() {
                          {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
                       </button>
                    )}
-                   {!['queued', 'processing'].includes(job.status) && (
+                   {!['queued', 'processing', 'cancelling'].includes(job.status) && (
                       <button disabled={busyJobId === job._id} title="Delete generation" onClick={(e) => { e.stopPropagation(); setPendingAction({ type: "delete", jobId: job._id, sku: job.skuName || job.skuId }); }} className="rounded-md p-1.5 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
                          {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                       </button>

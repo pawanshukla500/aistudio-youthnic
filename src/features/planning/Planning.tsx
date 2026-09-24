@@ -229,7 +229,7 @@ export function Planning() {
   }, [selectedId, selectedLoaded, selectedPreferredSchedule]);
 
   const uploadRef = async (role: string, file: File, sku: string, catalogId: Id<"catalogs">) => {
-    const resizedFile = await resizeImageFile(file, 1280, 0.85);
+    const resizedFile = await resizeImageFile(file);
     const uploaded = await uploadCatalogAsset({
       organizationId: String(organization._id),
       scope: "catalog",

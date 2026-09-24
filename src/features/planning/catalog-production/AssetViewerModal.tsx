@@ -4,6 +4,7 @@ import { saveAs } from "file-saver";
 import { invokeAppApi } from "../../../lib/backend";
 import { supabase } from "../../../lib/supabase";
 import { resolveCatalogAssetUrl } from "../../../lib/catalogStorage";
+import { scopePoseRowsToJob } from "../../../lib/generationRuns";
 import { formatDuration, type CatalogWorkItem } from "./types";
 
 type PoseAsset = {
@@ -104,7 +105,7 @@ export function AssetViewerModal({ item, onClose }: { item: CatalogWorkItem; onC
       setError("");
       const [posesResult, sessionResult] = await Promise.all([
         supabase.from("session_generations")
-          .select("generation_id,pose_index,title,pose_type,instructions,full_prompt,status,output_url,storage_path,storage_backend,qa_status,updated_at")
+          .select("generation_id,generation_data,pose_index,title,pose_type,instructions,full_prompt,status,output_url,storage_path,storage_backend,qa_status,updated_at")
           .eq("session_id", item.catalog_session_id || "")
           .order("pose_index"),
         supabase.from("catalog_sessions").select("session_data").eq("session_id", item.catalog_session_id || "").maybeSingle(),
@@ -113,7 +114,10 @@ export function AssetViewerModal({ item, onClose }: { item: CatalogWorkItem; onC
       const requestError = posesResult.error || sessionResult.error;
       if (requestError) setError(requestError.message);
       else {
-        const resolvedPoses = await Promise.all((posesResult.data || []).map(async (pose) => ({
+        // A re-run on the same session leaves the earlier run's rows behind; show
+        // only this work item's job so the viewer and ZIP hold one set of poses.
+        const poseRows = item.generation_job_id ? scopePoseRowsToJob(posesResult.data || [], item.generation_job_id) : (posesResult.data || []);
+        const resolvedPoses = await Promise.all(poseRows.map(async (pose) => ({
           ...pose,
           output_url: await resolveCatalogAssetUrl({ storageBackend: pose.storage_backend, storagePath: pose.storage_path, fallbackUrl: pose.output_url }),
         })));
@@ -135,7 +139,7 @@ export function AssetViewerModal({ item, onClose }: { item: CatalogWorkItem; onC
     };
     void load();
     return () => { active = false; };
-  }, [item.catalog_session_id]);
+  }, [item.catalog_session_id, item.generation_job_id]);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };

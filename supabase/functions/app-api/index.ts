@@ -1820,8 +1820,11 @@ async function generateImage(args: { prompt: string; model: string; size: string
   if (!item?.b64_json && !item?.url) throw new Error(`${isReve ? 'Reve' : 'OpenAI'} returned no image data.`);
   if (item.b64_json) {
     const bytes = decodeBase64(String(item.b64_json));
+    // OpenAI is asked for JPEG above; sniff the bytes so a provider that ignores
+    // output_format is still stored and sent to QA under its real type.
+    const mimeType = bytes[0] === 0xff && bytes[1] === 0xd8 ? "image/jpeg" : "image/png";
     return {
-      blob: new Blob([bytes], { type: "image/png" }), base64: String(item.b64_json), mimeType: "image/png",
+      blob: new Blob([bytes], { type: mimeType }), base64: String(item.b64_json), mimeType,
       requestId, usage, costUsd,
     };
   }
@@ -2281,6 +2284,18 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   scheduleBackground(kickWorker());
 }
 
+// cancelJob finalizes a job while a worker may still be mid-pose. Re-read the
+// status before any path puts the job back in the queue, so a stopped job is
+// not claimed again and billed for its remaining poses.
+async function jobIsStopping(jobId: unknown) {
+  const { data, error } = await service.from("generation_jobs").select("status").eq("job_id", String(jobId || "")).maybeSingle();
+  if (error) {
+    console.error(`Could not re-read job status before requeue: ${error.message}`);
+    return false;
+  }
+  return ["cancelling", "cancelled"].includes(String(data?.status || ""));
+}
+
 async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRecord, message: string, failureCode = "pose_consistency_failed") {
   const now = new Date().toISOString();
   await service.from("session_generations").update({ status: "failed", qa_status: "failed", error: message.slice(0, 1000), updated_at: now }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
@@ -2310,6 +2325,10 @@ async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRe
   // A later failure therefore keeps the shoot running and the set is delivered
   // partially for review instead of discarding images already paid for.
   if (remaining.length && Number(pose.pose_index) !== 1) {
+    if (await jobIsStopping(job.job_id)) {
+      await finalizeCancelledJob(job);
+      return;
+    }
     await Promise.all([
       service.from("generation_jobs").update({
         status: "queued", available_at: now, locked_at: null, lock_expires_at: null,
@@ -2377,6 +2396,14 @@ async function deferPoseRetry(args: {
   const usagePatch = args.usage
     ? accumulatedUsage(args.pose, args.usage, String(args.providerRequestId || ""), args.attemptCost)
     : {};
+  if (await jobIsStopping(args.job.job_id)) {
+    // Keep the spend of the attempt that was already in flight, then settle the stop.
+    await service.from("generation_jobs").update({
+      actual_cost_usd: Number(args.job.actual_cost_usd || 0) + args.attemptCost + Number(args.qaCost || 0), updated_at: now,
+    }).eq("job_id", args.job.job_id);
+    await finalizeCancelledJob(args.job);
+    return { processed: true, cancelled: true, jobId: args.job.job_id, pose: args.pose.pose_index };
+  }
   await Promise.all([
     service.from("session_generations").update({
       status: "queued", qa_status: "pending", error: retryMessage,
@@ -3088,7 +3115,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     const generatedStarted = Date.now();
     const generated = await generateImage({
       prompt, model: imageGenerationRoute.model, size: normalizeImageSize(String(job.aspect_ratio || "3:4"), String(job.image_size || "2K"), imageGenerationRoute.model),
-      quality: String(job.quality || "medium"), references: selected,
+      quality: String(job.quality || "high"), references: selected,
     });
     attemptUsage = generated.usage;
     providerRequestId = generated.requestId;
