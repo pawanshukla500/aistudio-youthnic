@@ -5,6 +5,8 @@
 --    actually claims: planning_batches that are due or already running.
 -- 2. dispatch_app_worker('catalog.preflight') now skips the HTTP call when no variant
 --    matches the preflight candidate query, so the functions service can sleep when idle.
+--    A failed analysis is retried at most every 6 hours (PREFLIGHT_FAILED_RETRY_MS in
+--    app-api) instead of on every 2-minute tick.
 -- 3. claim_next_generation_job lost its available_at filter when it was redefined in
 --    20260811150000, so any worker kick re-claimed a job that deferPoseRetry had just
 --    backed off (for example after an OpenAI 429). Restore the filter.
@@ -47,7 +49,8 @@ BEGIN
     -- Mirrors the candidate query in processCatalogPreflight.
     SELECT EXISTS (
       SELECT 1 FROM public.planning_requests
-      WHERE analysis_status IN ('pending', 'stale', 'failed')
+      WHERE (analysis_status IN ('pending', 'stale')
+             OR (analysis_status = 'failed' AND updated_at < now() - interval '6 hours'))
         AND batch_id IS NOT NULL
         AND validation_status = 'ready'
         AND front_image_url IS NOT NULL
