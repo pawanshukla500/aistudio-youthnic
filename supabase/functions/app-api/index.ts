@@ -2004,7 +2004,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
       model = imageGenerationPolicy.model;
     }
   }
-  const quality = ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : "medium";
+  const quality = ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : "high";
   // Presentation choice, not product truth: the analysis still records what the
   // references prove, and "auto" keeps the two in sync.
   const bottomWearMode = normalizeBottomWearMode(args.bottomWear ?? args.bottomWearMode);
@@ -4733,7 +4733,7 @@ async function createCatalogOperation(request: Request, args: JsonRecord) {
   const generationSettings = {
     modelDirection: String(args.modelDirection || ""), sceneDirection: String(args.sceneDirection || ""),
     category: String(args.category || "ethnic/fusion"), aspectRatio: String(args.aspectRatio || "3:4"),
-    imageSize: String(args.imageSize || "2K"), quality: "medium", poseQa: Boolean(args.poseQa),
+    imageSize: String(args.imageSize || "2K"), quality: ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : "high", poseQa: Boolean(args.poseQa),
     bottomWear: normalizeBottomWearMode(args.bottomWear),
     lookAndMood: String(args.lookAndMood || ""), stylingRequirements: String(args.stylingRequirements || ""),
     lighting: String(args.lighting || ""), composition: String(args.composition || ""),
@@ -6048,7 +6048,7 @@ async function queueCatalogVariantGeneration(
       model = imageGenerationPolicy.model;
     }
   }
-  const quality = ["low", "medium", "high"].includes(String(generationSettings.quality)) ? String(generationSettings.quality) : "medium";
+  const quality = ["low", "medium", "high"].includes(String(generationSettings.quality)) ? String(generationSettings.quality) : "high";
   const sessionData = {
     skuId: String(variant.request_code || variant.id),
     skuName: String(variant.sku_name),

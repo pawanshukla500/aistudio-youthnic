@@ -1593,7 +1593,7 @@ export async function bulkGenerateCatalogWorkItems(
     category: "ethnic/fusion",
     aspectRatio: "3:4",
     imageSize: "2K",
-    quality: "medium",
+    quality: "high",
     poseQa: false,
   };
   let adHocBatchId = "";
