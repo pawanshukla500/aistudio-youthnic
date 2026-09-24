@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 import { resolveCatalogAssetUrl } from "./catalogStorage";
 import { visibleGenerationDetailedStatus } from "./generationStatus";
@@ -13,7 +13,7 @@ export const api = {
   analysis: { analyzeReferences: "analysis.analyzeReferences" },
   files: { saveReference: "files.saveReference" },
   generation: { queueSku: "generation.queueSku", regeneratePose: "generation.regeneratePose" },
-  jobs: { list: "jobs.list", get: "jobs.get", getQueuePosition: "jobs.getQueuePosition", cancel: "jobs.cancel", remove: "jobs.remove", regenerateSession: "jobs.regenerateSession", rerunQa: "jobs.rerunQa" },
+  jobs: { list: "jobs.list", get: "jobs.get", getQueuePosition: "jobs.getQueuePosition", cancel: "jobs.cancel", remove: "jobs.remove", regenerateSession: "jobs.regenerateSession", rerunQa: "jobs.rerunQa", approve: "jobs.approve" },
   notifications: { list: "notifications.list", markRead: "notifications.markRead", markAllRead: "notifications.markAllRead" },
   catalog: {
     list: "catalog.list", get: "catalog.get", createCatalog: "catalog.createCatalog", bulkAddVariants: "catalog.bulkAddVariants",
@@ -318,8 +318,16 @@ async function getJob(jobId: string) {
     const hasRetainedPreviousOutput = pose.status === "failed" && priorWasRetained && Boolean(outputUrl || retainedPrevious.outputUrl || asset?.image_url);
     const retainedOutputUrl = hasRetainedPreviousOutput ? String(outputUrl || retainedPrevious.outputUrl || asset?.image_url || "") : "";
     const retainedStoragePath = hasRetainedPreviousOutput ? String(pose.storage_path || retainedPrevious.storagePath || asset?.storage_path || "") : "";
+    // Only surface a prior version for comparison when it is a different image
+    // than the one now on the card (an in-flight regeneration still shows it).
+    const previousVersionUrl = !hasRetainedPreviousOutput && outputUrl && retainedPrevious.outputUrl && retainedPrevious.outputUrl !== outputUrl
+      ? String(retainedPrevious.outputUrl)
+      : "";
     return {
       _id: pose.generation_id,
+      generationId: String(pose.generation_id || ""),
+      approvalStatus: String(pose.approval_status || "pending"),
+      previousVersionUrl,
       poseNumber: Number(pose.pose_index),
       title: pose.title || defaultTitles[Math.max(0, Number(pose.pose_index) - 1)] || `Pose ${pose.pose_index}`,
       status: pose.status || (outputUrl ? "completed" : "queued"),
@@ -359,6 +367,10 @@ async function getJob(jobId: string) {
     const usageDetails = record(usage.input_tokens_details);
     mappedPoses.push({
       _id: asset.id,
+      // Asset-only poses have no session_generations row, so jobs.approve cannot target them.
+      generationId: "",
+      approvalStatus: "pending",
+      previousVersionUrl: "",
       poseNumber,
       title: defaultTitles[Math.max(0, poseNumber - 1)] || `Pose ${poseNumber}`,
       status: "completed",
@@ -788,6 +800,8 @@ async function mutateBackend(endpoint: BackendEndpoint, args: Record<string, any
       return invokeAppApi("jobs.regenerateSession", args);
     case api.jobs.rerunQa:
       return invokeAppApi("jobs.rerunQa", args);
+    case api.jobs.approve:
+      return invokeAppApi("jobs.approve", args);
     case api.files.saveReference:
       return invokeAppApi("files.saveReference", args);
     case api.catalog.createCatalog:
@@ -863,9 +877,13 @@ async function mutateBackend(endpoint: BackendEndpoint, args: Record<string, any
   }
 }
 
-export function useQuery(endpoint: BackendEndpoint, args: Record<string, any> | "skip"): any {
+export function useQuery(endpoint: BackendEndpoint, args: Record<string, any> | "skip", options: { poll?: boolean } = {}): any {
   const [value, setValue] = useState<any>(undefined);
   const [error, setError] = useState<Error | null>(null);
+  // Read through a ref so switching polling off (e.g. once a job is finished)
+  // stops the timer's requests without re-running the effect and blanking data.
+  const pollRef = useRef(options.poll !== false);
+  pollRef.current = options.poll !== false;
   const serializedArgs = args === "skip" ? "skip" : JSON.stringify(args);
 
   useEffect(() => {
@@ -894,7 +912,7 @@ export function useQuery(endpoint: BackendEndpoint, args: Record<string, any> | 
     load();
     const dynamic = endpoint.startsWith("jobs.") || endpoint === api.notifications.list || endpoint.startsWith("catalog.");
     // Hidden tabs stop polling and catch up as soon as they are visible again.
-    const poll = () => { if (!document.hidden) load(); };
+    const poll = () => { if (!document.hidden && pollRef.current) load(); };
     const onVisible = () => { if (!document.hidden) load(); };
     const interval = dynamic ? window.setInterval(poll, 2500) : undefined;
     if (dynamic) document.addEventListener("visibilitychange", onVisible);

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Ban, CheckCircle2, Images, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Images, Loader2, Sparkles, X } from "lucide-react";
 import { api, useAction, useMutation, useQuery, type Id } from "../../lib/backend";
 import { Button } from "../../components/ui/Button";
 import { ActionDialog } from "../../components/ui/ActionDialog";
@@ -55,6 +55,94 @@ async function fileHash(file: File) {
   return Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
+const PRODUCT_SLOT_NAMES: Record<ProductReferenceRole, string> = {
+  front: "Front",
+  back: "Back",
+  fabric_pattern: "Fabric / Pattern Detail",
+  bottom: "Bottom Wear / Farshi",
+  mannequin: "Mannequin / Flat-lay",
+  additional_product: "Additional Product Photo",
+  saree_front_drape: "Full saree front",
+  saree_back_drape: "Rear / back drape",
+  saree_body_detail: "Body fabric / pattern",
+  saree_pallu_spread: "Pallu spread",
+  saree_border_tassels: "Border / tassels",
+  saree_blouse_front: "Blouse front",
+  saree_blouse_back_piece: "Blouse back / piece",
+};
+
+const SESSION_SUBMISSIONS_KEY = "youthnic.studio.sessionSubmissions";
+const MAX_SESSION_SUBMISSIONS = 12;
+
+function readSessionSubmissions(): string[] {
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(SESSION_SUBMISSIONS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string" && Boolean(value)).slice(0, MAX_SESSION_SUBMISSIONS) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSessionSubmissions(jobIds: string[]) {
+  try {
+    window.sessionStorage.setItem(SESSION_SUBMISSIONS_KEY, JSON.stringify(jobIds));
+  } catch {
+    // Private windows or blocked storage: the tray still works for this page view.
+  }
+}
+
+function submissionStatusLabel(job: any) {
+  if (job.status === "completed") return "Complete";
+  if (job.status === "failed") return "Failed";
+  if (job.status === "cancelling") return "Stopping…";
+  if (job.status === "cancelled") return "Stopped";
+  if (job.status === "queued") return "Queued";
+  if (job.status === "processing") return "Generating";
+  return String(job.status || "Unknown");
+}
+
+function SessionSubmissionRow({ jobId, latest, onRemove }: { jobId: string; latest: boolean; onRemove: () => void }) {
+  const [finished, setFinished] = useState(false);
+  // Finished rows stop polling; up to 12 rows each re-fetching a whole job
+  // every 2.5s would otherwise keep the backend busy for nothing.
+  const { data: job, error } = useQuery(api.jobs.get, { jobId }, { poll: !finished });
+  const delivery = job ? generationDeliveryProgress(job) : null;
+  const terminal = Boolean(job && ["completed", "failed", "cancelled"].includes(job.status));
+  useEffect(() => { if (terminal || job === null) setFinished(true); }, [terminal, job]);
+  return (
+    <li className="flex items-center gap-3 rounded-lg border border-outline-variant/40 bg-white px-3 py-2">
+      <div className="h-9 w-9 flex-shrink-0 overflow-hidden rounded-md bg-surface-container">
+        {job?.thumbnailUrl ? <img src={job.thumbnailUrl} alt="" className="h-full w-full object-cover" /> : <Images className="m-2.5 h-4 w-4 text-secondary" />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="truncate text-xs font-bold text-on-surface">{job ? job.skuName || job.skuId || "Untitled SKU" : job === null ? "Deleted submission" : "Loading…"}</p>
+          {latest && <span className="rounded-full bg-soft-blush px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary">Latest</span>}
+        </div>
+        {job && delivery ? (
+          <div className="mt-1 flex items-center gap-2">
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-container">
+              <div className={`h-full rounded-full transition-all ${job.status === "failed" ? "bg-error" : "bg-primary"}`} style={{ width: `${delivery.deliveredPercent}%` }} />
+            </div>
+            <span className={`shrink-0 text-[10px] font-semibold ${job.status === "failed" ? "text-error" : "text-secondary"}`}>
+              {submissionStatusLabel(job)} · {delivery.imagesStored}/{delivery.totalPoses}{delivery.failedPoses ? ` · ${delivery.failedPoses} failed` : ""}
+            </span>
+          </div>
+        ) : job === null ? (
+          <p className="mt-0.5 text-[10px] text-secondary">No longer in History.</p>
+        ) : error && job === undefined ? (
+          <p className="mt-0.5 truncate text-[10px] text-error">Could not load status: {error.message}</p>
+        ) : (
+          <p className="mt-0.5 flex items-center gap-1 text-[10px] text-secondary"><Loader2 className="h-3 w-3 animate-spin" /> Fetching status…</p>
+        )}
+      </div>
+      {job && !terminal && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />}
+      <Link to="/history" className="shrink-0 text-[11px] font-bold text-primary underline">History</Link>
+      <button type="button" onClick={onRemove} aria-label="Remove from this list" title="Remove from this list (the job keeps running)" className="shrink-0 rounded-md p-1 text-secondary hover:bg-surface-container"><X className="h-3.5 w-3.5" /></button>
+    </li>
+  );
+}
+
 function makeReference(role: StudioReference["role"], file: File): StudioReference {
   return { id: crypto.randomUUID(), role, file, previewUrl: URL.createObjectURL(file) };
 }
@@ -93,7 +181,12 @@ export function Studio() {
   const [generating, setGenerating] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [stopDialogOpen, setStopDialogOpen] = useState(false);
-  const [submittedJobId, setSubmittedJobId] = useState<Id<"generationJobs"> | null>(null);
+  // Every job queued from this browser tab (most recent first), kept in
+  // sessionStorage so a refresh does not lose track of earlier submissions.
+  const [sessionJobIds, setSessionJobIds] = useState<string[]>(readSessionSubmissions);
+  const [submittedJobId, setSubmittedJobId] = useState<Id<"generationJobs"> | null>(() => sessionJobIds[0] || null);
+  const [referenceHashes, setReferenceHashes] = useState<Record<string, string>>({});
+  const hashingReferenceIdsRef = useRef(new Set<string>());
   const [skuId, setSkuId] = useState("");
   const [skuName, setSkuName] = useState("");
   const [productDetails, setProductDetails] = useState("");
@@ -127,6 +220,33 @@ export function Studio() {
     : effectiveRoutingError
       ? "error"
       : "loading";
+
+  useEffect(() => { writeSessionSubmissions(sessionJobIds); }, [sessionJobIds]);
+
+  // Hash each product photo once (keyed by reference id) so the same file
+  // placed in two slots - e.g. the front shot also dropped in as Back - can be
+  // flagged before it silently weakens the analysis.
+  useEffect(() => {
+    const pending = Object.values(productReferences).filter((reference): reference is StudioReference =>
+      Boolean(reference && !referenceHashes[reference.id] && !hashingReferenceIdsRef.current.has(reference.id)));
+    for (const reference of pending) {
+      hashingReferenceIdsRef.current.add(reference.id);
+      void fileHash(reference.file)
+        .then((hash) => setReferenceHashes((current) => ({ ...current, [reference.id]: hash })))
+        .catch(() => undefined)
+        .finally(() => hashingReferenceIdsRef.current.delete(reference.id));
+    }
+  }, [productReferences, referenceHashes]);
+
+  const duplicateProductSlots = useMemo(() => {
+    const rolesByHash = new Map<string, ProductReferenceRole[]>();
+    for (const [role, reference] of Object.entries(productReferences) as Array<[ProductReferenceRole, StudioReference | undefined]>) {
+      const hash = reference ? referenceHashes[reference.id] : "";
+      if (!hash) continue;
+      rolesByHash.set(hash, [...(rolesByHash.get(hash) || []), role]);
+    }
+    return [...rolesByHash.values()].filter((roles) => roles.length > 1);
+  }, [productReferences, referenceHashes]);
 
   const allReferences = useMemo(
     () => [...Object.values(productReferences).filter(Boolean), ...(modelReference ? [modelReference] : []), ...styleReferences] as StudioReference[],
@@ -501,6 +621,7 @@ export function Studio() {
       setCategory("ethnic/fusion");
       setOptions(defaultOptions);
       setSubmittedJobId(result.jobId);
+      setSessionJobIds((current) => [String(result.jobId), ...current.filter((id) => id !== String(result.jobId))].slice(0, MAX_SESSION_SUBMISSIONS));
       setNotice({
         tone: "success",
         // Submitting twice now returns the run already going rather than
@@ -550,6 +671,25 @@ export function Studio() {
           <span className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> {notice.text}</span>
           {notice.jobId && <Link to="/history" className="font-bold underline">Track in history</Link>}
         </div>
+      )}
+
+      {sessionJobIds.length > 0 && (
+        <section className="mb-4 rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3 shadow-sm">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-secondary">Submitted this session ({sessionJobIds.length})</p>
+            <Link to="/history" className="text-[11px] font-bold text-primary underline">Open History</Link>
+          </div>
+          <ul className="max-h-64 space-y-1.5 overflow-auto">
+            {sessionJobIds.map((jobId, index) => (
+              <SessionSubmissionRow
+                key={jobId}
+                jobId={jobId}
+                latest={index === 0}
+                onRemove={() => setSessionJobIds((current) => current.filter((id) => id !== jobId))}
+              />
+            ))}
+          </ul>
+        </section>
       )}
 
       {submittedJobId && (
@@ -619,6 +759,19 @@ export function Studio() {
                   : "Front and back are required. Fabric / pattern detail and an additional product photo are optional — all four are treated as the same product. Style reference only guides scene, mood, and lighting."}
               </p>
             </div>
+            {duplicateProductSlots.length > 0 && (
+              <div role="alert" className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs leading-5 text-amber-900">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+                <div>
+                  {duplicateProductSlots.map((roles) => (
+                    <p key={roles.join(":")}>
+                      <b>Same photo used twice:</b> {roles.map((role) => `"${PRODUCT_SLOT_NAMES[role] || role}"`).join(" and ")} {roles.length > 2 ? "all contain" : "contain"} the identical image file.
+                    </p>
+                  ))}
+                  <p className="mt-0.5 text-[11px] text-amber-800">Each slot should show a different view so the model can reproduce every side of the product. Replace one of them if this was a mistake.</p>
+                </div>
+              </div>
+            )}
             <ProductReferences
               references={productReferences}
               onChange={changeProductReference}
