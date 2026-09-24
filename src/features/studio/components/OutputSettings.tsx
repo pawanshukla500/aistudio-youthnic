@@ -149,10 +149,10 @@ export function OutputSettings({
             <label className="mb-1.5 block text-xs font-semibold text-secondary">Generation quality</label>
             <select value={value.quality} onChange={(event) => set("quality", event.target.value as OutputOptions["quality"])} className="h-10 w-full rounded-md border border-outline-variant bg-white px-3 text-sm outline-none focus:border-primary">
               <option value="low">Low · fastest draft</option>
-              <option value="medium">Medium · balanced default</option>
-              <option value="high">High · maximum detail and cost</option>
+              <option value="medium">Medium · balanced, lower cost</option>
+              <option value="high">High · most realistic (default)</option>
             </select>
-            <p className="mt-1.5 text-[11px] leading-4 text-secondary">Medium is the default for GPT Image 2 and the supported GPT Image 1 family.</p>
+            <p className="mt-1.5 text-[11px] leading-4 text-secondary">High is the default because it gives the most photographic skin, hair and fabric detail. Choose Medium to cut image cost.</p>
           </div>
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-secondary">Background styling</label>
