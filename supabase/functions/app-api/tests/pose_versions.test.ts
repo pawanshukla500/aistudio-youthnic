@@ -56,13 +56,21 @@ Deno.test("every delivered image is a version, oldest first, and the pose's poin
   assertEquals(versions[1].outputTokens, 10);
 });
 
-Deno.test("the newest version is current when the pose points at none of them", () => {
+Deno.test("a legacy pose with no image pointer treats the newest version as current", () => {
   const assets = [
     { id: "a", image_url: "u1", storage_path: "p1", created_at: "2026-09-25T10:05:00.000Z", metadata: {} },
     { id: "b", image_url: "u2", storage_path: "p2", created_at: "2026-09-26T10:05:00.000Z", metadata: {} },
   ];
   assertEquals(buildPoseVersions(assets, [], "").map((version) => version.isCurrent), [false, true]);
-  assertEquals(buildPoseVersions(assets, [], "gone").map((version) => version.isCurrent), [false, true]);
+});
+
+Deno.test("a pose pointing at an image not yet archived marks no older version current", () => {
+  // Delivery writes the pose row and its archive row together; a read can land
+  // between them, when the card already shows the new image.
+  const assets = [
+    { id: "a", image_url: "u1", storage_path: "p1", created_at: "2026-09-25T10:05:00.000Z", metadata: {} },
+  ];
+  assertEquals(buildPoseVersions(assets, [], "p2-not-archived-yet").map((version) => version.isCurrent), [false]);
 });
 
 Deno.test("stamped timing wins over reconstruction", () => {

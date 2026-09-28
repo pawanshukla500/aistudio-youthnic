@@ -175,8 +175,11 @@ function answeredRequest(
  * All delivered versions of one pose, oldest first.
  *
  * `assets` are that pose's archived `planning_assets` rows for one job. The
- * current version is the one the pose row points at; when the pose points at
- * none of them (a legacy row, or a regeneration in flight) the newest is.
+ * current version is the one the pose row points at. A pose that names no
+ * image (a legacy row) treats the newest as current. A pose that names an
+ * image the archive does not hold has no current version here: the delivery
+ * writes the pose and its archive row together, and a read between the two
+ * must not mark an older image as the one on the card.
  */
 export function buildPoseVersions(
   assets: ArchivedAssetLike[],
@@ -193,7 +196,7 @@ export function buildPoseVersions(
     .sort((left, right) => (Date.parse(String(left.created_at || "")) || 0) - (Date.parse(String(right.created_at || "")) || 0));
   const current = String(currentStoragePath || "");
   const currentIndex = current ? ordered.findIndex((asset) => String(asset.storage_path || "") === current) : -1;
-  const effectiveCurrent = currentIndex >= 0 ? currentIndex : ordered.length - 1;
+  const effectiveCurrent = current ? currentIndex : ordered.length - 1;
   return ordered.map((asset, index) => {
     const metadata = record(asset.metadata);
     const usage = record(metadata.usage);

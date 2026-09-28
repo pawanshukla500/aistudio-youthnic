@@ -10,16 +10,23 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
   const learnings = rawBackendData.learnings || (rawBackendData.learning ? [rawBackendData.learning] : []);
 
   const poses: TracePose[] = rawPoses.map((p: any) => {
-    // A regeneration starts a new epoch with its own attempt numbers. Trace the
-    // current one; rows written before epochs were recorded stay included.
+    // A regeneration starts a new epoch with its own attempt numbers, so trace
+    // the current one. Rows written before epochs were recorded carry none;
+    // they are used only when nothing for this pose carries one.
     const epoch = Number(p.generation_epoch || 1);
-    const inEpoch = (value: unknown) => value === null || value === undefined || Number(value) === epoch;
-    const poseAiRuns = aiRuns.filter((r: any) => r.run_kind === "image_generation" && (r.pose_index === p.pose_index || r.input_summary?.pose === p.pose_index) && inEpoch(r.generation_epoch));
-    const poseQaReviews = qaReviews.filter((q: any) => q.pose_index === p.pose_index && inEpoch(q.generation_epoch));
+    const currentEpochOnly = <T,>(rows: T[], epochOf: (row: T) => unknown): T[] => {
+      const tagged = rows.filter((row) => epochOf(row) !== null && epochOf(row) !== undefined);
+      return tagged.length ? tagged.filter((row) => Number(epochOf(row)) === epoch) : rows;
+    };
+    const poseAiRuns = currentEpochOnly(
+      aiRuns.filter((r: any) => r.run_kind === "image_generation" && (r.pose_index === p.pose_index || r.input_summary?.pose === p.pose_index)),
+      (r: any) => r.generation_epoch,
+    );
+    const poseQaReviews = currentEpochOnly(qaReviews.filter((q: any) => q.pose_index === p.pose_index), (q: any) => q.generation_epoch);
     
     const genData = p.generation_data || {};
     const corrections = genData.corrections || [];
-    const rejectedAttempts = (genData.rejectedAttempts || []).filter((attempt: any) => inEpoch(attempt?.generationEpoch));
+    const rejectedAttempts = currentEpochOnly(Array.isArray(genData.rejectedAttempts) ? genData.rejectedAttempts : [], (attempt: any) => attempt?.generationEpoch);
     const referenceManifests = Array.isArray(genData.referenceManifests) ? genData.referenceManifests : [];
 
     const attempts: TraceAttempt[] = [];

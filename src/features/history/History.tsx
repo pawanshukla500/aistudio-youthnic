@@ -77,6 +77,15 @@ function poseVersions(pose: any): PoseVersion[] {
   return Array.isArray(pose?.versions) ? pose.versions : [];
 }
 
+// Whether QA was on for the image the card shows. A retained prior image
+// keeps its own setting; the pose's QA payload belongs to the failed retry.
+function shownQaEnabled(pose: any, jobPoseQa: boolean): boolean {
+  if (hasRetainedPreviousVersion(pose)) {
+    return poseVersions(pose).find((version) => version.isCurrent)?.qaEnabled ?? jobPoseQa;
+  }
+  return pose?.qaEnabled ?? jobPoseQa;
+}
+
 // A regeneration is timed from the moment someone asked for it. A first
 // delivery is timed from when the worker started it: its request time is the
 // job's, which would count the wait behind every earlier pose.
@@ -745,14 +754,14 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 )}
                 {retainedPrevious ? (
                   <span className="absolute inset-x-0 bottom-0 bg-slate-800/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white">
-                    Prior version retained · {visibleQaLabel(qaStatus, pose.qaEnabled ?? Boolean(job.poseQa))}
+                    Prior version retained · {visibleQaLabel(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)))}
                   </span>
                 ) : (
                   /* Delivered without an automatic verdict — it must never be mistaken
                      for a consistency-approved frame. */
                   ["unverified", "requires_human_review", "rejected_by_qa", "human_approved", "human_rejected"].includes(qaStatus) && outputUrl && (
                     <span className={`absolute inset-x-0 bottom-0 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider ${qaStatusBanner(qaStatus)}`}>
-                      {visibleQaLabel(qaStatus, pose.qaEnabled ?? Boolean(job.poseQa))}
+                      {visibleQaLabel(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)))}
                     </span>
                   )
                 )}
@@ -806,7 +815,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
               {retainedPrevious && <p className="mt-1 text-[10px] font-bold text-secondary">Current regeneration failed before replacement; prior paid output remains available.</p>}
               {!retainedPrevious && outputUrl && pose.productFidelity > 0 && (
                 <p className={`mt-1 text-[10px] font-bold ${fidelityTone(pose.productFidelity)}`}>
-                  AI QA estimate {pose.productFidelity}% · {visibleQaLabel(qaStatus, pose.qaEnabled ?? Boolean(job.poseQa))}
+                  AI QA estimate {pose.productFidelity}% · {visibleQaLabel(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)))}
                 </p>
               )}
               {outputUrl && (
@@ -869,7 +878,14 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   <div className="grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-4"><img src={selectedOutputUrl || latestRejected(selectedPose)?.url} alt={selectedPose.title} decoding="async" className="max-h-[76vh] max-w-full object-contain" /></div>
                 )}
                 <aside className="space-y-4 overflow-auto p-5 text-sm">
-                  {selectedCanBeReviewed && (canApprove || selectedPose.approvalStatus !== "pending") && (
+                  {selectedViewedVersion && (
+                    <div className="rounded-xl border border-primary/30 bg-soft-blush p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-primary">Viewing version {selectedViewedVersion.version} · earlier version</p>
+                      <p className="mt-1.5 text-[11px] leading-4 text-secondary">Review, QA and the details below belong to the current version. Download this one from the version history.</p>
+                      <button type="button" onClick={() => setViewedVersion(null)} className="mt-2 rounded-md border border-primary/30 bg-white px-2.5 py-1 text-[11px] font-bold text-primary hover:bg-primary/5">Back to current version</button>
+                    </div>
+                  )}
+                  {!selectedViewedVersion && selectedCanBeReviewed && (canApprove || selectedPose.approvalStatus !== "pending") && (
                     <div className={`rounded-xl border p-4 ${selectedPose.approvalStatus === "approved" ? "border-emerald-600/30 bg-emerald-50" : selectedPose.approvalStatus === "rejected" ? "border-red-600/20 bg-red-50" : "border-outline-variant/40 bg-surface-container-lowest"}`}>
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Review decision</p>
@@ -916,7 +932,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     {selectedQaStatus === "human_approved" ? (
                       <p className="mt-1 text-[10px] leading-4 text-success">Human approved. The percentage remains the recorded AI estimate; the approval is the verified decision.</p>
                     ) : selectedQaStatus === "unverified" ? (
-                      <p className="mt-1 text-[10px] leading-4 text-warning">{(selectedPose.qaEnabled ?? Boolean(job.poseQa)) ? "Automatic QA could not run for this frame, so it was delivered unverified." : "Automatic QA was switched off for this frame, so it was not checked."} Check it against the product references yourself.</p>
+                      <p className="mt-1 text-[10px] leading-4 text-warning">{shownQaEnabled(selectedPose, Boolean(job.poseQa)) ? "Automatic QA could not run for this frame, so it was delivered unverified." : "Automatic QA was switched off for this frame, so it was not checked."} Check it against the product references yourself.</p>
                     ) : selectedQaStatus === "requires_human_review" || selectedPose.fidelityReviewRecommended ? (
                       <p className="mt-1 text-[10px] leading-4 text-warning">This estimate is 90–94 or otherwise uncertain. It requires human review and is not verified.</p>
                     ) : selectedQaStatus === "rejected_by_qa" || selectedQaStatus === "failed" ? (
@@ -1036,7 +1052,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     {downloadingPoseId === selectedPose._id ? "Downloading…" : selectedRetainedPrevious ? "Download retained prior version" : "Download image"}
                   </button>
                 )}
-                {workspace.isAdmin && selectedPose.outputUrl && (
+                {workspace.isAdmin && selectedPose.outputUrl && !selectedViewedVersion && (
                   <button onClick={() => void runLatestQa(selectedPose)} disabled={rerunningQaId === selectedPose._id} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-white px-4 py-3 font-semibold text-primary hover:bg-primary/5 disabled:opacity-50">
                     {rerunningQaId === selectedPose._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
                     Re-run latest QA
