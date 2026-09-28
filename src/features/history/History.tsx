@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Ban, ChevronDown, ChevronUp, Download, Image as ImageIcon, Images, RefreshCcw, Search, Trash2, Loader2, Clock, AlertCircle, X, Brain, Check, ThumbsDown, Undo2, Columns2, ChevronLeft, ChevronRight, ListChecks } from "lucide-react";
+import { Ban, ChevronDown, ChevronUp, Download, Image as ImageIcon, Images, RefreshCcw, Search, Trash2, Loader2, Clock, AlertCircle, X, Brain, Check, ThumbsDown, Undo2, Columns2, ChevronLeft, ChevronRight, ListChecks, Layers, Eye } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, getJobReferenceImages, invokeAppApi, useMutation, useQuery, type Id } from "../../lib/backend";
 import { useWorkspace } from "../../lib/WorkspaceContext";
@@ -7,6 +7,7 @@ import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import { ActionDialog } from "../../components/ui/ActionDialog";
 import { generationDeliveryProgress } from "../../lib/generationProgress";
+import { formatDuration, type PoseVersion } from "../../lib/poseVersions";
 
 type PendingHistoryAction = {
   type: "stop" | "delete" | "regenerate";
@@ -63,6 +64,44 @@ function qaStatusLabel(status: string) {
     failed: "Rejected by QA (legacy)",
   };
   return labels[status] || "Requires human review";
+}
+
+// "unverified" covers both a validator that was switched off for the job and
+// one that could not return a verdict. Only the second is "unavailable".
+function visibleQaLabel(status: string, poseQaEnabled: boolean) {
+  if (status === "unverified" && !poseQaEnabled) return "Not QA-checked · QA off";
+  return qaStatusLabel(status);
+}
+
+function poseVersions(pose: any): PoseVersion[] {
+  return Array.isArray(pose?.versions) ? pose.versions : [];
+}
+
+// Whether QA was on for the image the card shows. A retained prior image
+// keeps its own setting; the pose's QA payload belongs to the failed retry.
+function shownQaEnabled(pose: any, jobPoseQa: boolean): boolean {
+  if (hasRetainedPreviousVersion(pose)) {
+    return poseVersions(pose).find((version) => version.isCurrent)?.qaEnabled ?? jobPoseQa;
+  }
+  return pose?.qaEnabled ?? jobPoseQa;
+}
+
+// A regeneration is timed from the moment someone asked for it. A first
+// delivery is timed from when the worker started it: its request time is the
+// job's, which would count the wait behind every earlier pose.
+function versionHeadlineMs(version: PoseVersion) {
+  return version.isRegeneration ? version.totalMs : version.activeMs;
+}
+
+function versionTimingDetail(version: PoseVersion) {
+  if (!version.timingRecorded) return version.totalMs ? "Reconstructed from the regeneration request time" : "Timing was not recorded for this version";
+  return [
+    version.isRegeneration && version.totalMs ? `Requested→delivered ${formatDuration(version.totalMs)}` : "",
+    `Waiting ${formatDuration(version.totalMs - version.activeMs) || "0s"}`,
+    `Working ${formatDuration(version.activeMs) || "0s"}`,
+    version.generationMs ? `Image model ${formatDuration(version.generationMs)}` : "",
+    version.attempts > 1 ? `${version.attempts} attempts` : "",
+  ].filter(Boolean).join(" · ");
 }
 
 function qaStatusBanner(status: string) {
@@ -144,6 +183,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [approvalError, setApprovalError] = useState<{ poseId: string; message: string } | null>(null);
   const [compareWithPrevious, setCompareWithPrevious] = useState(false);
+  // An earlier version opened from the pose preview's version history.
+  const [viewedVersion, setViewedVersion] = useState<{ poseId: string; versionId: string } | null>(null);
   const [batchSelection, setBatchSelection] = useState<string[]>([]);
   const [batchNote, setBatchNote] = useState("");
   const [batchPoseQa, setBatchPoseQa] = useState(false);
@@ -246,13 +287,28 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 
   const downloadArchived = async (pose: any, attempt: any) => {
     setDownloadError("");
-    setDownloadingPoseId(`${pose._id}:${attempt.attempt}`);
+    setDownloadingPoseId(`${pose._id}:${attempt.storagePath}`);
     try {
       const blob = await fetchPoseImageBlob(jobId, { storagePath: attempt.storagePath, outputUrl: attempt.url });
       const extension = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
-      saveAs(blob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_attempt${attempt.attempt}_qa-rejected.${extension}`);
+      const round = Number(attempt.generationEpoch) > 1 ? `_round${attempt.generationEpoch}` : "";
+      saveAs(blob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}${round}_attempt${attempt.attempt}_qa-rejected.${extension}`);
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : "Could not download this image.");
+    } finally {
+      setDownloadingPoseId(null);
+    }
+  };
+
+  const downloadVersion = async (pose: any, version: PoseVersion) => {
+    setDownloadError("");
+    setDownloadingPoseId(`${pose._id}:v${version.version}`);
+    try {
+      const blob = await fetchPoseImageBlob(jobId, { storagePath: version.storagePath, outputUrl: version.url });
+      const extension = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
+      saveAs(blob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}_v${version.version}.${extension}`);
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Could not download this version.");
     } finally {
       setDownloadingPoseId(null);
     }
@@ -469,7 +525,12 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const approvedPoseCount = job.poses.filter((pose: any) => pose.approvalStatus === "approved" && Boolean(visiblePoseOutputUrl(pose))).length;
   const selectedCanBeReviewed = Boolean(selectedPose?.generationId && selectedPose.status === "completed" && selectedPose.outputUrl);
   const selectedPreviousUrl = selectedPose && !selectedRetainedPrevious ? String(selectedPose.previousVersionUrl || "") : "";
-  const showCompare = Boolean(compareWithPrevious && selectedPreviousUrl && selectedOutputUrl);
+  const selectedVersions = selectedPose ? poseVersions(selectedPose) : [];
+  const selectedViewedVersion = viewedVersion && selectedPose && viewedVersion.poseId === selectedPose._id
+    ? selectedVersions.find((version) => version.id === viewedVersion.versionId && !version.isCurrent) || null
+    : null;
+  const showCompare = Boolean(compareWithPrevious && selectedPreviousUrl && selectedOutputUrl && !selectedViewedVersion);
+  const regenerationSummary = job.regenerationSummary || { regenerations: 0, regeneratedPoses: 0, averageRegenerationMs: 0, totalRegenerationMs: 0, regenerationCostUsd: 0 };
   const jobIsActive = ACTIVE_JOB_STATUSES.includes(job.status);
   const batchEligiblePoses = job.poses.filter((pose: any) => canRegeneratePose(pose, job.status));
   const batchSelectedCount = batchEligiblePoses.filter((pose: any) => batchSelection.includes(pose._id)).length;
@@ -500,6 +561,18 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             </span>
           )}
         </span>
+        {regenerationSummary.regenerations > 0 && (
+          <>
+            <span className="w-px h-4 bg-outline-variant/50 hidden sm:block"></span>
+            <span className="flex flex-col gap-0.5" title="Every regenerated version is kept in each pose's version history.">
+              <span className="flex items-center gap-1.5"><Layers className="h-3 w-3" /><b className="text-on-surface">Regenerations:</b> {regenerationSummary.regenerations} across {regenerationSummary.regeneratedPoses} pose{regenerationSummary.regeneratedPoses === 1 ? "" : "s"}</span>
+              <span className="text-[10px] text-secondary">
+                {regenerationSummary.averageRegenerationMs ? `Avg ${formatDuration(regenerationSummary.averageRegenerationMs)} request→delivery · total ${formatDuration(regenerationSummary.totalRegenerationMs)}` : "Timing not recorded"}
+                {` · $${Number(regenerationSummary.regenerationCostUsd || 0).toFixed(4)}`}
+              </span>
+            </span>
+          </>
+        )}
         
         {visibleError && (
           <>
@@ -643,6 +716,9 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           const qaStatus = visibleQaStatus(pose);
           const approval = approvalBadge(pose.approvalStatus);
           const batchEligible = batchSelectable && canRegeneratePose(pose, job.status);
+          const versions = poseVersions(pose);
+          const currentVersion = versions.find((version) => version.isCurrent) || null;
+          const showsQaBanner = retainedPrevious || (["unverified", "requires_human_review", "rejected_by_qa", "human_approved", "human_rejected"].includes(qaStatus) && Boolean(outputUrl));
           return (
             <div key={pose._id} className={`group ${outputUrl || latestRejected(pose) ? "cursor-zoom-in" : "cursor-default"}`} onClick={() => (outputUrl || latestRejected(pose)) && setSelectedPose(pose)}>
               <div className="relative aspect-[3/4] overflow-hidden rounded-xl border border-outline-variant/40 bg-white shadow-sm transition-all duration-300 hover:shadow-md hover:border-primary/40 group-hover:-translate-y-1">
@@ -678,14 +754,14 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 )}
                 {retainedPrevious ? (
                   <span className="absolute inset-x-0 bottom-0 bg-slate-800/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white">
-                    Prior version retained · {qaStatusLabel(qaStatus)}
+                    Prior version retained · {visibleQaLabel(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)))}
                   </span>
                 ) : (
                   /* Delivered without an automatic verdict — it must never be mistaken
                      for a consistency-approved frame. */
                   ["unverified", "requires_human_review", "rejected_by_qa", "human_approved", "human_rejected"].includes(qaStatus) && outputUrl && (
                     <span className={`absolute inset-x-0 bottom-0 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider ${qaStatusBanner(qaStatus)}`}>
-                      {qaStatusLabel(qaStatus)}
+                      {visibleQaLabel(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)))}
                     </span>
                   )
                 )}
@@ -715,7 +791,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     }}
                     disabled={downloadingPoseId === pose._id}
                     title={retainedPrevious ? "Download retained prior version" : "Download this image"}
-                    className="absolute right-2.5 bottom-2.5 z-10 flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-bold text-primary opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 hover:bg-white disabled:opacity-100"
+                    className={`absolute right-2.5 ${showsQaBanner ? "bottom-8" : "bottom-2.5"} z-10 flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-bold text-primary opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 hover:bg-white disabled:opacity-100`}
                   >
                     {downloadingPoseId === pose._id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
                     Download
@@ -739,13 +815,23 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
               {retainedPrevious && <p className="mt-1 text-[10px] font-bold text-secondary">Current regeneration failed before replacement; prior paid output remains available.</p>}
               {!retainedPrevious && outputUrl && pose.productFidelity > 0 && (
                 <p className={`mt-1 text-[10px] font-bold ${fidelityTone(pose.productFidelity)}`}>
-                  AI QA estimate {pose.productFidelity}% · {qaStatusLabel(qaStatus)}
+                  AI QA estimate {pose.productFidelity}% · {visibleQaLabel(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)))}
                 </p>
               )}
               {outputUrl && (
                 <div className="mt-1.5 space-y-0.5 text-[10px] text-secondary">
                   <p>{pose.usageReported ? `${pose.inputTokens.toLocaleString()} input · ${pose.outputTokens.toLocaleString()} output tokens` : "Provider token usage not returned"}</p>
-                  <p className="font-semibold text-on-surface">${Number(pose.actualCost || 0).toFixed(4)} actual</p>
+                  <p className="font-semibold text-on-surface">${Number(pose.actualCost || 0).toFixed(4)} actual{versions.length > 1 ? " · all versions" : ""}</p>
+                  {versions.length > 1 && (
+                    <p className="flex items-center gap-1 font-semibold text-primary" title="Every earlier version is kept. Open the image to see and download them.">
+                      <Layers className="h-3 w-3" /> v{currentVersion?.version || versions.length} of {versions.length} · regenerated {versions.length - 1}×
+                    </p>
+                  )}
+                  {currentVersion && formatDuration(versionHeadlineMs(currentVersion)) && (
+                    <p title={versionTimingDetail(currentVersion)}>
+                      {currentVersion.isRegeneration ? "Regenerated in" : "Generated in"} {formatDuration(versionHeadlineMs(currentVersion))}{currentVersion.attempts > 1 ? ` · ${currentVersion.attempts} attempts` : ""}
+                    </p>
+                  )}
                 </div>
               )}
               {pose.error && <p className="mt-1.5 line-clamp-2 text-[10px] text-danger bg-danger/10 border border-danger/20 p-2 rounded-md">{pose.error}</p>}
@@ -783,11 +869,23 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                       <img src={selectedOutputUrl} alt={`${selectedPose.title} — current version`} decoding="async" className="max-h-[70vh] max-w-full object-contain" />
                     </figure>
                   </div>
+                ) : selectedViewedVersion ? (
+                  <div className="relative grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-4">
+                    <span className="absolute left-4 top-4 rounded-md bg-white/15 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white">Version {selectedViewedVersion.version} of {selectedVersions.length} · earlier version</span>
+                    <img src={selectedViewedVersion.url} alt={`${selectedPose.title} — version ${selectedViewedVersion.version}`} decoding="async" className="max-h-[76vh] max-w-full object-contain" />
+                  </div>
                 ) : (
                   <div className="grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-4"><img src={selectedOutputUrl || latestRejected(selectedPose)?.url} alt={selectedPose.title} decoding="async" className="max-h-[76vh] max-w-full object-contain" /></div>
                 )}
                 <aside className="space-y-4 overflow-auto p-5 text-sm">
-                  {selectedCanBeReviewed && (canApprove || selectedPose.approvalStatus !== "pending") && (
+                  {selectedViewedVersion && (
+                    <div className="rounded-xl border border-primary/30 bg-soft-blush p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-primary">Viewing version {selectedViewedVersion.version} · earlier version</p>
+                      <p className="mt-1.5 text-[11px] leading-4 text-secondary">Review, QA and the details below belong to the current version. Download this one from the version history.</p>
+                      <button type="button" onClick={() => setViewedVersion(null)} className="mt-2 rounded-md border border-primary/30 bg-white px-2.5 py-1 text-[11px] font-bold text-primary hover:bg-primary/5">Back to current version</button>
+                    </div>
+                  )}
+                  {!selectedViewedVersion && selectedCanBeReviewed && (canApprove || selectedPose.approvalStatus !== "pending") && (
                     <div className={`rounded-xl border p-4 ${selectedPose.approvalStatus === "approved" ? "border-emerald-600/30 bg-emerald-50" : selectedPose.approvalStatus === "rejected" ? "border-red-600/20 bg-red-50" : "border-outline-variant/40 bg-surface-container-lowest"}`}>
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Review decision</p>
@@ -834,7 +932,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     {selectedQaStatus === "human_approved" ? (
                       <p className="mt-1 text-[10px] leading-4 text-success">Human approved. The percentage remains the recorded AI estimate; the approval is the verified decision.</p>
                     ) : selectedQaStatus === "unverified" ? (
-                      <p className="mt-1 text-[10px] leading-4 text-warning">Automatic QA could not run for this frame, so it was delivered unverified. Check it against the product references yourself.</p>
+                      <p className="mt-1 text-[10px] leading-4 text-warning">{shownQaEnabled(selectedPose, Boolean(job.poseQa)) ? "Automatic QA could not run for this frame, so it was delivered unverified." : "Automatic QA was switched off for this frame, so it was not checked."} Check it against the product references yourself.</p>
                     ) : selectedQaStatus === "requires_human_review" || selectedPose.fidelityReviewRecommended ? (
                       <p className="mt-1 text-[10px] leading-4 text-warning">This estimate is 90–94 or otherwise uncertain. It requires human review and is not verified.</p>
                     ) : selectedQaStatus === "rejected_by_qa" || selectedQaStatus === "failed" ? (
@@ -888,6 +986,53 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     </ol>
                   </div>
                 )}
+                {selectedVersions.length > 0 && (
+                  <div className="rounded-xl border border-outline-variant/40 p-4">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-secondary"><Layers className="h-3 w-3" /> Version history</p>
+                      <span className="text-[10px] text-secondary">{selectedVersions.length} kept · {selectedVersions.length - 1} regeneration{selectedVersions.length - 1 === 1 ? "" : "s"}</span>
+                    </div>
+                    <ol className="mt-3 space-y-2">
+                      {[...selectedVersions].reverse().map((version) => {
+                        const viewing = selectedViewedVersion ? selectedViewedVersion.id === version.id : version.isCurrent;
+                        const headline = formatDuration(versionHeadlineMs(version));
+                        const downloadKey = `${selectedPose._id}:v${version.version}`;
+                        return (
+                          <li key={version.id} className={`flex gap-3 rounded-lg p-1.5 ${viewing ? "bg-soft-blush ring-1 ring-primary/30" : ""}`}>
+                            <button
+                              type="button"
+                              onClick={() => setViewedVersion(version.isCurrent ? null : { poseId: selectedPose._id, versionId: version.id })}
+                              title={version.isCurrent ? "Show the current version" : `Show version ${version.version}`}
+                              className="shrink-0"
+                            >
+                              <img src={version.url} alt={`${selectedPose.title} — version ${version.version}`} loading="lazy" decoding="async" className="h-20 w-16 rounded-md border border-outline-variant/40 object-cover" />
+                            </button>
+                            <div className="min-w-0 flex-1 text-[10px] leading-4 text-secondary">
+                              <p className="flex items-center gap-1.5 text-[11px] font-bold text-on-surface">
+                                Version {version.version}
+                                {version.isCurrent && <span className="rounded-full bg-primary px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">Current</span>}
+                              </p>
+                              <p>{version.createdAt ? new Date(version.createdAt).toLocaleString() : "Time unavailable"}</p>
+                              {headline && <p title={versionTimingDetail(version)}>{version.isRegeneration ? "Regenerated in" : "Generated in"} {headline}{version.attempts > 1 ? ` · ${version.attempts} attempts` : ""}</p>}
+                              <p>${version.actualCostUsd.toFixed(4)} image{version.quality ? ` · ${version.quality}` : ""}{version.qaStatus ? ` · ${visibleQaLabel(version.qaStatus, version.qaEnabled ?? Boolean(job.poseQa))}` : ""}</p>
+                              {version.instructions && <p className="line-clamp-2 italic" title={version.instructions}>“{version.instructions}”</p>}
+                              <div className="mt-1 flex gap-1.5">
+                                {!version.isCurrent && !viewing && (
+                                  <button type="button" onClick={() => setViewedVersion({ poseId: selectedPose._id, versionId: version.id })} className="flex items-center gap-1 rounded-md border border-outline-variant px-2 py-1 font-bold text-secondary hover:bg-surface-container">
+                                    <Eye className="h-3 w-3" /> View
+                                  </button>
+                                )}
+                                <button type="button" onClick={() => void downloadVersion(selectedPose, version)} disabled={downloadingPoseId === downloadKey} className="flex items-center gap-1 rounded-md border border-outline-variant px-2 py-1 font-bold text-secondary hover:bg-surface-container disabled:opacity-50">
+                                  {downloadingPoseId === downloadKey ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} Download
+                                </button>
+                              </div>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </div>
+                )}
                 <div className="rounded-xl bg-surface-container-lowest p-4">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">OpenAI usage</p>
                   <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
@@ -907,7 +1052,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     {downloadingPoseId === selectedPose._id ? "Downloading…" : selectedRetainedPrevious ? "Download retained prior version" : "Download image"}
                   </button>
                 )}
-                {workspace.isAdmin && selectedPose.outputUrl && (
+                {workspace.isAdmin && selectedPose.outputUrl && !selectedViewedVersion && (
                   <button onClick={() => void runLatestQa(selectedPose)} disabled={rerunningQaId === selectedPose._id} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-white px-4 py-3 font-semibold text-primary hover:bg-primary/5 disabled:opacity-50">
                     {rerunningQaId === selectedPose._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
                     Re-run latest QA
@@ -922,14 +1067,14 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                         <div key={attempt.storagePath} className="flex gap-3">
                           <img src={attempt.url} alt={`Attempt ${attempt.attempt}`} loading="lazy" decoding="async" className="h-20 w-16 shrink-0 rounded-md border border-outline-variant/40 object-cover" />
                           <div className="min-w-0 flex-1">
-                            <p className="text-[11px] font-bold text-on-surface">Attempt {attempt.attempt} · score {Number(attempt.score || 0)}</p>
+                            <p className="text-[11px] font-bold text-on-surface">{Number(attempt.generationEpoch) > 1 ? `Round ${attempt.generationEpoch} · ` : ""}Attempt {attempt.attempt} · score {Number(attempt.score || 0)}</p>
                             <p className="mt-0.5 line-clamp-3 text-[10px] leading-4 text-secondary" title={attempt.reason}>{attempt.reason}</p>
                             <button
                               onClick={() => void downloadArchived(selectedPose, attempt)}
-                              disabled={downloadingPoseId === `${selectedPose._id}:${attempt.attempt}`}
+                              disabled={downloadingPoseId === `${selectedPose._id}:${attempt.storagePath}`}
                               className="mt-1.5 flex items-center gap-1.5 rounded-md border border-outline-variant px-2 py-1 text-[10px] font-bold text-secondary hover:bg-surface-container disabled:opacity-50"
                             >
-                              {downloadingPoseId === `${selectedPose._id}:${attempt.attempt}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                              {downloadingPoseId === `${selectedPose._id}:${attempt.storagePath}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
                               Download
                             </button>
                           </div>

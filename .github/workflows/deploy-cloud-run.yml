@@ -50,7 +50,7 @@ jobs:
         run: node --check scripts/verify-catalog-workflow-live.mjs
 
       - name: Test catalog workflow utilities
-        run: deno test --frozen supabase/functions/app-api/lib/catalogHandoffCalendar.test.ts supabase/functions/app-api/lib/catalogStageTimeline.test.ts supabase/functions/app-api/lib/catalogRecipientSelection.test.ts supabase/functions/app-api/tests/ai_model_policy.test.ts supabase/functions/app-api/tests/fashion_knowledge.test.ts supabase/functions/app-api/tests/learning_rules.test.ts supabase/functions/app-api/tests/prompt_patterns.test.ts supabase/functions/app-api/tests/generation_memory.test.ts supabase/functions/app-api/tests/reference_policy.test.ts supabase/functions/app-api/tests/saree_profiles.test.ts supabase/functions/app-api/tests/garment_poses.test.ts supabase/functions/app-api/tests/showcase_feature.test.ts supabase/functions/app-api/tests/evidence_prompt.test.ts supabase/functions/app-api/tests/catalog_token_optimization.test.ts supabase/functions/app-api/tests/generation_runs.test.ts supabase/functions/app-api/tests/qa_fidelity.test.ts supabase/functions/app-api/tests/admin_ai_routing.test.ts supabase/functions/app-api/tests/invoke_error_message.test.ts supabase/functions/app-api/tests/provider_cost.test.ts && deno test --frozen --allow-read=supabase/functions/app-api/index.ts,src,supabase/migrations supabase/functions/app-api/tests/entrypoint_source.test.ts supabase/functions/app-api/tests/image_routing.test.ts supabase/functions/app-api/tests/duplicate_queue.test.ts
+        run: deno test --frozen supabase/functions/app-api/lib/catalogHandoffCalendar.test.ts supabase/functions/app-api/lib/catalogStageTimeline.test.ts supabase/functions/app-api/lib/catalogRecipientSelection.test.ts supabase/functions/app-api/tests/ai_model_policy.test.ts supabase/functions/app-api/tests/fashion_knowledge.test.ts supabase/functions/app-api/tests/learning_rules.test.ts supabase/functions/app-api/tests/prompt_patterns.test.ts supabase/functions/app-api/tests/generation_memory.test.ts supabase/functions/app-api/tests/reference_policy.test.ts supabase/functions/app-api/tests/saree_profiles.test.ts supabase/functions/app-api/tests/garment_poses.test.ts supabase/functions/app-api/tests/showcase_feature.test.ts supabase/functions/app-api/tests/evidence_prompt.test.ts supabase/functions/app-api/tests/catalog_token_optimization.test.ts supabase/functions/app-api/tests/generation_runs.test.ts supabase/functions/app-api/tests/qa_fidelity.test.ts supabase/functions/app-api/tests/admin_ai_routing.test.ts supabase/functions/app-api/tests/invoke_error_message.test.ts supabase/functions/app-api/tests/provider_cost.test.ts supabase/functions/app-api/tests/pose_versions.test.ts supabase/functions/app-api/tests/scene_lock.test.ts && deno test --frozen --allow-read=supabase/functions/app-api/index.ts,src,supabase/migrations supabase/functions/app-api/tests/entrypoint_source.test.ts supabase/functions/app-api/tests/image_routing.test.ts supabase/functions/app-api/tests/duplicate_queue.test.ts
 
       - name: Validate catalog migration SQL
         run: npm run validate:catalog-sql
@@ -69,14 +69,38 @@ jobs:
             echo "Skipping remote type generation check (no credentials provided)."
             exit 0
           fi
-          if ! diff -q -B -w src/database.types.ts generated.types.ts >/dev/null 2>&1; then
+          # Compare the schema, not the layout. Newer Supabase CLI releases emit
+          # unformatted types (quoted keys, "," and ";" separators, one-line
+          # objects) and spell a NOT NULL json column `NonNullable<Json>`
+          # rather than `Json`, so a plain diff fails on every run. Format both
+          # files the same way, then ignore whitespace, optional trailing
+          # separators, and that spelling. A nullable json column is
+          # `Json | null` either way, so nullability drift still fails.
+          cp src/database.types.ts committed.types.ts
+          npx --yes oxfmt@0.71.0 committed.types.ts generated.types.ts >/dev/null
+          canonical() { tr -d '[:space:]' < "$1" | sed -e 's/NonNullable<Json>/Json/g' -e 's/[;,]}/}/g' -e 's/,]/]/g'; }
+          if [ "$(canonical committed.types.ts)" != "$(canonical generated.types.ts)" ]; then
             echo "::error::Supabase types are out of sync! The database schema has changed but src/database.types.ts was not updated."
-            diff -u -B -w src/database.types.ts generated.types.ts | head -n 100 || true
+            # One declaration per line, layout already removed: only real
+            # differences show.
+            tokens() { canonical "$1" | sed 's/[{};]/&\n/g'; }
+            diff <(tokens committed.types.ts) <(tokens generated.types.ts) | head -n 300 || true
             exit 1
           fi
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           RAILWAY_DATABASE_URL: ${{ secrets.RAILWAY_DATABASE_URL }}
+
+      # Schema only, no secrets: lets a mismatch be inspected, or the file be
+      # used to refresh src/database.types.ts.
+      - name: Upload generated database types on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-database-types
+          path: generated.types.ts
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Type-check application Edge Function
         run: deno check --frozen supabase/functions/app-api/index.ts

@@ -26,6 +26,7 @@ import {
   resolveBottomWearPresentation,
 } from "./garmentPoses.ts";
 import { isDirectBackProductRole, roleLabel } from "./referencePolicy.ts";
+import { sceneLockBlock } from "./sceneLock.ts";
 
 export type PromptReference = { role: string };
 
@@ -400,7 +401,7 @@ function poseCategoryRules(category: string) {
 - Stance should be grounded and confident.`,
     sitting: `
 - SEATED / SITTING EDITORIAL POSE:
-- The model is gracefully and elegantly seated (e.g. on a minimal studio bench, architectural plinth/cube, minimal chair, or sleek studio step matching the set).
+- The model is gracefully and elegantly seated on seating that already belongs to the established set (e.g. its bench, plinth/cube, chair or step). Never bring new furniture into the set for this frame.
 - MANDATORY GARMENT & BOTTOM-WEAR READABILITY:
   * Both legs, trousers/farshi/skirt/pleats, hemline, and footwear must remain clearly visible and beautifully arranged - never tucked away, crumpled, obscured, or hidden behind props.
   * The upper garment silhouette, neckline, embroidery, and sleeve details must remain fully displayed and untangled.
@@ -650,6 +651,7 @@ export function composeGenerationPrompt(args: {
   // shared helper so the pose brief, this rule, the shoot memory and the feedback
   // row all describe the same frame.
   const showcaseShot = effectiveShowcaseShot(creative);
+  const sceneLock = sceneLockBlock({ creativeDirection: creative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference });
   const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL);
   const faceQualityInstruction = faceRequired
     ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct and naturally shaped eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
@@ -665,7 +667,7 @@ export function composeGenerationPrompt(args: {
   });
 
   const allowedDelta = [
-    `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step matching the set; complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(args.pose.bodyPosition, 360)}`,
+    `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(args.pose.bodyPosition, 360)}`,
     `camera angle: ${boundedText(args.pose.cameraAngle, 360)}`,
     `framing: ${boundedText(args.pose.framing, 360)}`,
     `expression: ${boundedText(args.pose.expression, 360)}`,
@@ -721,7 +723,9 @@ ${generationMemory}
 
 EDIT GOAL:
 Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${boundedText(args.pose.title, 160)}. The finished image must look like the same real professional photoshoot as every other frame in this set.
-Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE (if supplied) or the clean commercial studio direction. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
+Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE${hasApprovedAnchor ? " as already photographed in APPROVED POSE 1 - rebuild exactly the set Pose 1 shows, including in a back view" : " (if supplied)"} and the SCENE LOCK below - never a different or generic set. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
+
+${sceneLock}
 
 PHOTOGRAPHIC REALISM - MUST READ AS CAPTURED BY A REAL CAMERA, NEVER AS AI-GENERATED:
 - Camera and optics: full-frame camera with a lens suited to this framing (about 85mm for full-length and three-quarter frames, macro-style close focus for detail crops), low ISO, real optical depth of field with gradual focus falloff. No fake bokeh, cut-out or halo edges, or pasted-on subject.
@@ -857,7 +861,7 @@ STYLE REFERENCE SITTING OVERRIDE (POSE 4):
 ${isPose4 && isSittingDemanded ? `
 SEATED EDITORIAL POSE REQUIREMENT (POSE 4):
 - The style reference or product requirements specifically demand an elegant seated pose for this frame.
-- Model must be seated gracefully on a minimal studio bench, architectural plinth/cube, or clean studio step that seamlessly matches the set.
+- Model must be seated gracefully on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (style reference / Pose 1). Do not bring in new furniture.
 - Both legs, bottom wear (farshi/trousers/pleats), hemline, and footwear MUST remain fully visible, untangled, and unbunched.
 - Posture must be upright, poised, and relaxed editorial - showcasing garment fit and draping without wrinkling or obscuring key details.
 ` : ""}
@@ -878,6 +882,7 @@ ${learnings}
 ` : ""}
 
 PROMPT:
+(Pose, camera and framing only. The SCENE LOCK above decides the set.)
 ${boundedText(args.pose.prompt, 1_200)}
 
 REALISTIC INTEGRATION:

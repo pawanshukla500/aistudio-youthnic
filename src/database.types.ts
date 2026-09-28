@@ -2224,7 +2224,7 @@ export type Database = {
           error_message?: string
           estimated_cost_usd?: number
           failed_poses?: number
-          history_search?: string | null
+          history_search?: never
           image_size?: string
           input_image_tokens?: number
           input_text_tokens?: number
@@ -2268,7 +2268,7 @@ export type Database = {
           error_message?: string
           estimated_cost_usd?: number
           failed_poses?: number
-          history_search?: string | null
+          history_search?: never
           image_size?: string
           input_image_tokens?: number
           input_text_tokens?: number
@@ -4550,9 +4550,9 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      app_current_workspace: { Args: never; Returns: Json }
+      app_current_workspace: { Args: Record<PropertyKey, never>; Returns: Json }
       claim_due_catalog_batch: {
-        Args: never
+        Args: Record<PropertyKey, never>
         Returns: {
           approved_at: string | null
           approved_by_member_id: string | null
@@ -4607,7 +4607,7 @@ export type Database = {
         }
       }
       claim_next_generation_job: {
-        Args: never
+        Args: Record<PropertyKey, never>
         Returns: {
           actual_cost_usd: number
           aspect_ratio: string
@@ -4672,7 +4672,7 @@ export type Database = {
         }
         Returns: Json
       }
-      recover_stale_generation_jobs: { Args: never; Returns: number }
+      recover_stale_generation_jobs: { Args: Record<PropertyKey, never>; Returns: number }
       replace_organization_team_members: {
         Args: {
           p_actor_member_id: string

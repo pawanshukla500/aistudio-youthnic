@@ -4,6 +4,7 @@ import { resolveCatalogAssetUrl } from "./catalogStorage";
 import { visibleGenerationDetailedStatus } from "./generationStatus";
 import { functionInvokeErrorMessage, appApiInvokeTimeoutMs, isGatewayCutFailure, isRetryableInvokeOperation } from "./errors";
 import { scopePoseRowsToJob } from "./generationRuns";
+import { buildPoseVersions, summarizeRegenerations } from "./poseVersions";
 import { ANALYSIS_RUN_KINDS, attributeJobCostRuns, rollupSessionCost, type CostRun } from "./sessionCost";
 
 export type Id<_Table extends string> = string;
@@ -323,15 +324,20 @@ async function getJob(jobId: string) {
     const previousVersionUrl = !hasRetainedPreviousOutput && outputUrl && retainedPrevious.outputUrl && retainedPrevious.outputUrl !== outputUrl
       ? String(retainedPrevious.outputUrl)
       : "";
+    // Every image this pose delivered in this job, oldest first. Regeneration
+    // never deletes the earlier ones, so each stays viewable and downloadable.
+    const versions = buildPoseVersions(assetsForPose, pose.regeneration_history, String(pose.storage_path || ""));
     return {
       _id: pose.generation_id,
       generationId: String(pose.generation_id || ""),
       approvalStatus: String(pose.approval_status || "pending"),
       previousVersionUrl,
+      versions,
       poseNumber: Number(pose.pose_index),
       title: pose.title || defaultTitles[Math.max(0, Number(pose.pose_index) - 1)] || `Pose ${pose.pose_index}`,
       status: pose.status || (outputUrl ? "completed" : "queued"),
       qaStatus: pose.qa_status,
+      qaEnabled: typeof record(pose.qa_payload).qaEnabled === "boolean" ? record(pose.qa_payload).qaEnabled as boolean : null,
       outputUrl,
       storagePath: pose.storage_path || asset?.storage_path || retainedStoragePath,
       hasRetainedPreviousOutput,
@@ -359,10 +365,15 @@ async function getJob(jobId: string) {
     };
   });
   const knownPoseNumbers = new Set(mappedPoses.map((pose) => pose.poseNumber));
-  for (const asset of generatedAssets) {
+  for (const candidate of generatedAssets) {
+    const poseNumber = Number(record(candidate.metadata).poseIndex || 0);
+    if (!poseNumber || knownPoseNumbers.has(poseNumber) || !candidate.image_url) continue;
+    // One card per pose. Assets are oldest first, so the newest viewable one is
+    // the card and every archived image of the pose is one of its versions.
+    knownPoseNumbers.add(poseNumber);
+    const poseAssets = generatedAssets.filter((entry) => Number(record(entry.metadata).poseIndex || 0) === poseNumber);
+    const asset = [...poseAssets].reverse().find((entry) => entry.image_url) || candidate;
     const metadata = record(asset.metadata);
-    const poseNumber = Number(metadata.poseIndex || 0);
-    if (!poseNumber || knownPoseNumbers.has(poseNumber) || !asset.image_url) continue;
     const usage = record(metadata.usage);
     const usageDetails = record(usage.input_tokens_details);
     mappedPoses.push({
@@ -371,6 +382,7 @@ async function getJob(jobId: string) {
       generationId: "",
       approvalStatus: "pending",
       previousVersionUrl: "",
+      versions: buildPoseVersions(poseAssets, [], String(asset.storage_path || "")),
       poseNumber,
       title: defaultTitles[Math.max(0, poseNumber - 1)] || `Pose ${poseNumber}`,
       status: "completed",
@@ -378,6 +390,7 @@ async function getJob(jobId: string) {
       // Reading a `passed` key that is never written made every asset-only pose
       // report as QA-passed, including ones QA never cleared.
       qaStatus: String(metadata.qaStatus || "") || (record(metadata.qa).pass === true ? "passed" : record(metadata.qa).pass === false ? "failed" : "unverified"),
+      qaEnabled: typeof metadata.qaEnabled === "boolean" ? metadata.qaEnabled : null,
       outputUrl: asset.image_url,
       storagePath: asset.storage_path || "",
       hasRetainedPreviousOutput: false,
@@ -451,6 +464,7 @@ async function getJob(jobId: string) {
     errorMessage: job.error_message || "",
     session: sessionResult.data,
     poses: mappedPoses,
+    regenerationSummary: summarizeRegenerations(mappedPoses.map((pose) => pose.versions)),
   };
 }
 
