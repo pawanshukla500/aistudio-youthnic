@@ -81,7 +81,10 @@ jobs:
           canonical() { tr -d '[:space:]' < "$1" | sed -e 's/NonNullable<Json>/Json/g' -e 's/[;,]}/}/g' -e 's/,]/]/g'; }
           if [ "$(canonical committed.types.ts)" != "$(canonical generated.types.ts)" ]; then
             echo "::error::Supabase types are out of sync! The database schema has changed but src/database.types.ts was not updated."
-            diff -u -B -w committed.types.ts generated.types.ts | head -n 100 || true
+            # One declaration per line, layout already removed: only real
+            # differences show.
+            tokens() { canonical "$1" | sed 's/[{};]/&\n/g'; }
+            diff <(tokens committed.types.ts) <(tokens generated.types.ts) | head -n 300 || true
             exit 1
           fi
         env:
