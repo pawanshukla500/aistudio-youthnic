@@ -365,13 +365,15 @@ async function getJob(jobId: string) {
     };
   });
   const knownPoseNumbers = new Set(mappedPoses.map((pose) => pose.poseNumber));
-  for (const asset of generatedAssets) {
-    const metadata = record(asset.metadata);
-    const poseNumber = Number(metadata.poseIndex || 0);
-    if (!poseNumber || knownPoseNumbers.has(poseNumber) || !asset.image_url) continue;
-    // One card per pose: its other archived images are that card's versions.
+  for (const candidate of generatedAssets) {
+    const poseNumber = Number(record(candidate.metadata).poseIndex || 0);
+    if (!poseNumber || knownPoseNumbers.has(poseNumber) || !candidate.image_url) continue;
+    // One card per pose. Assets are oldest first, so the newest viewable one is
+    // the card and every archived image of the pose is one of its versions.
     knownPoseNumbers.add(poseNumber);
     const poseAssets = generatedAssets.filter((entry) => Number(record(entry.metadata).poseIndex || 0) === poseNumber);
+    const asset = [...poseAssets].reverse().find((entry) => entry.image_url) || candidate;
+    const metadata = record(asset.metadata);
     const usage = record(metadata.usage);
     const usageDetails = record(usage.input_tokens_details);
     mappedPoses.push({
