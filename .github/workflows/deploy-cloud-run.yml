@@ -71,12 +71,14 @@ jobs:
           fi
           # Compare the schema, not the layout. Newer Supabase CLI releases emit
           # unformatted types (quoted keys, "," and ";" separators, one-line
-          # objects), so a plain diff fails on every run. Format both files
-          # the same way, then ignore whitespace and optional trailing
-          # separators before a closing brace or bracket.
+          # objects) and spell a NOT NULL json column `NonNullable<Json>`
+          # rather than `Json`, so a plain diff fails on every run. Format both
+          # files the same way, then ignore whitespace, optional trailing
+          # separators, and that spelling. A nullable json column is
+          # `Json | null` either way, so nullability drift still fails.
           cp src/database.types.ts committed.types.ts
           npx --yes oxfmt@0.71.0 committed.types.ts generated.types.ts >/dev/null
-          canonical() { tr -d '[:space:]' < "$1" | sed -e 's/[;,]}/}/g' -e 's/,]/]/g'; }
+          canonical() { tr -d '[:space:]' < "$1" | sed -e 's/NonNullable<Json>/Json/g' -e 's/[;,]}/}/g' -e 's/,]/]/g'; }
           if [ "$(canonical committed.types.ts)" != "$(canonical generated.types.ts)" ]; then
             echo "::error::Supabase types are out of sync! The database schema has changed but src/database.types.ts was not updated."
             diff -u -B -w committed.types.ts generated.types.ts | head -n 100 || true
@@ -85,6 +87,17 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           RAILWAY_DATABASE_URL: ${{ secrets.RAILWAY_DATABASE_URL }}
+
+      # Schema only, no secrets: lets a mismatch be inspected, or the file be
+      # used to refresh src/database.types.ts.
+      - name: Upload generated database types on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-database-types
+          path: generated.types.ts
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Type-check application Edge Function
         run: deno check --frozen supabase/functions/app-api/index.ts
