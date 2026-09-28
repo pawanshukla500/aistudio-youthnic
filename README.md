@@ -197,6 +197,7 @@ The application source, dependencies, environment, launcher, and runtime no long
 - `supabase/migrations/20260811153000_edge_worker_schedules.sql` — scheduled workers
 - `supabase/migrations/20260811112304_tier1_generation_queue_recovery.sql` — durable retries and stale-job recovery
 - `docs/SUPABASE_LIVE_SCHEMA_AUDIT.md` — live schema, security, and cutover verification
+- `docs/GENERATION_ORCHESTRATION.md` — worker pipeline, scene lock, regeneration history/timing, and the LangGraph decision
 
 - `supabase/migrations/20260811170000_generation_usage_controls_preflight.sql` — provider usage fields and catalog preflight cron
 

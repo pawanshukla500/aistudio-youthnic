@@ -3,6 +3,8 @@ import * as ExcelJS from "https://esm.sh/exceljs@4.4.0";
 import { encodeBase64, decodeBase64 } from "jsr:@std/encoding/base64";
 import { deleteFirebaseObject, downloadFirebaseObject, uploadFirebaseObject, createFirebaseUser, updateFirebaseUser, deleteFirebaseUser } from "./firebase-admin.ts";
 import { claimGenerationRun, queueReuseResponse } from "../../../src/lib/generationRuns.ts";
+import { deliveredVersionTiming, stampPoseTiming } from "../../../src/lib/poseVersions.ts";
+import { applyRequestedBackground } from "./lib/sceneLock.ts";
 import {
   ANALYSIS_VERSION,
   CONSISTENCY_RULES,
@@ -134,6 +136,13 @@ const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/app-api`;
 const OPENAI_MODEL = DEFAULT_IMAGE_GENERATION_ROUTE.model;
 const MAX_REFERENCES = MAX_IMAGE_REFERENCES;
 const MAX_GENERATION_ATTEMPTS = 3;
+// GPT Image quality when a request, catalog or legacy job names none. Medium
+// keeps output tokens (and cost) well below high; Studio can still pick high.
+const DEFAULT_IMAGE_QUALITY = "medium";
+// Every QA-rejected frame is paid for and archived. The pointer list spans
+// regenerations, so it must not drop earlier ones after a single epoch's worth;
+// the bound only keeps the row finite.
+const REJECTED_ATTEMPT_HISTORY_LIMIT = 100;
 const QA_VERSION = "saree-qa-v14-listing-grade";
 const WORKER_LEASE_MS = 4 * 60_000;
 const WORKER_LEASE_HEARTBEAT_MS = 60_000;
@@ -2026,7 +2035,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
       model = imageGenerationPolicy.model;
     }
   }
-  const quality = ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : "high";
+  const quality = ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : DEFAULT_IMAGE_QUALITY;
   // Presentation choice, not product truth: the analysis still records what the
   // references prove, and "auto" keeps the two in sync.
   const bottomWearMode = normalizeBottomWearMode(args.bottomWear ?? args.bottomWearMode);
@@ -2093,11 +2102,9 @@ async function queueGeneration(request: Request, args: JsonRecord) {
       skuName: jobData.skuName,
       productDetails: jobData.productDetails,
       category: jobData.category,
-      creativeDirection: {
-        ...(sessionData.creativeDirection as Record<string, unknown> || {}),
-        scene: jobData.backgroundStyle,
-        ...(jobData.backgroundStyle ? { backgroundStyle: jobData.backgroundStyle, studioEnvironment: jobData.backgroundStyle } : {}),
-      },
+      // "Auto from references" keeps the concrete set the analysis described;
+      // only an explicit background choice replaces it.
+      creativeDirection: applyRequestedBackground(sessionData.creativeDirection, jobData.backgroundStyle),
       modelIdentity: {
         ...(sessionData.modelIdentity as Record<string, unknown> || {}),
         direction: jobData.modelIdentityDirection,
@@ -2106,11 +2113,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
       bottomWearMode,
       imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
       generationMemory: sessionGenerationMemory(sessionData, {
-        creativeDirection: {
-          ...(sessionData.creativeDirection as Record<string, unknown> || {}),
-          scene: jobData.backgroundStyle,
-          ...(jobData.backgroundStyle ? { backgroundStyle: jobData.backgroundStyle, studioEnvironment: jobData.backgroundStyle } : {}),
-        },
+        creativeDirection: applyRequestedBackground(sessionData.creativeDirection, jobData.backgroundStyle),
         referenceFingerprint: String(session.reference_hash || ""),
       }),
     }
@@ -2397,7 +2400,8 @@ async function archiveRejectedAttempt(args: {
     const storagePath = `organizations/${args.job.org_id}/generated/${args.job.job_id}/rejected/${args.pose.pose_index}-attempt-${args.attempt}-${crypto.randomUUID()}.${extensionForMimeType(args.generated.mimeType)}`;
     const stored = await uploadCatalogObject({ orgId: String(args.job.org_id), storagePath, blob: args.generated.blob, mimeType: args.generated.mimeType });
     return {
-      attempt: args.attempt, url: stored.downloadUrl, storagePath: stored.storagePath,
+      attempt: args.attempt, generationEpoch: Number(args.pose.generation_epoch || 1),
+      url: stored.downloadUrl, storagePath: stored.storagePath,
       storageBackend: stored.storageBackend,
       mimeType: args.generated.mimeType, reason: args.qa.reason, failed: args.qa.failed,
       score: args.qa.score, createdAt: Date.now(),
@@ -2846,7 +2850,7 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
   const candidates = poseReferenceCandidates(sourceInputs, poseData.id, garmentFamily);
   // Image generation posts the blobs as multipart form data. Only Gemini QA
   // needs the inline base64 copy, so a QA-disabled shoot never pays for it.
-  const referenceLoadOptions = { encodeBase64: Boolean(job.pose_qa) };
+  const referenceLoadOptions = { encodeBase64: Boolean(job.pose_qa) || storedPoseData.poseQaRequested === true };
   // Provide the front anchor to the back pose for model identity and background
   // continuity. The generation prompt explicitly instructs the LLM not to use
   // it as a garment geometry source for the back pose. This lookup shares no
@@ -3090,12 +3094,19 @@ async function processWorker(request: Request, args: JsonRecord) {
     return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed", error: budgetBlock };
   }
   const { loadedReferences, approved, poseData, selected, authoritativeBackReference, storedPoseData } = resolvedPoseReferences;
+  // QA follows the job, or this pose alone when its regeneration asked for it.
+  const poseQaEnabled = Boolean(job.pose_qa) || storedPoseData.poseQaRequested === true;
   const attempt = Number(pose.attempt_count || 0) + 1;
   if (attempt > MAX_GENERATION_ATTEMPTS) {
     await failPoseAndJob(job, session, pose, `Pose ${pose.pose_index} exhausted ${MAX_GENERATION_ATTEMPTS} generation attempts.`);
     return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed" };
   }
   const now = new Date().toISOString();
+  const generationEpoch = Number(pose.generation_epoch || 1);
+  const poseTiming = stampPoseTiming(storedPoseData, { epoch: generationEpoch, attempt, jobCreatedAt: job.created_at, now });
+  // On the pose data before anything can fail, so every retry path persists it
+  // and the next attempt of this version keeps the same start.
+  storedPoseData.timing = poseTiming;
   await Promise.all([
     service.from("session_generations").update({ status: "processing", attempt_count: Number(pose.attempt_count || 0), updated_at: now }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id),
     service.from("generation_jobs").update({ current_pose: pose.pose_index, lock_expires_at: new Date(Date.now() + WORKER_LEASE_MS).toISOString(), updated_at: now, job_data: { ...((job.job_data as JsonRecord) || {}), detailedStatus: `Pose ${pose.pose_index} generating (Attempt ${Number(pose.attempt_count || 0) + 1})` } }).eq("job_id", job.job_id),
@@ -3127,7 +3138,7 @@ async function processWorker(request: Request, args: JsonRecord) {
       appliedLearningAt: new Date().toISOString(),
       referenceManifests: appendReferenceManifest(storedPoseData, {
         attempt,
-        generationEpoch: Number(pose.generation_epoch || 1),
+        generationEpoch,
         pose: poseData,
         selected,
       }),
@@ -3149,8 +3160,10 @@ async function processWorker(request: Request, args: JsonRecord) {
     const generatedStarted = Date.now();
     const generated = await generateImage({
       prompt, model: imageGenerationRoute.model, size: normalizeImageSize(String(job.aspect_ratio || "3:4"), String(job.image_size || "2K"), imageGenerationRoute.model),
-      quality: String(job.quality || "high"), references: selected,
+      quality: String(job.quality || DEFAULT_IMAGE_QUALITY), references: selected,
     });
+    // Measured before QA runs, so it is the image provider's time alone.
+    const generationMs = Date.now() - generatedStarted;
     attemptUsage = generated.usage;
     providerRequestId = generated.requestId;
     attemptCost = generated.costUsd;
@@ -3162,7 +3175,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     let qaStarted = 0;
     let qaLatencyMs = 0;
     let qaUnavailable = "";
-    if (Boolean(job.pose_qa)) {
+    if (poseQaEnabled) {
       try {
         qaStarted = Date.now();
         qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData, organizationId: String(job.org_id) });
@@ -3197,6 +3210,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     await recordAiRun({
       organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
       job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "image_generation", model: imageGenerationRoute.model, provider: imageGenerationRoute.provider,
+      generation_id: pose.generation_id, generation_epoch: generationEpoch, attempt_number: attempt,
       input_fingerprint: smallHash(prompt),
       input_summary: {
         pose: pose.pose_index,
@@ -3211,7 +3225,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         referenceManifest: selectedReferenceManifest(selected, poseData),
         appliedLearningRuleIds: learningRuleIds,
       },
-      output_json: { generated: true }, status: "completed", latency_ms: Date.now() - generatedStarted,
+      output_json: { generated: true }, status: "completed", latency_ms: generationMs,
       provider_request_id: providerRequestId,
       input_tokens: generated.usage.inputTokens, input_text_tokens: generated.usage.inputTextTokens,
       input_image_tokens: generated.usage.inputImageTokens, output_tokens: generated.usage.outputTokens,
@@ -3219,7 +3233,7 @@ async function processWorker(request: Request, args: JsonRecord) {
       cost_usd: attemptCost, cost_source: generated.usage.providerReported ? "provider_reported_tokens_openai_public_rates" : "provider_not_reported",
     });
     
-    if (!qaUnavailable && Boolean(job.pose_qa)) {
+    if (!qaUnavailable && poseQaEnabled) {
        const qaUsage = (qa.usageMetadata || {}) as any;
        const policy = (qa as any).policy as VisionPolicy | undefined;
          const calculated = await pricedVisionUsage({ usageMetadata: qaUsage }, policy?.provider || "openai", policy?.model || "gpt-5.6-luna");
@@ -3227,6 +3241,7 @@ async function processWorker(request: Request, args: JsonRecord) {
        await recordAiRun({
          organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
          job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: policy?.model || "gpt-5.6-luna", provider: policy?.provider || "openai",
+         generation_id: pose.generation_id, generation_epoch: generationEpoch, attempt_number: attempt,
          purpose: policy?.purpose || "qa", thinking_level: policy?.thinkingLevel || "high",
          input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt, policy: policy ? visionPolicySnapshot(policy, (qa as any).visionAttempts || []) : null },
          output_json: { qa, qaVersion: QA_VERSION }, status: qa.outcome, latency_ms: qaLatencyMs,
@@ -3249,7 +3264,7 @@ async function processWorker(request: Request, args: JsonRecord) {
       const isRepeatedDefect = qaCorrections.length > 0 && qaCorrections[qaCorrections.length - 1].includes(defect);
       qaCorrections = [...qaCorrections, `Attempt ${attempt}: ${defect}`].slice(-MAX_GENERATION_ATTEMPTS);
       const archived = await archiveRejectedAttempt({ job, pose, attempt, generated, qa });
-      if (archived) rejectedAttempts = appendRejectedAttemptHistory(rejectedAttempts, archived, MAX_GENERATION_ATTEMPTS);
+      if (archived) rejectedAttempts = appendRejectedAttemptHistory(rejectedAttempts, archived, REJECTED_ATTEMPT_HISTORY_LIMIT);
       // The verdict is written now, not on the way out: neither deferPoseRetry nor
       // failPoseAndJob touches qa_payload, so a pose that exhausts its retries
       // would otherwise show an archived image with no fidelity breakdown.
@@ -3274,32 +3289,40 @@ async function processWorker(request: Request, args: JsonRecord) {
     const storagePath = `organizations/${job.org_id}/generated/${job.job_id}/${pose.pose_index}-${safeSku}-${crypto.randomUUID()}.${extensionForMimeType(generated.mimeType)}`;
     const stored = await uploadCatalogObject({ orgId: String(job.org_id), storagePath, blob: generated.blob, mimeType: generated.mimeType });
     const completedAt = new Date().toISOString();
-    const { qaStatus } = qaStorageDisposition({ qaEnabled: Boolean(job.pose_qa), qaUnavailable: Boolean(qaUnavailable), outcome: qa.outcome });
+    const { qaStatus } = qaStorageDisposition({ qaEnabled: poseQaEnabled, qaUnavailable: Boolean(qaUnavailable), outcome: qa.outcome });
     const usagePatch = accumulatedUsage(pose as JsonRecord, generated.usage, generated.requestId, attemptCost);
+    const versionTiming = deliveredVersionTiming(poseTiming, { completedAt, attempt, generationMs });
     await Promise.all([
       service.from("session_generations").update({
         status: "completed", output_url: stored.downloadUrl, storage_path: stored.storagePath, storage_backend: stored.storageBackend,
-        qa_status: qaStatus, qa_payload: { ...qa, qaUnavailable, qaVersion: QA_VERSION },
+        qa_status: qaStatus, qa_payload: { ...qa, qaUnavailable, qaVersion: QA_VERSION, qaEnabled: poseQaEnabled },
         error: qaUnavailable ? `Delivered without automatic consistency QA: ${qaUnavailable}`.slice(0, 1000) : "", updated_at: completedAt,
+        // A review decision belongs to the image it was made on. The earlier
+        // version keeps its archive row; this new image has not been reviewed.
+        approval_status: "pending", approved_by: null, approved_at: null, approval_notes: null,
         generation_data: {
           ...storedPoseData,
           correction: "",
           corrections: [],
           completedAt: Date.now(),
+          timing: versionTiming,
           mimeType: generated.mimeType,
           previousOutputRetained: false,
           regeneratedFromPriorOutput: Boolean((pose.generation_data as JsonRecord | undefined)?.previousOutputRetained),
         },
         ...usagePatch,
       }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id),
+      // One immutable row per delivered image: this is the pose's version history.
       service.from("planning_assets").insert({
         organization_id: job.org_id, planning_request_id: job.planning_request_id, sku_name: job.sku_name,
         prompt, image_url: stored.downloadUrl, storage_path: stored.storagePath, generation_job_id: job.job_id,
         sku_matched: true, asset_role: "generated", storage_backend: stored.storageBackend,
         metadata: {
-          poseIndex: pose.pose_index, poseType: pose.pose_type, qa, qaStatus, qaVersion: QA_VERSION,
+          poseIndex: pose.pose_index, poseType: pose.pose_type, qa, qaStatus, qaVersion: QA_VERSION, qaEnabled: poseQaEnabled,
           model: imageGenerationRoute.model, provider: imageGenerationRoute.provider, quality: job.quality,
           providerRequestId: generated.requestId, usage: generated.usage.raw, actualCostUsd: attemptCost,
+          generationId: pose.generation_id, generationEpoch, attempt, timing: versionTiming,
+          regenerationInstructions: generationEpoch > 1 ? String(pose.regeneration_instructions || "") : "",
         },
       }),
       // Every QA execution state is immutable audit history. An unavailable or
@@ -3308,9 +3331,9 @@ async function processWorker(request: Request, args: JsonRecord) {
       service.from("qa_reviews").insert({
         organization_id: job.org_id, planning_request_id: job.planning_request_id, generation_job_id: job.job_id,
         pose_index: pose.pose_index,
-        reviewer_type: !job.pose_qa ? "qa_disabled" : qaUnavailable ? "gemini_auto_unavailable" : "gemini_auto",
-        score: qa.score, passed: !qaUnavailable && Boolean(job.pose_qa) && qa.automaticallyVerified,
-        issues: qaUnavailable ? ["qa_unavailable"] : !job.pose_qa ? ["qa_disabled"] : qa.failed,
+        reviewer_type: !poseQaEnabled ? "qa_disabled" : qaUnavailable ? "gemini_auto_unavailable" : "gemini_auto",
+        score: qa.score, passed: !qaUnavailable && poseQaEnabled && qa.automaticallyVerified,
+        issues: qaUnavailable ? ["qa_unavailable"] : !poseQaEnabled ? ["qa_disabled"] : qa.failed,
         notes: qa.reason, qa_version: QA_VERSION, outcome: qaStatus,
         generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt, metadata: { qa, qaUnavailable },
       }),
@@ -3678,11 +3701,16 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
         requestedAt: regenerationRequestedAt,
         requestedByMemberId: workspace.member.id,
         previousOutputRetained,
-      }].slice(-20),
+        previousApprovalStatus: String(pose.approval_status || "pending"),
+        previousGenerationEpoch: Math.max(1, Number(pose.generation_epoch || 1)),
+      }],
       generation_data: {
         ...poseGenerationData,
         previousOutputRetained,
         regenerationQueuedAt: regenerationRequestedAt,
+        // The dialog's "Run Gemini consistency QA" checkbox. It checks this
+        // pose even when the job itself was queued without QA.
+        poseQaRequested: args.poseQa === true,
       },
       updated_at: regenerationRequestedAt,
     }).eq("generation_id", generationId),
@@ -4825,7 +4853,7 @@ async function createCatalogOperation(request: Request, args: JsonRecord) {
   const generationSettings = {
     modelDirection: String(args.modelDirection || ""), sceneDirection: String(args.sceneDirection || ""),
     category: String(args.category || "ethnic/fusion"), aspectRatio: String(args.aspectRatio || "3:4"),
-    imageSize: String(args.imageSize || "2K"), quality: ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : "high", poseQa: Boolean(args.poseQa),
+    imageSize: String(args.imageSize || "2K"), quality: ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : DEFAULT_IMAGE_QUALITY, poseQa: Boolean(args.poseQa),
     bottomWear: normalizeBottomWearMode(args.bottomWear),
     lookAndMood: String(args.lookAndMood || ""), stylingRequirements: String(args.stylingRequirements || ""),
     lighting: String(args.lighting || ""), composition: String(args.composition || ""),
@@ -6150,7 +6178,7 @@ async function queueCatalogVariantGeneration(
       model = imageGenerationPolicy.model;
     }
   }
-  const quality = ["low", "medium", "high"].includes(String(generationSettings.quality)) ? String(generationSettings.quality) : "high";
+  const quality = ["low", "medium", "high"].includes(String(generationSettings.quality)) ? String(generationSettings.quality) : DEFAULT_IMAGE_QUALITY;
   const sessionData = {
     skuId: String(variant.request_code || variant.id),
     skuName: String(variant.sku_name),

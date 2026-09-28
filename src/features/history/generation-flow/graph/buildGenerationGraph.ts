@@ -10,12 +10,16 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
   const learnings = rawBackendData.learnings || (rawBackendData.learning ? [rawBackendData.learning] : []);
 
   const poses: TracePose[] = rawPoses.map((p: any) => {
-    const poseAiRuns = aiRuns.filter((r: any) => r.run_kind === "image_generation" && (r.pose_index === p.pose_index || r.input_summary?.pose === p.pose_index));
-    const poseQaReviews = qaReviews.filter((q: any) => q.pose_index === p.pose_index);
+    // A regeneration starts a new epoch with its own attempt numbers. Trace the
+    // current one; rows written before epochs were recorded stay included.
+    const epoch = Number(p.generation_epoch || 1);
+    const inEpoch = (value: unknown) => value === null || value === undefined || Number(value) === epoch;
+    const poseAiRuns = aiRuns.filter((r: any) => r.run_kind === "image_generation" && (r.pose_index === p.pose_index || r.input_summary?.pose === p.pose_index) && inEpoch(r.generation_epoch));
+    const poseQaReviews = qaReviews.filter((q: any) => q.pose_index === p.pose_index && inEpoch(q.generation_epoch));
     
     const genData = p.generation_data || {};
     const corrections = genData.corrections || [];
-    const rejectedAttempts = genData.rejectedAttempts || [];
+    const rejectedAttempts = (genData.rejectedAttempts || []).filter((attempt: any) => inEpoch(attempt?.generationEpoch));
     const referenceManifests = Array.isArray(genData.referenceManifests) ? genData.referenceManifests : [];
 
     const attempts: TraceAttempt[] = [];
