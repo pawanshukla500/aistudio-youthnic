@@ -69,9 +69,17 @@ jobs:
             echo "Skipping remote type generation check (no credentials provided)."
             exit 0
           fi
-          if ! diff -q -B -w src/database.types.ts generated.types.ts >/dev/null 2>&1; then
+          # Compare the schema, not the layout. Newer Supabase CLI releases emit
+          # unformatted types (quoted keys, "," and ";" separators, one-line
+          # objects), so a plain diff fails on every run. Format both files
+          # the same way, then ignore whitespace and optional trailing
+          # separators before a closing brace or bracket.
+          cp src/database.types.ts committed.types.ts
+          npx --yes oxfmt@0.71.0 committed.types.ts generated.types.ts >/dev/null
+          canonical() { tr -d '[:space:]' < "$1" | sed -e 's/[;,]}/}/g' -e 's/,]/]/g'; }
+          if [ "$(canonical committed.types.ts)" != "$(canonical generated.types.ts)" ]; then
             echo "::error::Supabase types are out of sync! The database schema has changed but src/database.types.ts was not updated."
-            diff -u -B -w src/database.types.ts generated.types.ts | head -n 100 || true
+            diff -u -B -w committed.types.ts generated.types.ts | head -n 100 || true
             exit 1
           fi
         env:
