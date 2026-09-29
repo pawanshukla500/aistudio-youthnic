@@ -549,15 +549,32 @@ export function Admin() {
     const fallbackModel = fallback
       ? modelsFor(fallback.provider, purpose).find((model) => model.id === preferredModelId(fallback.provider, modelsFor(fallback.provider, purpose))) || modelsFor(fallback.provider, purpose)[0]
       : undefined;
+    const defaultPrimaryProvider = primary?.provider || (purpose === "product_truth" ? "meta" : "openai");
+    const defaultPrimaryThinking = normalizedThinking(
+      defaultPrimaryProvider,
+      primaryModel?.id || "",
+      purpose,
+      primaryModel?.thinkingLevels.includes("high") ? "high" : primaryModel?.thinkingLevels[0],
+    );
+    const defaultFallbackThinking = fallback && fallbackModel
+      ? normalizedThinking(
+          fallback.provider,
+          fallbackModel.id,
+          purpose,
+          fallbackModel.id === "gpt-5.6-luna" && fallbackModel.thinkingLevels.includes("high")
+            ? "high"
+            : fallbackModel.thinkingLevels[0],
+        )
+      : undefined;
     return {
       purpose,
-      primaryProvider: primary?.provider || "openai",
+      primaryProvider: defaultPrimaryProvider,
       primaryModel: primaryModel?.id || "",
-      primaryThinking: normalizedThinking(primary?.provider || "openai", primaryModel?.id || "", purpose, primaryModel?.thinkingLevels[0]),
+      primaryThinking: defaultPrimaryThinking,
       fallbackEnabled: purpose !== "image_generation" && Boolean(fallback && fallbackModel),
       fallbackProvider: fallback?.provider,
       fallbackModel: fallbackModel?.id,
-      fallbackThinking: fallback && fallbackModel ? normalizedThinking(fallback.provider, fallbackModel.id, purpose, fallbackModel.thinkingLevels[0]) : undefined,
+      fallbackThinking: defaultFallbackThinking,
     };
   };
   const aiPoliciesForEditor = managedAiPurposes.map(({ purpose }) =>
@@ -571,6 +588,18 @@ export function Admin() {
       const currentPolicy = current.find((policy) => policy.purpose === purpose) || defaultAiPolicy(purpose);
       return [...current.filter((policy) => policy.purpose !== purpose), change(currentPolicy)];
     });
+  };
+  const applyRecommendedProductTruth = () => {
+    updateAiPolicy("product_truth", (current) => ({
+      ...current,
+      primaryProvider: "meta",
+      primaryModel: "muse-spark-1.3-contributor",
+      primaryThinking: "high",
+      fallbackEnabled: true,
+      fallbackProvider: "openai",
+      fallbackModel: "gpt-5.6-luna",
+      fallbackThinking: "high",
+    }));
   };
 
   const submitUser = async (event: React.FormEvent) => {
@@ -1150,9 +1179,44 @@ export function Admin() {
                 return (
                   <article key={policy.purpose} className="overflow-hidden rounded-2xl border border-outline-variant/40 bg-white shadow-sm">
                     <div className="border-b border-outline-variant/30 p-5">
-                      <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">{config.label}</p><p className="mt-2 text-sm leading-6 text-secondary">{config.description}</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider ${primaryConfigured && fallbackConfigured ? "bg-success-surface text-success" : "bg-warning-surface text-warning"}`}>{primaryConfigured && fallbackConfigured ? "Ready" : "Needs key"}</span></div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">{config.label}</p>
+                          <p className="mt-2 text-sm leading-6 text-secondary">{config.description}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {policy.purpose === "product_truth" && (
+                            <button
+                              type="button"
+                              onClick={applyRecommendedProductTruth}
+                              disabled={saving || !overview.capabilities.canManageSettings}
+                              className="rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-primary hover:bg-primary/10 disabled:opacity-50"
+                              title="Set Primary: Meta Muse Spark (Contributor) High, Fallback: OpenAI GPT 5.6 Luna High"
+                            >
+                              Recommended routing
+                            </button>
+                          )}
+                          <span className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider ${primaryConfigured && fallbackConfigured ? "bg-success-surface text-success" : "bg-warning-surface text-warning"}`}>{primaryConfigured && fallbackConfigured ? "Ready" : "Needs key"}</span>
+                        </div>
+                      </div>
                     </div>
                     <div className="space-y-5 p-5">
+                      {policy.purpose === "product_truth" && policy.primaryProvider === "openai" && (policy.primaryModel === "gpt-5.6-terra" || policy.primaryModel === "gpt-5.6-sol") && (
+                        <div className="flex flex-col gap-2 rounded-xl border border-primary/30 bg-soft-blush p-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="text-xs font-bold text-on-surface">Switch to Meta Muse Spark + Luna to reduce token cost</p>
+                            <p className="text-[11px] leading-4 text-secondary">GPT 5.6 Terra has high per-token pricing. Meta Muse Spark 1.3 Contributor (~$0.10 / $0.20 per 1M) with GPT 5.6 Luna (High thinking) fallback provides superior cost efficiency.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={applyRecommendedProductTruth}
+                            disabled={saving || !overview.capabilities.canManageSettings}
+                            className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white hover:bg-primary/90 disabled:opacity-50"
+                          >
+                            Apply low-cost routing
+                          </button>
+                        </div>
+                      )}
                       <div>
                         <div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-sm font-bold text-on-surface">Primary provider</h4><div className="flex items-center gap-2"><span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase ${primaryConfigured ? "bg-success-surface text-success" : "bg-warning-surface text-warning"}`}>{primaryConfigured ? "Configured" : "Missing secret"}</span>{policy.purpose !== "image_generation" && <button type="button" disabled={saving || !primaryConfigured || !policy.primaryModel || !overview.capabilities.canManageSettings || routeProbes[`${policy.purpose}-primary`]?.status === "running"} onClick={() => void runRouteProbe(`${policy.purpose}-primary`, policy.primaryProvider, policy.primaryModel, policy.primaryThinking, policy.purpose)} className="rounded-lg border border-outline-variant px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-secondary disabled:opacity-50">{routeProbes[`${policy.purpose}-primary`]?.status === "running" ? "Testing…" : "Test"}</button>}</div></div>
                         {routeProbes[`${policy.purpose}-primary`]?.status === "pass" && <p className="mb-3 text-xs text-success">Primary probe passed in {routeProbes[`${policy.purpose}-primary`]?.latencyMs} ms.</p>}

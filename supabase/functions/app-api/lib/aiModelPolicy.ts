@@ -247,6 +247,12 @@ export const FAST_PRODUCT_TRUTH_ROUTE = {
   thinkingLevel: "low",
 } as const satisfies NormalizedAiModelRoute;
 
+export const FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE = {
+  provider: "meta",
+  model: "muse-spark-1.3-contributor",
+  thinkingLevel: "low",
+} as const satisfies NormalizedAiModelRoute;
+
 export const FAST_PRODUCT_TRUTH_GEMINI_ROUTE = {
   provider: "gemini",
   model: "gemini-3.8-flash",
@@ -257,6 +263,12 @@ export const CHEAP_OPENAI_VISION_ROUTE = {
   provider: "openai",
   model: "gpt-5.6-luna",
   thinkingLevel: "low",
+} as const satisfies NormalizedAiModelRoute;
+
+export const LUNA_HIGH_THINKING_VISION_ROUTE = {
+  provider: "openai",
+  model: "gpt-5.6-luna",
+  thinkingLevel: "high",
 } as const satisfies NormalizedAiModelRoute;
 
 export const OPENAI_TERRA_VISION_ROUTE = {
@@ -317,6 +329,11 @@ export function clampProductTruthThinking(route: NormalizedAiModelRoute): AiThin
   const allowed = allowedThinkingLevels(route, "product_truth", { strictJson: true });
   if (route.thinkingLevel === "none" && allowed.includes("none")) return "none";
   if (route.thinkingLevel === "minimal" && allowed.includes("minimal")) return "minimal";
+  // Luna is fast and cost-efficient. When explicitly configured with high thinking
+  // for deep reasoning across scene, styling, and 6-pose plans, preserve high thinking.
+  if (route.model === "gpt-5.6-luna" && route.thinkingLevel === "high" && allowed.includes("high")) {
+    return "high";
+  }
   if (allowed.includes("low")) return "low";
   if (allowed.includes("minimal")) return "minimal";
   if (allowed.includes("none")) return "none";
@@ -351,17 +368,21 @@ export function productTruthGatewayBudgetMs(configured?: number) {
 
 /**
  * The routes product-truth analysis tries, in order: exactly the primary and
- * the fallback saved in Administration. No model is inserted ahead of them,
- * substituted for them, or dropped from the chain; a duplicate fallback runs
+ * the fallback(s) saved in Administration or defaults. No model is inserted ahead
+ * of them, substituted for them, or dropped from the chain; duplicate fallbacks run
  * once. Only the reasoning effort is capped (see `clampProductTruthThinking`).
  */
 export function productTruthRouteChain(
   primary: NormalizedAiModelRoute,
-  fallback?: NormalizedAiModelRoute,
+  fallback?: NormalizedAiModelRoute | readonly (NormalizedAiModelRoute | undefined)[],
 ): NormalizedAiModelRoute[] {
   const chain: NormalizedAiModelRoute[] = [];
   const seen = new Set<string>();
-  for (const route of [primary, fallback]) {
+  const candidates = [
+    primary,
+    ...(Array.isArray(fallback) ? fallback : [fallback]),
+  ];
+  for (const route of candidates) {
     if (!route) continue;
     const next = withFastProductTruthThinking(route);
     const key = routeKey(next);

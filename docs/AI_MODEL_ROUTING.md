@@ -33,12 +33,14 @@ can be saved or called.
 
 ## Order and fallback
 
-For a vision purpose, the chain is `[primary, fallback]` exactly as saved
-(`productTruthRouteChain`). Administration refuses to save a fallback identical to the
-primary ("Choose a different fallback provider or model."); an older row that has one
-runs that model once.
+For a vision purpose, the chain is `[primary, ...fallbacks]` as saved or resolved
+(`productTruthRouteChain`). When Meta Muse Spark is primary and OpenAI Luna is the first fallback,
+the system automatically wires OpenAI GPT-5.6 Terra as the third fallback safety net so that
+Terra's expensive compute is only tapped if both low-cost models fail. Administration refuses to
+save a fallback identical to the primary ("Choose a different fallback provider or model.");
+an older row that has one runs that model once.
 
-The chain moves to the fallback when the primary fails for a reason another model can fix:
+The chain moves to the next fallback when the current model fails for a reason another model can fix:
 
 - model not available (404 / model not found / no access);
 - API key missing or rejected;
@@ -52,16 +54,18 @@ An invalid request (400, malformed input, safety block) stops the chain, because
 switching models would not fix the product references.
 
 A hop whose API key is not set is **still attempted**. It fails at once with a
-message naming the secret (`OPENAI_API_KEY`, `META_MODEL_API_KEY`, `GEMINI_API_KEY`,
+message naming the secret (`META_MODEL_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
 `QWEN_API_KEY`), so the administrator can see why a configured fallback never answered.
 
 ## Reasoning effort for product analysis
 
-Product analysis is one large multimodal JSON call that must finish inside Studio's
-180s wait. High reasoning on it overran that budget, so `clampProductTruthThinking`
-runs product analysis at **low** reasoning (or the provider's lowest supported level),
-whatever is saved. Explicit "none" or "minimal" is preserved. Only the effort changes,
-never the model. QA keeps its saved reasoning, except that Gemini Flash models run at low.
+Product analysis is one large multimodal JSON call that must finish inside Studio's 180s wait.
+Heavy models (Terra, Flash, Sol, Muse Spark) run at **low** reasoning (or the provider's lowest
+supported level) to fit that budget. Explicit "none" or "minimal" is preserved. OpenAI Luna
+is lightweight and cost-efficient (~$0.20 / $1.20 per 1M tokens); when explicitly configured
+with **high** thinking, it preserves high thinking to provide thorough chain-of-thought
+reasoning across scene, styling, and 6-pose plans without timing out. QA keeps its saved reasoning,
+except that Gemini Flash models run at low.
 
 ## Time budget (product analysis)
 
@@ -111,7 +115,8 @@ OpenAI and Meta Muse Spark vision calls support dual protocols:
 
 | Purpose | Primary | Fallback |
 | --- | --- | --- |
-| `product_truth`, `qa` | OpenAI `gpt-5.6-luna`, or Meta `muse-spark-1.3` when only the Meta key is set | OpenAI `gpt-5.6-terra` |
+| `product_truth` | Meta `muse-spark-1.3` (or `muse-spark-1.3-contributor`), or OpenAI `gpt-5.6-luna` when Meta key is not set | Hop 1: OpenAI `gpt-5.6-luna` (high thinking) · Hop 2: OpenAI `gpt-5.6-terra` (low) |
+| `qa` | OpenAI `gpt-5.6-luna` | OpenAI `gpt-5.6-terra` |
 | `image_generation` | OpenAI `gpt-image-2.5-flare-2026-09-08` | — |
 
 Image quality defaults to `medium` (`DEFAULT_IMAGE_QUALITY`); see
