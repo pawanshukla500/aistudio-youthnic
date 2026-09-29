@@ -391,6 +391,11 @@ export function extractLearnedPromptPatterns(args: {
     if (matched.some(poseFailed)) return "failure" as const;
     return null;
   };
+  const shootOutcomeFor = (matched: Array<{ status?: string }>) => {
+    if (matched.some(poseFailed)) return "failure" as const;
+    if (matched.length > 0 && matched.every(poseCompleted)) return "success" as const;
+    return null;
+  };
   const extracted: LearnedPromptPattern[] = [];
 
   if (args.hasStyleReference) {
@@ -468,7 +473,7 @@ export function extractLearnedPromptPatterns(args: {
     ));
   }
 
-  const overallOutcome = outcomeFor(poses);
+  const overallOutcome = shootOutcomeFor(poses);
   if (overallOutcome) {
     extracted.push(pattern(
       "pose",
