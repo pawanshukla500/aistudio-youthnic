@@ -949,21 +949,16 @@ Deno.test("Meta Muse Spark thinking levels and provider failure details", () => 
   assertEquals(contributorLevels.includes("minimal"), true);
   assertEquals(contributorLevels.includes("none"), false);
 
-  // Informative 404 details are appended to guide administrators
-  const informative404 = classifyVisionProviderFailure("meta", {
+  // 404 failure returns safe, standardized message without echoing raw provider strings
+  const unavailable404 = classifyVisionProviderFailure("meta", {
     status: 404,
     message: "Endpoint /v1/chat/completions does not serve this model. Use /v1/responses.",
   });
-  assertEquals(informative404.code, "provider_unavailable");
-  assertEquals(informative404.fallbackEligible, true);
-  assert(informative404.message.includes("Endpoint /v1/chat/completions does not serve this model"));
-
-  // Generic 404 defaults to standard advice
-  const generic404 = classifyVisionProviderFailure("meta", {
-    status: 404,
-    message: "meta vision request failed (404).",
-  });
-  assertEquals(generic404.code, "provider_unavailable");
-  assert(generic404.message.includes("Check the model in Administration and the provider account."));
+  assertEquals(unavailable404.code, "provider_unavailable");
+  assertEquals(unavailable404.fallbackEligible, true);
+  assertEquals(
+    unavailable404.message,
+    "This model is not available to the configured API key (model not found, or the account has no access to it). Check the model in Administration and the provider account.",
+  );
 });
 
