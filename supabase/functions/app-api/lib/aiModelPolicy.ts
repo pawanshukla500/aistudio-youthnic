@@ -528,14 +528,21 @@ export async function runVisionProviderChain<T>(args: {
     throw new Error("No approved vision provider route is available.");
   }
 
-  const emit = async (attempt: VisionHopAttempt) => {
+  // A hop's telemetry write starts before the next hop but is not waited on:
+  // time spent writing would come out of the fallback's share of the budget.
+  // Every write is settled before the chain returns or throws.
+  const writes: Promise<void>[] = [];
+  const emit = (attempt: VisionHopAttempt) => {
     attempts.push(attempt);
-    try {
-      await args.onAttempt?.(attempt);
-    } catch {
-      // Telemetry must never hide a successful later hop.
-    }
+    writes.push((async () => {
+      try {
+        await args.onAttempt?.(attempt);
+      } catch {
+        // Telemetry must never hide a successful later hop.
+      }
+    })());
   };
+  const settleWrites = () => Promise.all(writes);
 
   const chainError = (failure: VisionProviderFailure | null, route: NormalizedAiModelRoute) => {
     const message = visionChainFailureMessage(attempts, args.routes.length);
@@ -562,7 +569,7 @@ export async function runVisionProviderChain<T>(args: {
         name: "TimeoutError",
         message: "The selected vision provider timed out.",
       });
-      await emit({
+      emit({
         provider: route.provider as AiProvider,
         model: route.model,
         thinkingLevel: route.thinkingLevel,
@@ -579,7 +586,7 @@ export async function runVisionProviderChain<T>(args: {
         () => args.invoke(route, timeoutMs),
         timeoutMs,
       );
-      await emit({
+      emit({
         provider: route.provider as AiProvider,
         model: route.model,
         thinkingLevel: route.thinkingLevel,
@@ -587,11 +594,12 @@ export async function runVisionProviderChain<T>(args: {
         latencyMs: now() - hopStarted,
         attemptNumber: index + 1,
       });
+      await settleWrites();
       return { value, route, attempts };
     } catch (error) {
       const failure = args.classify(route, error);
       lastFailure = failure;
-      await emit({
+      emit({
         provider: route.provider as AiProvider,
         model: route.model,
         thinkingLevel: route.thinkingLevel,
@@ -603,11 +611,13 @@ export async function runVisionProviderChain<T>(args: {
       });
       const remaining = args.routes.length - index - 1;
       if (!shouldContinueVisionFallback(failure, remaining)) {
+        await settleWrites();
         throw chainError(failure, route);
       }
     }
   }
 
+  await settleWrites();
   throw chainError(lastFailure, lastRoute);
 }
 

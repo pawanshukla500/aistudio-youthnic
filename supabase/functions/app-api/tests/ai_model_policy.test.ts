@@ -788,6 +788,54 @@ Deno.test("failed hops are persisted before the next provider is invoked", async
   ]);
 });
 
+Deno.test("a slow telemetry write neither delays nor shortens the fallback, and is still awaited", async () => {
+  const routes = productTruthRouteChain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR);
+  let clock = 0;
+  let releaseWrite: () => void = () => {};
+  let writeFinished = false;
+  const fallbackTimeouts: number[] = [];
+  const events: string[] = [];
+  const chain = runVisionProviderChain({
+    routes,
+    purpose: "product_truth",
+    gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
+    now: () => clock,
+    invoke: async (route, timeoutMs) => {
+      events.push(`invoke:${route.model}`);
+      if (route.model === "gpt-5.6-terra") {
+        clock += 1_000;
+        throw Object.assign(new Error("model not found"), { status: 404 });
+      }
+      fallbackTimeouts.push(timeoutMs);
+      return { ok: true };
+    },
+    classify: (route, error) =>
+      classifyVisionProviderFailure(route.provider, {
+        message: error instanceof Error ? error.message : String(error),
+        status: (error as { status?: number }).status,
+      }),
+    onAttempt: async (attempt) => {
+      if (attempt.outcome !== "failed") return;
+      events.push(`write-started:${attempt.model}`);
+      // A database write that is still pending when the fallback starts.
+      await new Promise<void>((resolve) => { releaseWrite = resolve; });
+      clock += 30_000;
+      writeFinished = true;
+    },
+  });
+  // Let the fallback start while the write is still pending.
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assertEquals(events, ["invoke:gpt-5.6-terra", "write-started:gpt-5.6-terra", "invoke:muse-spark-1.3-contributor"]);
+  // The fallback got the full remaining wait: the pending write took nothing from it.
+  assertEquals(fallbackTimeouts, [STUDIO_INVOKE_BUDGET_MS - VISION_GATEWAY_RESERVE_MS - 1_000]);
+  assertEquals(writeFinished, false);
+  releaseWrite();
+  const result = await chain;
+  // The chain does not return until the failed hop's row is written.
+  assertEquals(writeFinished, true);
+  assertEquals(result.route.model, "muse-spark-1.3-contributor");
+});
+
 Deno.test("a failed chain names every configured model and why it failed", async () => {
   const routes = productTruthRouteChain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR);
   let thrown: unknown;
