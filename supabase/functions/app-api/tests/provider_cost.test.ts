@@ -227,5 +227,29 @@ Deno.test("estimateJobCostUsd scales by pose count, model, quality, QA, and anal
     analysisCostUsd: 0.04,
   });
   assertEquals(zeroPoses, 0.04);
+
+  // adminRates scaling: gpt-image-2 public rate imageOutput is 50 ($0.28/img).
+  // With admin rate snapshot of imageOutput: 25, price scales down to $0.14/img.
+  // 6 poses at high quality with default analysis $0.03 = 0.03 + 6 * 0.14 = 0.87 (vs 1.71).
+  const adminDerivedEstimate = estimateJobCostUsd({
+    posesCount: 6,
+    imageModel: "gpt-image-2",
+    quality: "high",
+    poseQa: false,
+    adminRates: {
+      "gpt-image-2": { imageOutput: 25 },
+    },
+  });
+  assertEquals(adminDerivedEstimate, 0.87);
+
+  // analysisCostUsd: null (e.g. query failed) falls back to default $0.03 analysis allowance
+  const failedAnalysisLoad = estimateJobCostUsd({
+    posesCount: 1,
+    imageModel: "gpt-image-2",
+    quality: "high",
+    poseQa: false,
+    analysisCostUsd: null,
+  });
+  assertEquals(failedAnalysisLoad, 0.31);
 });
 

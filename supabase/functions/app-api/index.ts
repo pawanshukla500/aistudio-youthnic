@@ -350,7 +350,7 @@ async function analysisCostUsdFor(args: { organizationId: string; sessionId: str
   const { data, error } = await query;
   if (error) {
     console.error(`Could not load analysis cost: ${error.message}`);
-    return 0;
+    return null;
   }
   return roundUsd((data || []).reduce((total, row) => total + Number(row.cost_usd || 0), 0));
 }
@@ -1966,6 +1966,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     requestedModel: String(args.model || "").trim() || null,
     bottomWearMode,
   };
+  const adminRates = await currentAdminRates();
   const analysisCostUsd = await analysisCostUsdFor({
     organizationId: workspace.organization.id,
     sessionId,
@@ -1983,8 +1984,9 @@ async function queueGeneration(request: Request, args: JsonRecord) {
       quality,
       poseQa: Boolean(args.poseQa),
       analysisCostUsd,
+      adminRates,
     }),
-    actual_cost_usd: analysisCostUsd, created_at: now, updated_at: now,
+    actual_cost_usd: Number(analysisCostUsd || 0), created_at: now, updated_at: now,
   };
   const poseRows = enabled.map((pose, index) => ({
     session_id: sessionId, generation_id: `${jobId}:pose:${index + 1}`, pose_index: index + 1,
@@ -6150,6 +6152,7 @@ async function queueCatalogVariantGeneration(
     sessionId,
     planningRequestId: String(variant.id),
   });
+  const adminRates = await currentAdminRates();
 
   const jobData = {
     skuId: String(variant.request_code || variant.id),
@@ -6190,8 +6193,9 @@ async function queueCatalogVariantGeneration(
       quality,
       poseQa: Boolean(generationSettings.poseQa),
       analysisCostUsd,
+      adminRates,
     }),
-    actual_cost_usd: analysisCostUsd,
+    actual_cost_usd: Number(analysisCostUsd || 0),
     created_at: queuedAt,
     updated_at: queuedAt,
   });

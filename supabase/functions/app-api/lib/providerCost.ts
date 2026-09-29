@@ -615,7 +615,15 @@ export function estimateJobCostUsd(args: {
 }): number {
   const poses = Math.max(0, Number(args.posesCount) || 0);
   const modelKey = normalizeModelKey(args.imageModel);
-  const basePerImage = DEFAULT_ESTIMATED_IMAGE_COST_USD[modelKey] ?? 0.20;
+  const publicBase = DEFAULT_ESTIMATED_IMAGE_COST_USD[modelKey] ?? 0.20;
+  const admin = lookupAdminRates(args.imageModel, args.adminRates);
+  const publicRates = IMAGE_TOKEN_RATES[args.imageModel] || IMAGE_TOKEN_RATES[modelKey];
+  let basePerImage = publicBase;
+  if (admin?.imageOutput && publicRates?.imageOutput) {
+    basePerImage = roundUsd(publicBase * (admin.imageOutput / publicRates.imageOutput));
+  } else if (admin?.imageOutput) {
+    basePerImage = roundUsd((admin.imageOutput * 5_500) / 1_000_000);
+  }
   const quality = String(args.quality || "high").toLowerCase();
   const qualityFactor = quality === "low" ? 0.75 : quality === "medium" ? 0.9 : 1.0;
   const imageTotal = poses * (basePerImage * qualityFactor);
