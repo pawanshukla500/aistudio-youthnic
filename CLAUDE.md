@@ -14,8 +14,9 @@ Six-pose fashion catalog photoshoots generated from product references.
    models that run, in that order. Never hardcode, insert, substitute, reroute, or
    silently drop a model, and never write to `organization_ai_model_policies` from
    code paths other than the Admin save. The only adjustment allowed is reasoning
-   effort: product analysis runs at low to fit the 140s Studio wait, and Gemini
-   Flash QA runs at low. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
+   effort: product analysis runs at low (or the model's lowest supported level;
+   Qwen runs with thinking off) to fit the 140s Studio wait, and Gemini Flash QA
+   runs at low. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
 2. **Product references are the truth.** Generated images, style references and
    learning rules never override the uploaded front/back/fabric product images.
 3. **One set per shoot.** Every pose prompt carries the same SCENE LOCK

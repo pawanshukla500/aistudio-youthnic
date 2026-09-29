@@ -788,7 +788,34 @@ Deno.test("failed hops are persisted before the next provider is invoked", async
   ]);
 });
 
-Deno.test("a slow telemetry write neither delays nor shortens the fallback, and is still awaited", async () => {
+Deno.test("a failed hop's row is written before the fallback starts", async () => {
+  const routes = productTruthRouteChain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR);
+  let terraRowWritten = false;
+  let rowWrittenWhenFallbackStarted: boolean | null = null;
+  await runVisionProviderChain({
+    routes,
+    purpose: "product_truth",
+    gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
+    invoke: async (route) => {
+      if (route.model === "gpt-5.6-terra") throw Object.assign(new Error("model not found"), { status: 404 });
+      rowWrittenWhenFallbackStarted = terraRowWritten;
+      return { ok: true };
+    },
+    classify: (route, error) =>
+      classifyVisionProviderFailure(route.provider, {
+        message: error instanceof Error ? error.message : String(error),
+        status: (error as { status?: number }).status,
+      }),
+    onAttempt: async (attempt) => {
+      if (attempt.outcome !== "failed") return;
+      await new Promise((resolve) => setTimeout(resolve, 5)); // a normal, quick insert
+      terraRowWritten = true;
+    },
+  });
+  assertEquals(rowWrittenWhenFallbackStarted, true);
+});
+
+Deno.test("a stalled telemetry write takes at most the capped wait from the fallback, and is still awaited", async () => {
   const routes = productTruthRouteChain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR);
   let clock = 0;
   let releaseWrite: () => void = () => {};
@@ -800,6 +827,7 @@ Deno.test("a slow telemetry write neither delays nor shortens the fallback, and 
     purpose: "product_truth",
     gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
     now: () => clock,
+    telemetryWaitMs: 1,
     invoke: async (route, timeoutMs) => {
       events.push(`invoke:${route.model}`);
       if (route.model === "gpt-5.6-terra") {
@@ -823,8 +851,8 @@ Deno.test("a slow telemetry write neither delays nor shortens the fallback, and 
       writeFinished = true;
     },
   });
-  // Let the fallback start while the write is still pending.
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  // The write is stalled; the fallback starts once the capped wait ends.
+  await new Promise((resolve) => setTimeout(resolve, 50));
   assertEquals(events, ["invoke:gpt-5.6-terra", "write-started:gpt-5.6-terra", "invoke:muse-spark-1.3-contributor"]);
   // The fallback got the full remaining wait: the pending write took nothing from it.
   assertEquals(fallbackTimeouts, [STUDIO_INVOKE_BUDGET_MS - VISION_GATEWAY_RESERVE_MS - 1_000]);
@@ -875,6 +903,7 @@ Deno.test("a single configured model says there is no fallback; a hard failure s
   const terraFailure = {
     provider: "openai" as const,
     model: "gpt-5.6-terra",
+    outcome: "failed" as const,
     failureCode: "provider_unavailable",
     failureMessage: "This model is not available to the configured API key.",
   };
@@ -886,4 +915,14 @@ Deno.test("a single configured model says there is no fallback; a hard failure s
   assert(visionChainFailureMessage([invalid], 2).endsWith("The configured fallback was not tried because this failure cannot be fixed by switching models."));
   assertEquals(visionRouteLabel(ADMIN_MUSE_CONTRIBUTOR), "Meta muse-spark-1.3-contributor");
   assertEquals(visionChainFailureMessage([], 2), "No approved vision provider route is available.");
+  // A failed hop is named even when it carries no message or code.
+  assertEquals(
+    visionChainFailureMessage([{ provider: "meta", model: "muse-spark-1.3", outcome: "failed" }], 1),
+    "Meta muse-spark-1.3: vision_request_failed No fallback model is configured for this purpose in Administration.",
+  );
+  // A completed hop is never listed as a failure.
+  assertEquals(
+    visionChainFailureMessage([{ provider: "meta", model: "muse-spark-1.3", outcome: "completed" }], 1),
+    "No approved vision provider route is available.",
+  );
 });

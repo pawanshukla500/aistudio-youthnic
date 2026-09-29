@@ -34,7 +34,9 @@ can be saved or called.
 ## Order and fallback
 
 For a vision purpose, the chain is `[primary, fallback]` exactly as saved
-(`productTruthRouteChain`). A fallback identical to the primary runs once.
+(`productTruthRouteChain`). Administration refuses to save a fallback identical to the
+primary ("Choose a different fallback provider or model."); an older row that has one
+runs that model once.
 
 The chain moves to the fallback when the primary fails for a reason another model can fix:
 
@@ -99,7 +101,10 @@ the Responses API, the error reported is the Responses API's.
   - `error_message` reads `"<Provider> <model>: <reason>"`.
 
   A failed fallback hop is recorded too; before this change a failed second hop was
-  silently lost.
+  silently lost. The chain waits up to `VISION_TELEMETRY_WAIT_MS` (2s) for a failed
+  hop's row before starting the next hop, so the row normally exists before the fallback
+  runs, and a stalled database costs the fallback at most 2s. Every write is awaited
+  before the chain returns.
 
 ## Defaults (no saved policy)
 
