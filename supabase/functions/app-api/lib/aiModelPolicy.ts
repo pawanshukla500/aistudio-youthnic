@@ -238,8 +238,8 @@ export function defaultThinkingLevel(
 }
 
 /**
- * Muse Spark remains allowed as an explicit org override, but it is never the
- * automatic first hop. Studio Analyze uses OpenAI Luna.
+ * Fallback defaults, used only when an organization has saved no policy for a
+ * purpose. A saved Administration policy is always used as configured.
  */
 export const FAST_PRODUCT_TRUTH_ROUTE = {
   provider: "meta",
@@ -267,16 +267,19 @@ export const OPENAI_TERRA_VISION_ROUTE = {
 
 /**
  * Studio Analyze uses `supabase.functions.invoke("app-api")`. Without an
- * explicit client timeout the browser/SDK aborts around 55–60s.
- *
- * The Studio client waits `STUDIO_ANALYZE_TIMEOUT_MS` (140s). Product-truth
- * uses OpenAI Luna first (same `OPENAI_API_KEY` as image generation). Gemini
- * is not part of the automatic chain. Muse, if stored, is last and capped.
+ * explicit client timeout the browser/SDK aborts around 55–60s, so the Studio
+ * client waits `STUDIO_ANALYZE_TIMEOUT_MS` (140s) and the product-truth chain
+ * is budgeted inside that wait.
  */
 export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
 export const STUDIO_INVOKE_BUDGET_MS = STUDIO_ANALYZE_TIMEOUT_MS;
 export const PRODUCT_TRUTH_TIMEOUT_MS = 40_000;
-export const PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS = 25_000;
+/**
+ * Product truth keeps this much of the wait for the configured fallback while
+ * the primary runs. A primary that fails fast (a 404, a missing key) hands the
+ * fallback almost the whole wait; a primary that hangs cannot starve it.
+ */
+export const PRODUCT_TRUTH_FALLBACK_RESERVE_MS = 40_000;
 export const VISION_PROVIDER_TIMEOUT_MS = 50_000;
 export const VISION_GATEWAY_BUDGET_MS = 145_000;
 /** Held back inside the chain: parsing a hop's reply and recording the attempt. */
@@ -292,33 +295,23 @@ export const VISION_GATEWAY_RESERVE_MS = 5_000;
 export const VISION_REQUEST_OVERHEAD_MS = 5_000;
 export const PRODUCT_TRUTH_MIN_SLICE_MS = 10_000;
 export const VISION_HOP_MIN_MS = 8_000;
-export const VISION_ROUTE_PROMOTION_THRESHOLD = 4;
-
 /**
- * Studio product-truth hops: OpenAI Luna first. A stored Muse/Qwen/Terra
- * route can still run after that. Gemini and Sol are omitted — this project
- * uses the OpenAI API key for vision work. Keeping the automatic chain to a
- * single OpenAI hop lets Luna use the remaining 140s Studio wait.
+ * How long the chain waits for a failed hop's telemetry write before starting
+ * the next hop. A normal write lands well inside it, so the row exists before
+ * the fallback runs; a stalled database can take at most this much of the
+ * fallback's budget. Every write is still awaited before the chain returns.
  */
-export const PRODUCT_TRUTH_FAILOVER_CHAIN: readonly NormalizedAiModelRoute[] = [
-  CHEAP_OPENAI_VISION_ROUTE,
-];
-
-const FAST_OPENAI_THINKING: readonly AiThinkingLevel[] = ["none", "low"];
+export const VISION_TELEMETRY_WAIT_MS = 2_000;
 
 function routeKey(route: Pick<NormalizedAiModelRoute, "provider" | "model">) {
   return `${text(route.provider)}:${text(route.model)}`;
 }
 
-export function isSlowReasoningVisionRoute(route: Pick<NormalizedAiModelRoute, "provider" | "thinkingLevel">) {
-  return route.provider === "openai" &&
-    !FAST_OPENAI_THINKING.includes(route.thinkingLevel);
-}
-
 /**
- * Product-truth analyze must stay on low/minimal thinking even when Admin saved
- * `high`. High reasoning on Luna is as slow as Sol for this workload and misses
- * the Edge budget.
+ * Product-truth analyze runs on low/minimal thinking even when Admin saved a
+ * higher level: this is one large multimodal JSON call inside Studio's 140s
+ * wait, and high reasoning on it missed that budget. The model choice is never
+ * changed here, only its reasoning effort.
  */
 export function clampProductTruthThinking(route: NormalizedAiModelRoute): AiThinkingLevel {
   const allowed = allowedThinkingLevels(route, "product_truth", { strictJson: true });
@@ -332,35 +325,6 @@ export function withFastProductTruthThinking(
   route: NormalizedAiModelRoute,
 ): NormalizedAiModelRoute {
   return { ...route, thinkingLevel: clampProductTruthThinking(route) };
-}
-
-export function isOmittedProductTruthHop(
-  route?: Pick<NormalizedAiModelRoute, "provider" | "model"> | null,
-) {
-  if (!route) return false;
-  if (text(route.provider) === "gemini") return true;
-  return route.provider === "openai" && route.model === "gpt-5.6-sol";
-}
-
-export function isSlowProductTruthHop(
-  route?: Pick<NormalizedAiModelRoute, "provider" | "model"> | null,
-) {
-  if (!route) return false;
-  if (route.provider === "meta") return true;
-  if (route.provider === "openai" && route.model === "gpt-5.6-terra") return true;
-  return false;
-}
-
-export function productTruthHopTimeoutMs(
-  providerOrRoute?: AiProvider | Pick<NormalizedAiModelRoute, "provider" | "model"> | null,
-  model?: string,
-): number {
-  if (!providerOrRoute) return PRODUCT_TRUTH_TIMEOUT_MS;
-  const route = typeof providerOrRoute === "string"
-    ? { provider: providerOrRoute, model: model || "" }
-    : providerOrRoute;
-  if (isSlowProductTruthHop(route)) return PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS;
-  return PRODUCT_TRUTH_TIMEOUT_MS;
 }
 
 /**
@@ -383,26 +347,26 @@ export function productTruthGatewayBudgetMs(configured?: number) {
   return Math.min(value, STUDIO_INVOKE_BUDGET_MS - VISION_REQUEST_OVERHEAD_MS);
 }
 
+/**
+ * The routes product-truth analysis tries, in order: exactly the primary and
+ * the fallback saved in Administration. No model is inserted ahead of them,
+ * substituted for them, or dropped from the chain; a duplicate fallback runs
+ * once. Only the reasoning effort is capped (see `clampProductTruthThinking`).
+ */
 export function productTruthRouteChain(
   primary: NormalizedAiModelRoute,
-  existingFallback?: NormalizedAiModelRoute,
+  fallback?: NormalizedAiModelRoute,
 ): NormalizedAiModelRoute[] {
   const chain: NormalizedAiModelRoute[] = [];
   const seen = new Set<string>();
-  const push = (route?: NormalizedAiModelRoute | null) => {
-    if (!route) return;
-    if (isOmittedProductTruthHop(route)) return;
+  for (const route of [primary, fallback]) {
+    if (!route) continue;
     const next = withFastProductTruthThinking(route);
     const key = routeKey(next);
-    if (seen.has(key)) return;
+    if (seen.has(key)) continue;
     seen.add(key);
     chain.push(next);
-  };
-  // OpenAI Luna first so a leftover Gemini or Muse org policy cannot consume
-  // the client wait before the configured OpenAI key is used.
-  for (const hop of PRODUCT_TRUTH_FAILOVER_CHAIN) push(hop);
-  push(primary);
-  push(existingFallback);
+  }
   return chain;
 }
 
@@ -441,23 +405,23 @@ export function remainingVisionTimeoutMs(args: {
   elapsedMs: number;
   gatewayBudgetMs: number;
   preferredTimeoutMs?: number;
-  route?: Pick<NormalizedAiModelRoute, "provider" | "model">;
 }): number {
-  const preferred = args.preferredTimeoutMs ??
-    (args.purpose === "product_truth"
-      ? productTruthHopTimeoutMs(args.route)
-      : VISION_PROVIDER_TIMEOUT_MS);
   const remainingWall = Math.max(
     0,
     args.gatewayBudgetMs - args.elapsedMs - VISION_GATEWAY_RESERVE_MS,
   );
   if (remainingWall <= 0) return 0;
-  // Product-truth Studio client waits 140s. The last hop (usually Luna) gets
-  // the remaining wall so a single OpenAI route is not capped at 40–90s.
+  // Product truth: the last hop gets whatever is left of the Studio wait; an
+  // earlier hop gets it minus a fixed reserve for each hop still to come.
   if (args.purpose === "product_truth") {
     if (args.remainingRouteCount <= 1) return remainingWall;
-    return Math.min(preferred, remainingWall);
+    const reservedForLater = PRODUCT_TRUTH_FALLBACK_RESERVE_MS * (args.remainingRouteCount - 1);
+    return Math.max(
+      Math.min(PRODUCT_TRUTH_MIN_SLICE_MS, remainingWall),
+      remainingWall - reservedForLater,
+    );
   }
+  const preferred = args.preferredTimeoutMs ?? VISION_PROVIDER_TIMEOUT_MS;
   if (args.remainingRouteCount <= 1) return Math.min(preferred, remainingWall);
   const reservedForLater = PRODUCT_TRUTH_MIN_SLICE_MS *
     Math.max(0, args.remainingRouteCount - 1);
@@ -481,6 +445,8 @@ export type VisionHopAttempt = {
   thinkingLevel: AiThinkingLevel;
   outcome: "completed" | "failed";
   failureCode?: string;
+  /** Why this hop failed, in words an administrator can act on. */
+  failureMessage?: string;
   latencyMs: number;
   attemptNumber: number;
 };
@@ -509,6 +475,43 @@ export function visionAttemptTelemetryRows(
   }));
 }
 
+const PROVIDER_LABELS: Record<string, string> = {
+  openai: "OpenAI",
+  meta: "Meta",
+  gemini: "Gemini",
+  qwen: "Qwen",
+  reve: "Reve",
+};
+
+/** "OpenAI gpt-5.6-terra" - the provider and the exact model id that was called. */
+export function visionRouteLabel(route: Pick<NormalizedAiModelRoute, "provider" | "model">) {
+  return `${PROVIDER_LABELS[text(route.provider)] || text(route.provider)} ${text(route.model)}`;
+}
+
+/**
+ * What the person sees when analysis or QA could not run: every configured
+ * model that was tried and why each one failed, so a wrong model id, a missing
+ * key or an exhausted budget is named instead of hidden behind "a fallback can
+ * be used".
+ */
+export function visionChainFailureMessage(
+  attempts: Pick<VisionHopAttempt, "provider" | "model" | "outcome" | "failureMessage" | "failureCode">[],
+  configuredRouteCount: number,
+): string {
+  const failed = attempts.filter((attempt) => attempt.outcome === "failed");
+  if (!failed.length) return "No approved vision provider route is available.";
+  const lines = failed.map((attempt) =>
+    `${visionRouteLabel(attempt)}: ${attempt.failureMessage || attempt.failureCode || "vision_request_failed"}`
+  );
+  const untried = configuredRouteCount - attempts.length;
+  const tail = configuredRouteCount <= 1
+    ? " No fallback model is configured for this purpose in Administration."
+    : untried > 0
+      ? " The configured fallback was not tried because this failure cannot be fixed by switching models."
+      : "";
+  return `${failed.length > 1 ? "Every configured vision model failed. " : ""}${lines.join(" · ")}${tail}`;
+}
+
 export async function runVisionProviderChain<T>(args: {
   routes: NormalizedAiModelRoute[];
   purpose: string;
@@ -518,10 +521,12 @@ export async function runVisionProviderChain<T>(args: {
   now?: () => number;
   /**
    * Fired after each hop is finished, before the next hop starts. Studio uses
-   * this to persist Muse/Luna failures immediately so a later abort still
-   * leaves Meta rows in `ai_runs`.
+   * this to persist a failed hop immediately so a later abort still leaves its
+   * row in `ai_runs`.
    */
   onAttempt?: (attempt: VisionHopAttempt) => Promise<void> | void;
+  /** Override for tests; see `VISION_TELEMETRY_WAIT_MS`. */
+  telemetryWaitMs?: number;
 }): Promise<{ value: T; route: NormalizedAiModelRoute; attempts: VisionHopAttempt[] }> {
   const now = args.now || Date.now;
   const started = now();
@@ -532,13 +537,39 @@ export async function runVisionProviderChain<T>(args: {
     throw new Error("No approved vision provider route is available.");
   }
 
+  // A failed hop's telemetry is written before the next hop starts, but the
+  // wait is capped: a stalled write must not spend the fallback's budget.
+  // Any write still running then is awaited before the chain returns or throws.
+  const telemetryWaitMs = args.telemetryWaitMs ?? VISION_TELEMETRY_WAIT_MS;
+  const writes: Promise<void>[] = [];
   const emit = async (attempt: VisionHopAttempt) => {
     attempts.push(attempt);
-    try {
-      await args.onAttempt?.(attempt);
-    } catch {
-      // Telemetry must never hide a successful later hop.
-    }
+    const write = (async () => {
+      try {
+        await args.onAttempt?.(attempt);
+      } catch {
+        // Telemetry must never hide a successful later hop.
+      }
+    })();
+    writes.push(write);
+    if (attempt.outcome !== "failed") return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      write,
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, telemetryWaitMs); }),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+  };
+  const settleWrites = () => Promise.all(writes);
+
+  const chainError = (failure: VisionProviderFailure | null, route: NormalizedAiModelRoute) => {
+    const message = visionChainFailureMessage(attempts, args.routes.length);
+    return Object.assign(new Error(message), {
+      name: "VisionChainError",
+      failure: failure ? { ...failure, message } : null,
+      attempts,
+      route,
+    });
   };
 
   for (let index = 0; index < args.routes.length; index += 1) {
@@ -549,7 +580,6 @@ export async function runVisionProviderChain<T>(args: {
       remainingRouteCount: args.routes.length - index,
       elapsedMs: now() - started,
       gatewayBudgetMs: args.gatewayBudgetMs,
-      route,
     });
     const hopStarted = now();
     if (timeoutMs < VISION_HOP_MIN_MS) {
@@ -563,6 +593,7 @@ export async function runVisionProviderChain<T>(args: {
         thinkingLevel: route.thinkingLevel,
         outcome: "failed",
         failureCode: lastFailure.code,
+        failureMessage: "Not started: the time left in this request was too short to call it.",
         latencyMs: now() - hopStarted,
         attemptNumber: index + 1,
       });
@@ -581,6 +612,7 @@ export async function runVisionProviderChain<T>(args: {
         latencyMs: now() - hopStarted,
         attemptNumber: index + 1,
       });
+      await settleWrites();
       return { value, route, attempts };
     } catch (error) {
       const failure = args.classify(route, error);
@@ -591,177 +623,20 @@ export async function runVisionProviderChain<T>(args: {
         thinkingLevel: route.thinkingLevel,
         outcome: "failed",
         failureCode: failure.code,
+        failureMessage: failure.message,
         latencyMs: now() - hopStarted,
         attemptNumber: index + 1,
       });
       const remaining = args.routes.length - index - 1;
       if (!shouldContinueVisionFallback(failure, remaining)) {
-        throw Object.assign(new Error(failure.message), {
-          name: "VisionChainError",
-          failure,
-          attempts,
-          route,
-        });
+        await settleWrites();
+        throw chainError(failure, route);
       }
     }
   }
 
-  throw Object.assign(
-    new Error(
-      lastFailure?.message || "No approved vision provider route is available.",
-    ),
-    {
-      name: "VisionChainError",
-      failure: lastFailure,
-      attempts,
-      route: lastRoute,
-    },
-  );
-}
-
-export type VisionPromotionRun = {
-  provider: string;
-  model: string;
-  status: string;
-};
-
-const PROMOTABLE_PRODUCT_TRUTH_ROUTES: Record<string, NormalizedAiModelRoute> = {
-  "gpt-5.6-luna": CHEAP_OPENAI_VISION_ROUTE,
-  "gpt-5.6-terra": OPENAI_TERRA_VISION_ROUTE,
-};
-
-function isSameVisionRoute(
-  left: { provider: string; model: string },
-  right: { provider: string; model: string },
-) {
-  return text(left.provider) === text(right.provider) &&
-    text(left.model) === text(right.model);
-}
-
-/**
- * Promote a proven product-truth model from live `ai_runs` completions.
- * Consecutive newest-first streak wins; if the stored primary has zero
- * completions in the window, the promotable model with the most completions
- * is used instead. Only OpenAI Luna/Terra are auto-promoted.
- */
-export function evaluateVisionRoutePromotion(args: {
-  primary: Pick<NormalizedAiModelRoute, "provider" | "model">;
-  recentSuccessfulRuns: VisionPromotionRun[];
-  threshold?: number;
-}): NormalizedAiModelRoute | null {
-  const threshold = args.threshold ?? VISION_ROUTE_PROMOTION_THRESHOLD;
-  const recent = args.recentSuccessfulRuns.filter((run) =>
-    run.status === "completed"
-  );
-  if (!recent.length) return null;
-  const candidate = recent[0];
-  if (!isSameVisionRoute(candidate, args.primary)) {
-    const consecutiveRoute = PROMOTABLE_PRODUCT_TRUTH_ROUTES[text(candidate.model)];
-    if (consecutiveRoute) {
-      let streak = 0;
-      for (const run of recent) {
-        if (
-          text(run.model) === text(candidate.model) &&
-          text(run.provider) === text(candidate.provider)
-        ) {
-          streak += 1;
-          continue;
-        }
-        break;
-      }
-      if (streak >= threshold) {
-        return withFastProductTruthThinking(consecutiveRoute);
-      }
-    }
-  }
-
-  const primaryCount = recent.filter((run) =>
-    isSameVisionRoute(run, args.primary)
-  ).length;
-  if (primaryCount > 0) return null;
-  const counts = new Map<string, { count: number; route: NormalizedAiModelRoute }>();
-  for (const run of recent) {
-    const route = PROMOTABLE_PRODUCT_TRUTH_ROUTES[text(run.model)];
-    if (!route || isSameVisionRoute(run, args.primary)) continue;
-    const key = `${text(run.provider)}:${text(run.model)}`;
-    const current = counts.get(key);
-    counts.set(key, { count: (current?.count || 0) + 1, route });
-  }
-  let best: { count: number; route: NormalizedAiModelRoute } | null = null;
-  for (const entry of counts.values()) {
-    if (entry.count < threshold) continue;
-    if (!best || entry.count > best.count) best = entry;
-  }
-  return best ? withFastProductTruthThinking(best.route) : null;
-}
-
-export function promotionFallbackRoute(
-  promoted: NormalizedAiModelRoute,
-): NormalizedAiModelRoute {
-  if (text(promoted.model) === "gpt-5.6-luna") {
-    return withFastProductTruthThinking(OPENAI_TERRA_VISION_ROUTE);
-  }
-  return withFastProductTruthThinking(CHEAP_OPENAI_VISION_ROUTE);
-}
-
-export type FastProductTruthPreference = {
-  route: NormalizedAiModelRoute;
-  fallback?: NormalizedAiModelRoute;
-  rerouted: boolean;
-};
-
-/**
- * Prefer OpenAI Luna for product-truth analysis. Stored Gemini routes and
- * slow GPT reasoning (Sol / high thinking) are rerouted to Luna. Terra is
- * kept as the same-key fallback when no other usable fallback exists.
- * Muse/Qwen org primaries stay in the chain after Luna via
- * `productTruthRouteChain`. This helper is product-truth only — QA keeps
- * the administrator-selected route.
- */
-export function preferFastProductTruthRoute(
-  primary: NormalizedAiModelRoute,
-  existingFallback?: NormalizedAiModelRoute,
-): FastProductTruthPreference {
-  const luna = withFastProductTruthThinking(CHEAP_OPENAI_VISION_ROUTE);
-  const terra = withFastProductTruthThinking(OPENAI_TERRA_VISION_ROUTE);
-  const shouldRerouteToOpenAi =
-    primary.provider === "gemini" ||
-    isOmittedProductTruthHop(primary) ||
-    isSlowReasoningVisionRoute(primary);
-
-  if (shouldRerouteToOpenAi) {
-    const fallback = existingFallback &&
-        !isOmittedProductTruthHop(existingFallback) &&
-        !isSlowReasoningVisionRoute(existingFallback) &&
-        routeKey(existingFallback) !== routeKey(luna)
-      ? withFastProductTruthThinking(existingFallback)
-      : terra;
-    return { route: luna, fallback, rerouted: true };
-  }
-
-  if (
-    primary.provider === "openai" &&
-    primary.model === luna.model &&
-    (!existingFallback || isOmittedProductTruthHop(existingFallback))
-  ) {
-    return { route: luna, fallback: terra, rerouted: false };
-  }
-
-  return { route: primary, fallback: existingFallback, rerouted: false };
-}
-
-/**
- * Keep hops whose server-side secret is present. Gemini is omitted from the
- * product-truth chain separately; QA may still use a configured Gemini route.
- */
-export function selectConfiguredVisionRoutes(
-  routes: NormalizedAiModelRoute[],
-  configuredProviders: ReadonlySet<string> | readonly string[],
-): NormalizedAiModelRoute[] {
-  const configured = configuredProviders instanceof Set
-    ? configuredProviders
-    : new Set(configuredProviders);
-  return routes.filter((route) => configured.has(text(route.provider)));
+  await settleWrites();
+  throw chainError(lastFailure, lastRoute);
 }
 
 export function aiModelDisplayLabel(model: string): string {
@@ -1096,7 +971,7 @@ export function classifyVisionProviderFailure(
       status,
       false,
       true,
-      "The selected vision provider has reached its budget or quota. A configured fallback can be used; otherwise update its billing or choose another configured provider in Administration.",
+      "Its budget or quota is exhausted. Update the provider's billing or choose another model in Administration.",
     );
   }
 
@@ -1114,7 +989,7 @@ export function classifyVisionProviderFailure(
       status,
       false,
       true,
-      "The selected vision model is not available. A configured fallback can be used.",
+      "This model is not available to the configured API key (model not found, or the account has no access to it). Check the model in Administration and the provider account.",
     );
   }
 
@@ -1128,16 +1003,18 @@ export function classifyVisionProviderFailure(
       status,
       false,
       false,
-      "The vision request is invalid or unsupported. Check the selected model and product references before trying again.",
+      "The request was rejected as invalid or unsupported by this model. Check the selected model and the product references.",
     );
   }
 
   if (
     [401, 403].includes(status || 0) ||
-    /invalid[_\s-]*(?:api\s*)?key|unauthori[sz]ed|forbidden|authentication|permission[_\s-]*denied|is not configured in the supabase edge function/
+    /invalid[_\s-]*(?:api\s*)?key|unauthori[sz]ed|forbidden|authentication|permission[_\s-]*denied|is not configured in (?:the )?supabase edge function/
       .test(detail)
   ) {
-    const missingSecret = /is not configured in the supabase edge function/.test(detail);
+    // assertVisionProviderConfigured says "... is not configured in Supabase Edge
+    // Function secrets."; the old pattern required "the" and never matched it.
+    const missingSecret = /is not configured in (?:the )?supabase edge function/.test(detail);
     return failure(
       provider,
       "provider_authentication_failed",
@@ -1145,8 +1022,8 @@ export function classifyVisionProviderFailure(
       false,
       true,
       missingSecret
-        ? "The selected vision provider is not configured. A configured fallback can be used."
-        : `The selected vision provider (${provider}) is not authorized. An administrator must verify its server-side secret.`,
+        ? `Its API key (${providerSecretName(provider)}) is not configured on the server.`
+        : `Its API key (${providerSecretName(provider)}) was rejected as unauthorized. An administrator must check the server-side secret.`,
     );
   }
 
@@ -1159,7 +1036,7 @@ export function classifyVisionProviderFailure(
       status,
       true,
       true,
-      "The selected vision provider is temporarily rate-limited. The request can retry or use a configured fallback.",
+      "It is rate-limited right now. Try again shortly.",
     );
   }
 
@@ -1174,7 +1051,7 @@ export function classifyVisionProviderFailure(
       status,
       true,
       true,
-      "The selected vision provider timed out. The request can retry or use a configured fallback.",
+      "It did not answer in time.",
     );
   }
 
@@ -1188,7 +1065,7 @@ export function classifyVisionProviderFailure(
       status,
       true,
       true,
-      "The vision provider returned an incomplete response. The request can retry or use a configured fallback.",
+      "It returned an incomplete response.",
     );
   }
 
@@ -1203,7 +1080,7 @@ export function classifyVisionProviderFailure(
       status,
       true,
       true,
-      "The selected vision provider is temporarily unavailable. The request can retry or use a configured fallback.",
+      "It is temporarily unavailable (server error). Try again shortly.",
     );
   }
 
@@ -1213,7 +1090,7 @@ export function classifyVisionProviderFailure(
     status,
     false,
     true,
-    "The selected vision provider could not complete this request. The request can use a configured fallback; review provider configuration and product references if all routes fail.",
+    "It could not complete this request.",
   );
 }
 

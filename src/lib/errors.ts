@@ -45,11 +45,11 @@ export function isGatewayCutFailure(args: InvokeFailureShape): boolean {
     haystack.includes("failed to send a request to the edge function");
 }
 
-/** Must cover VISION_GATEWAY_BUDGET_MS so a single OpenAI Luna hop can finish. */
+/** Must cover VISION_GATEWAY_BUDGET_MS so the configured primary and fallback can both run. */
 export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
 
 export const ANALYZE_GATEWAY_CUT_MESSAGE =
-  "Analysis was interrupted before OpenAI could finish. Retry Analyze — GPT 5.6 Luna runs first on the configured OpenAI API key.";
+  "Analysis was interrupted before the configured vision model could finish. Retry Analyze.";
 
 export function isAnalyzeInvokeOperation(operation: string) {
   return ANALYZE_OPERATIONS.has(operation);

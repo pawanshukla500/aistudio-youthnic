@@ -44,21 +44,16 @@ import {
   VISION_GATEWAY_BUDGET_MS,
   VISION_HOP_MIN_MS,
   VISION_PROVIDER_TIMEOUT_MS,
-  VISION_ROUTE_PROMOTION_THRESHOLD,
   productTruthGatewayBudgetMs,
-  clampProductTruthThinking,
-  evaluateVisionRoutePromotion,
   geminiThinkingConfig,
-  preferFastProductTruthRoute,
   preferFastProductTruthThinking,
   productTruthRouteChain,
-  promotionFallbackRoute,
   providerSecretName,
   resolveStoredImageGenerationRoute,
   runVisionProviderChain,
-  selectConfiguredVisionRoutes,
   shouldRetrySameVisionRoute,
   visionAttemptTelemetryRows,
+  visionRouteLabel,
   type AiModelPurpose,
   type AiProvider,
   type AiThinkingLevel,
@@ -381,15 +376,10 @@ function visionFailureRecord(error: unknown, policy: {
   };
 }
 
-function visionHopFailureMessage(attempt: VisionAttempt, error?: unknown) {
+function visionHopFailureMessage(attempt: VisionAttempt) {
   if (attempt.outcome !== "failed") return "";
-  if (error instanceof VisionProviderError && error.model === attempt.model) {
-    return error.failure.message.slice(0, 1000);
-  }
-  if (attempt.failureCode === "provider_timeout") {
-    return "The selected vision provider timed out. The request can retry or use a configured fallback.";
-  }
-  return (attempt.failureCode || "vision_request_failed").slice(0, 1000);
+  const reason = attempt.failureMessage || attempt.failureCode || "vision_request_failed";
+  return `${visionRouteLabel(attempt)}: ${reason}`.slice(0, 1000);
 }
 
 async function recordVisionHopRuns(args: {
@@ -403,12 +393,14 @@ async function recordVisionHopRuns(args: {
   jobId?: string;
   planningRequestId?: string;
   batchId?: string | null;
-  error?: unknown;
 }) {
-  const hops = visionAttemptTelemetryRows(args.attempts);
   const ids: string[] = [];
-  for (const hop of hops) {
-    if (hop.status !== "failed") continue;
+  // Hops arrive one at a time (attempts: [attempt]), so pair each row with its
+  // own attempt. Indexing by attemptNumber found nothing for a failed second
+  // hop, threw, and the configured fallback's failure was never recorded.
+  for (const attempt of args.attempts) {
+    if (attempt.outcome !== "failed") continue;
+    const [hop] = visionAttemptTelemetryRows([attempt]);
     const id = await recordAiRun({
       organization_id: args.organizationId,
       planning_request_id: args.planningRequestId || null,
@@ -430,10 +422,7 @@ async function recordVisionHopRuns(args: {
       latency_ms: hop.latencyMs,
       cost_usd: 0,
       cost_source: "provider_cost_not_available",
-      error_message: visionHopFailureMessage(
-        args.attempts[hop.attemptNumber - 1],
-        args.error,
-      ),
+      error_message: visionHopFailureMessage(attempt),
       output_json: {
         errorCode: hop.errorCode || "vision_request_failed",
         attemptNumber: hop.attemptNumber,
@@ -443,68 +432,6 @@ async function recordVisionHopRuns(args: {
     if (id) ids.push(id);
   }
   return ids;
-}
-
-async function maybePromoteProvenVisionRoute(
-  orgId: string,
-  policy: VisionPolicy,
-  attempts: VisionAttempt[],
-) {
-  if (policy.purpose !== "product_truth" || policy.source !== "organization") return;
-  const winner = attempts.find((attempt) => attempt.outcome === "completed");
-  if (!winner) return;
-  const { data, error } = await service.from("ai_runs")
-    .select("provider, model, status, created_at")
-    .eq("organization_id", orgId)
-    .eq("run_kind", "product_reference_analysis")
-    .eq("status", "completed")
-    .order("created_at", { ascending: false })
-    .limit(12);
-  if (error) {
-    console.error(`Could not evaluate vision route promotion: ${error.message}`);
-    return;
-  }
-  const promoted = evaluateVisionRoutePromotion({
-    primary: { provider: policy.provider, model: policy.model },
-    recentSuccessfulRuns: (data || []).map((row) => ({
-      provider: String(row.provider || ""),
-      model: String(row.model || ""),
-      status: String(row.status || ""),
-    })),
-    threshold: VISION_ROUTE_PROMOTION_THRESHOLD,
-  });
-  if (!promoted) return;
-  const fallback = promotionFallbackRoute(promoted);
-  const { error: updateError } = await service.from("organization_ai_model_policies").update({
-    primary_provider: promoted.provider,
-    primary_model: promoted.model,
-    primary_reasoning: promoted.thinkingLevel,
-    fallback_enabled: true,
-    fallback_provider: fallback.provider,
-    fallback_model: fallback.model,
-    fallback_reasoning: fallback.thinkingLevel,
-    updated_by_member_id: null,
-  }).eq("organization_id", orgId).eq("purpose", "product_truth");
-  if (updateError) {
-    console.error(`Could not auto-promote vision route: ${updateError.message}`);
-    return;
-  }
-  await service.from("audit_logs").insert({
-    organization_id: orgId,
-    actor_member_id: null,
-    actor_email: "system:vision-promotion",
-    action: "ai_model_policies.auto_promoted",
-    resource_type: "organization_ai_model_policies",
-    resource_id: orgId,
-    metadata: {
-      purpose: "product_truth",
-      from: `${policy.provider}:${policy.model}`,
-      to: `${promoted.provider}:${promoted.model}`,
-      fallback: `${fallback.provider}:${fallback.model}`,
-      threshold: VISION_ROUTE_PROMOTION_THRESHOLD,
-      reason: "consecutive_successful_product_truth_runs",
-    },
-  });
 }
 
 type ReferenceInput = {
@@ -732,8 +659,8 @@ async function resolveVisionPolicy(orgId: string, args: {
 
 function applyFastProductTruthRouting(policy: VisionPolicy): VisionPolicy {
   if (policy.purpose !== "product_truth" && policy.purpose !== "qa") return policy;
-  // Product-truth is forced onto Luna so Studio Analyze uses OPENAI_API_KEY.
-  // QA keeps the administrator-selected provider, including Gemini.
+  // The models saved in Administration are the models that run, for product
+  // truth and QA alike. Only reasoning effort is adjusted to fit the time budget.
   if (policy.purpose === "qa") {
     return {
       ...policy,
@@ -743,25 +670,13 @@ function applyFastProductTruthRouting(policy: VisionPolicy): VisionPolicy {
         : policy.fallback,
     };
   }
-  const preferred = preferFastProductTruthRoute({
+  const [primary, ...fallbacks] = productTruthRouteChain({
     provider: policy.provider,
     model: policy.model,
     thinkingLevel: policy.thinkingLevel,
   }, policy.fallback);
-  let next = policy;
-  if (preferred.rerouted) {
-    next = { ...policy, ...preferred.route, fallback: preferred.fallback };
-  } else if (preferred.fallback) {
-    next = { ...policy, fallback: preferred.fallback };
-  }
-  const chain = productTruthRouteChain({
-    provider: next.provider,
-    model: next.model,
-    thinkingLevel: clampProductTruthThinking(next),
-  }, next.fallback);
-  const [primary, ...fallbacks] = chain;
   return {
-    ...next,
+    ...policy,
     ...primary,
     fallback: fallbacks[0],
     fallbacks,
@@ -1399,8 +1314,13 @@ async function openAiVisionJson(
     const classified = asVisionProviderError(error, route);
     try {
       return await openAiResponsesVisionJson(route, parts, timeoutMs);
-    } catch {
-      throw classified;
+    } catch (responsesError) {
+      // Chat Completions answers 404 / 400 for a model that only serves the
+      // Responses API. Its error then says "not available" when the real
+      // reason is whatever the Responses call reported, so report that one.
+      const chatRejectedModel = (classified.failure.code === "provider_unavailable" && classified.failure.status === 404) ||
+        classified.failure.code === "provider_invalid_request";
+      throw chatRejectedModel ? asVisionProviderError(responsesError, route) : classified;
     }
   }
 }
@@ -1490,19 +1410,18 @@ async function visionJson(
       { provider: policy.provider, model: policy.model, thinkingLevel: policy.thinkingLevel },
       ...(policy.fallback ? [policy.fallback] : []),
     ];
-  const configured = new Set(
-    AI_PROVIDERS.filter((provider) => Boolean(Deno.env.get(providerSecretName(provider))?.trim())),
-  );
-  const routes = selectConfiguredVisionRoutes(requested, configured);
+  // Every configured route is attempted in order. A route whose API key is
+  // missing fails at once with a message naming the secret, and the chain moves
+  // on; it is not dropped silently, so an administrator can see why a
+  // configured fallback never answered.
   try {
     const chained = await runVisionProviderChain({
-      routes,
+      routes: requested,
       purpose: policy.purpose,
       gatewayBudgetMs: visionGatewayBudgetMs(policy.purpose),
       invoke: async (route, timeoutMs) => {
-        // Product-truth hops fail over Luna → Terra. Studio waits 140s so a
-        // Luna timeout can still start Terra. A same-route retry would starve
-        // later hops.
+        // Product truth runs each configured hop once: a same-route retry
+        // would spend the configured fallback's share of Studio's 140s wait.
         if (policy.purpose === "product_truth") {
           return await invokeVisionRoute(policy, route, parts, timeoutMs);
         }
@@ -1689,11 +1608,6 @@ async function analyze(request: Request, args: JsonRecord) {
       usage_payload: { providerAnalysis: result.raw.usageMetadata || result.raw.usage || {}, attempts: result.attempts },
     });
     if (analysisRunId) analysisRunIds.push(analysisRunId);
-    try {
-      await maybePromoteProvenVisionRoute(orgId, policy, result.attempts);
-    } catch (error) {
-      console.error(`Vision route auto-promotion failed: ${errorMessage(error)}`);
-    }
     usedPolicy = result.policy;
   }
 
@@ -5902,11 +5816,6 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
     } catch (error) {
       console.error("Could not propose the catalogue styling plan", errorMessage(error));
     }
-    try {
-      await maybePromoteProvenVisionRoute(String(batch.organization_id), hashes.policy, analysis.attempts);
-    } catch (error) {
-      console.error(`Vision route auto-promotion failed: ${errorMessage(error)}`);
-    }
     if (!args.requestId) scheduleBackground(kickCatalogPreflight(batchId));
     return { processed: true, requestId: variant.id, fingerprint: hashes.fingerprint };
   } catch (error) {
@@ -7771,7 +7680,7 @@ async function probeAiRouteOperation(request: Request, args: JsonRecord) {
       provider: route.provider,
       model: route.model,
       latencyMs: Date.now() - started,
-      message: error instanceof VisionProviderError ? error.failure.message : errorMessage(error),
+      message: `${visionRouteLabel(route)}: ${error instanceof VisionProviderError ? error.failure.message : errorMessage(error)}`,
     };
   }
 }
