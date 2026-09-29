@@ -492,9 +492,17 @@ Deno.test("product-truth analyze clamps Admin high thinking to low for Muse and 
     }),
     "low",
   );
+  assertEquals(
+    clampProductTruthThinking({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+      thinkingLevel: "none",
+    }),
+    "none",
+  );
   assertEquals(PRODUCT_TRUTH_TIMEOUT_MS, 40_000);
-  assertEquals(PRODUCT_TRUTH_FALLBACK_RESERVE_MS, 40_000);
-  assertEquals(STUDIO_INVOKE_BUDGET_MS, 140_000);
+  assertEquals(PRODUCT_TRUTH_FALLBACK_RESERVE_MS, 45_000);
+  assertEquals(STUDIO_INVOKE_BUDGET_MS, 180_000);
 });
 
 Deno.test("product truth runs exactly the Administration primary, then its fallback", () => {
@@ -529,7 +537,7 @@ Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
   // browser aborted: the chain's clock starts after auth, the workspace RPC and
   // reference loading, so none of that is covered by the per-hop reserve.
   const reserved = STUDIO_INVOKE_BUDGET_MS - VISION_REQUEST_OVERHEAD_MS;
-  assertEquals(productTruthGatewayBudgetMs(145_000), reserved);
+  assertEquals(productTruthGatewayBudgetMs(185_000), reserved);
   assertEquals(productTruthGatewayBudgetMs(), reserved);
   assert(productTruthGatewayBudgetMs() < STUDIO_INVOKE_BUDGET_MS);
 

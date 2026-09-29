@@ -10,6 +10,7 @@ import {
   providerUsage,
   rollupSessionCost,
   usageCostUsd,
+  estimateJobCostUsd,
 } from "../lib/providerCost.ts";
 
 Deno.test("image cost uses provider-reported GPT Image 2.5 Flare token rates", () => {
@@ -185,3 +186,70 @@ Deno.test("deriveAdminRateTable prices image models from billed dollars and imag
   assertAlmostEquals(scaled["gpt-image-2.5-flare"]?.imageInput || 0, 16, 1e-8);
   assertAlmostEquals(scaled["gpt-image-2.5-flare"]?.imageOutput || 0, 60, 1e-8);
 });
+
+Deno.test("estimateJobCostUsd scales by pose count, model, quality, QA, and analysis", () => {
+  // 6 poses with gpt-image-2, high quality (1.0), QA off, default analysis ($0.03)
+  // 0.03 + 6 * 0.28 = 1.71
+  const sixPosesGptImage2 = estimateJobCostUsd({
+    posesCount: 6,
+    imageModel: "gpt-image-2",
+    quality: "high",
+    poseQa: false,
+  });
+  assertEquals(sixPosesGptImage2, 1.71);
+
+  // 1 pose with gpt-image-2, high quality, QA off, 0 analysis cost (e.g. single regeneration)
+  // 0 + 1 * 0.28 = 0.28
+  const singlePoseGptImage2 = estimateJobCostUsd({
+    posesCount: 1,
+    imageModel: "gpt-image-2",
+    quality: "high",
+    poseQa: false,
+    analysisCostUsd: 0,
+  });
+  assertEquals(singlePoseGptImage2, 0.28);
+
+  // 6 poses with gpt-image-2.5-flare (cheaper: 0.16/img), medium quality (0.9x), QA on (6 * 0.005), actual analysis $0.025
+  // 0.025 + 6 * (0.16 * 0.9) + 6 * 0.005 = 0.025 + 0.864 + 0.03 = 0.919
+  const flareWithQa = estimateJobCostUsd({
+    posesCount: 6,
+    imageModel: "gpt-image-2.5-flare",
+    quality: "medium",
+    poseQa: true,
+    analysisCostUsd: 0.025,
+  });
+  assertEquals(flareWithQa, 0.919);
+
+  // 0 poses returns only analysis cost
+  const zeroPoses = estimateJobCostUsd({
+    posesCount: 0,
+    imageModel: "gpt-image-2",
+    analysisCostUsd: 0.04,
+  });
+  assertEquals(zeroPoses, 0.04);
+
+  // adminRates scaling: gpt-image-2 public rate imageOutput is 50 ($0.28/img).
+  // With admin rate snapshot of imageOutput: 25, price scales down to $0.14/img.
+  // 6 poses at high quality with default analysis $0.03 = 0.03 + 6 * 0.14 = 0.87 (vs 1.71).
+  const adminDerivedEstimate = estimateJobCostUsd({
+    posesCount: 6,
+    imageModel: "gpt-image-2",
+    quality: "high",
+    poseQa: false,
+    adminRates: {
+      "gpt-image-2": { imageOutput: 25 },
+    },
+  });
+  assertEquals(adminDerivedEstimate, 0.87);
+
+  // analysisCostUsd: null (e.g. query failed) falls back to default $0.03 analysis allowance
+  const failedAnalysisLoad = estimateJobCostUsd({
+    posesCount: 1,
+    imageModel: "gpt-image-2",
+    quality: "high",
+    poseQa: false,
+    analysisCostUsd: null,
+  });
+  assertEquals(failedAnalysisLoad, 0.31);
+});
+

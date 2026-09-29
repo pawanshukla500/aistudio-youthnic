@@ -586,3 +586,51 @@ export function rollupSessionCost(runs: CostRun[], fallbackGenerationUsd = 0): S
     usedAdminRates,
   };
 }
+
+export const DEFAULT_ESTIMATED_IMAGE_COST_USD: Record<string, number> = {
+  "gpt-image-2.5-flare-2026-09-08": 0.16,
+  "gpt-image-2.5-flare": 0.16,
+  "gpt-image-2.5-sunburst": 0.16,
+  "gpt-image-2": 0.28,
+  "gpt-image-1.5": 0.28,
+  "gpt-image-1": 0.28,
+  "gpt-image-1-mini": 0.005,
+  "reve-2.1-image": 0.28,
+};
+
+export const DEFAULT_ESTIMATED_QA_COST_PER_POSE_USD = 0.005;
+export const DEFAULT_ESTIMATED_ANALYSIS_COST_USD = 0.03;
+
+/**
+ * Real job cost estimate based on pose count, image model rates, quality,
+ * pose QA and actual/estimated product analysis cost.
+ */
+export function estimateJobCostUsd(args: {
+  posesCount: number;
+  imageModel: string;
+  quality?: string | null;
+  poseQa?: boolean | null;
+  analysisCostUsd?: number | null;
+  adminRates?: AdminRateTable;
+}): number {
+  const poses = Math.max(0, Number(args.posesCount) || 0);
+  const modelKey = normalizeModelKey(args.imageModel);
+  const publicBase = DEFAULT_ESTIMATED_IMAGE_COST_USD[modelKey] ?? 0.20;
+  const admin = lookupAdminRates(args.imageModel, args.adminRates);
+  const publicRates = IMAGE_TOKEN_RATES[args.imageModel] || IMAGE_TOKEN_RATES[modelKey];
+  let basePerImage = publicBase;
+  if (admin?.imageOutput && publicRates?.imageOutput) {
+    basePerImage = roundUsd(publicBase * (admin.imageOutput / publicRates.imageOutput));
+  } else if (admin?.imageOutput) {
+    basePerImage = roundUsd((admin.imageOutput * 5_500) / 1_000_000);
+  }
+  const quality = String(args.quality || "high").toLowerCase();
+  const qualityFactor = quality === "low" ? 0.75 : quality === "medium" ? 0.9 : 1.0;
+  const imageTotal = poses * (basePerImage * qualityFactor);
+  const qaTotal = args.poseQa ? poses * DEFAULT_ESTIMATED_QA_COST_PER_POSE_USD : 0;
+  const analysisCost = typeof args.analysisCostUsd === "number" && args.analysisCostUsd >= 0
+    ? args.analysisCostUsd
+    : DEFAULT_ESTIMATED_ANALYSIS_COST_USD;
+  return roundUsd(analysisCost + imageTotal + qaTotal);
+}
+

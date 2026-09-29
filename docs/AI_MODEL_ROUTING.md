@@ -58,17 +58,18 @@ message naming the secret (`OPENAI_API_KEY`, `META_MODEL_API_KEY`, `GEMINI_API_K
 ## Reasoning effort for product analysis
 
 Product analysis is one large multimodal JSON call that must finish inside Studio's
-140s wait. High reasoning on it overran that budget, so `clampProductTruthThinking`
+180s wait. High reasoning on it overran that budget, so `clampProductTruthThinking`
 runs product analysis at **low** reasoning (or the provider's lowest supported level),
-whatever is saved. Only the effort changes, never the model. QA keeps its saved
-reasoning, except that Gemini Flash models run at low.
+whatever is saved. Explicit "none" or "minimal" is preserved. Only the effort changes,
+never the model. QA keeps its saved reasoning, except that Gemini Flash models run at low.
 
 ## Time budget (product analysis)
 
-- Studio's client waits `STUDIO_ANALYZE_TIMEOUT_MS` (140s). The chain budget is 135s,
-  holding 5s back for work outside the chain.
+- Studio's client waits `STUDIO_ANALYZE_TIMEOUT_MS` (180s). The chain budget is 175s,
+  holding 5s back for work outside the chain (`VISION_REQUEST_OVERHEAD_MS`).
 - While a fallback is still to come, the primary gets the remaining time minus
-  `PRODUCT_TRUTH_FALLBACK_RESERVE_MS` (40s). A hanging primary can never starve the fallback.
+  `PRODUCT_TRUTH_FALLBACK_RESERVE_MS` (45s) and `VISION_GATEWAY_RESERVE_MS` (5s), giving
+  Hop 1 up to 125s. A hanging primary can never starve the fallback.
 - A primary that fails fast (a 404 or a missing key) hands the fallback nearly the whole budget.
 
 ## Errors people see
@@ -115,6 +116,17 @@ the Responses API, the error reported is the Responses API's.
 
 Image quality defaults to `medium` (`DEFAULT_IMAGE_QUALITY`); see
 [Generation orchestration](GENERATION_ORCHESTRATION.md).
+
+## Job cost estimation
+
+`estimateJobCostUsd` (`supabase/functions/app-api/lib/providerCost.ts`) computes
+dynamic job costs for generation jobs enqueued via Studio (`studio.queue`) or catalog
+processing (`catalog.process`), replacing the former fixed $0.25 placeholder:
+- Primary generation: `posesCount × basePrice(model) × qualityMultiplier`
+- Image quality multipliers: low (0.75x), medium (0.9x), high (1.0x)
+- Pose QA allowance: `$0.005` per pose when QA is enabled
+- Product analysis allowance: `$0.03` default amortized per job (or actual analysis cost when available)
+- Pose regenerations: computed for the exact number of regenerated poses
 
 ## Changing routing code
 

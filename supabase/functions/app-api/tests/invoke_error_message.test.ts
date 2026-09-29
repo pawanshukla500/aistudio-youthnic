@@ -8,10 +8,10 @@ import {
   isRetryableInvokeOperation,
 } from "../../../../src/lib/errors.ts";
 
-Deno.test("Studio analyze client timeout is at least 140s", () => {
-  assertEquals(STUDIO_ANALYZE_TIMEOUT_MS, 140_000);
-  assertEquals(appApiInvokeTimeoutMs("studio.analyze"), 140_000);
-  assertEquals(appApiInvokeTimeoutMs("analysis.analyzeReferences"), 140_000);
+Deno.test("Studio analyze client timeout is at least 180s", () => {
+  assertEquals(STUDIO_ANALYZE_TIMEOUT_MS, 180_000);
+  assertEquals(appApiInvokeTimeoutMs("studio.analyze"), 180_000);
+  assertEquals(appApiInvokeTimeoutMs("analysis.analyzeReferences"), 180_000);
   assertEquals(appApiInvokeTimeoutMs("studio.queue"), undefined);
 });
 
