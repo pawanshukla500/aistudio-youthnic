@@ -120,6 +120,7 @@ import {
   providerUsage,
   roundUsd,
   usageCostUsd,
+  estimateJobCostUsd,
   type AdminRateTable,
   type ProviderUsage,
 } from "./lib/providerCost.ts";
@@ -1421,7 +1422,7 @@ async function visionJson(
       gatewayBudgetMs: visionGatewayBudgetMs(policy.purpose),
       invoke: async (route, timeoutMs) => {
         // Product truth runs each configured hop once: a same-route retry
-        // would spend the configured fallback's share of Studio's 140s wait.
+        // would spend the configured fallback's share of Studio's 180s wait.
         if (policy.purpose === "product_truth") {
           return await invokeVisionRoute(policy, route, parts, timeoutMs);
         }
@@ -1975,7 +1976,15 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     status: "queued", readiness_status: "ready", readiness_reasons: [], sku_name: jobData.skuName, session_id: sessionId, job_data: jobData,
     planning_request_id: session.planning_request_id, total_poses: enabled.length, provider: imageGenerationPolicy.provider, model,
     aspect_ratio: String(args.aspectRatio || "3:4"), image_size: String(args.imageSize || "2K"), quality,
-    pose_qa: Boolean(args.poseQa), estimated_cost_usd: 0.25, actual_cost_usd: analysisCostUsd, created_at: now, updated_at: now,
+    pose_qa: Boolean(args.poseQa),
+    estimated_cost_usd: estimateJobCostUsd({
+      posesCount: enabled.length,
+      imageModel: model,
+      quality,
+      poseQa: Boolean(args.poseQa),
+      analysisCostUsd,
+    }),
+    actual_cost_usd: analysisCostUsd, created_at: now, updated_at: now,
   };
   const poseRows = enabled.map((pose, index) => ({
     session_id: sessionId, generation_id: `${jobId}:pose:${index + 1}`, pose_index: index + 1,
@@ -6175,7 +6184,13 @@ async function queueCatalogVariantGeneration(
     image_size: String(generationSettings.imageSize || "2K"),
     quality,
     pose_qa: Boolean(generationSettings.poseQa),
-    estimated_cost_usd: 0.25,
+    estimated_cost_usd: estimateJobCostUsd({
+      posesCount: poses.length,
+      imageModel: model,
+      quality,
+      poseQa: Boolean(generationSettings.poseQa),
+      analysisCostUsd,
+    }),
     actual_cost_usd: analysisCostUsd,
     created_at: queuedAt,
     updated_at: queuedAt,

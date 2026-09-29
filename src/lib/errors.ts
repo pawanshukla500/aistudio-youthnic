@@ -46,7 +46,7 @@ export function isGatewayCutFailure(args: InvokeFailureShape): boolean {
 }
 
 /** Must cover VISION_GATEWAY_BUDGET_MS so the configured primary and fallback can both run. */
-export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
+export const STUDIO_ANALYZE_TIMEOUT_MS = 180_000;
 
 export const ANALYZE_GATEWAY_CUT_MESSAGE =
   "Analysis was interrupted before the configured vision model could finish. Retry Analyze.";

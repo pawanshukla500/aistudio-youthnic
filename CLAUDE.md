@@ -15,8 +15,8 @@ Six-pose fashion catalog photoshoots generated from product references.
    silently drop a model, and never write to `organization_ai_model_policies` from
    code paths other than the Admin save. The only adjustment allowed is reasoning
    effort: product analysis runs at low (or the model's lowest supported level;
-   Qwen runs with thinking off) to fit the 140s Studio wait, and Gemini Flash QA
-   runs at low. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
+   explicit none/minimal is preserved; Qwen runs with thinking off) to fit the
+   180s Studio wait, and Gemini Flash QA runs at low. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
 2. **Product references are the truth.** Generated images, style references and
    learning rules never override the uploaded front/back/fabric product images.
 3. **One set per shoot.** Every pose prompt carries the same SCENE LOCK
@@ -24,7 +24,10 @@ Six-pose fashion catalog photoshoots generated from product references.
 4. **Never delete paid output.** Each delivered image is an immutable
    `planning_assets` row with a unique storage path; regenerations add versions
    (`src/lib/poseVersions.ts`).
-5. **Defaults:**
+5. **Real estimated job costs.** `generation_jobs.estimated_cost_usd` is computed
+   dynamically via `lib/providerCost.ts` based on pose count, image model rates,
+   quality, pose QA, and analysis cost (never hardcoded to $0.25).
+6. **Defaults:**
    - image quality `medium` (`DEFAULT_IMAGE_QUALITY`);
    - pose QA off unless the job or a regeneration asks for it;
    - aspect ratio 3:4 at 2K.

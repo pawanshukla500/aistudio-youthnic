@@ -268,10 +268,10 @@ export const OPENAI_TERRA_VISION_ROUTE = {
 /**
  * Studio Analyze uses `supabase.functions.invoke("app-api")`. Without an
  * explicit client timeout the browser/SDK aborts around 55–60s, so the Studio
- * client waits `STUDIO_ANALYZE_TIMEOUT_MS` (140s) and the product-truth chain
+ * client waits `STUDIO_ANALYZE_TIMEOUT_MS` (180s) and the product-truth chain
  * is budgeted inside that wait.
  */
-export const STUDIO_ANALYZE_TIMEOUT_MS = 140_000;
+export const STUDIO_ANALYZE_TIMEOUT_MS = 180_000;
 export const STUDIO_INVOKE_BUDGET_MS = STUDIO_ANALYZE_TIMEOUT_MS;
 export const PRODUCT_TRUTH_TIMEOUT_MS = 40_000;
 /**
@@ -279,9 +279,9 @@ export const PRODUCT_TRUTH_TIMEOUT_MS = 40_000;
  * the primary runs. A primary that fails fast (a 404, a missing key) hands the
  * fallback almost the whole wait; a primary that hangs cannot starve it.
  */
-export const PRODUCT_TRUTH_FALLBACK_RESERVE_MS = 40_000;
+export const PRODUCT_TRUTH_FALLBACK_RESERVE_MS = 45_000;
 export const VISION_PROVIDER_TIMEOUT_MS = 50_000;
-export const VISION_GATEWAY_BUDGET_MS = 145_000;
+export const VISION_GATEWAY_BUDGET_MS = 185_000;
 /** Held back inside the chain: parsing a hop's reply and recording the attempt. */
 export const VISION_GATEWAY_RESERVE_MS = 5_000;
 /**
@@ -309,12 +309,14 @@ function routeKey(route: Pick<NormalizedAiModelRoute, "provider" | "model">) {
 
 /**
  * Product-truth analyze runs on low/minimal thinking even when Admin saved a
- * higher level: this is one large multimodal JSON call inside Studio's 140s
+ * higher level: this is one large multimodal JSON call inside Studio's 180s
  * wait, and high reasoning on it missed that budget. The model choice is never
- * changed here, only its reasoning effort.
+ * changed here, only its reasoning effort. Explicit "none" or "minimal" is preserved.
  */
 export function clampProductTruthThinking(route: NormalizedAiModelRoute): AiThinkingLevel {
   const allowed = allowedThinkingLevels(route, "product_truth", { strictJson: true });
+  if (route.thinkingLevel === "none" && allowed.includes("none")) return "none";
+  if (route.thinkingLevel === "minimal" && allowed.includes("minimal")) return "minimal";
   if (allowed.includes("low")) return "low";
   if (allowed.includes("minimal")) return "minimal";
   if (allowed.includes("none")) return "none";
@@ -329,7 +331,7 @@ export function withFastProductTruthThinking(
 
 /**
  * Cap product-truth at the Studio client wait even when
- * `VISION_GATEWAY_BUDGET_MS` is 145s. Returning after the client has
+ * `VISION_GATEWAY_BUDGET_MS` is 185s. Returning after the client has
  * disconnected still drops hop 2.
  *
  * The cap holds back `VISION_REQUEST_OVERHEAD_MS` rather than spending the whole
