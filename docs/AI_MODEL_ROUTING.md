@@ -37,8 +37,8 @@ For a vision purpose, the chain is `[primary, ...fallbacks]` as saved or resolve
 (`productTruthRouteChain`). When Meta Muse Spark is primary and OpenAI Luna is the first fallback,
 the system automatically wires OpenAI GPT-5.6 Terra as the third fallback safety net so that
 Terra's expensive compute is only tapped if both low-cost models fail. Administration refuses to
-save a fallback identical to the primary ("Choose a different fallback provider or model.");
-an older row that has one runs that model once.
+save a fallback identical to the primary ("Choose a different fallback provider or model."). If an older
+stored row has an identical primary and fallback route, it deduplicates to avoid redundant retries.
 
 The chain moves to the next fallback when the current model fails for a reason another model can fix:
 
