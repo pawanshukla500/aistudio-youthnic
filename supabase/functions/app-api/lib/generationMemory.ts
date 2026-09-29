@@ -468,6 +468,34 @@ export function extractLearnedPromptPatterns(args: {
     ));
   }
 
+  const overallOutcome = outcomeFor(poses);
+  if (overallOutcome) {
+    extracted.push(pattern(
+      "pose",
+      "pose-plan-6-variation-lock",
+      "Every shoot executes a 6-pose plan with physical variation: Pose 1 hero, Pose 2 35-to-45 degree turn, Pose 3 true rear view, Pose 4 active movement or seated, Pose 5 close-up detail, Pose 6 unique feature showcase. Never duplicate frontal standing.",
+      overallOutcome,
+    ));
+    extracted.push(pattern(
+      "styling",
+      "locked-styling-and-accessories",
+      "Hold identical footwear, jewellery, ornaments, styling, makeup, hair, and photoshoot backdrop across all 6 poses for seamless catalog continuity.",
+      overallOutcome,
+    ));
+    extracted.push(pattern(
+      "pose",
+      "natural-realistic-expression",
+      "Model expressions and smiles must be relaxed, natural, and realistic with soft lips and calm warmth — never an artificial, exaggerated, or frozen stock smile.",
+      overallOutcome,
+    ));
+    extracted.push(pattern(
+      "garment",
+      "product-reference-sole-truth",
+      "Derive only photoshoot backdrop, model face/style guidance, pose inspiration, and framing from the style reference. The product cut, design, and bottom wear must remain 100% faithful to uploaded product images.",
+      overallOutcome,
+    ));
+  }
+
   return extracted.filter((entry) => entry.patternText && entry.title);
 }
 

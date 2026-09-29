@@ -2634,7 +2634,7 @@ async function handleMemoryAndPlanningNode(node: JsonRecord, sessionId: string) 
     const { count: generatedAlready } = await service.from("planning_requests")
       .select("id", { count: "exact", head: true }).eq("batch_id", batchId).eq("generation_status", "completed");
     
-    await proposeCatalogStylingPlan(batchId, { catalog_memory: proposalBatch?.catalog_memory || {} } as JsonRecord, normalized.stylingPlan, variantId);
+    await proposeCatalogStylingPlan(batchId, { catalog_memory: proposalBatch?.catalog_memory || {} } as JsonRecord, normalized.stylingPlan, variantId, normalized.posePlan);
     if (!generatedAlready) {
       await service.rpc("save_catalog_styling_plan", { p_batch_id: batchId, p_plan: normalized.stylingPlan, p_approve: false, p_member_id: null });
     } else {
@@ -5388,21 +5388,34 @@ function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof nor
   return normalized;
 }
 
-async function proposeCatalogStylingPlan(batchId: string, _batch: JsonRecord, stylingPlan: StylingPlanProfile, variantId: string) {
+async function proposeCatalogStylingPlan(
+  batchId: string,
+  _batch: JsonRecord,
+  stylingPlan: StylingPlanProfile,
+  variantId: string,
+  posePlan?: readonly StudioPose[],
+) {
   // Guarded in the database, not here: two colourways can reach preflight at the
   // same time, and a read-then-write would let the second overwrite the first
   // one's proposal - or clobber an anchor frame recorded in between.
+  const patch: JsonRecord = {
+    stylingPlan,
+    // Kept unedited alongside the working copy: comparing what the AI proposed
+    // with what the stylist approved is the raw material the memory needs, and
+    // it is unrecoverable once the plan is edited in place.
+    stylingPlanProposed: stylingPlan,
+    stylingPlanProposedAt: new Date().toISOString(),
+    stylingPlanSourceRequestId: variantId,
+  };
+  if (Array.isArray(posePlan) && posePlan.length > 0) {
+    patch.posePlan = posePlan;
+    patch.posePlanProposed = posePlan;
+    patch.posePlanProposedAt = new Date().toISOString();
+    patch.posePlanSourceRequestId = variantId;
+  }
   const { error } = await service.rpc("merge_catalog_memory", {
     p_batch_id: batchId,
-    p_patch: {
-      stylingPlan,
-      // Kept unedited alongside the working copy: comparing what the AI proposed
-      // with what the stylist approved is the raw material the memory needs, and
-      // it is unrecoverable once the plan is edited in place.
-      stylingPlanProposed: stylingPlan,
-      stylingPlanProposedAt: new Date().toISOString(),
-      stylingPlanSourceRequestId: variantId,
-    },
+    p_patch: patch,
     p_require_absent: "stylingPlan",
   });
   if (error) throw new Error(error.message);
@@ -5893,7 +5906,7 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
     // a failed proposal used to reject alongside it, marking a successful analysis as
     // a Gemini failure and buying a second one on the next run.
     try {
-      await proposeCatalogStylingPlan(batchId, batch as JsonRecord, normalized.stylingPlan, variant.id);
+      await proposeCatalogStylingPlan(batchId, batch as JsonRecord, normalized.stylingPlan, variant.id, normalized.posePlan);
     } catch (error) {
       console.error("Could not propose the catalogue styling plan", errorMessage(error));
     }
@@ -6108,7 +6121,7 @@ async function queueCatalogVariantGeneration(
 
   const memory = (batch.catalog_memory || {}) as JsonRecord;
   if (!memory.stylingPlan) {
-    await proposeCatalogStylingPlan(batchId, batch, normalized.stylingPlan, String(variant.id));
+    await proposeCatalogStylingPlan(batchId, batch, normalized.stylingPlan, String(variant.id), normalized.posePlan);
     const generatedAlready = variants.some((entry) => entry.generation_status === "completed");
     const { data: saveResult, error: saveError } = await service.rpc("save_catalog_styling_plan", {
       p_batch_id: batchId,
