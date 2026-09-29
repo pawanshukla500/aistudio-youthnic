@@ -18,7 +18,6 @@ SET
   revision = revision + 1,
   updated_at = now()
 WHERE purpose = 'product_truth'
-  AND (
-    (primary_provider = 'openai' AND primary_model IN ('gpt-5.6-terra', 'gpt-5.6-sol'))
-    OR (primary_provider = 'openai' AND fallback_provider = 'meta')
-  );
+  AND primary_provider = 'openai'
+  AND primary_model = 'gpt-5.6-terra'
+  AND fallback_provider = 'meta';
