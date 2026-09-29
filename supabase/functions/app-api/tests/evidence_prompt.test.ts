@@ -886,4 +886,122 @@ Deno.test("composeGenerationPrompt locks style-reference jewellery and dual-mode
   assertStringIncludes(compacted, "POSE 5 HARD RULE (PRODUCT DETAIL PRIMARY)");
 });
 
+Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image scope, locked details, and natural expressions", () => {
+  // Test Pose 2: Mandatory 3/4 turn
+  const pose2Prompt = composeGenerationPrompt({
+    skuName: "KURTA-SET-01",
+    productDetails: "Purple floral printed kurta with patiala salwar",
+    pose: {
+      id: "angled",
+      title: "Three-Quarter Sleeve and Fall View",
+      poseNumber: 2,
+      description: "Model standing at three-quarter angle",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "35 degree angle",
+      handPlacement: "one hand near collar",
+      expression: "natural soft smile",
+      highlightedDetails: ["side silhouette", "sleeve"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "angle",
+      consistencyNotes: "locked",
+      prompt: "Show angled view.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "purple" },
+      creativeDirection: { seatedPoseRequired: "no" },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+
+  // 1. 6-Pose Variation Directive
+  assertStringIncludes(pose2Prompt, "6-POSE PLAN VARIATION DIRECTIVE");
+  assertStringIncludes(pose2Prompt, "CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN)");
+  assertStringIncludes(pose2Prompt, "Torso and hips MUST physically rotate 35 to 45 degrees");
+  assertStringIncludes(pose2Prompt, "DO NOT render a flat frontal standing pose or repeat Pose 1");
+
+  // 2. Reference Image Scope & Product Integrity
+  assertStringIncludes(pose2Prompt, "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:");
+  assertStringIncludes(pose2Prompt, "from the reference image (style reference / model reference), take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction");
+  assertStringIncludes(pose2Prompt, "The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows");
+
+  // 3. Locked Details Across All Six Images
+  assertStringIncludes(pose2Prompt, "LOCKED DETAILS ACROSS ALL SIX IMAGES (AVOID CONSISTENCY MISTAKES):");
+  assertStringIncludes(pose2Prompt, "Background / Backdrop: Exact same physical room, wall finish, flooring, lighting, shadows, and props across all 6 frames");
+  assertStringIncludes(pose2Prompt, "Footwear: The exact same footwear (pair, style, heel, color, finish) across all 6 frames");
+  assertStringIncludes(pose2Prompt, "Ornaments & Jewellery: Identical jewellery pieces, metal type, count, and placement across all 6 frames");
+  assertStringIncludes(pose2Prompt, "Product Layout & Product Design: Garment construction, cuts, seams, trims, embroidery geometry, pattern repeat, and bottom-wear architecture remain locked across all 6 frames");
+
+  // 4. Natural & Realistic Expressions
+  assertStringIncludes(pose2Prompt, "Natural, realistic expressions and smiles:");
+  assertStringIncludes(pose2Prompt, "strictly avoid forced, wide, exaggerated, frozen, or artificial 'stock-photo' smiles");
+
+  // 5. Negative rules
+  assertStringIncludes(pose2Prompt, "Never render duplicate or identical frontal standing poses across different pose slots");
+  assertStringIncludes(pose2Prompt, "Never render artificial, forced, stiff, or frozen stock catalog smiles");
+  assertStringIncludes(pose2Prompt, "Never redesign the product or copy garment details from the style reference");
+
+  // Test Pose 4: Walking stride
+  const pose4Prompt = composeGenerationPrompt({
+    skuName: "KURTA-SET-01",
+    productDetails: "Purple floral printed kurta with patiala salwar",
+    pose: {
+      id: "creative",
+      title: "Playful Courtyard Step",
+      poseNumber: 4,
+      description: "Mid-stride walk",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "walking",
+      handPlacement: "natural swing",
+      expression: "warm natural glance",
+      highlightedDetails: ["flare"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "movement",
+      consistencyNotes: "locked",
+      prompt: "Show walking motion.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "purple" },
+      creativeDirection: { seatedPoseRequired: "no" },
+    },
+    references: [{ role: "front" }],
+  });
+  assertStringIncludes(pose4Prompt, "CURRENT FRAME (POSE 4 - DYNAMIC WALKING STRIDE)");
+  assertStringIncludes(pose4Prompt, "Active dynamic walking movement captured mid-step across the studio floor");
+
+  // Test Pose 6: Feature showcase
+  const pose6Prompt = composeGenerationPrompt({
+    skuName: "KURTA-SET-01",
+    productDetails: "Purple floral printed kurta with patiala salwar",
+    pose: {
+      id: "showcase",
+      title: "Patiala Volume Feature",
+      poseNumber: 6,
+      description: "Feature showcase",
+      cameraAngle: "low angle",
+      framing: "wide full body",
+      bodyPosition: "feet separated",
+      handPlacement: "relaxed",
+      expression: "calm poise",
+      highlightedDetails: ["bottom volume"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "showcase",
+      consistencyNotes: "locked",
+      prompt: "Show volume.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "purple" },
+      creativeDirection: { seatedPoseRequired: "no" },
+    },
+    references: [{ role: "front" }],
+  });
+  assertStringIncludes(pose6Prompt, "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE)");
+  assertStringIncludes(pose6Prompt, "Framing, angle, and physical stance MUST visibly diverge from Pose 1");
+});
+
+
 

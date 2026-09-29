@@ -564,6 +564,80 @@ function showcaseHardRule(intent: ShowcaseIntent, family: GarmentPoseFamily) {
   return "- SHOWCASE FRAME HARD RULE (TRUE FALL AND LENGTH): a full-length frame proving the garment's real fall, fit and length. Side seams hang straight, the hem stays level and complete inside the frame, and the garment is never hitched, tucked, gathered or shortened. Footwear grounded and visible.";
 }
 
+function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSittingDemanded: boolean): string {
+  const poseNum = pose.poseNumber;
+  const isPose1 = poseNum === 1 || pose.id === "full_front";
+  const isPose2 = poseNum === 2 || pose.id === "angled";
+  const isPose3 = poseNum === 3 || pose.id === "back";
+  const isPose4 = poseNum === 4 || pose.id === "creative";
+  const isPose5 = poseNum === 5 || pose.id === "closeup";
+  const isPose6 = poseNum === 6 || pose.id === "showcase";
+
+  const lines = [
+    "6-POSE PLAN VARIATION DIRECTIVE (MANDATORY PHYSICAL DIVERGENCE):",
+    "Every shoot executes a distinct 6-pose plan where each frame has a unique physical geometry and purpose. Under NO circumstances should any frame repeat a static frontal standing pose:",
+    "- Pose 1 (full_front): Square-on catalog hero stance with balanced weight, showing complete silhouette.",
+    "- Pose 2 (angled): Mandatory 35-to-45 degree physical turn of torso and hips with one foot forward; strictly prohibit flat frontal standing or repeating Pose 1.",
+    "- Pose 3 (back): 180° true full rear view, shoulders and hips facing fully away; hair and dupatta swept forward for 100% unobstructed rear view.",
+    "- Pose 4 (creative): Active dynamic walking stride across the room with natural fabric flutter or elegant seated editorial pose on a studio bench/step (if demanded); strictly prohibit static standing in place.",
+    "- Pose 5 (closeup): Genuinely zoomed-in detail crop (face-and-detail or tight product-detail); strictly prohibit full-body hero repeat.",
+    "- Pose 6 (showcase): Dynamic feature-specific composition with stance, framing, and angle visibly diverging from Pose 1 (e.g. feet separated or angled to showcase trouser/Patiala/farshi volume and pleats, or drape spread).",
+  ];
+
+  if (isPose1) {
+    lines.push(
+      "CURRENT FRAME (POSE 1 - SQUARE HERO): Grounded, balanced, straight-on catalog hero stance establishing the full outfit silhouette from head to hem. Relaxed, effortless poise with a natural gentle smile or calm composure.",
+    );
+  } else if (isPose2) {
+    lines.push(
+      "CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN): Torso and hips MUST physically rotate 35 to 45 degrees with one foot stepped forward. DO NOT render a flat frontal standing pose or repeat Pose 1. Reveal side silhouette, garment depth, side seams, and sleeve shape.",
+    );
+  } else if (isPose3) {
+    lines.push(
+      "CURRENT FRAME (POSE 3 - 180° REAR VIEW): Model faces fully away from camera. Shoulders and hips square to rear. Hair swept forward, dupatta draped forward over arms/front so rear construction is 100% visible.",
+    );
+  } else if (isPose4) {
+    if (isSittingDemanded) {
+      lines.push(
+        "CURRENT FRAME (POSE 4 - SEATED EDITORIAL): Elegant seated editorial posture on a minimal studio bench or architectural step from the established set. Both legs, bottom wear volume, hemline, and footwear remain fully visible and beautifully arranged.",
+      );
+    } else {
+      lines.push(
+        "CURRENT FRAME (POSE 4 - DYNAMIC WALKING STRIDE): Active dynamic walking movement captured mid-step across the studio floor with natural fabric flutter and movement. NEVER render a static standing hero repeat!",
+      );
+    }
+  } else if (isPose5) {
+    lines.push(
+      "CURRENT FRAME (POSE 5 - ZOOMED-IN DETAIL): Genuinely zoomed in on product craftsmanship and selling details. NEVER repeat a full-body or wide hero frame.",
+    );
+  } else if (isPose6) {
+    lines.push(
+      "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE): Framing, angle, and physical stance MUST visibly diverge from Pose 1. Feet separated or angled to showcase feature volume/flare. Never repeat the flat frontal hero stance.",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function referenceImageScopeDirective(): string {
+  return [
+    "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:",
+    "- STYLE / REFERENCE IMAGE SCOPE: from the reference image (style reference / model reference), take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction.",
+    "- PRODUCT INTEGRITY (SOLE TRUTH FROM UPLOADED PRODUCT IMAGES): the product itself (fabric, colors, prints, pattern geometry, neckline, sleeves, hem, embroidery, trims, closures, and complete bottom wear) MUST come exclusively from uploaded product references. The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows.",
+  ].join("\n");
+}
+
+function lockedDetailsDirective(): string {
+  return [
+    "LOCKED DETAILS ACROSS ALL SIX IMAGES (AVOID CONSISTENCY MISTAKES):",
+    "- Background / Backdrop: Exact same physical room, wall finish, flooring, lighting, shadows, and props across all 6 frames without drift.",
+    "- Footwear: The exact same footwear (pair, style, heel, color, finish) across all 6 frames.",
+    "- Ornaments & Jewellery: Identical jewellery pieces, metal type, count, and placement across all 6 frames.",
+    "- Accessories & Styling: Identical makeup, hair, bag, belt, and styling treatment across all 6 frames.",
+    "- Product Layout & Product Design: Garment construction, cuts, seams, trims, embroidery geometry, pattern repeat, and bottom-wear architecture remain locked across all 6 frames.",
+  ].join("\n");
+}
+
 export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
   session: JsonRecord; references: PromptReference[]; correction?: string; learnings?: string; fashionKnowledge?: string;
@@ -731,12 +805,14 @@ PHOTOGRAPHIC REALISM - MUST READ AS CAPTURED BY A REAL CAMERA, NEVER AS AI-GENER
 - Camera and optics: full-frame camera with a lens suited to this framing (about 85mm for full-length and three-quarter frames, macro-style close focus for detail crops), low ISO, real optical depth of field with gradual focus falloff. No fake bokeh, cut-out or halo edges, or pasted-on subject.
 - Colour and tone: true-to-life colours and exposure from a restrained professional RAW edit. Accurate, varied skin tones with natural redness and undertones; very fine sensor grain; soft highlight roll-off and detail in the shadows. No HDR, bloom, glow, haze, oversaturation, teal-orange grade, glossy beauty retouch, painterly, illustrated, 3D or CGI look.
 - Real person: an individual, believable face with natural character, not an idealized stock face; relaxed, weight-bearing posture with slight natural asymmetry; correct hands with five fingers, knuckles and nails; natural neck, shoulder and limb proportions. Hair shows individual strands and a few flyaways, never a solid helmet-like mass.
+- Natural, realistic expressions and smiles: model expressions and smiles must look effortless, relaxed, and natural. Soft, genuine smiles with relaxed cheek muscles and gentle eye warmth, or calm editorial poise — strictly avoid forced, wide, exaggerated, frozen, or artificial 'stock-photo' smiles. Teeth, if visible, must look natural, relaxed, and anatomically accurate.
 - Real textile: visible weave or knit, natural creases at elbows, waist and knees, gravity-driven folds, real thickness at hems and seams. No vinyl or plastic sheen unless the fabric is genuinely satin or silk.
 - Grounded in the set: one coherent light source direction across face, garment and background; soft contact shadows under the feet; the model physically occupies the room.
 
 LOCKED SUBJECT - MUST NOT CHANGE:
 ${modelJson}
 - Same recognizable face, skin tone, body proportions, hairstyle, hair length/color, makeup, accessories and footwear across the complete set.
+- Model expressions: authentic, relaxed warmth and natural composure; never a stiff, forced, or frozen smile.
 - Pose 1 is only the subject/scene anchor for later poses. It never overrides original product references.
 
 FACE & IDENTITY LOCK - HIGHEST PRIORITY:
@@ -748,6 +824,7 @@ ${hasModelReference
 ${faceQualityInstruction}
 
 LOCKED PRODUCT - MUST NOT CHANGE:
+${referenceImageScopeDirective()}
 ${productCoreJson}
 ${isSaree ? (isTrueBack ? `SAREE REAR TRUTH - DIRECT EVIDENCE ONLY:
 ${sareeTruthJson}
@@ -799,6 +876,7 @@ Embroidery geometry: ${embroideryGeometryJson}
 ${bottomWearSection({ bottomWear, isSaree: isSareeShoot, hasBottomReference })}
 
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
+${lockedDetailsDirective()}
 ${creativeJson}
 - Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, and colour grade. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
 - ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS: Never reproduce the background, wall, arches, urns, pots, plants, steps, or environment visible behind the garment in the product reference photos (front, back, bottom, mannequin). The photoshoot set must come exclusively from the STYLE REFERENCE (or Pose 1 anchor / studio specification).
@@ -835,6 +913,7 @@ ${allowedDelta.map((value) => `- ${value}`).join("\n")}
 - Everything not named here stays locked.
 
 POSE REQUIREMENT:
+${poseVariationDirective(args.pose, isSittingDemanded)}
 Description: ${boundedText(args.pose.description, 600)}
 Details to highlight: ${highlightedDetails}
 Visibility rules: ${visibilityRules}
@@ -897,6 +976,9 @@ ${faceRequired ? `- Render the eyes with correct anatomy: two naturally shaped, 
 
 PROHIBITED UNRELATED CHANGES:
 ${rules.map((rule) => `- ${rule}`).join("\n")}
+- Never render duplicate or identical frontal standing poses across different pose slots (Poses 2, 4, and 6 must visibly physically diverge from Pose 1).
+- Never render artificial, forced, stiff, or frozen stock catalog smiles.
+- Never redesign the product or copy garment details from the style reference.
 - Never complete, mirror, continue, relocate, add or remove decoration for symmetry.
 - Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
 ${bottomWear.includesBottomWear

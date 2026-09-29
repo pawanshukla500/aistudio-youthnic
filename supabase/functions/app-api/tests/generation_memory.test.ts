@@ -90,8 +90,29 @@ Deno.test("learned prompt patterns stay generic and fail closed without a catego
   assertEquals(titles.includes("style-reference-backdrop-lock"), true);
   assertEquals(titles.includes("seated-pose-4-lock"), true);
   assertEquals(titles.includes("pose1-continuity-lock"), true);
+  assertEquals(titles.includes("pose-plan-6-variation-lock"), true);
+  assertEquals(titles.includes("locked-styling-and-accessories"), true);
+  assertEquals(titles.includes("natural-realistic-expression"), true);
+  assertEquals(titles.includes("product-reference-sole-truth"), true);
   assertEquals(learned.find((pattern) => pattern.title === "closeup-product-detail-lock")?.outcome, "failure");
+  assertEquals(learned.find((pattern) => pattern.title === "pose-plan-6-variation-lock")?.outcome, "failure");
+  assertEquals(learned.find((pattern) => pattern.title === "locked-styling-and-accessories")?.outcome, "failure");
   assertEquals(learned.every((pattern) => !/ivory|gold yoke|SKU/i.test(pattern.patternText)), true);
+
+  const fullySuccessfulShoot = extractLearnedPromptPatterns({
+    category: "ethnic/fusion",
+    hasStyleReference: true,
+    poses: [
+      { poseIndex: 1, poseType: "full_front", status: "completed" },
+      { poseIndex: 2, poseType: "angled", status: "completed" },
+      { poseIndex: 3, poseType: "back", status: "completed" },
+      { poseIndex: 4, poseType: "creative", status: "completed" },
+      { poseIndex: 5, poseType: "closeup", status: "completed" },
+      { poseIndex: 6, poseType: "showcase", status: "completed" },
+    ],
+  });
+  assertEquals(fullySuccessfulShoot.find((pattern) => pattern.title === "pose-plan-6-variation-lock")?.outcome, "success");
+  assertEquals(fullySuccessfulShoot.find((pattern) => pattern.title === "locked-styling-and-accessories")?.outcome, "success");
 
   const skippedSeat = extractLearnedPromptPatterns({
     category: "ethnic/fusion",
