@@ -122,10 +122,10 @@ Image quality defaults to `medium` (`DEFAULT_IMAGE_QUALITY`); see
 `estimateJobCostUsd` (`supabase/functions/app-api/lib/providerCost.ts`) computes
 dynamic job costs for generation jobs enqueued via Studio (`studio.queue`) or catalog
 processing (`catalog.process`), replacing the former fixed $0.25 placeholder:
-- Primary generation: `posesCount × basePrice(model, imageQuality)`
-- Image quality multipliers: standard (1.0x), medium (1.15x), high (1.35x), ultra (1.65x)
+- Primary generation: `posesCount × basePrice(model) × qualityMultiplier`
+- Image quality multipliers: low (0.75x), medium (0.9x), high (1.0x)
 - Pose QA allowance: `$0.005` per pose when QA is enabled
-- Product analysis allowance: `$0.01` amortized per job
+- Product analysis allowance: `$0.03` default amortized per job (or actual analysis cost when available)
 - Pose regenerations: computed for the exact number of regenerated poses
 
 ## Changing routing code
