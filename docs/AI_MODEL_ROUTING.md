@@ -86,9 +86,9 @@ For example:
 With only one configured model the message ends "No fallback model is configured for
 this purpose in Administration."
 
-OpenAI vision calls try Chat Completions first, then the Responses API. When Chat
-Completions rejects the model (404 or 400), which usually means the model only serves
-the Responses API, the error reported is the Responses API's.
+OpenAI and Meta Muse Spark vision calls support dual protocols:
+- **OpenAI** vision calls try Chat Completions first, then the Responses API (`/v1/responses`). When Chat Completions rejects the model (404 or 400), which usually means the model only serves the Responses API, the error reported is the Responses API's.
+- **Meta Muse Spark** calls use the native Responses API (`https://api.meta.ai/v1/responses`) as specified in the official [Meta Model API documentation](https://dev.meta.ai/docs/overview#muse-spark) for multimodal image understanding and structured reasoning, falling back to Chat Completions (`https://api.meta.ai/v1/chat/completions`) if an endpoint returns 404 or 400. When both reject the model or an account lacks tier access, detailed provider diagnostics are preserved so administrators can immediately identify the underlying cause.
 
 ## Debugging a failure
 

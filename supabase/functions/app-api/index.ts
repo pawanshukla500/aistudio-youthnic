@@ -1183,8 +1183,13 @@ function responseContentFromParts(parts: JsonRecord[]) {
   return content;
 }
 
-function chatContentFromParts(parts: JsonRecord[]) {
-  return responseContentFromParts(parts).map((part) => part.type === "input_image"
+function chatContentFromParts(parts: JsonRecord[]): string | JsonRecord[] {
+  const content = responseContentFromParts(parts);
+  const hasImages = content.some((part) => part.type === "input_image");
+  if (!hasImages) {
+    return content.map((part) => String(part.text || "")).join("\n\n");
+  }
+  return content.map((part) => part.type === "input_image"
     ? { type: "image_url", image_url: { url: part.image_url } }
     : { type: "text", text: part.text });
 }
@@ -1326,6 +1331,71 @@ async function openAiVisionJson(
   }
 }
 
+async function metaResponsesVisionJson(
+  route: NormalizedAiModelRoute,
+  parts: JsonRecord[],
+  timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+) {
+  assertVisionProviderConfigured(route);
+  const effort = route.thinkingLevel === "none" ? "minimal" : route.thinkingLevel;
+  const response = await fetch("https://api.meta.ai/v1/responses", {
+    method: "POST",
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${requiredEnv("META_MODEL_API_KEY")}`,
+    },
+    body: JSON.stringify({
+      model: route.model,
+      input: [{
+        type: "message",
+        role: "user",
+        content: responseContentFromParts(parts),
+      }],
+      reasoning: { effort },
+      text: { format: { type: "json_object" } },
+      max_output_tokens: 16384,
+    }),
+  });
+  const data = await response.json().catch(() => ({})) as JsonRecord;
+  if (!response.ok) {
+    const providerError = data.error as JsonRecord | undefined;
+    throw visionProviderError(route, {
+      status: response.status,
+      message: String(providerError?.message || data.message || `Meta Muse Spark vision request failed (${response.status}).`),
+      code: String(providerError?.code || providerError?.type || ""),
+    });
+  }
+  const text = extractResponseApiText(data);
+  if (!text) throw visionProviderError(route, { message: "meta returned no structured visual response." });
+  return { raw: data, text, json: parseJsonResponse(text) };
+}
+
+async function metaVisionJson(
+  route: NormalizedAiModelRoute,
+  parts: JsonRecord[],
+  timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+) {
+  // dev.meta.ai specifies the Responses API (https://api.meta.ai/v1/responses) as the
+  // recommended default for multimodal image understanding and structured reasoning with Muse Spark.
+  // We try Responses API first, and if rejected (404/400), seamlessly fall back to Chat Completions.
+  try {
+    return await metaResponsesVisionJson(route, parts, timeoutMs);
+  } catch (error) {
+    const classified = asVisionProviderError(error, route);
+    const responsesRejected = (classified.failure.code === "provider_unavailable" && classified.failure.status === 404) ||
+      classified.failure.code === "provider_invalid_request" ||
+      classified.failure.status === 400;
+    if (!responsesRejected) throw classified;
+    try {
+      return await openAiCompatibleVisionJson(route, parts, "meta", timeoutMs);
+    } catch (chatError) {
+      const chatClassified = asVisionProviderError(chatError, route);
+      throw chatClassified.failure.status === 404 ? classified : chatClassified;
+    }
+  }
+}
+
 async function qwenVisionJson(route: NormalizedAiModelRoute, parts: JsonRecord[]) {
   assertVisionProviderConfigured(route);
   const response = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
@@ -1376,7 +1446,7 @@ async function invokeVisionRoute(
     return openAiVisionJson(route, parts, timeoutMs);
   }
   if (route.provider === "meta") {
-    return openAiCompatibleVisionJson(route, parts, route.provider, timeoutMs);
+    return metaVisionJson(route, parts, timeoutMs);
   }
   return qwenVisionJson(route, parts);
 }
@@ -7686,7 +7756,7 @@ async function probeAiRouteOperation(request: Request, args: JsonRecord) {
     } else if (route.provider === "openai") {
       await openAiVisionJson(probeRoute, parts, 8_000);
     } else if (route.provider === "meta") {
-      await openAiCompatibleVisionJson(probeRoute, parts, "meta", 8_000);
+      await metaVisionJson(probeRoute, parts, 8_000);
     } else if (route.provider === "qwen") {
       await qwenVisionJson(route, parts);
     } else {

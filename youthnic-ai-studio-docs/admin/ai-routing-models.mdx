@@ -66,7 +66,9 @@ always kept; only the reasoning effort is lowered for this job.
 ## Testing a model
 
 Use **TEST** next to the primary and **TEST FALLBACK** next to the fallback. Each sends a
-tiny JSON request to that exact model. A pass proves the API key and model name work.
+tiny JSON request to that exact model. For OpenAI and Meta Muse Spark, probes and production
+analysis seamlessly test both the native Responses API (`/v1/responses`) and Chat Completions (`/v1/chat/completions`).
+A pass proves the API key, endpoint access, and model name work.
 **CONFIGURED** only means the provider's API key is set on the server.
 
 ---
