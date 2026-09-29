@@ -10,7 +10,7 @@ SET
     WHEN fallback_model = 'muse-spark-1.3-contributor' OR primary_model = 'muse-spark-1.3-contributor' THEN 'muse-spark-1.3-contributor'
     ELSE 'muse-spark-1.3'
   END,
-  primary_reasoning = 'high',
+  primary_reasoning = 'low',
   fallback_enabled = true,
   fallback_provider = 'openai',
   fallback_model = 'gpt-5.6-luna',

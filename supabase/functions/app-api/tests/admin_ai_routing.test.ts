@@ -89,3 +89,29 @@ Deno.test("preferred image generation model is Flare 2026-09-08 over Sunburst an
     "gpt-image-2.5-flare-2026-09-08",
   );
 });
+
+Deno.test("product truth policy coercion defaults Meta thinking to low and preserves Luna high thinking", () => {
+  const metaPolicy = coerceAdminAiPolicy({
+    purpose: "product_truth",
+    primaryProvider: "meta",
+    primaryModel: "muse-spark-1.3",
+    primaryThinking: "high",
+    fallbackEnabled: true,
+    fallbackProvider: "openai",
+    fallbackModel: "gpt-5.6-luna",
+    fallbackThinking: "high",
+  }, [
+    ...registry.filter((r) => r.provider !== "openai"),
+    {
+      provider: "openai",
+      configured: true,
+      models: [
+        { id: "gpt-5.6-luna", label: "GPT 5.6 Luna", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "high"] },
+      ],
+    },
+  ]);
+  // Meta in product_truth is coerced to low to agree with server runtime clamp
+  assertEquals(metaPolicy.primaryThinking, "low");
+  // Luna in product_truth preserves high thinking
+  assertEquals(metaPolicy.fallbackThinking, "high");
+});

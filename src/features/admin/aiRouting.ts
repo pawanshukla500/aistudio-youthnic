@@ -87,9 +87,21 @@ function thinkingFor(
   const levels = modelsForProviderPurpose(registry, provider, purpose)
     .find((model) => model.id === modelId)?.thinkingLevels || [];
   if (provider === "qwen") return "none";
+  if (purpose === "product_truth") {
+    if (provider === "openai" && modelId === "gpt-5.6-luna") {
+      if (current && levels.includes(current)) return current;
+      if (levels.includes("high")) return "high";
+    }
+    if (current && ["none", "minimal", "low"].includes(current) && levels.includes(current)) {
+      return current;
+    }
+    if (levels.includes("low")) return "low";
+    if (levels.includes("minimal")) return "minimal";
+    return levels[0] || "none";
+  }
   if (current && levels.includes(current)) return current;
   if (provider === "openai" && modelId === "gpt-5.6-luna" && levels.includes("high")) return "high";
-  if (provider === "meta" && levels.includes("high")) return "high";
+  if (purpose === "qa" && levels.includes("medium")) return "medium";
   return levels[0] || "none";
 }
 
