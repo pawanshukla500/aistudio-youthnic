@@ -522,7 +522,7 @@ export function Admin() {
       ]);
     return [...groups.entries()];
   }, [overview]);
-  const aiRegistry = overview?.aiModelRegistry || [];
+  const aiRegistry = useMemo(() => overview?.aiModelRegistry || [], [overview?.aiModelRegistry]);
   const providerFor = (provider: string) => aiRegistry.find((entry) => entry.provider === provider);
   const modelsFor = (provider: string, purpose: AiPolicyPurpose) =>
     modelsForProviderPurpose(aiRegistry, provider, purpose);
@@ -530,12 +530,21 @@ export function Admin() {
     if (provider === "qwen") return ["none"];
     const levels = modelsFor(provider, purpose).find((model) => model.id === modelId)?.thinkingLevels || [];
     const safeLevels = provider === "meta" ? levels.filter((level) => level !== "none") : levels;
-    return safeLevels.length ? safeLevels : provider === "meta" ? ["high"] : ["none"];
+    return safeLevels.length ? safeLevels : provider === "meta" ? ["low"] : ["none"];
   };
   const normalizedThinking = (provider: string, modelId: string, purpose: AiPolicyPurpose, current: string | undefined) => {
     const levels = thinkingLevelsFor(provider, modelId, purpose);
     if (provider === "qwen") return "none";
-    if (provider === "meta" && current === "none") return levels[0] || "high";
+    if (provider === "meta" && current === "none") return levels.includes("low") ? "low" : levels[0] || "minimal";
+    if (purpose === "product_truth") {
+      if (provider === "openai" && modelId === "gpt-5.6-luna") {
+        return current && levels.includes(current) ? current : levels.includes("high") ? "high" : levels[0] || "low";
+      }
+      if (current && ["none", "minimal", "low"].includes(current) && levels.includes(current)) {
+        return current;
+      }
+      return levels.includes("low") ? "low" : levels.includes("minimal") ? "minimal" : levels[0] || "none";
+    }
     return current && levels.includes(current) ? current : levels[0] || "none";
   };
   const defaultAiPolicy = (purpose: AiPolicyPurpose): AiModelPolicy => {
@@ -549,15 +558,34 @@ export function Admin() {
     const fallbackModel = fallback
       ? modelsFor(fallback.provider, purpose).find((model) => model.id === preferredModelId(fallback.provider, modelsFor(fallback.provider, purpose))) || modelsFor(fallback.provider, purpose)[0]
       : undefined;
+    const defaultPrimaryProvider = primary?.provider || (purpose === "product_truth" ? "meta" : "openai");
+    const defaultPrimaryThinking = normalizedThinking(
+      defaultPrimaryProvider,
+      primaryModel?.id || "",
+      purpose,
+      purpose === "product_truth"
+        ? (primaryModel?.thinkingLevels.includes("low") ? "low" : primaryModel?.thinkingLevels[0])
+        : (primaryModel?.thinkingLevels.includes("high") ? "high" : primaryModel?.thinkingLevels[0]),
+    );
+    const defaultFallbackThinking = fallback && fallbackModel
+      ? normalizedThinking(
+          fallback.provider,
+          fallbackModel.id,
+          purpose,
+          fallbackModel.id === "gpt-5.6-luna" && fallbackModel.thinkingLevels.includes("high")
+            ? "high"
+            : fallbackModel.thinkingLevels[0],
+        )
+      : undefined;
     return {
       purpose,
-      primaryProvider: primary?.provider || "openai",
+      primaryProvider: defaultPrimaryProvider,
       primaryModel: primaryModel?.id || "",
-      primaryThinking: normalizedThinking(primary?.provider || "openai", primaryModel?.id || "", purpose, primaryModel?.thinkingLevels[0]),
+      primaryThinking: defaultPrimaryThinking,
       fallbackEnabled: purpose !== "image_generation" && Boolean(fallback && fallbackModel),
       fallbackProvider: fallback?.provider,
       fallbackModel: fallbackModel?.id,
-      fallbackThinking: fallback && fallbackModel ? normalizedThinking(fallback.provider, fallbackModel.id, purpose, fallbackModel.thinkingLevels[0]) : undefined,
+      fallbackThinking: defaultFallbackThinking,
     };
   };
   const aiPoliciesForEditor = managedAiPurposes.map(({ purpose }) =>
@@ -571,6 +599,50 @@ export function Admin() {
       const currentPolicy = current.find((policy) => policy.purpose === purpose) || defaultAiPolicy(purpose);
       return [...current.filter((policy) => policy.purpose !== purpose), change(currentPolicy)];
     });
+  };
+  const canApplyRecommendedProductTruth = useMemo(() => {
+    const metaEntry = aiRegistry.find((entry) => entry.provider === "meta");
+    const openAiEntry = aiRegistry.find((entry) => entry.provider === "openai");
+    const metaModels = (metaEntry?.models || []).filter((model) => model.purposes.includes("product_truth"));
+    const openAiModels = (openAiEntry?.models || []).filter((model) => model.purposes.includes("product_truth"));
+    return Boolean(
+      metaEntry?.configured &&
+      metaModels.length > 0 &&
+      openAiEntry?.configured &&
+      openAiModels.length > 0,
+    );
+  }, [aiRegistry]);
+
+  const applyRecommendedProductTruth = () => {
+    const metaEntry = providerFor("meta");
+    const openAiEntry = providerFor("openai");
+    const metaModels = modelsFor("meta", "product_truth");
+    const openAiModels = modelsFor("openai", "product_truth");
+    if (!metaEntry?.configured || !metaModels.length || !openAiEntry?.configured || !openAiModels.length) {
+      setNotice({
+        tone: "error",
+        text: "Cannot apply recommendation: Meta and OpenAI must both be configured with available vision models.",
+      });
+      return;
+    }
+    const metaModel =
+      metaModels.find((model) => model.id === "muse-spark-1.3-contributor") ||
+      metaModels.find((model) => model.id === "muse-spark-1.3") ||
+      metaModels[0];
+    const openAiModel =
+      openAiModels.find((model) => model.id === "gpt-5.6-luna") ||
+      openAiModels[0];
+
+    updateAiPolicy("product_truth", (current) => ({
+      ...current,
+      primaryProvider: "meta",
+      primaryModel: metaModel.id,
+      primaryThinking: normalizedThinking("meta", metaModel.id, "product_truth", "low"),
+      fallbackEnabled: true,
+      fallbackProvider: "openai",
+      fallbackModel: openAiModel.id,
+      fallbackThinking: normalizedThinking("openai", openAiModel.id, "product_truth", "high"),
+    }));
   };
 
   const submitUser = async (event: React.FormEvent) => {
@@ -1150,9 +1222,47 @@ export function Admin() {
                 return (
                   <article key={policy.purpose} className="overflow-hidden rounded-2xl border border-outline-variant/40 bg-white shadow-sm">
                     <div className="border-b border-outline-variant/30 p-5">
-                      <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">{config.label}</p><p className="mt-2 text-sm leading-6 text-secondary">{config.description}</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider ${primaryConfigured && fallbackConfigured ? "bg-success-surface text-success" : "bg-warning-surface text-warning"}`}>{primaryConfigured && fallbackConfigured ? "Ready" : "Needs key"}</span></div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">{config.label}</p>
+                          <p className="mt-2 text-sm leading-6 text-secondary">{config.description}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {policy.purpose === "product_truth" && (
+                            <button
+                              type="button"
+                              onClick={applyRecommendedProductTruth}
+                              disabled={saving || !overview.capabilities.canManageSettings || !canApplyRecommendedProductTruth}
+                              className="rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-primary hover:bg-primary/10 disabled:opacity-50"
+                              title="Set Primary: Meta Muse Spark, Fallback: OpenAI GPT 5.6 Luna High"
+                            >
+                              Recommended routing
+                            </button>
+                          )}
+                          <span className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider ${primaryConfigured && fallbackConfigured ? "bg-success-surface text-success" : "bg-warning-surface text-warning"}`}>{primaryConfigured && fallbackConfigured ? "Ready" : "Needs key"}</span>
+                        </div>
+                      </div>
                     </div>
                     <div className="space-y-5 p-5">
+                      {policy.purpose === "product_truth" &&
+                        policy.primaryProvider === "openai" &&
+                        (policy.primaryModel === "gpt-5.6-terra" || policy.primaryModel === "gpt-5.6-sol") &&
+                        canApplyRecommendedProductTruth && (
+                        <div className="flex flex-col gap-2 rounded-xl border border-primary/30 bg-soft-blush p-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="text-xs font-bold text-on-surface">Switch to Meta Muse Spark + Luna to reduce token cost</p>
+                            <p className="text-[11px] leading-4 text-secondary">GPT 5.6 Terra has high per-token pricing. Meta Muse Spark with GPT 5.6 Luna (High thinking) fallback provides superior cost efficiency.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={applyRecommendedProductTruth}
+                            disabled={saving || !overview.capabilities.canManageSettings}
+                            className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white hover:bg-primary/90 disabled:opacity-50"
+                          >
+                            Apply low-cost routing
+                          </button>
+                        </div>
+                      )}
                       <div>
                         <div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-sm font-bold text-on-surface">Primary provider</h4><div className="flex items-center gap-2"><span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase ${primaryConfigured ? "bg-success-surface text-success" : "bg-warning-surface text-warning"}`}>{primaryConfigured ? "Configured" : "Missing secret"}</span>{policy.purpose !== "image_generation" && <button type="button" disabled={saving || !primaryConfigured || !policy.primaryModel || !overview.capabilities.canManageSettings || routeProbes[`${policy.purpose}-primary`]?.status === "running"} onClick={() => void runRouteProbe(`${policy.purpose}-primary`, policy.primaryProvider, policy.primaryModel, policy.primaryThinking, policy.purpose)} className="rounded-lg border border-outline-variant px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-secondary disabled:opacity-50">{routeProbes[`${policy.purpose}-primary`]?.status === "running" ? "Testing…" : "Test"}</button>}</div></div>
                         {routeProbes[`${policy.purpose}-primary`]?.status === "pass" && <p className="mb-3 text-xs text-success">Primary probe passed in {routeProbes[`${policy.purpose}-primary`]?.latencyMs} ms.</p>}

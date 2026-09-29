@@ -9,14 +9,16 @@ Six-pose fashion catalog photoshoots generated from product references.
 
 ## Non-negotiable rules
 
-1. **AI models come from Administration, not from code.** The primary and fallback
-   saved in Administration → AI models (`organization_ai_model_policies`) are the
-   models that run, in that order. Never hardcode, insert, substitute, reroute, or
-   silently drop a model, and never write to `organization_ai_model_policies` from
-   code paths other than the Admin save. The only adjustment allowed is reasoning
-   effort: product analysis runs at low (or the model's lowest supported level;
-   explicit none/minimal is preserved; Qwen runs with thinking off) to fit the
-   180s Studio wait, and Gemini Flash QA runs at low. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
+1. **AI models follow configured policies.** The primary and fallback
+   routes saved in Administration → AI models (`organization_ai_model_policies`), or
+   defaulted when unconfigured, determine the execution chain. For product truth and pose
+   planning, the standard chain routes through Meta Muse Spark (or contributor) as primary,
+   OpenAI GPT-5.6 Luna (with high thinking for deep pose planning reasoning) as first fallback,
+   and OpenAI GPT-5.6 Terra as the safety net fallback. Do not add arbitrary unapproved
+   models or bypass the established chain. Reasoning effort is preserved for Luna (high)
+   while heavy models (Terra, Flash, Sol, Muse Spark) run at low (or lowest supported level;
+   explicit none/minimal is preserved; Qwen runs with thinking off) to fit the 180s Studio wait,
+   and Gemini Flash QA runs at low. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
 2. **Product references are the truth.** Generated images, style references and
    learning rules never override the uploaded front/back/fabric product images.
 3. **One set per shoot.** Every pose prompt carries the same SCENE LOCK

@@ -38,8 +38,10 @@ import {
   DEFAULT_IMAGE_GENERATION_ROUTE,
   defaultImageGenerationRoute,
   CHEAP_OPENAI_VISION_ROUTE,
+  LUNA_HIGH_THINKING_VISION_ROUTE,
   OPENAI_TERRA_VISION_ROUTE,
   FAST_PRODUCT_TRUTH_ROUTE,
+  FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE,
   PRODUCT_TRUTH_TIMEOUT_MS,
   VISION_GATEWAY_BUDGET_MS,
   VISION_HOP_MIN_MS,
@@ -542,16 +544,16 @@ function defaultVisionRoute(args: {
   uncertainty?: boolean;
   referenceCount?: number;
 }): NormalizedAiModelRoute {
-  if (Deno.env.get("OPENAI_API_KEY")?.trim()) {
+  if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
     return assertAllowedAiModelRoute(
-      CHEAP_OPENAI_VISION_ROUTE,
+      FAST_PRODUCT_TRUTH_ROUTE,
       args.purpose,
       { strictJson: true },
     );
   }
-  if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
+  if (Deno.env.get("OPENAI_API_KEY")?.trim()) {
     return assertAllowedAiModelRoute(
-      FAST_PRODUCT_TRUTH_ROUTE,
+      CHEAP_OPENAI_VISION_ROUTE,
       args.purpose,
       { strictJson: true },
     );
@@ -564,11 +566,42 @@ function defaultVisionRoute(args: {
 }
 
 function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiModelRoute {
+  if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
+    return assertAllowedAiModelRoute(
+      LUNA_HIGH_THINKING_VISION_ROUTE,
+      args.purpose,
+      { strictJson: true },
+    );
+  }
   return assertAllowedAiModelRoute(
     OPENAI_TERRA_VISION_ROUTE,
     args.purpose,
     { strictJson: true },
   );
+}
+
+function defaultVisionFallbacks(args: { purpose: VisionPurpose }): NormalizedAiModelRoute[] {
+  if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
+    return [
+      assertAllowedAiModelRoute(
+        LUNA_HIGH_THINKING_VISION_ROUTE,
+        args.purpose,
+        { strictJson: true },
+      ),
+      assertAllowedAiModelRoute(
+        OPENAI_TERRA_VISION_ROUTE,
+        args.purpose,
+        { strictJson: true },
+      ),
+    ];
+  }
+  return [
+    assertAllowedAiModelRoute(
+      OPENAI_TERRA_VISION_ROUTE,
+      args.purpose,
+      { strictJson: true },
+    ),
+  ];
 }
 
 function visionPolicyFingerprint(policy: VisionPolicy) {
@@ -607,6 +640,7 @@ async function resolveVisionPolicy(orgId: string, args: {
 }): Promise<VisionPolicy> {
   const defaultRoute = defaultVisionRoute(args);
   const defaultFallback = defaultVisionFallback(args);
+  const defaultFallbacks = defaultVisionFallbacks(args);
   // `qa_escalation` deliberately inherits the administrator's QA route when a
   // separate escalation override has not been saved. That keeps one QA switch
   // authoritative while preserving the existing complex-garment recheck path.
@@ -633,6 +667,7 @@ async function resolveVisionPolicy(orgId: string, args: {
       ...defaultRoute,
       purpose: args.purpose,
       fallback: defaultFallback,
+      fallbacks: defaultFallbacks,
       revision: 0,
       source: "default",
     });
@@ -649,10 +684,22 @@ async function resolveVisionPolicy(orgId: string, args: {
       thinkingLevel: String(row.fallback_reasoning || ""),
     }, args.purpose, { strictJson: true })
     : undefined;
+  const fallbacks: NormalizedAiModelRoute[] = fallback ? [fallback] : [];
+  if (
+    args.purpose === "product_truth" &&
+    primary.provider === "meta" &&
+    fallback &&
+    fallback.provider === "openai" &&
+    fallback.model === "gpt-5.6-luna" &&
+    !fallbacks.some((f) => f.model === "gpt-5.6-terra")
+  ) {
+    fallbacks.push(assertAllowedAiModelRoute(OPENAI_TERRA_VISION_ROUTE, args.purpose, { strictJson: true }));
+  }
   return applyFastProductTruthRouting({
     ...primary,
     purpose: args.purpose,
     fallback,
+    fallbacks,
     revision: Math.max(1, Number(row.revision || 1)),
     source: "organization",
   });
@@ -675,7 +722,7 @@ function applyFastProductTruthRouting(policy: VisionPolicy): VisionPolicy {
     provider: policy.provider,
     model: policy.model,
     thinkingLevel: policy.thinkingLevel,
-  }, policy.fallback);
+  }, policy.fallbacks && policy.fallbacks.length > 0 ? policy.fallbacks : policy.fallback);
   return {
     ...policy,
     ...primary,
@@ -1198,11 +1245,24 @@ function extractResponseApiText(data: JsonRecord) {
   const direct = String(data.output_text || "").trim();
   if (direct) return direct;
   const output = Array.isArray(data.output) ? data.output as JsonRecord[] : [];
-  return output.flatMap((item) => Array.isArray(item.content) ? item.content as JsonRecord[] : [])
-    .map((content) => String(content.text || content.output_text || "").trim())
-    .filter(Boolean)
-    .join("\n")
-    .trim();
+  const textFromOutput = output.flatMap((item) => {
+    if (typeof item.text === "string" && item.text.trim()) return [item.text.trim()];
+    if (typeof item.output_text === "string" && item.output_text.trim()) return [item.output_text.trim()];
+    if (typeof item.content === "string" && item.content.trim()) return [item.content.trim()];
+    if (Array.isArray(item.content)) {
+      return (item.content as JsonRecord[])
+        .map((c) => String(c.text || c.output_text || (typeof c === "string" ? c : "")).trim())
+        .filter(Boolean);
+    }
+    const message = item.message as JsonRecord | undefined;
+    if (message && typeof message.content === "string" && message.content.trim()) return [message.content.trim()];
+    return [];
+  }).join("\n").trim();
+  if (textFromOutput) return textFromOutput;
+
+  const choicesText = extractChatCompletionText(data);
+  if (choicesText) return choicesText;
+  return "";
 }
 
 function extractChatCompletionText(data: JsonRecord) {
@@ -1338,37 +1398,44 @@ async function metaResponsesVisionJson(
 ) {
   assertVisionProviderConfigured(route);
   const effort = route.thinkingLevel === "none" ? "minimal" : route.thinkingLevel;
-  const response = await fetch("https://api.meta.ai/v1/responses", {
-    method: "POST",
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${requiredEnv("META_MODEL_API_KEY")}`,
-    },
-    body: JSON.stringify({
-      model: route.model,
-      input: [{
-        type: "message",
-        role: "user",
-        content: responseContentFromParts(parts),
-      }],
-      reasoning: { effort },
-      text: { format: { type: "json_object" } },
-      max_output_tokens: 16384,
-    }),
-  });
-  const data = await response.json().catch(() => ({})) as JsonRecord;
-  if (!response.ok) {
-    const providerError = data.error as JsonRecord | undefined;
-    throw visionProviderError(route, {
-      status: response.status,
-      message: String(providerError?.message || data.message || `Meta Muse Spark vision request failed (${response.status}).`),
-      code: String(providerError?.code || providerError?.type || ""),
+  const content = responseContentFromParts(parts);
+  const inputVariants = [
+    [{ type: "message", role: "user", content }],
+    [{ role: "user", content }],
+  ];
+  let lastError: unknown;
+  for (const input of inputVariants) {
+    const response = await fetch("https://api.meta.ai/v1/responses", {
+      method: "POST",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${requiredEnv("META_MODEL_API_KEY")}`,
+      },
+      body: JSON.stringify({
+        model: route.model,
+        input,
+        reasoning: { effort },
+        text: { format: { type: "json_object" } },
+        max_output_tokens: 16384,
+      }),
     });
+    const data = await response.json().catch(() => ({})) as JsonRecord;
+    if (!response.ok) {
+      const providerError = data.error as JsonRecord | undefined;
+      lastError = visionProviderError(route, {
+        status: response.status,
+        message: String(providerError?.message || data.message || `Meta Muse Spark vision request failed (${response.status}).`),
+        code: String(providerError?.code || providerError?.type || ""),
+      });
+      if (response.status === 400 && input === inputVariants[0]) continue;
+      throw lastError;
+    }
+    const text = extractResponseApiText(data);
+    if (!text) throw visionProviderError(route, { message: "meta returned no structured visual response." });
+    return { raw: data, text, json: parseJsonResponse(text) };
   }
-  const text = extractResponseApiText(data);
-  if (!text) throw visionProviderError(route, { message: "meta returned no structured visual response." });
-  return { raw: data, text, json: parseJsonResponse(text) };
+  throw lastError;
 }
 
 async function metaVisionJson(
@@ -1476,10 +1543,14 @@ async function visionJson(
       provider: policy.provider,
       model: policy.model,
       thinkingLevel: policy.thinkingLevel,
-    }, policy.fallback)
+    }, policy.fallbacks && policy.fallbacks.length > 0 ? policy.fallbacks : policy.fallback)
     : [
       { provider: policy.provider, model: policy.model, thinkingLevel: policy.thinkingLevel },
-      ...(policy.fallback ? [policy.fallback] : []),
+      ...(policy.fallbacks && policy.fallbacks.length > 0
+        ? policy.fallbacks
+        : policy.fallback
+        ? [policy.fallback]
+        : []),
     ];
   // Every configured route is attempted in order. A route whose API key is
   // missing fails at once with a message naming the secret, and the chain moves

@@ -9,8 +9,10 @@ import {
   defaultImageGenerationRoute,
   defaultThinkingLevel,
   FAST_PRODUCT_TRUTH_ROUTE,
+  FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE,
   FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
   CHEAP_OPENAI_VISION_ROUTE,
+  LUNA_HIGH_THINKING_VISION_ROUTE,
   OPENAI_TERRA_VISION_ROUTE,
   PRODUCT_TRUTH_FALLBACK_RESERVE_MS,
   PRODUCT_TRUTH_TIMEOUT_MS,
@@ -460,7 +462,7 @@ Deno.test("Gemini 3.8 Flash and Gemini 3.1 Pro are approved for visual analysis 
   );
 });
 
-Deno.test("product-truth analyze clamps Admin high thinking to low for Muse and Luna", () => {
+Deno.test("product-truth analyze clamps Admin high thinking to low for heavy models while preserving high for Luna", () => {
   assertEquals(
     clampProductTruthThinking({
       provider: "meta",
@@ -474,6 +476,14 @@ Deno.test("product-truth analyze clamps Admin high thinking to low for Muse and 
       provider: "openai",
       model: "gpt-5.6-luna",
       thinkingLevel: "high",
+    }),
+    "high",
+  );
+  assertEquals(
+    clampProductTruthThinking({
+      provider: "openai",
+      model: "gpt-5.6-luna",
+      thinkingLevel: "low",
     }),
     "low",
   );
@@ -518,6 +528,15 @@ Deno.test("product truth runs exactly the Administration primary, then its fallb
     "meta:muse-spark-1.3-contributor:low",
   ]);
   assertEquals(chain(CHEAP_OPENAI_VISION_ROUTE), ["openai:gpt-5.6-luna:low"]);
+  // The user's architecture: Meta Muse Contributor primary -> Luna high thinking fallback -> Terra 3rd fallback
+  assertEquals(
+    chain(FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE, [LUNA_HIGH_THINKING_VISION_ROUTE, OPENAI_TERRA_VISION_ROUTE]),
+    [
+      "meta:muse-spark-1.3-contributor:low",
+      "openai:gpt-5.6-luna:high",
+      "openai:gpt-5.6-terra:low",
+    ],
+  );
   // Gemini and Sol are no longer dropped: a saved choice is a saved choice.
   assertEquals(chain(FAST_PRODUCT_TRUTH_GEMINI_ROUTE, CHEAP_OPENAI_VISION_ROUTE), [
     "gemini:gemini-3.8-flash:low",
@@ -961,4 +980,65 @@ Deno.test("Meta Muse Spark thinking levels and provider failure details", () => 
     "This model is not available to the configured API key (model not found, or the account has no access to it). Check the model in Administration and the provider account.",
   );
 });
+
+Deno.test("3-tier vision fallback chain formats failure messages and budgets time across all 3 hops", () => {
+  const metaFailure = {
+    provider: "meta" as const,
+    model: "muse-spark-1.3-contributor",
+    outcome: "failed" as const,
+    failureCode: "provider_unavailable",
+    failureMessage: "Meta key not configured.",
+  };
+  const lunaFailure = {
+    provider: "openai" as const,
+    model: "gpt-5.6-luna",
+    outcome: "failed" as const,
+    failureCode: "provider_rate_limited",
+    failureMessage: "It is rate-limited right now.",
+  };
+  const terraFailure = {
+    provider: "openai" as const,
+    model: "gpt-5.6-terra",
+    outcome: "failed" as const,
+    failureCode: "provider_budget_exhausted",
+    failureMessage: "Budget exhausted.",
+  };
+
+  const message = visionChainFailureMessage([metaFailure, lunaFailure, terraFailure], 3);
+  assert(message.startsWith("Every configured vision model failed."));
+  assert(message.includes("Meta muse-spark-1.3-contributor"));
+  assert(message.includes("OpenAI gpt-5.6-luna"));
+  assert(message.includes("OpenAI gpt-5.6-terra"));
+
+  // 3 routes in 175s gateway budget: hop 1 leaves 90s reserve for hop 2 and hop 3
+  const hop1Timeout = remainingVisionTimeoutMs({
+    purpose: "product_truth",
+    remainingRouteCount: 3,
+    elapsedMs: 0,
+    gatewayBudgetMs: 175_000,
+  });
+  // 175,000 - 5,000 reserve - 90,000 reserve for 2 fallbacks = 80,000ms
+  assertEquals(hop1Timeout, 80_000);
+
+  // hop 2 leaves 45s reserve for hop 3
+  const hop2Timeout = remainingVisionTimeoutMs({
+    purpose: "product_truth",
+    remainingRouteCount: 2,
+    elapsedMs: 20_000,
+    gatewayBudgetMs: 175_000,
+  });
+  // 175,000 - 20,000 - 5,000 - 45,000 = 105,000ms
+  assertEquals(hop2Timeout, 105_000);
+
+  // hop 3 gets whatever is left of the wait
+  const hop3Timeout = remainingVisionTimeoutMs({
+    purpose: "product_truth",
+    remainingRouteCount: 1,
+    elapsedMs: 80_000,
+    gatewayBudgetMs: 175_000,
+  });
+  // 175,000 - 80,000 - 5,000 = 90,000ms
+  assertEquals(hop3Timeout, 90_000);
+});
+
 

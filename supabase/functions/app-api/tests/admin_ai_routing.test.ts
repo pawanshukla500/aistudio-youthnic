@@ -44,8 +44,8 @@ Deno.test("fallback model lists stay on the selected provider", () => {
   );
 });
 
-Deno.test("preferred vision models are Muse 1.3 and Luna, not Sol or Contributor", () => {
-  assertEquals(preferredModelId("meta", registry.find((entry) => entry.provider === "meta")!.models), "muse-spark-1.3");
+Deno.test("preferred vision models are Muse Spark Contributor and Luna, not Sol or Terra", () => {
+  assertEquals(preferredModelId("meta", registry.find((entry) => entry.provider === "meta")!.models), "muse-spark-1.3-contributor");
   assertEquals(preferredModelId("openai", modelsForProviderPurpose(registry, "openai", "product_truth")), "gpt-5.6-luna");
 });
 
@@ -65,18 +65,22 @@ Deno.test("OpenAI fallback cannot keep a Gemini model id", () => {
   assertEquals(coerced.repairRequired, true);
 });
 
-Deno.test("new vision routing prefers OpenAI Luna when both OpenAI and Gemini are configured", () => {
+Deno.test("product truth routing prefers Meta Muse Spark as primary and OpenAI Luna as fallback when both are configured", () => {
   const primary = preferredConfiguredProvider(registry, "product_truth");
-  assertEquals(primary?.provider, "openai");
+  assertEquals(primary?.provider, "meta");
   assertEquals(
-    preferredModelId("openai", modelsForProviderPurpose(registry, "openai", "product_truth")),
-    "gpt-5.6-luna",
+    preferredModelId("meta", modelsForProviderPurpose(registry, "meta", "product_truth")),
+    "muse-spark-1.3-contributor",
   );
   const fallback = preferredConfiguredProvider(registry, "product_truth", {
     exclude: primary?.provider,
     fallback: true,
   });
-  assertEquals(fallback?.provider, "meta");
+  assertEquals(fallback?.provider, "openai");
+  assertEquals(
+    preferredModelId("openai", modelsForProviderPurpose(registry, "openai", "product_truth")),
+    "gpt-5.6-luna",
+  );
 });
 
 Deno.test("preferred image generation model is Flare 2026-09-08 over Sunburst and legacy GPT Image 2", () => {
@@ -84,4 +88,30 @@ Deno.test("preferred image generation model is Flare 2026-09-08 over Sunburst an
     preferredModelId("openai", modelsForProviderPurpose(registry, "openai", "image_generation")),
     "gpt-image-2.5-flare-2026-09-08",
   );
+});
+
+Deno.test("product truth policy coercion defaults Meta thinking to low and preserves Luna high thinking", () => {
+  const metaPolicy = coerceAdminAiPolicy({
+    purpose: "product_truth",
+    primaryProvider: "meta",
+    primaryModel: "muse-spark-1.3",
+    primaryThinking: "high",
+    fallbackEnabled: true,
+    fallbackProvider: "openai",
+    fallbackModel: "gpt-5.6-luna",
+    fallbackThinking: "high",
+  }, [
+    ...registry.filter((r) => r.provider !== "openai"),
+    {
+      provider: "openai",
+      configured: true,
+      models: [
+        { id: "gpt-5.6-luna", label: "GPT 5.6 Luna", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "high"] },
+      ],
+    },
+  ]);
+  // Meta in product_truth is coerced to low to agree with server runtime clamp
+  assertEquals(metaPolicy.primaryThinking, "low");
+  // Luna in product_truth preserves high thinking
+  assertEquals(metaPolicy.fallbackThinking, "high");
 });

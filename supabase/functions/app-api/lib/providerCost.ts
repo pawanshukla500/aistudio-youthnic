@@ -83,7 +83,7 @@ export const OPENAI_VISION_PRICING: Record<string, VisionTokenRates> = {
 export const META_VISION_PRICING: Record<string, VisionTokenRates> = {
   "muse-spark-1.3": { input: 1.25, output: 4.25, cached: 0.125, version: "2026-09", source: "meta_standard_muse" },
   "muse-spark-1.2": { input: 1.25, output: 4.25, cached: 0.125, version: "2026-09", source: "meta_standard_muse" },
-  "muse-spark-1.3-contributor": { input: 0.10, output: 0.20, cached: 0.01, version: "2026-09", source: "meta_contributor_muse" },
+  "muse-spark-1.3-contributor": { input: 0.10, output: 0.20, cached: 0.002, version: "2026-09", source: "meta_contributor_muse" },
 };
 
 export const ANALYSIS_RUN_KINDS = ["product_reference_analysis", "catalog_product_preflight"] as const;

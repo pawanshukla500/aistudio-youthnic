@@ -43,13 +43,14 @@ export function preferredModelId(provider: string, models: AdminAiRegistryModel[
   if (provider === "openai" && ids.includes("gpt-image-2.5-flare")) return "gpt-image-2.5-flare";
   if (provider === "openai" && ids.includes("gpt-image-2.5-sunburst")) return "gpt-image-2.5-sunburst";
   if (provider === "openai" && ids.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
+  if (provider === "meta" && ids.includes("muse-spark-1.3-contributor")) return "muse-spark-1.3-contributor";
   if (provider === "meta" && ids.includes("muse-spark-1.3")) return "muse-spark-1.3";
   if (provider === "gemini" && models.length && ids.includes("gemini-3.8-flash")) return "gemini-3.8-flash";
   return ids[0] || "";
 }
 
-const VISION_PROVIDER_PREFERENCE = ["openai", "meta", "qwen", "gemini"];
-const FALLBACK_PROVIDER_PREFERENCE = ["openai", "qwen", "meta"];
+const VISION_PROVIDER_PREFERENCE = ["meta", "openai", "qwen", "gemini"];
+const FALLBACK_PROVIDER_PREFERENCE = ["openai", "meta", "qwen", "gemini"];
 
 export function preferredConfiguredProvider(
   registry: AdminAiRegistryEntry[],
@@ -58,6 +59,10 @@ export function preferredConfiguredProvider(
 ) {
   const order = purpose === "image_generation"
     ? ["openai"]
+    : purpose === "product_truth"
+    ? options?.fallback
+      ? ["openai", "qwen", "gemini"]
+      : ["meta", "openai", "qwen", "gemini"]
     : options?.fallback
     ? FALLBACK_PROVIDER_PREFERENCE
     : VISION_PROVIDER_PREFERENCE;
@@ -82,7 +87,21 @@ function thinkingFor(
   const levels = modelsForProviderPurpose(registry, provider, purpose)
     .find((model) => model.id === modelId)?.thinkingLevels || [];
   if (provider === "qwen") return "none";
+  if (purpose === "product_truth") {
+    if (provider === "openai" && modelId === "gpt-5.6-luna") {
+      if (current && levels.includes(current)) return current;
+      if (levels.includes("high")) return "high";
+    }
+    if (current && ["none", "minimal", "low"].includes(current) && levels.includes(current)) {
+      return current;
+    }
+    if (levels.includes("low")) return "low";
+    if (levels.includes("minimal")) return "minimal";
+    return levels[0] || "none";
+  }
   if (current && levels.includes(current)) return current;
+  if (provider === "openai" && modelId === "gpt-5.6-luna" && levels.includes("high")) return "high";
+  if (purpose === "qa" && levels.includes("medium")) return "medium";
   return levels[0] || "none";
 }
 
