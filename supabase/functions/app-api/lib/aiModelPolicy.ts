@@ -985,13 +985,21 @@ export function classifyVisionProviderFailure(
     /(?:model|models\/[\w.-]+)\s+(?:is\s+)?not found|not found for api version|is not available/
       .test(detail)
   ) {
+    const rawDetail = text(input.message);
+    const hasMeaningfulDetail = rawDetail &&
+      !rawDetail.toLowerCase().includes("model not found") &&
+      !rawDetail.toLowerCase().includes("is not available") &&
+      !rawDetail.toLowerCase().includes("failed (404)") &&
+      !rawDetail.toLowerCase().includes("404");
     return failure(
       provider,
       "provider_unavailable",
       status,
       false,
       true,
-      "This model is not available to the configured API key (model not found, or the account has no access to it). Check the model in Administration and the provider account.",
+      hasMeaningfulDetail
+        ? `This model is not available to the configured API key (model not found, or the account has no access to it): ${rawDetail}`
+        : "This model is not available to the configured API key (model not found, or the account has no access to it). Check the model in Administration and the provider account.",
     );
   }
 

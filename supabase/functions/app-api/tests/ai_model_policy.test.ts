@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert@1";
 import {
   allowedModelsForPurpose,
+  allowedThinkingLevels,
   assertAllowedAiModelRoute,
   classifyVisionProviderFailure,
   clampProductTruthThinking,
@@ -934,3 +935,35 @@ Deno.test("a single configured model says there is no fallback; a hard failure s
     "No approved vision provider route is available.",
   );
 });
+
+Deno.test("Meta Muse Spark thinking levels and provider failure details", () => {
+  const standardRoute = { provider: "meta", model: "muse-spark-1.3" };
+  const standardLevels = allowedThinkingLevels(standardRoute, "product_truth");
+  assertEquals(standardLevels.includes("max"), true);
+  assertEquals(standardLevels.includes("minimal"), true);
+  assertEquals(standardLevels.includes("none"), false);
+
+  const contributorRoute = { provider: "meta", model: "muse-spark-1.3-contributor" };
+  const contributorLevels = allowedThinkingLevels(contributorRoute, "product_truth");
+  assertEquals(contributorLevels.includes("max"), false);
+  assertEquals(contributorLevels.includes("minimal"), true);
+  assertEquals(contributorLevels.includes("none"), false);
+
+  // Informative 404 details are appended to guide administrators
+  const informative404 = classifyVisionProviderFailure("meta", {
+    status: 404,
+    message: "Endpoint /v1/chat/completions does not serve this model. Use /v1/responses.",
+  });
+  assertEquals(informative404.code, "provider_unavailable");
+  assertEquals(informative404.fallbackEligible, true);
+  assert(informative404.message.includes("Endpoint /v1/chat/completions does not serve this model"));
+
+  // Generic 404 defaults to standard advice
+  const generic404 = classifyVisionProviderFailure("meta", {
+    status: 404,
+    message: "meta vision request failed (404).",
+  });
+  assertEquals(generic404.code, "provider_unavailable");
+  assert(generic404.message.includes("Check the model in Administration and the provider account."));
+});
+
