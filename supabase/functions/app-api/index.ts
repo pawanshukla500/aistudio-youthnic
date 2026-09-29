@@ -115,6 +115,7 @@ import {
   COMPLETIONS_DIMENSION_PREFIX,
   adminRateSnapshots,
   deriveAdminRateTable,
+  estimateJobCostUsd,
   extractVisionUsageAndCost,
   parseAdminRateRows,
   providerUsage,
@@ -1710,6 +1711,40 @@ function normalizeImageSize(aspectRatio: string, imageSize: string, model: strin
   return is2k ? "2048x2048" : "1024x1024";
 }
 
+/**
+ * `model` is the one the job stores and the worker runs: the resolved
+ * image-generation policy's model, or a per-shoot override validated against
+ * it. QA is priced on the organization's QA route, resolved as validatePose does.
+ */
+async function estimateGenerationJobCostUsd(args: {
+  organizationId: string;
+  model: string;
+  aspectRatio: string;
+  imageSize: string;
+  quality: string;
+  poseCount: number;
+  poseQa: boolean;
+}) {
+  let qaRoute: { provider: string; model: string } | null = null;
+  if (args.poseQa) {
+    try {
+      qaRoute = await resolveVisionPolicy(args.organizationId, { purpose: "qa" });
+    } catch (error) {
+      // An estimate must not block a submit; the QA check reports its own failure when it runs.
+      console.error(`Could not resolve the QA route for the job cost estimate: ${errorMessage(error)}`);
+    }
+  }
+  return estimateJobCostUsd({
+    imageModel: args.model,
+    quality: args.quality,
+    size: normalizeImageSize(args.aspectRatio, args.imageSize, args.model),
+    poseCount: args.poseCount,
+    poseQa: args.poseQa,
+    qaRoute,
+    adminRates: await currentAdminRates(),
+  });
+}
+
 async function generateImage(args: { prompt: string; model: string; size: string; quality: string; references: LoadedReference[] }) {
   // composeGenerationPrompt enforces this too. Keep the provider boundary guarded
   // so future callers cannot send an oversized prompt and trigger a paid-job retry.
@@ -1970,12 +2005,18 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     sessionId,
     planningRequestId: String(session.planning_request_id || ""),
   });
+  const aspectRatio = String(args.aspectRatio || "3:4");
+  const imageSize = String(args.imageSize || "2K");
+  const poseQa = Boolean(args.poseQa);
+  const estimatedCostUsd = await estimateGenerationJobCostUsd({
+    organizationId: workspace.organization.id, model, aspectRatio, imageSize, quality, poseCount: enabled.length, poseQa,
+  });
   const jobRow = {
     job_id: jobId, user_id: workspace.user.firebaseUid, user_email: workspace.user.email, org_id: workspace.organization.id,
     status: "queued", readiness_status: "ready", readiness_reasons: [], sku_name: jobData.skuName, session_id: sessionId, job_data: jobData,
     planning_request_id: session.planning_request_id, total_poses: enabled.length, provider: imageGenerationPolicy.provider, model,
-    aspect_ratio: String(args.aspectRatio || "3:4"), image_size: String(args.imageSize || "2K"), quality,
-    pose_qa: Boolean(args.poseQa), estimated_cost_usd: 0.25, actual_cost_usd: analysisCostUsd, created_at: now, updated_at: now,
+    aspect_ratio: aspectRatio, image_size: imageSize, quality,
+    pose_qa: poseQa, estimated_cost_usd: estimatedCostUsd, actual_cost_usd: analysisCostUsd, created_at: now, updated_at: now,
   };
   const poseRows = enabled.map((pose, index) => ({
     session_id: sessionId, generation_id: `${jobId}:pose:${index + 1}`, pose_index: index + 1,
@@ -6155,6 +6196,12 @@ async function queueCatalogVariantGeneration(
     requestedModel: String(generationSettings.model || "").trim() || null,
     bottomWearMode,
   };
+  const aspectRatio = String(generationSettings.aspectRatio || "3:4");
+  const imageSize = String(generationSettings.imageSize || "2K");
+  const poseQa = Boolean(generationSettings.poseQa);
+  const estimatedCostUsd = await estimateGenerationJobCostUsd({
+    organizationId: String(batch.organization_id), model, aspectRatio, imageSize, quality, poseCount: poses.length, poseQa,
+  });
   const { error: jobInsertError } = await service.from("generation_jobs").insert({
     job_id: jobId,
     user_id: "catalog-worker",
@@ -6171,11 +6218,11 @@ async function queueCatalogVariantGeneration(
     total_poses: poses.length,
     provider: imageGenerationPolicy.provider,
     model,
-    aspect_ratio: String(generationSettings.aspectRatio || "3:4"),
-    image_size: String(generationSettings.imageSize || "2K"),
+    aspect_ratio: aspectRatio,
+    image_size: imageSize,
     quality,
-    pose_qa: Boolean(generationSettings.poseQa),
-    estimated_cost_usd: 0.25,
+    pose_qa: poseQa,
+    estimated_cost_usd: estimatedCostUsd,
     actual_cost_usd: analysisCostUsd,
     created_at: queuedAt,
     updated_at: queuedAt,

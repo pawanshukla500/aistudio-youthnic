@@ -271,6 +271,76 @@ export function usageCostUsd(model: string, usage: ProviderUsage, adminRates?: A
   );
 }
 
+/**
+ * Typical usage of one pose, for pricing a job before it runs. Output tokens
+ * follow OpenAI's published GPT Image table for a 1024x1024 frame and scale
+ * with pixel area (1024x1536 is exactly 1.5x). Input is the composed prompt
+ * plus the reference images, about 16-21k image tokens per pose
+ * (docs/GENERATION_ORCHESTRATION.md). The model sets the rates, not the usage.
+ */
+export const TYPICAL_IMAGE_OUTPUT_TOKENS_1024: Record<string, number> = { low: 272, medium: 1056, high: 4160 };
+export const TYPICAL_IMAGE_INPUT_TEXT_TOKENS = 4_000;
+export const TYPICAL_IMAGE_INPUT_IMAGE_TOKENS = 18_500;
+// One QA pass: the QA prompt, the frame under test and its references in; the verdict out.
+export const TYPICAL_QA_INPUT_TOKENS = 15_000;
+export const TYPICAL_QA_OUTPUT_TOKENS = 2_000;
+
+function pixelArea(size: string) {
+  const match = /^(\d+)x(\d+)$/i.exec(String(size || "").trim());
+  const area = match ? Number(match[1]) * Number(match[2]) : 0;
+  return area > 0 ? area : 1024 * 1024;
+}
+
+/** An unknown quality is priced as medium, the default. */
+export function typicalImageUsage(quality: string, size: string): ProviderUsage {
+  const tokens1024 = TYPICAL_IMAGE_OUTPUT_TOKENS_1024[quality] ?? TYPICAL_IMAGE_OUTPUT_TOKENS_1024.medium;
+  const outputTokens = Math.round(tokens1024 * pixelArea(size) / (1024 * 1024));
+  const inputTokens = TYPICAL_IMAGE_INPUT_TEXT_TOKENS + TYPICAL_IMAGE_INPUT_IMAGE_TOKENS;
+  return {
+    inputTokens,
+    inputTextTokens: TYPICAL_IMAGE_INPUT_TEXT_TOKENS,
+    inputImageTokens: TYPICAL_IMAGE_INPUT_IMAGE_TOKENS,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    providerReported: true,
+    raw: {},
+  };
+}
+
+export type JobCostEstimateInput = {
+  /** The image model the job stores and the worker runs. */
+  imageModel: string;
+  quality: string;
+  /** The provider size the worker requests, e.g. "1536x2048". */
+  size: string;
+  poseCount: number;
+  poseQa: boolean;
+  /** The organization's QA route; priced only when pose QA is on. */
+  qaRoute?: { provider: string; model: string } | null;
+  adminRates?: AdminRateTable;
+};
+
+/**
+ * Pre-run estimate for a generation job, priced with the same rates as its
+ * actual cost: usageCostUsd for each frame, and extractVisionUsageAndCost for
+ * one QA pass per frame when pose QA is on. Retries, QA escalations and
+ * product analysis are not included.
+ */
+export function estimateJobCostUsd(input: JobCostEstimateInput) {
+  const poses = Number.isFinite(input.poseCount) ? Math.max(0, Math.floor(input.poseCount)) : 0;
+  if (!poses) return 0;
+  const generationPerPose = usageCostUsd(input.imageModel, typicalImageUsage(input.quality, input.size), input.adminRates);
+  const qaPerPose = input.poseQa && input.qaRoute
+    ? extractVisionUsageAndCost(
+      { usage: { input_tokens: TYPICAL_QA_INPUT_TOKENS, output_tokens: TYPICAL_QA_OUTPUT_TOKENS } },
+      input.qaRoute.provider,
+      input.qaRoute.model,
+      input.adminRates,
+    ).costUsd
+    : 0;
+  return roundUsd(poses * (generationPerPose + qaPerPose));
+}
+
 export type ParsedCostLineItem = {
   model: string;
   component: "input" | "output" | "cached" | "image" | "other";
