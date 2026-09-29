@@ -35,7 +35,7 @@ Target Filename: `images/studio/product-references-uploaded.webp`]
 ---
 
 ### Stage 2: AI Vision Analysis & Garment Truth
-The platform dispatches the reference images to the vision analysis pipeline (powered by Google Gemini Flash or OpenAI Luna with automatic failover):
+The platform sends the reference images to the vision model chosen for **Product truth & pose planning** in [AI Routing & Model Policies](/admin/ai-routing-models), and to its configured fallback if that model fails:
 - Identifies primary and secondary colors, fabric weave, neckline geometry, sleeve length, and bottom wear architecture.
 - Extracts regional evidence (front yoke, hem, side seams, rear closures).
 - Establishes absence hard locks to ensure non-existent trims are never hallucinated.

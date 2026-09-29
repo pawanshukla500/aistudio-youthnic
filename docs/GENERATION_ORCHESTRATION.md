@@ -78,6 +78,11 @@ Revisit this if the pipeline becomes branching and agentic. Examples: a planner 
 among many tools, or several models negotiating a shot. Six fixed poses in sequence is a queue,
 not a graph.
 
+## Which models run
+
+The vision models for analysis and QA, and the image model, come from Administration → AI
+models, exactly as saved. See [AI model routing](AI_MODEL_ROUTING.md).
+
 ## Defaults
 
 - Image quality: `medium` (`DEFAULT_IMAGE_QUALITY` in `index.ts`, Studio, and ad-hoc catalog

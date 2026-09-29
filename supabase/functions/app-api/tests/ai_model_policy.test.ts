@@ -11,31 +11,30 @@ import {
   FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
   CHEAP_OPENAI_VISION_ROUTE,
   OPENAI_TERRA_VISION_ROUTE,
+  PRODUCT_TRUTH_FALLBACK_RESERVE_MS,
   PRODUCT_TRUTH_TIMEOUT_MS,
-  PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS,
   STUDIO_INVOKE_BUDGET_MS,
   VISION_GATEWAY_RESERVE_MS,
   VISION_REQUEST_OVERHEAD_MS,
-  evaluateVisionRoutePromotion,
-  isSlowProductTruthHop,
   productTruthGatewayBudgetMs,
-  productTruthHopTimeoutMs,
   geminiThinkingConfig,
   normalizeAiModelRoute,
-  preferFastProductTruthRoute,
   preferFastProductTruthThinking,
   productTruthRouteChain,
-  promotionFallbackRoute,
   remainingVisionTimeoutMs,
   invokeWithHopTimeout,
-  isOmittedProductTruthHop,
   runVisionProviderChain,
-  selectConfiguredVisionRoutes,
   shouldContinueVisionFallback,
   shouldRetrySameVisionRoute,
   validateAiModelRoute,
   visionAttemptTelemetryRows,
+  visionChainFailureMessage,
+  visionRouteLabel,
 } from "../lib/aiModelPolicy.ts";
+
+// The organization's saved Administration policy for product truth.
+const ADMIN_TERRA = { provider: "openai", model: "gpt-5.6-terra", thinkingLevel: "high" } as const;
+const ADMIN_MUSE_CONTRIBUTOR = { provider: "meta", model: "muse-spark-1.3-contributor", thinkingLevel: "high" } as const;
 
 Deno.test("vision registry keeps image generation on approved OpenAI image models", () => {
   assertEquals(DEFAULT_IMAGE_GENERATION_ROUTE, {
@@ -331,7 +330,7 @@ Deno.test("abort and truncated JSON are timeout/incomplete so Flash fallback can
   assert(shouldContinueVisionFallback(unexpectedFailure, 2));
 });
 
-Deno.test("product-truth defaults to fast thinking and reroutes slow GPT and Gemini to OpenAI Luna", () => {
+Deno.test("product-truth defaults to fast thinking; Gemini Flash QA thinking stays low", () => {
   assertEquals(
     defaultThinkingLevel({ provider: "openai" }, "product_truth", {
       strictJson: true,
@@ -351,30 +350,6 @@ Deno.test("product-truth defaults to fast thinking and reroutes slow GPT and Gem
       { strictJson: true },
     ),
     { provider: "openai", model: "gpt-5.6-sol", thinkingLevel: "low" },
-  );
-  const preferred = preferFastProductTruthRoute({
-    provider: "openai",
-    model: "gpt-5.6-sol",
-    thinkingLevel: "high",
-  });
-  assertEquals(preferred.rerouted, true);
-  assertEquals(preferred.route, CHEAP_OPENAI_VISION_ROUTE);
-  assertEquals(preferred.fallback, OPENAI_TERRA_VISION_ROUTE);
-  const geminiPreferred = preferFastProductTruthRoute({
-    provider: "gemini",
-    model: "gemini-3.8-flash",
-    thinkingLevel: "medium",
-  });
-  assertEquals(geminiPreferred.rerouted, true);
-  assertEquals(geminiPreferred.route, CHEAP_OPENAI_VISION_ROUTE);
-  assertEquals(geminiPreferred.fallback, OPENAI_TERRA_VISION_ROUTE);
-  assertEquals(
-    preferFastProductTruthRoute({
-      provider: "openai",
-      model: "gpt-5.6-luna",
-      thinkingLevel: "low",
-    }),
-    { route: CHEAP_OPENAI_VISION_ROUTE, fallback: OPENAI_TERRA_VISION_ROUTE, rerouted: false },
   );
   assertEquals(
     preferFastProductTruthThinking({
@@ -518,75 +493,35 @@ Deno.test("product-truth analyze clamps Admin high thinking to low for Muse and 
     "low",
   );
   assertEquals(PRODUCT_TRUTH_TIMEOUT_MS, 40_000);
-  assertEquals(PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS, 25_000);
+  assertEquals(PRODUCT_TRUTH_FALLBACK_RESERVE_MS, 40_000);
   assertEquals(STUDIO_INVOKE_BUDGET_MS, 140_000);
 });
 
-Deno.test("product-truth failover is OpenAI Luna, keeps Terra, and omits Gemini", () => {
-  const expected = ["openai:gpt-5.6-luna:low"];
-  assertEquals(
-    productTruthRouteChain(CHEAP_OPENAI_VISION_ROUTE).map((route) =>
-      `${route.provider}:${route.model}:${route.thinkingLevel}`
-    ),
-    expected,
-  );
-  assertEquals(
-    productTruthRouteChain(FAST_PRODUCT_TRUTH_GEMINI_ROUTE, CHEAP_OPENAI_VISION_ROUTE)
-      .map((route) => `${route.provider}:${route.model}:${route.thinkingLevel}`),
-    expected,
-  );
-  assertEquals(
-    productTruthRouteChain({
-      provider: "openai",
-      model: "gpt-5.6-luna",
-      thinkingLevel: "high",
-    }).map((route) => `${route.provider}:${route.model}:${route.thinkingLevel}`),
-    expected,
-  );
-  assertEquals(
-    productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE, {
-      provider: "qwen",
-      model: "qwen3.8-max",
-      thinkingLevel: "none",
-    }).map((route) => `${route.provider}:${route.model}`),
-    [
-      "openai:gpt-5.6-luna",
-      "meta:muse-spark-1.3",
-      "qwen:qwen3.8-max",
-    ],
-  );
-  assertEquals(
-    productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE, {
-      provider: "gemini",
-      model: "gemini-3.1-pro",
-      thinkingLevel: "high",
-    }).map((route) => `${route.provider}:${route.model}`),
-    [
-      "openai:gpt-5.6-luna",
-      "meta:muse-spark-1.3",
-    ],
-  );
-  assertEquals(
-    productTruthRouteChain(CHEAP_OPENAI_VISION_ROUTE, OPENAI_TERRA_VISION_ROUTE)
-      .map((route) => `${route.provider}:${route.model}`),
-    ["openai:gpt-5.6-luna", "openai:gpt-5.6-terra"],
-  );
-  assertEquals(
-    productTruthRouteChain({
-      provider: "openai",
-      model: "gpt-5.6-terra",
-      thinkingLevel: "low",
-    }).map((route) => `${route.provider}:${route.model}`),
-    ["openai:gpt-5.6-luna", "openai:gpt-5.6-terra"],
-  );
-  assertEquals(
-    productTruthRouteChain({
-      provider: "openai",
-      model: "gpt-5.6-sol",
-      thinkingLevel: "low",
-    }).map((route) => `${route.provider}:${route.model}`),
-    ["openai:gpt-5.6-luna"],
-  );
+Deno.test("product truth runs exactly the Administration primary, then its fallback", () => {
+  const chain = (primary: Parameters<typeof productTruthRouteChain>[0], fallback?: Parameters<typeof productTruthRouteChain>[1]) =>
+    productTruthRouteChain(primary, fallback).map((route) => `${route.provider}:${route.model}:${route.thinkingLevel}`);
+
+  // The reported configuration: Terra first, Muse Spark 1.3 Contributor as fallback.
+  // No Luna hop is inserted ahead of it and neither model is substituted; only
+  // the reasoning effort is capped for the Studio time budget.
+  assertEquals(chain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR), [
+    "openai:gpt-5.6-terra:low",
+    "meta:muse-spark-1.3-contributor:low",
+  ]);
+  assertEquals(chain(CHEAP_OPENAI_VISION_ROUTE), ["openai:gpt-5.6-luna:low"]);
+  // Gemini and Sol are no longer dropped: a saved choice is a saved choice.
+  assertEquals(chain(FAST_PRODUCT_TRUTH_GEMINI_ROUTE, CHEAP_OPENAI_VISION_ROUTE), [
+    "gemini:gemini-3.8-flash:low",
+    "openai:gpt-5.6-luna:low",
+  ]);
+  assertEquals(chain({ provider: "openai", model: "gpt-5.6-sol", thinkingLevel: "high" }), ["openai:gpt-5.6-sol:low"]);
+  assertEquals(chain(FAST_PRODUCT_TRUTH_ROUTE, {
+    provider: "qwen",
+    model: "qwen3.8-max",
+    thinkingLevel: "none",
+  }), ["meta:muse-spark-1.3:low", "qwen:qwen3.8-max:none"]);
+  // A fallback identical to the primary runs once.
+  assertEquals(chain(OPENAI_TERRA_VISION_ROUTE, ADMIN_TERRA), ["openai:gpt-5.6-terra:low"]);
 });
 
 Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
@@ -607,69 +542,47 @@ Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
     remainingRouteCount: 1,
     elapsedMs: 0,
     gatewayBudgetMs: productTruthGatewayBudgetMs(),
-    route: CHEAP_OPENAI_VISION_ROUTE,
   });
   assertEquals(
     loneHop + VISION_GATEWAY_RESERVE_MS + VISION_REQUEST_OVERHEAD_MS,
     STUDIO_INVOKE_BUDGET_MS,
   );
   assert(loneHop > 0);
-  assertEquals(
-    isSlowProductTruthHop({ provider: "meta", model: "muse-spark-1.3" }),
-    true,
-  );
-  assertEquals(
-    productTruthHopTimeoutMs({ provider: "meta", model: "muse-spark-1.3" }),
-    PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS,
-  );
-  assert(PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS >= 20_000);
-  assert(PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS <= 25_000);
-  assertEquals(
-    productTruthHopTimeoutMs({ provider: "openai", model: "gpt-5.6-luna" }),
-    PRODUCT_TRUTH_TIMEOUT_MS,
-  );
-
-  const lunaFirst = remainingVisionTimeoutMs({
+  // With a fallback configured, the primary may use the wait minus a fixed
+  // reserve, so a hanging primary can never starve the fallback.
+  const primaryFirst = remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 2,
     elapsedMs: 0,
     gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
-    route: CHEAP_OPENAI_VISION_ROUTE,
   });
-  assertEquals(lunaFirst, PRODUCT_TRUTH_TIMEOUT_MS);
-  assert(lunaFirst < STUDIO_INVOKE_BUDGET_MS);
+  assertEquals(primaryFirst, STUDIO_INVOKE_BUDGET_MS - VISION_GATEWAY_RESERVE_MS - PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
 
-  const lunaOnly = remainingVisionTimeoutMs({
+  const primaryOnly = remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 1,
     elapsedMs: 0,
     gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
-    route: CHEAP_OPENAI_VISION_ROUTE,
   });
-  assertEquals(lunaOnly, STUDIO_INVOKE_BUDGET_MS - VISION_GATEWAY_RESERVE_MS);
+  assertEquals(primaryOnly, STUDIO_INVOKE_BUDGET_MS - VISION_GATEWAY_RESERVE_MS);
 
-  const museIfFirst = remainingVisionTimeoutMs({
-    purpose: "product_truth",
-    remainingRouteCount: 3,
-    elapsedMs: 0,
-    gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
-    route: FAST_PRODUCT_TRUTH_ROUTE,
-  });
-  assertEquals(museIfFirst, PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS);
-  assert(museIfFirst <= 25_000);
-
-  const afterLunaTimeout = remainingVisionTimeoutMs({
+  // A primary that timed out still leaves the fallback its reserved share...
+  const fallbackAfterPrimaryTimeout = remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 1,
-    elapsedMs: PRODUCT_TRUTH_TIMEOUT_MS,
+    elapsedMs: primaryFirst,
     gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
-    route: FAST_PRODUCT_TRUTH_ROUTE,
   });
-  assert(afterLunaTimeout >= 10_000);
-  assert(
-    PRODUCT_TRUTH_TIMEOUT_MS + afterLunaTimeout + VISION_GATEWAY_RESERVE_MS <=
-      STUDIO_INVOKE_BUDGET_MS,
-  );
+  assertEquals(fallbackAfterPrimaryTimeout, PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
+  // ...and one that failed fast (a 404, a missing key) hands it nearly everything.
+  const fallbackAfterFastFailure = remainingVisionTimeoutMs({
+    purpose: "product_truth",
+    remainingRouteCount: 1,
+    elapsedMs: 1_000,
+    gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
+  });
+  assert(fallbackAfterFastFailure > primaryFirst);
+  assert(primaryFirst + fallbackAfterPrimaryTimeout + VISION_GATEWAY_RESERVE_MS <= STUDIO_INVOKE_BUDGET_MS);
 
   const timeout = classifyVisionProviderFailure("meta", {
     name: "TimeoutError",
@@ -681,7 +594,7 @@ Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
 });
 
 Deno.test("timeout on hop-1 still invokes hop-2 and later hops", async () => {
-  const routes = productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE);
+  const routes = productTruthRouteChain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR);
   const invoked: string[] = [];
   const result = await runVisionProviderChain({
     routes,
@@ -690,7 +603,7 @@ Deno.test("timeout on hop-1 still invokes hop-2 and later hops", async () => {
     now: Date.now,
     invoke: async (route) => {
       invoked.push(`${route.provider}:${route.model}`);
-      if (route.model === "gpt-5.6-luna") {
+      if (route.model === "gpt-5.6-terra") {
         throw Object.assign(new Error("The signal has been aborted"), {
           name: "TimeoutError",
         });
@@ -703,19 +616,19 @@ Deno.test("timeout on hop-1 still invokes hop-2 and later hops", async () => {
         message: error instanceof Error ? error.message : String(error),
       }),
   });
-  assertEquals(invoked[0], "openai:gpt-5.6-luna");
-  assertEquals(invoked[1], "meta:muse-spark-1.3");
-  assertEquals(result.route.model, "muse-spark-1.3");
-  assertEquals(result.value, { ok: true, model: "muse-spark-1.3" });
+  assertEquals(invoked[0], "openai:gpt-5.6-terra");
+  assertEquals(invoked[1], "meta:muse-spark-1.3-contributor");
+  assertEquals(result.route.model, "muse-spark-1.3-contributor");
+  assertEquals(result.value, { ok: true, model: "muse-spark-1.3-contributor" });
   const rows = visionAttemptTelemetryRows(result.attempts);
   assertEquals(rows.map((row) => `${row.model}:${row.status}:${row.attemptNumber}`), [
-    "gpt-5.6-luna:failed:1",
-    "muse-spark-1.3:completed:2",
+    "gpt-5.6-terra:failed:1",
+    "muse-spark-1.3-contributor:completed:2",
   ]);
 });
 
 Deno.test("unclassified provider request failure on hop-1 fails over to hop-2 instead of aborting", async () => {
-  const routes = productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE);
+  const routes = productTruthRouteChain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR);
   const invoked: string[] = [];
   const result = await runVisionProviderChain({
     routes,
@@ -724,7 +637,7 @@ Deno.test("unclassified provider request failure on hop-1 fails over to hop-2 in
     now: Date.now,
     invoke: async (route) => {
       invoked.push(`${route.provider}:${route.model}`);
-      if (route.model === "gpt-5.6-luna") {
+      if (route.model === "gpt-5.6-terra") {
         throw new Error("Internal provider gateway error");
       }
       return { ok: true, model: route.model };
@@ -734,14 +647,14 @@ Deno.test("unclassified provider request failure on hop-1 fails over to hop-2 in
         message: error instanceof Error ? error.message : String(error),
       }),
   });
-  assertEquals(invoked[0], "openai:gpt-5.6-luna");
-  assertEquals(invoked[1], "meta:muse-spark-1.3");
-  assertEquals(result.route.model, "muse-spark-1.3");
-  assertEquals(result.value, { ok: true, model: "muse-spark-1.3" });
+  assertEquals(invoked[0], "openai:gpt-5.6-terra");
+  assertEquals(invoked[1], "meta:muse-spark-1.3-contributor");
+  assertEquals(result.route.model, "muse-spark-1.3-contributor");
+  assertEquals(result.value, { ok: true, model: "muse-spark-1.3-contributor" });
 });
 
 Deno.test("60s leftover gateway still runs hop-2 after a full hop-1 timeout", async () => {
-  const routes = productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE);
+  const routes = productTruthRouteChain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR);
   let clock = 0;
   const invoked: Array<{ model: string; timeoutMs: number; at: number }> = [];
   const result = await runVisionProviderChain({
@@ -751,7 +664,7 @@ Deno.test("60s leftover gateway still runs hop-2 after a full hop-1 timeout", as
     now: () => clock,
     invoke: async (route, timeoutMs) => {
       invoked.push({ model: route.model, timeoutMs, at: clock });
-      if (route.model === "gpt-5.6-luna") {
+      if (route.model === "gpt-5.6-terra") {
         clock += timeoutMs;
         throw Object.assign(new Error("The selected vision provider timed out."), {
           name: "TimeoutError",
@@ -767,13 +680,12 @@ Deno.test("60s leftover gateway still runs hop-2 after a full hop-1 timeout", as
       }),
   });
   assertEquals(invoked.map((hop) => hop.model), [
-    "gpt-5.6-luna",
-    "muse-spark-1.3",
+    "gpt-5.6-terra",
+    "muse-spark-1.3-contributor",
   ]);
-  assert(invoked[0].timeoutMs <= PRODUCT_TRUTH_TIMEOUT_MS);
-  assert(invoked[1].timeoutMs >= 8_000);
+  assert(invoked[1].timeoutMs >= PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
   assert(invoked[0].timeoutMs + invoked[1].timeoutMs <= 60_000);
-  assertEquals(result.route.model, "muse-spark-1.3");
+  assertEquals(result.route.model, "muse-spark-1.3-contributor");
 });
 
 Deno.test("Muse timeout still invokes hop-2 and logs both hops", async () => {
@@ -791,7 +703,7 @@ Deno.test("Muse timeout still invokes hop-2 and logs both hops", async () => {
     invoke: async (route, timeoutMs) => {
       events.push(`invoke:${route.model}`);
       if (route.model === "muse-spark-1.3") {
-        assert(timeoutMs <= PRODUCT_TRUTH_SLOW_HOP_TIMEOUT_MS);
+        assert(timeoutMs <= STUDIO_INVOKE_BUDGET_MS - VISION_GATEWAY_RESERVE_MS - PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
         clock += timeoutMs;
         throw Object.assign(new Error("The selected vision provider timed out."), {
           name: "TimeoutError",
@@ -844,7 +756,7 @@ Deno.test("hop timeout is enforced when invoke ignores timeoutMs", async () => {
 });
 
 Deno.test("failed hops are persisted before the next provider is invoked", async () => {
-  const routes = productTruthRouteChain(FAST_PRODUCT_TRUTH_ROUTE);
+  const routes = productTruthRouteChain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR);
   const events: string[] = [];
   await runVisionProviderChain({
     routes,
@@ -852,7 +764,7 @@ Deno.test("failed hops are persisted before the next provider is invoked", async
     gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
     invoke: async (route) => {
       events.push(`invoke:${route.model}`);
-      if (route.model === "gpt-5.6-luna") {
+      if (route.model === "gpt-5.6-terra") {
         throw Object.assign(new Error("The signal has been aborted"), {
           name: "TimeoutError",
         });
@@ -869,111 +781,61 @@ Deno.test("failed hops are persisted before the next provider is invoked", async
     },
   });
   assertEquals(events, [
-    "invoke:gpt-5.6-luna",
-    "log:gpt-5.6-luna:failed",
-    "invoke:muse-spark-1.3",
-    "log:muse-spark-1.3:completed",
+    "invoke:gpt-5.6-terra",
+    "log:gpt-5.6-terra:failed",
+    "invoke:muse-spark-1.3-contributor",
+    "log:muse-spark-1.3-contributor:completed",
   ]);
 });
 
-Deno.test("auto-promotion requires four consecutive Luna or Terra successes", () => {
-  const luna = {
-    provider: "openai" as const,
-    model: "gpt-5.6-luna",
-    status: "completed",
-  };
-  assertEquals(
-    evaluateVisionRoutePromotion({
-      primary: FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
-      recentSuccessfulRuns: [luna, luna, luna],
-    }),
-    null,
-  );
-  assertEquals(
-    evaluateVisionRoutePromotion({
-      primary: FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
-      recentSuccessfulRuns: [luna, luna, luna, luna],
-    }),
-    CHEAP_OPENAI_VISION_ROUTE,
-  );
-  assertEquals(
-    promotionFallbackRoute(CHEAP_OPENAI_VISION_ROUTE),
-    OPENAI_TERRA_VISION_ROUTE,
-  );
-  assertEquals(
-    evaluateVisionRoutePromotion({
-      primary: CHEAP_OPENAI_VISION_ROUTE,
-      recentSuccessfulRuns: [luna, luna, luna, luna],
-    }),
-    null,
-  );
-  const terra = {
+Deno.test("a failed chain names every configured model and why it failed", async () => {
+  const routes = productTruthRouteChain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR);
+  let thrown: unknown;
+  try {
+    await runVisionProviderChain({
+      routes,
+      purpose: "product_truth",
+      gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
+      invoke: (route) => {
+        if (route.provider === "openai") {
+          throw Object.assign(new Error("The model `gpt-5.6-terra` does not exist or you do not have access to it."), { status: 404 });
+        }
+        throw new Error("Meta Muse Spark is selected for vision work but META_MODEL_API_KEY is not configured in Supabase Edge Function secrets.");
+      },
+      classify: (route, error) =>
+        classifyVisionProviderFailure(route.provider, {
+          message: error instanceof Error ? error.message : String(error),
+          status: (error as { status?: number }).status,
+        }),
+    });
+  } catch (error) {
+    thrown = error;
+  }
+  const failure = (thrown as { failure?: { message: string; code: string } }).failure;
+  assert(failure);
+  // Both hops ran: the missing Meta key did not silently remove the fallback.
+  assertEquals((thrown as { attempts: unknown[] }).attempts.length, 2);
+  assert(failure.message.startsWith("Every configured vision model failed."));
+  assert(failure.message.includes("OpenAI gpt-5.6-terra: This model is not available to the configured API key"));
+  assert(failure.message.includes("Meta muse-spark-1.3-contributor: Its API key (META_MODEL_API_KEY) is not configured on the server."));
+  // The old wording promised a fallback at the very moment every fallback had failed.
+  assertEquals(failure.message.includes("A configured fallback can be used"), false);
+  assertEquals((thrown as Error).message, failure.message);
+});
+
+Deno.test("a single configured model says there is no fallback; a hard failure says the fallback was skipped", () => {
+  const terraFailure = {
     provider: "openai" as const,
     model: "gpt-5.6-terra",
-    status: "completed",
+    failureCode: "provider_unavailable",
+    failureMessage: "This model is not available to the configured API key.",
   };
   assertEquals(
-    evaluateVisionRoutePromotion({
-      primary: FAST_PRODUCT_TRUTH_ROUTE,
-      recentSuccessfulRuns: [terra, terra, terra, terra],
-    }),
-    OPENAI_TERRA_VISION_ROUTE,
+    visionChainFailureMessage([terraFailure], 1),
+    "OpenAI gpt-5.6-terra: This model is not available to the configured API key. No fallback model is configured for this purpose in Administration.",
   );
-  assertEquals(
-    evaluateVisionRoutePromotion({
-      primary: FAST_PRODUCT_TRUTH_ROUTE,
-      recentSuccessfulRuns: [
-        luna,
-        { provider: "gemini", model: "gemini-3.8-flash", status: "completed" },
-        luna,
-        luna,
-      ],
-    }),
-    null,
-  );
+  const invalid = { ...terraFailure, failureCode: "provider_invalid_request", failureMessage: "The request was rejected as invalid." };
+  assert(visionChainFailureMessage([invalid], 2).endsWith("The configured fallback was not tried because this failure cannot be fixed by switching models."));
+  assertEquals(visionRouteLabel(ADMIN_MUSE_CONTRIBUTOR), "Meta muse-spark-1.3-contributor");
+  assertEquals(visionChainFailureMessage([], 2), "No approved vision provider route is available.");
 });
-
-Deno.test("Gemini completions are not auto-promoted; only configured OpenAI hops run", () => {
-  const gemini = {
-    provider: "gemini" as const,
-    model: "gemini-3.8-flash",
-    status: "completed",
-  };
-  assertEquals(
-    evaluateVisionRoutePromotion({
-      primary: FAST_PRODUCT_TRUTH_ROUTE,
-      recentSuccessfulRuns: [gemini, gemini, gemini],
-    }),
-    null,
-  );
-  assertEquals(
-    evaluateVisionRoutePromotion({
-      primary: FAST_PRODUCT_TRUTH_ROUTE,
-      recentSuccessfulRuns: Array.from({ length: 12 }, () => gemini),
-    }),
-    null,
-  );
-  assertEquals(
-    promotionFallbackRoute(FAST_PRODUCT_TRUTH_GEMINI_ROUTE),
-    CHEAP_OPENAI_VISION_ROUTE,
-  );
-  assertEquals(
-    selectConfiguredVisionRoutes(
-      productTruthRouteChain(FAST_PRODUCT_TRUTH_GEMINI_ROUTE, FAST_PRODUCT_TRUTH_ROUTE),
-      ["openai"],
-    ).map((route) => `${route.provider}:${route.model}`),
-    ["openai:gpt-5.6-luna"],
-  );
-  assertEquals(
-    selectConfiguredVisionRoutes(
-      [
-        FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
-        CHEAP_OPENAI_VISION_ROUTE,
-        FAST_PRODUCT_TRUTH_ROUTE,
-      ],
-      ["openai", "gemini", "meta"],
-    ).map((route) => `${route.provider}:${route.model}`),
-    ["gemini:gemini-3.8-flash", "openai:gpt-5.6-luna", "meta:muse-spark-1.3"],
-  );
-});
-

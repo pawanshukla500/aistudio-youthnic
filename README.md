@@ -198,6 +198,8 @@ The application source, dependencies, environment, launcher, and runtime no long
 - `supabase/migrations/20260811112304_tier1_generation_queue_recovery.sql` — durable retries and stale-job recovery
 - `docs/SUPABASE_LIVE_SCHEMA_AUDIT.md` — live schema, security, and cutover verification
 - `docs/GENERATION_ORCHESTRATION.md` — worker pipeline, scene lock, regeneration history/timing, and the LangGraph decision
+- `docs/AI_MODEL_ROUTING.md` — Administration-configured primary/fallback models, failover rules, time budget, and error messages
+- `CLAUDE.md` — rules and checks for coding agents working in this repo
 
 - `supabase/migrations/20260811170000_generation_usage_controls_preflight.sql` — provider usage fields and catalog preflight cron
 
