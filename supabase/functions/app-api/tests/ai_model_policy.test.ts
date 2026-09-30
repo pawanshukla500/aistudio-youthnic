@@ -5,6 +5,8 @@ import {
   assertAllowedAiModelRoute,
   classifyVisionProviderFailure,
   clampProductTruthThinking,
+  clampProductTruthHopThinking,
+  dualProtocolPrimaryTimeoutMs,
   DEFAULT_IMAGE_GENERATION_ROUTE,
   defaultImageGenerationRoute,
   defaultThinkingLevel,
@@ -1039,6 +1041,78 @@ Deno.test("3-tier vision fallback chain formats failure messages and budgets tim
   });
   // 175,000 - 80,000 - 5,000 = 90,000ms
   assertEquals(hop3Timeout, 90_000);
+});
+
+Deno.test("dualProtocolPrimaryTimeoutMs bounds the primary slice to preserve fallback time", () => {
+  // 80s hop (primary Meta route in 3-tier chain) is bounded to 25s
+  assertEquals(dualProtocolPrimaryTimeoutMs(80_000), 25_000);
+
+  // 45s hop (reserve for fallback) allocates 45% = 20,250ms
+  assertEquals(dualProtocolPrimaryTimeoutMs(45_000), 20_250);
+
+  // 30s hop allocates 45% = 13,500ms
+  assertEquals(dualProtocolPrimaryTimeoutMs(30_000), 13_500);
+
+  // Hop with 20s allocates 45% = 9,000ms
+  assertEquals(dualProtocolPrimaryTimeoutMs(20_000), 9_000);
+
+  // Hop with 16s allocates 45% = 7,200ms
+  assertEquals(dualProtocolPrimaryTimeoutMs(16_000), 7_200);
+
+  // Hop <= VISION_HOP_MIN_MS (8s) uses the entire hop timeout
+  assertEquals(dualProtocolPrimaryTimeoutMs(8_000), 8_000);
+  assertEquals(dualProtocolPrimaryTimeoutMs(5_000), 5_000);
+});
+
+Deno.test("clampProductTruthHopThinking clamps high reasoning when hop timeout is under 60s", () => {
+  // Luna with high thinking under 45s fallback hop is clamped to low
+  const lunaHigh = { provider: "openai" as const, model: "gpt-5.6-luna", thinkingLevel: "high" as const };
+  assertEquals(clampProductTruthHopThinking(lunaHigh, 45_000), {
+    provider: "openai",
+    model: "gpt-5.6-luna",
+    thinkingLevel: "low",
+  });
+
+  // Luna with high thinking under full 80s primary hop preserves high
+  assertEquals(clampProductTruthHopThinking(lunaHigh, 80_000), lunaHigh);
+
+  // Low, minimal, or none thinking are untouched under any timeout
+  const lunaLow = { provider: "openai" as const, model: "gpt-5.6-luna", thinkingLevel: "low" as const };
+  assertEquals(clampProductTruthHopThinking(lunaLow, 45_000), lunaLow);
+
+  const museNone = { provider: "meta" as const, model: "muse-spark-1.3", thinkingLevel: "none" as const };
+  assertEquals(clampProductTruthHopThinking(museNone, 30_000), museNone);
+});
+
+Deno.test("runVisionProviderChain clamps fallback thinking for product truth in telemetry and returned route", async () => {
+  const primaryRoute = { provider: "meta" as const, model: "muse-spark-1.3", thinkingLevel: "low" as const };
+  const fallbackRoute = { provider: "openai" as const, model: "gpt-5.6-luna", thinkingLevel: "high" as const };
+  const terraRoute = { provider: "openai" as const, model: "gpt-5.6-terra", thinkingLevel: "low" as const };
+
+  let simulatedTime = 1_000;
+  let fallbackInvokedThinking: string | undefined;
+  const result = await runVisionProviderChain({
+    routes: [primaryRoute, fallbackRoute, terraRoute],
+    purpose: "product_truth",
+    gatewayBudgetMs: 175_000,
+    now: () => simulatedTime,
+    classify: (route, error) => classifyVisionProviderFailure(route.provider as any, { message: String(error) }),
+    invoke: async (route, _timeoutMs) => {
+      if (route.provider === "meta") {
+        simulatedTime += 80_000;
+        throw new Error("Meta timeout");
+      }
+      fallbackInvokedThinking = route.thinkingLevel;
+      return { ok: true };
+    },
+  });
+
+  // Fallback invoked with low thinking under 45s hop budget
+  assertEquals(fallbackInvokedThinking, "low");
+  // Returned route reflects clamped thinking
+  assertEquals(result.route.thinkingLevel, "low");
+  // Telemetry attempt reflects clamped thinking
+  assertEquals(result.attempts[1].thinkingLevel, "low");
 });
 
 

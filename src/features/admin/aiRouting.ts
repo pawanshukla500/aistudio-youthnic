@@ -90,6 +90,7 @@ function thinkingFor(
   if (purpose === "product_truth") {
     if (provider === "openai" && modelId === "gpt-5.6-luna") {
       if (current && levels.includes(current)) return current;
+      if (levels.includes("low")) return "low";
       if (levels.includes("high")) return "high";
     }
     if (current && ["none", "minimal", "low"].includes(current) && levels.includes(current)) {
