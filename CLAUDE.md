@@ -13,10 +13,10 @@ Six-pose fashion catalog photoshoots generated from product references.
    routes saved in Administration → AI models (`organization_ai_model_policies`), or
    defaulted when unconfigured, determine the execution chain. For product truth and pose
    planning, the standard chain routes through Meta Muse Spark (or contributor) as primary,
-   OpenAI GPT-5.6 Luna (with high thinking for deep pose planning reasoning) as first fallback,
+   OpenAI GPT-5.6 Luna (with high thinking when primary; low thinking when fallback under tight hop budget) as first fallback,
    and OpenAI GPT-5.6 Terra as the safety net fallback. Do not add arbitrary unapproved
-   models or bypass the established chain. Reasoning effort is preserved for Luna (high)
-   while heavy models (Terra, Flash, Sol, Muse Spark) run at low (or lowest supported level;
+   models or bypass the established chain. Reasoning effort is preserved for Luna (high when hop budget permits;
+   clamped to low when hop timeout < 60s to prevent hop timeouts) while heavy models (Terra, Flash, Sol, Muse Spark) run at low (or lowest supported level;
    explicit none/minimal is preserved; Qwen runs with thinking off) to fit the 180s Studio wait,
    and Gemini Flash QA runs at low. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
 2. **Product references are the truth.** Generated images, style references and
@@ -34,7 +34,7 @@ Six-pose fashion catalog photoshoots generated from product references.
    - pose QA off unless the job or a regeneration asks for it;
    - aspect ratio 3:4 at 2K.
 7. **Multimodal provider protocols:**
-   - **Meta Muse Spark:** Implements dual-endpoint routing per [Meta Model API docs](https://dev.meta.ai/docs/overview#muse-spark). The native Responses API (`https://api.meta.ai/v1/responses`) is used for multimodal image understanding and structured JSON (`text: { format: { type: "json_object" } }`), falling back to Chat Completions (`/v1/chat/completions`) if an endpoint returns 404/400. Server secret: `META_MODEL_API_KEY`. Supported reasoning levels: `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` (`muse-spark-1.3` standard only). Never pass `none` (Meta rejects with 400).
+   - **Meta Muse Spark:** Implements dual-endpoint routing per [Meta Model API docs](https://dev.meta.ai/docs/overview#muse-spark). The native Responses API (`https://api.meta.ai/v1/responses`) is allocated a bounded primary slice (`dualProtocolPrimaryTimeoutMs`), falling back to Chat Completions (`/v1/chat/completions`) if Responses API errors or times out. Server secret: `META_MODEL_API_KEY`. Supported reasoning levels: `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` (`muse-spark-1.3` standard only). Never pass `none` (Meta rejects with 400).
    - **OpenAI:** Tries Chat Completions first, falling back to Responses API (`/v1/responses`) on 404/400. Server secret: `OPENAI_API_KEY`.
 
 ## Where things live

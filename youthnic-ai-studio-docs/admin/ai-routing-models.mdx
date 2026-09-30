@@ -57,8 +57,9 @@ A different model would not fix the product photos.
 <Note>
 **Thinking for product analysis runs at Low** for heavy models (Terra, Flash, Sol, Muse Spark),
 or the lowest level the model supports (explicit "none" or "minimal" is preserved; Qwen runs with thinking off).
-OpenAI Luna is lightweight and cost-efficient; when configured with **High** thinking, it preserves high thinking
-for deep reasoning across scene, styling, and 6-pose plans without timing out.
+OpenAI Luna is lightweight and cost-efficient; when configured with **High** thinking as primary, it preserves high thinking
+for deep reasoning across scene, styling, and 6-pose plans without timing out. Under tight fallback budgets (< 60s), thinking
+is clamped to **Low** so fallbacks return in 10-15s and avoid timeout cascades.
 </Note>
 
 ---

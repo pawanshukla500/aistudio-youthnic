@@ -641,7 +641,7 @@ export function Admin() {
       fallbackEnabled: true,
       fallbackProvider: "openai",
       fallbackModel: openAiModel.id,
-      fallbackThinking: normalizedThinking("openai", openAiModel.id, "product_truth", "high"),
+      fallbackThinking: normalizedThinking("openai", openAiModel.id, "product_truth", "low"),
     }));
   };
 

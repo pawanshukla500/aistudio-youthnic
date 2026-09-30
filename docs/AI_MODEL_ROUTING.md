@@ -63,9 +63,11 @@ Product analysis is one large multimodal JSON call that must finish inside Studi
 Heavy models (Terra, Flash, Sol, Muse Spark) run at **low** reasoning (or the provider's lowest
 supported level) to fit that budget. Explicit "none" or "minimal" is preserved. OpenAI Luna
 is lightweight and cost-efficient (~$0.20 / $1.20 per 1M tokens); when explicitly configured
-with **high** thinking, it preserves high thinking to provide thorough chain-of-thought
-reasoning across scene, styling, and 6-pose plans without timing out. QA keeps its saved reasoning,
-except that Gemini Flash models run at low.
+with **high** thinking as primary, it preserves high thinking to provide thorough chain-of-thought
+reasoning across scene, styling, and 6-pose plans without timing out. When any hop runs under
+a tight fallback deadline (`timeoutMs < 60s`), thinking is dynamically clamped to **low**
+(`clampProductTruthHopThinking`) to ensure it answers in 10-15s and never starves subsequent fallbacks.
+QA keeps its saved reasoning, except that Gemini Flash models run at low.
 
 ## Time budget (product analysis)
 
@@ -92,7 +94,7 @@ this purpose in Administration."
 
 OpenAI and Meta Muse Spark vision calls support dual protocols:
 - **OpenAI** vision calls try Chat Completions first, then the Responses API (`/v1/responses`). When Chat Completions rejects the model (404 or 400), which usually means the model only serves the Responses API, the error reported is the Responses API's.
-- **Meta Muse Spark** calls use the native Responses API (`https://api.meta.ai/v1/responses`) as specified in the official [Meta Model API documentation](https://dev.meta.ai/docs/overview#muse-spark) for multimodal image understanding and structured reasoning, falling back to Chat Completions (`https://api.meta.ai/v1/chat/completions`) if an endpoint returns 404 or 400. When both reject the model or an account lacks tier access, detailed provider diagnostics are preserved so administrators can immediately identify the underlying cause.
+- **Meta Muse Spark** calls use the native Responses API (`https://api.meta.ai/v1/responses`) as specified in the official [Meta Model API documentation](https://dev.meta.ai/docs/overview#muse-spark) for multimodal image understanding and structured reasoning, bounded by a primary slice (`dualProtocolPrimaryTimeoutMs`, max 25s) so that if Responses API times out or errors, it seamlessly falls back to Chat Completions (`https://api.meta.ai/v1/chat/completions`) with the remaining time budget. Detailed provider diagnostics are preserved so administrators can immediately identify the underlying cause.
 
 ## Debugging a failure
 

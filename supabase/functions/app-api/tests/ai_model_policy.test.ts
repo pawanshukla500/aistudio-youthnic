@@ -5,6 +5,8 @@ import {
   assertAllowedAiModelRoute,
   classifyVisionProviderFailure,
   clampProductTruthThinking,
+  clampProductTruthHopThinking,
+  dualProtocolPrimaryTimeoutMs,
   DEFAULT_IMAGE_GENERATION_ROUTE,
   defaultImageGenerationRoute,
   defaultThinkingLevel,
@@ -1039,6 +1041,44 @@ Deno.test("3-tier vision fallback chain formats failure messages and budgets tim
   });
   // 175,000 - 80,000 - 5,000 = 90,000ms
   assertEquals(hop3Timeout, 90_000);
+});
+
+Deno.test("dualProtocolPrimaryTimeoutMs bounds the primary slice to preserve fallback time", () => {
+  // 80s hop (primary Meta route in 3-tier chain) is bounded to 25s
+  assertEquals(dualProtocolPrimaryTimeoutMs(80_000), 25_000);
+
+  // 45s hop (reserve for fallback) allocates 45% = 20,250ms
+  assertEquals(dualProtocolPrimaryTimeoutMs(45_000), 20_250);
+
+  // 30s hop allocates 45% = 13,500ms
+  assertEquals(dualProtocolPrimaryTimeoutMs(30_000), 13_500);
+
+  // Hop with 20s allocates 45% = 9,000ms
+  assertEquals(dualProtocolPrimaryTimeoutMs(20_000), 9_000);
+
+  // Very small hop (<= 2 * VISION_HOP_MIN_MS = 16s) uses the entire hop timeout
+  assertEquals(dualProtocolPrimaryTimeoutMs(16_000), 16_000);
+  assertEquals(dualProtocolPrimaryTimeoutMs(15_000), 15_000);
+});
+
+Deno.test("clampProductTruthHopThinking clamps high reasoning when hop timeout is under 60s", () => {
+  // Luna with high thinking under 45s fallback hop is clamped to low
+  const lunaHigh = { provider: "openai" as const, model: "gpt-5.6-luna", thinkingLevel: "high" as const };
+  assertEquals(clampProductTruthHopThinking(lunaHigh, 45_000), {
+    provider: "openai",
+    model: "gpt-5.6-luna",
+    thinkingLevel: "low",
+  });
+
+  // Luna with high thinking under full 80s primary hop preserves high
+  assertEquals(clampProductTruthHopThinking(lunaHigh, 80_000), lunaHigh);
+
+  // Low, minimal, or none thinking are untouched under any timeout
+  const lunaLow = { provider: "openai" as const, model: "gpt-5.6-luna", thinkingLevel: "low" as const };
+  assertEquals(clampProductTruthHopThinking(lunaLow, 45_000), lunaLow);
+
+  const museNone = { provider: "meta" as const, model: "muse-spark-1.3", thinkingLevel: "none" as const };
+  assertEquals(clampProductTruthHopThinking(museNone, 30_000), museNone);
 });
 
 

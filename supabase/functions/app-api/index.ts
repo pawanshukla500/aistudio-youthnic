@@ -47,6 +47,9 @@ import {
   VISION_HOP_MIN_MS,
   VISION_PROVIDER_TIMEOUT_MS,
   productTruthGatewayBudgetMs,
+  dualProtocolPrimaryTimeoutMs,
+  clampProductTruthHopThinking,
+  visionHopTimeoutError,
   geminiThinkingConfig,
   preferFastProductTruthThinking,
   productTruthRouteChain,
@@ -568,7 +571,7 @@ function defaultVisionRoute(args: {
 function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiModelRoute {
   if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
     return assertAllowedAiModelRoute(
-      LUNA_HIGH_THINKING_VISION_ROUTE,
+      CHEAP_OPENAI_VISION_ROUTE,
       args.purpose,
       { strictJson: true },
     );
@@ -584,7 +587,7 @@ function defaultVisionFallbacks(args: { purpose: VisionPurpose }): NormalizedAiM
   if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
     return [
       assertAllowedAiModelRoute(
-        LUNA_HIGH_THINKING_VISION_ROUTE,
+        CHEAP_OPENAI_VISION_ROUTE,
         args.purpose,
         { strictJson: true },
       ),
@@ -1374,12 +1377,21 @@ async function openAiVisionJson(
   parts: JsonRecord[],
   timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
 ) {
+  const startedAt = Date.now();
   try {
     return await openAiCompatibleVisionJson(route, parts, "openai", timeoutMs);
   } catch (error) {
     const classified = asVisionProviderError(error, route);
+    if (classified.failure.code === "provider_authentication_failed") {
+      throw classified;
+    }
+    const elapsed = Date.now() - startedAt;
+    if (elapsed >= timeoutMs) {
+      throw classified;
+    }
+    const remainingMs = Math.max(VISION_HOP_MIN_MS, timeoutMs - elapsed);
     try {
-      return await openAiResponsesVisionJson(route, parts, timeoutMs);
+      return await openAiResponsesVisionJson(route, parts, remainingMs);
     } catch (responsesError) {
       // Chat Completions answers 404 / 400 for a model that only serves the
       // Responses API. Its error then says "not available" when the real
@@ -1404,10 +1416,16 @@ async function metaResponsesVisionJson(
     [{ role: "user", content }],
   ];
   let lastError: unknown;
+  const startedAt = Date.now();
   for (const input of inputVariants) {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed >= timeoutMs) {
+      throw lastError || visionHopTimeoutError("Meta Responses API timed out.");
+    }
+    const remainingMs = Math.max(VISION_HOP_MIN_MS, timeoutMs - elapsed);
     const response = await fetch("https://api.meta.ai/v1/responses", {
       method: "POST",
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: AbortSignal.timeout(remainingMs),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${requiredEnv("META_MODEL_API_KEY")}`,
@@ -1416,7 +1434,6 @@ async function metaResponsesVisionJson(
         model: route.model,
         input,
         reasoning: { effort },
-        text: { format: { type: "json_object" } },
         max_output_tokens: 16384,
       }),
     });
@@ -1443,19 +1460,24 @@ async function metaVisionJson(
   parts: JsonRecord[],
   timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
 ) {
-  // dev.meta.ai specifies the Responses API (https://api.meta.ai/v1/responses) as the
-  // recommended default for multimodal image understanding and structured reasoning with Muse Spark.
-  // We try Responses API first, and if rejected (404/400), seamlessly fall back to Chat Completions.
+  // dev.meta.ai specifies the Responses API (https://api.meta.ai/v1/responses) as an option
+  // for multimodal image understanding and structured reasoning with Muse Spark, while
+  // Chat Completions (https://api.meta.ai/v1/chat/completions) is the standard OpenAI-compatible protocol.
+  // We allocate a bounded slice for Responses API. If it times out or errors (except authentication failure),
+  // we seamlessly fall back to Chat Completions with the remaining time budget.
+  const startedAt = Date.now();
+  const responsesBudgetMs = dualProtocolPrimaryTimeoutMs(timeoutMs);
   try {
-    return await metaResponsesVisionJson(route, parts, timeoutMs);
+    return await metaResponsesVisionJson(route, parts, responsesBudgetMs);
   } catch (error) {
     const classified = asVisionProviderError(error, route);
-    const responsesRejected = (classified.failure.code === "provider_unavailable" && classified.failure.status === 404) ||
-      classified.failure.code === "provider_invalid_request" ||
-      classified.failure.status === 400;
-    if (!responsesRejected) throw classified;
+    if (classified.failure.code === "provider_authentication_failed") {
+      throw classified;
+    }
+    const elapsed = Date.now() - startedAt;
+    const remainingMs = Math.max(VISION_HOP_MIN_MS, timeoutMs - elapsed);
     try {
-      return await openAiCompatibleVisionJson(route, parts, "meta", timeoutMs);
+      return await openAiCompatibleVisionJson(route, parts, "meta", remainingMs);
     } catch (chatError) {
       const chatClassified = asVisionProviderError(chatError, route);
       throw chatClassified.failure.status === 404 ? classified : chatClassified;
@@ -1501,21 +1523,25 @@ async function invokeVisionRoute(
   parts: JsonRecord[],
   timeoutMs = policy.purpose === "product_truth" ? PRODUCT_TRUTH_TIMEOUT_MS : VISION_PROVIDER_TIMEOUT_MS,
 ) {
-  if (route.provider === "gemini") {
+  const effectiveRoute = policy.purpose === "product_truth"
+    ? clampProductTruthHopThinking(route, timeoutMs)
+    : route;
+
+  if (effectiveRoute.provider === "gemini") {
     const gemini = await geminiJson({
       purpose: policy.purpose,
-      model: route.model,
-      thinkingLevel: route.thinkingLevel as "medium" | "high" | "low",
+      model: effectiveRoute.model,
+      thinkingLevel: effectiveRoute.thinkingLevel as "medium" | "high" | "low",
     }, parts, timeoutMs);
     return { raw: gemini.raw, text: gemini.text, json: gemini.json };
   }
-  if (route.provider === "openai") {
-    return openAiVisionJson(route, parts, timeoutMs);
+  if (effectiveRoute.provider === "openai") {
+    return openAiVisionJson(effectiveRoute, parts, timeoutMs);
   }
-  if (route.provider === "meta") {
-    return metaVisionJson(route, parts, timeoutMs);
+  if (effectiveRoute.provider === "meta") {
+    return metaVisionJson(effectiveRoute, parts, timeoutMs);
   }
-  return qwenVisionJson(route, parts);
+  return qwenVisionJson(effectiveRoute, parts);
 }
 
 function asVisionProviderError(error: unknown, route: NormalizedAiModelRoute) {

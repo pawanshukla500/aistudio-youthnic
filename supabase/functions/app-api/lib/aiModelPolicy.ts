@@ -346,6 +346,36 @@ export function withFastProductTruthThinking(
   return { ...route, thinkingLevel: clampProductTruthThinking(route) };
 }
 
+export const DUAL_PROTOCOL_PRIMARY_MAX_SLICE_MS = 25_000;
+
+/**
+ * Bounds the primary protocol slice in dual-protocol calls (e.g. Meta Responses API)
+ * so that if the primary protocol stalls or times out, the secondary protocol
+ * (e.g. Chat Completions) still has sufficient budget to run before the hop deadline.
+ */
+export function dualProtocolPrimaryTimeoutMs(hopTimeoutMs: number): number {
+  if (hopTimeoutMs <= VISION_HOP_MIN_MS * 2) return hopTimeoutMs;
+  return Math.min(
+    DUAL_PROTOCOL_PRIMARY_MAX_SLICE_MS,
+    Math.max(VISION_HOP_MIN_MS, Math.floor(hopTimeoutMs * 0.45)),
+  );
+}
+
+/**
+ * When product truth analysis runs under a tight hop budget (< 60s, e.g. fallbacks
+ * in a multi-hop chain), heavy reasoning is guaranteed to miss the hop timeout.
+ * Clamps high thinking to low.
+ */
+export function clampProductTruthHopThinking(
+  route: NormalizedAiModelRoute,
+  timeoutMs: number,
+): NormalizedAiModelRoute {
+  if (timeoutMs < 60_000 && route.thinkingLevel === "high") {
+    return { ...route, thinkingLevel: "low" };
+  }
+  return route;
+}
+
 /**
  * Cap product-truth at the Studio client wait even when
  * `VISION_GATEWAY_BUDGET_MS` is 185s. Returning after the client has
