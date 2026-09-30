@@ -354,10 +354,10 @@ export const DUAL_PROTOCOL_PRIMARY_MAX_SLICE_MS = 25_000;
  * (e.g. Chat Completions) still has sufficient budget to run before the hop deadline.
  */
 export function dualProtocolPrimaryTimeoutMs(hopTimeoutMs: number): number {
-  if (hopTimeoutMs <= VISION_HOP_MIN_MS * 2) return hopTimeoutMs;
+  if (hopTimeoutMs <= VISION_HOP_MIN_MS) return hopTimeoutMs;
   return Math.min(
     DUAL_PROTOCOL_PRIMARY_MAX_SLICE_MS,
-    Math.max(VISION_HOP_MIN_MS, Math.floor(hopTimeoutMs * 0.45)),
+    Math.max(1, Math.floor(hopTimeoutMs * 0.45)),
   );
 }
 
@@ -626,14 +626,17 @@ export async function runVisionProviderChain<T>(args: {
   };
 
   for (let index = 0; index < args.routes.length; index += 1) {
-    const route = args.routes[index];
-    lastRoute = route;
+    let route = args.routes[index];
     const timeoutMs = remainingVisionTimeoutMs({
       purpose: args.purpose,
       remainingRouteCount: args.routes.length - index,
       elapsedMs: now() - started,
       gatewayBudgetMs: args.gatewayBudgetMs,
     });
+    if (args.purpose === "product_truth") {
+      route = clampProductTruthHopThinking(route, timeoutMs);
+    }
+    lastRoute = route;
     const hopStarted = now();
     if (timeoutMs < VISION_HOP_MIN_MS) {
       lastFailure = classifyVisionProviderFailure(route.provider as AiProvider, {

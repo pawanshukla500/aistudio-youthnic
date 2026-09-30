@@ -1056,9 +1056,12 @@ Deno.test("dualProtocolPrimaryTimeoutMs bounds the primary slice to preserve fal
   // Hop with 20s allocates 45% = 9,000ms
   assertEquals(dualProtocolPrimaryTimeoutMs(20_000), 9_000);
 
-  // Very small hop (<= 2 * VISION_HOP_MIN_MS = 16s) uses the entire hop timeout
-  assertEquals(dualProtocolPrimaryTimeoutMs(16_000), 16_000);
-  assertEquals(dualProtocolPrimaryTimeoutMs(15_000), 15_000);
+  // Hop with 16s allocates 45% = 7,200ms
+  assertEquals(dualProtocolPrimaryTimeoutMs(16_000), 7_200);
+
+  // Hop <= VISION_HOP_MIN_MS (8s) uses the entire hop timeout
+  assertEquals(dualProtocolPrimaryTimeoutMs(8_000), 8_000);
+  assertEquals(dualProtocolPrimaryTimeoutMs(5_000), 5_000);
 });
 
 Deno.test("clampProductTruthHopThinking clamps high reasoning when hop timeout is under 60s", () => {
@@ -1079,6 +1082,37 @@ Deno.test("clampProductTruthHopThinking clamps high reasoning when hop timeout i
 
   const museNone = { provider: "meta" as const, model: "muse-spark-1.3", thinkingLevel: "none" as const };
   assertEquals(clampProductTruthHopThinking(museNone, 30_000), museNone);
+});
+
+Deno.test("runVisionProviderChain clamps fallback thinking for product truth in telemetry and returned route", async () => {
+  const primaryRoute = { provider: "meta" as const, model: "muse-spark-1.3", thinkingLevel: "low" as const };
+  const fallbackRoute = { provider: "openai" as const, model: "gpt-5.6-luna", thinkingLevel: "high" as const };
+  const terraRoute = { provider: "openai" as const, model: "gpt-5.6-terra", thinkingLevel: "low" as const };
+
+  let simulatedTime = 1_000;
+  let fallbackInvokedThinking: string | undefined;
+  const result = await runVisionProviderChain({
+    routes: [primaryRoute, fallbackRoute, terraRoute],
+    purpose: "product_truth",
+    gatewayBudgetMs: 175_000,
+    now: () => simulatedTime,
+    classify: (route, error) => classifyVisionProviderFailure(route.provider as any, { message: String(error) }),
+    invoke: async (route, _timeoutMs) => {
+      if (route.provider === "meta") {
+        simulatedTime += 80_000;
+        throw new Error("Meta timeout");
+      }
+      fallbackInvokedThinking = route.thinkingLevel;
+      return { ok: true };
+    },
+  });
+
+  // Fallback invoked with low thinking under 45s hop budget
+  assertEquals(fallbackInvokedThinking, "low");
+  // Returned route reflects clamped thinking
+  assertEquals(result.route.thinkingLevel, "low");
+  // Telemetry attempt reflects clamped thinking
+  assertEquals(result.attempts[1].thinkingLevel, "low");
 });
 
 

@@ -1386,10 +1386,10 @@ async function openAiVisionJson(
       throw classified;
     }
     const elapsed = Date.now() - startedAt;
-    if (elapsed >= timeoutMs) {
+    const remainingMs = timeoutMs - elapsed;
+    if (remainingMs < VISION_HOP_MIN_MS) {
       throw classified;
     }
-    const remainingMs = Math.max(VISION_HOP_MIN_MS, timeoutMs - elapsed);
     try {
       return await openAiResponsesVisionJson(route, parts, remainingMs);
     } catch (responsesError) {
@@ -1475,7 +1475,10 @@ async function metaVisionJson(
       throw classified;
     }
     const elapsed = Date.now() - startedAt;
-    const remainingMs = Math.max(VISION_HOP_MIN_MS, timeoutMs - elapsed);
+    const remainingMs = timeoutMs - elapsed;
+    if (remainingMs < VISION_HOP_MIN_MS) {
+      throw classified;
+    }
     try {
       return await openAiCompatibleVisionJson(route, parts, "meta", remainingMs);
     } catch (chatError) {
