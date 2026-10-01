@@ -29,21 +29,21 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 // authenticated app-api function instead, which fetches the bytes server-side with the
 // Firebase Admin credentials and hands them back as base64. Fall back to a direct fetch for
 // any pose missing a storagePath (e.g. legacy rows), or if the proxy call fails.
-async function fetchPoseImageBlob(jobId: string, pose: any): Promise<Blob> {
+async function fetchPoseImageBlob(jobId: string, pose: any): Promise<{ blob?: Blob; base64?: string; mimeType?: string }> {
   if (pose.storagePath) {
     try {
       const result = await invokeAppApi<{ base64: string; mimeType: string }>("jobs.downloadAsset", {
         jobId,
         storagePath: pose.storagePath,
       });
-      return base64ToBlob(result.base64, result.mimeType);
+      return { base64: result.base64, mimeType: result.mimeType };
     } catch (err) {
       console.error("Proxied image download failed, falling back to direct fetch", err);
     }
   }
   const response = await fetch(pose.outputUrl);
   if (!response.ok) throw new Error("Image download failed");
-  return response.blob();
+  return { blob: await response.blob() };
 }
 
 function fidelityTone(score: number) {
@@ -289,10 +289,11 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     setDownloadError("");
     setDownloadingPoseId(`${pose._id}:${attempt.storagePath}`);
     try {
-      const blob = await fetchPoseImageBlob(jobId, { storagePath: attempt.storagePath, outputUrl: attempt.url });
-      const extension = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
+      const assetData = await fetchPoseImageBlob(jobId, { storagePath: attempt.storagePath, outputUrl: attempt.url });
+      const dlBlob = assetData.blob || base64ToBlob(assetData.base64!, assetData.mimeType || "image/png");
+      const extension = dlBlob.type === "image/webp" ? "webp" : dlBlob.type === "image/jpeg" ? "jpg" : "png";
       const round = Number(attempt.generationEpoch) > 1 ? `_round${attempt.generationEpoch}` : "";
-      saveAs(blob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}${round}_attempt${attempt.attempt}_qa-rejected.${extension}`);
+      saveAs(dlBlob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}${round}_attempt${attempt.attempt}_qa-rejected.${extension}`);
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : "Could not download this image.");
     } finally {
@@ -304,9 +305,10 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     setDownloadError("");
     setDownloadingPoseId(`${pose._id}:v${version.version}`);
     try {
-      const blob = await fetchPoseImageBlob(jobId, { storagePath: version.storagePath, outputUrl: version.url });
-      const extension = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
-      saveAs(blob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}_v${version.version}.${extension}`);
+      const assetData = await fetchPoseImageBlob(jobId, { storagePath: version.storagePath, outputUrl: version.url });
+      const dlBlob = assetData.blob || base64ToBlob(assetData.base64!, assetData.mimeType || "image/png");
+      const extension = dlBlob.type === "image/webp" ? "webp" : dlBlob.type === "image/jpeg" ? "jpg" : "png";
+      saveAs(dlBlob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}_v${version.version}.${extension}`);
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : "Could not download this version.");
     } finally {
@@ -320,10 +322,11 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     setDownloadError("");
     setDownloadingPoseId(pose._id);
     try {
-      const blob = await fetchPoseImageBlob(jobId, asset);
-      const extension = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
+      const assetData = await fetchPoseImageBlob(jobId, asset);
+      const dlBlob = assetData.blob || base64ToBlob(assetData.base64!, assetData.mimeType || "image/png");
+      const extension = dlBlob.type === "image/webp" ? "webp" : dlBlob.type === "image/jpeg" ? "jpg" : "png";
       const version = hasRetainedPreviousVersion(pose) ? "_prior-retained-version" : "";
-      saveAs(blob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}${version}.${extension}`);
+      saveAs(dlBlob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}${version}.${extension}`);
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : "Could not download this image.");
     } finally {
@@ -351,7 +354,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       // from the batch (a storagePath-less legacy pose, or a partial batch failure) still falls
       // back to the single-image path below.
       const storagePaths = [...new Set(storedPoses.map((pose: any) => visiblePoseStoragePath(pose)).filter(Boolean))];
-      const blobByStoragePath = new Map<string, Blob>();
+      const assetByStoragePath = new Map<string, { base64: string; mimeType: string }>();
       if (storagePaths.length) {
         try {
           const result = await invokeAppApi<{ assets: Array<{ storagePath: string; base64?: string; mimeType?: string; error?: string }> }>(
@@ -359,7 +362,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             { jobId, storagePaths },
           );
           for (const asset of result.assets) {
-            if (asset.base64) blobByStoragePath.set(asset.storagePath, base64ToBlob(asset.base64, asset.mimeType || "image/png"));
+            if (asset.base64) assetByStoragePath.set(asset.storagePath, { base64: asset.base64, mimeType: asset.mimeType || "image/png" });
           }
         } catch (err) {
           console.error("Batched ZIP download failed, falling back to per-image downloads", err);
@@ -370,18 +373,33 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       const promises = storedPoses.map(async (pose: any, i: number) => {
         try {
           const asset = visiblePoseAsset(pose);
-          const blob = blobByStoragePath.get(asset.storagePath) ?? await fetchPoseImageBlob(jobId, asset);
-
-          // Determine extension from content type or fallback to jpg
-          let ext = "jpg";
-          if (blob.type === "image/png") ext = "png";
-          else if (blob.type === "image/webp") ext = "webp";
-
+          const cachedAsset = assetByStoragePath.get(asset.storagePath);
           const safeTitle = String(pose.title || "pose").replace(/[^a-z0-9]/gi, '_').toLowerCase();
-          // Name by pose number so a missing pose never shifts later files'
-          // marketplace upload order.
-          const filename = `${Number(pose.poseNumber) || i + 1}_${safeTitle}.${ext}`;
-          folder.file(filename, blob);
+          const poseNumber = Number(pose.poseNumber) || i + 1;
+
+          if (cachedAsset) {
+            let ext = "jpg";
+            if (cachedAsset.mimeType === "image/png") ext = "png";
+            else if (cachedAsset.mimeType === "image/webp") ext = "webp";
+            const filename = `${poseNumber}_${safeTitle}.${ext}`;
+            folder.file(filename, cachedAsset.base64, { base64: true });
+            return;
+          }
+
+          const assetData = await fetchPoseImageBlob(jobId, asset);
+          let ext = "jpg";
+          const mimeType = assetData.mimeType || (assetData.blob && assetData.blob.type) || "image/jpeg";
+          if (mimeType === "image/png") ext = "png";
+          else if (mimeType === "image/webp") ext = "webp";
+
+          const filename = `${poseNumber}_${safeTitle}.${ext}`;
+          if (assetData.base64) {
+            folder.file(filename, assetData.base64, { base64: true });
+          } else if (assetData.blob) {
+            folder.file(filename, assetData.blob);
+          } else {
+            throw new Error("No image data returned");
+          }
         } catch (err) {
           console.error("Failed to fetch image for ZIP", err);
           missingPoses.push(Number(pose.poseNumber) || i + 1);
