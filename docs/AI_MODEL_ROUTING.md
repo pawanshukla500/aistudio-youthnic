@@ -73,10 +73,12 @@ QA keeps its saved reasoning, except that Gemini Flash models run at low.
 
 - Studio's client waits `STUDIO_ANALYZE_TIMEOUT_MS` (180s). The chain budget is 175s,
   holding 5s back for work outside the chain (`VISION_REQUEST_OVERHEAD_MS`).
-- While a fallback is still to come, the primary gets the remaining time minus
-  `PRODUCT_TRUTH_FALLBACK_RESERVE_MS` (45s) and `VISION_GATEWAY_RESERVE_MS` (5s), giving
-  Hop 1 up to 125s. A hanging primary can never starve the fallback.
-- A primary that fails fast (a 404 or a missing key) hands the fallback nearly the whole budget.
+- While a fallback is still to come, the current hop keeps one
+  `PRODUCT_TRUTH_FALLBACK_RESERVE_MS` (45s) window, plus `VISION_GATEWAY_RESERVE_MS`
+  (5s). That reserve is not multiplied by the number of later hops, so the automatic
+  Terra safety net does not shrink the primary. Hop 1 gets up to 125s. A hanging
+  primary still leaves the next model its 45s window.
+- A primary that fails fast (a 404 or a missing key) hands the next model nearly the whole budget.
 
 ## Errors people see
 
@@ -92,9 +94,9 @@ For example:
 With only one configured model the message ends "No fallback model is configured for
 this purpose in Administration."
 
-OpenAI and Meta Muse Spark vision calls support dual protocols:
-- **OpenAI** vision calls try Chat Completions first, then the Responses API (`/v1/responses`). When Chat Completions rejects the model (404 or 400), which usually means the model only serves the Responses API, the error reported is the Responses API's.
-- **Meta Muse Spark** calls use the native Responses API (`https://api.meta.ai/v1/responses`) as specified in the official [Meta Model API documentation](https://dev.meta.ai/docs/overview#muse-spark) for multimodal image understanding and structured reasoning, bounded by a primary slice (`dualProtocolPrimaryTimeoutMs`, max 25s) so that if Responses API times out or errors, it seamlessly falls back to Chat Completions (`https://api.meta.ai/v1/chat/completions`) with the remaining time budget. Detailed provider diagnostics are preserved so administrators can immediately identify the underlying cause.
+OpenAI and Meta Muse Spark vision calls support dual protocols. The first protocol gets the whole hop (`dualProtocolPrimaryTimeoutMs`). The other protocol runs only when the first returns an error and at least 8s remains. A timeout means that hop is over; the chain moves to the next configured model instead of sending the same photos to a second protocol with no time left.
+- **Product photos** (Meta and OpenAI) use the Responses API first (`/v1/responses`). Chat Completions is the alternate when Responses rejects the call in time to retry.
+- **OpenAI text probes** try Chat Completions first, then the Responses API. When Chat Completions rejects the model (404 or 400), the error reported is the Responses API's.
 
 ## Debugging a failure
 

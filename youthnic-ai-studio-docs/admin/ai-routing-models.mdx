@@ -67,9 +67,9 @@ is clamped to **Low** so fallbacks return in 10-15s and avoid timeout cascades.
 ## Testing a model
 
 Use **TEST** next to the primary and **TEST FALLBACK** next to the fallback. Each sends a
-tiny JSON request to that exact model. For OpenAI and Meta Muse Spark, probes and production
-analysis seamlessly test both the native Responses API (`/v1/responses`) and Chat Completions (`/v1/chat/completions`).
-A pass proves the API key, endpoint access, and model name work.
+tiny JSON request to that exact model. A pass proves the API key and the model name.
+It does not time a full product-photo analysis. Production analysis sends the photos to
+the Responses API and only tries Chat Completions when that call returns an error in time to retry.
 **CONFIGURED** only means the provider's API key is set on the server.
 
 ---

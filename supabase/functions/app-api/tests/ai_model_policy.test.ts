@@ -7,6 +7,7 @@ import {
   clampProductTruthThinking,
   clampProductTruthHopThinking,
   dualProtocolPrimaryTimeoutMs,
+  visionProtocolOrder,
   DEFAULT_IMAGE_GENERATION_ROUTE,
   defaultImageGenerationRoute,
   defaultThinkingLevel,
@@ -1012,15 +1013,22 @@ Deno.test("3-tier vision fallback chain formats failure messages and budgets tim
   assert(message.includes("OpenAI gpt-5.6-luna"));
   assert(message.includes("OpenAI gpt-5.6-terra"));
 
-  // 3 routes in 175s gateway budget: hop 1 leaves 90s reserve for hop 2 and hop 3
+  // Terra is a third hop, but it does not take a second 45s reserve out of
+  // the primary. One fallback window is held back, same as a two-hop chain.
   const hop1Timeout = remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 3,
     elapsedMs: 0,
     gatewayBudgetMs: 175_000,
   });
-  // 175,000 - 5,000 reserve - 90,000 reserve for 2 fallbacks = 80,000ms
-  assertEquals(hop1Timeout, 80_000);
+  // 175,000 - 5,000 reserve - 45,000 fallback window = 125,000ms
+  assertEquals(hop1Timeout, 125_000);
+  assertEquals(hop1Timeout, remainingVisionTimeoutMs({
+    purpose: "product_truth",
+    remainingRouteCount: 2,
+    elapsedMs: 0,
+    gatewayBudgetMs: 175_000,
+  }));
 
   // hop 2 leaves 45s reserve for hop 3
   const hop2Timeout = remainingVisionTimeoutMs({
@@ -1043,25 +1051,16 @@ Deno.test("3-tier vision fallback chain formats failure messages and budgets tim
   assertEquals(hop3Timeout, 90_000);
 });
 
-Deno.test("dualProtocolPrimaryTimeoutMs bounds the primary slice to preserve fallback time", () => {
-  // 80s hop (primary Meta route in 3-tier chain) is bounded to 25s
-  assertEquals(dualProtocolPrimaryTimeoutMs(80_000), 25_000);
-
-  // 45s hop (reserve for fallback) allocates 45% = 20,250ms
-  assertEquals(dualProtocolPrimaryTimeoutMs(45_000), 20_250);
-
-  // 30s hop allocates 45% = 13,500ms
-  assertEquals(dualProtocolPrimaryTimeoutMs(30_000), 13_500);
-
-  // Hop with 20s allocates 45% = 9,000ms
-  assertEquals(dualProtocolPrimaryTimeoutMs(20_000), 9_000);
-
-  // Hop with 16s allocates 45% = 7,200ms
-  assertEquals(dualProtocolPrimaryTimeoutMs(16_000), 7_200);
-
-  // Hop <= VISION_HOP_MIN_MS (8s) uses the entire hop timeout
+Deno.test("the first vision protocol keeps the whole hop", () => {
+  // A 25s cap aborted Muse Spark while a product-photo call was still running.
+  assertEquals(dualProtocolPrimaryTimeoutMs(80_000), 80_000);
+  assertEquals(dualProtocolPrimaryTimeoutMs(125_000), 125_000);
+  assertEquals(dualProtocolPrimaryTimeoutMs(45_000), 45_000);
   assertEquals(dualProtocolPrimaryTimeoutMs(8_000), 8_000);
-  assertEquals(dualProtocolPrimaryTimeoutMs(5_000), 5_000);
+  assertEquals(visionProtocolOrder("meta", true), ["responses", "chat"]);
+  assertEquals(visionProtocolOrder("meta", false), ["responses", "chat"]);
+  assertEquals(visionProtocolOrder("openai", true), ["responses", "chat"]);
+  assertEquals(visionProtocolOrder("openai", false), ["chat", "responses"]);
 });
 
 Deno.test("clampProductTruthHopThinking clamps high reasoning when hop timeout is under 60s", () => {

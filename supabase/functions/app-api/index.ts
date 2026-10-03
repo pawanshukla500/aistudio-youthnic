@@ -48,6 +48,7 @@ import {
   VISION_PROVIDER_TIMEOUT_MS,
   productTruthGatewayBudgetMs,
   dualProtocolPrimaryTimeoutMs,
+  visionProtocolOrder,
   clampProductTruthHopThinking,
   visionHopTimeoutError,
   geminiThinkingConfig,
@@ -1372,33 +1373,44 @@ async function openAiCompatibleVisionJson(
   return { raw: data, text, json: parseJsonResponse(text) };
 }
 
+function visionPartsHaveImages(parts: JsonRecord[]) {
+  return parts.some((part) => {
+    const inline = part.inlineData && typeof part.inlineData === "object" ? part.inlineData as JsonRecord : null;
+    return Boolean(String(inline?.data || "").trim());
+  });
+}
+
 async function openAiVisionJson(
   route: NormalizedAiModelRoute,
   parts: JsonRecord[],
   timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
 ) {
   const startedAt = Date.now();
+  const [first] = visionProtocolOrder("openai", visionPartsHaveImages(parts));
+  const primaryBudget = dualProtocolPrimaryTimeoutMs(timeoutMs);
   try {
-    return await openAiCompatibleVisionJson(route, parts, "openai", timeoutMs);
+    return first === "responses"
+      ? await openAiResponsesVisionJson(route, parts, primaryBudget)
+      : await openAiCompatibleVisionJson(route, parts, "openai", primaryBudget);
   } catch (error) {
     const classified = asVisionProviderError(error, route);
     if (classified.failure.code === "provider_authentication_failed") {
       throw classified;
     }
-    const elapsed = Date.now() - startedAt;
-    const remainingMs = timeoutMs - elapsed;
+    const remainingMs = timeoutMs - (Date.now() - startedAt);
     if (remainingMs < VISION_HOP_MIN_MS) {
       throw classified;
     }
     try {
-      return await openAiResponsesVisionJson(route, parts, remainingMs);
-    } catch (responsesError) {
-      // Chat Completions answers 404 / 400 for a model that only serves the
-      // Responses API. Its error then says "not available" when the real
-      // reason is whatever the Responses call reported, so report that one.
-      const chatRejectedModel = (classified.failure.code === "provider_unavailable" && classified.failure.status === 404) ||
+      return first === "responses"
+        ? await openAiCompatibleVisionJson(route, parts, "openai", remainingMs)
+        : await openAiResponsesVisionJson(route, parts, remainingMs);
+    } catch (alternateError) {
+      // A 404 / 400 from the first protocol means this model only serves the
+      // other one. Report the protocol that actually accepted the model.
+      const firstRejectedModel = (classified.failure.code === "provider_unavailable" && classified.failure.status === 404) ||
         classified.failure.code === "provider_invalid_request";
-      throw chatRejectedModel ? asVisionProviderError(responsesError, route) : classified;
+      throw firstRejectedModel ? asVisionProviderError(alternateError, route) : classified;
     }
   }
 }
@@ -1419,10 +1431,10 @@ async function metaResponsesVisionJson(
   const startedAt = Date.now();
   for (const input of inputVariants) {
     const elapsed = Date.now() - startedAt;
-    if (elapsed >= timeoutMs) {
+    const remainingMs = timeoutMs - elapsed;
+    if (remainingMs < VISION_HOP_MIN_MS) {
       throw lastError || visionHopTimeoutError("Meta Responses API timed out.");
     }
-    const remainingMs = Math.max(VISION_HOP_MIN_MS, timeoutMs - elapsed);
     const response = await fetch("https://api.meta.ai/v1/responses", {
       method: "POST",
       signal: AbortSignal.timeout(remainingMs),
@@ -1460,11 +1472,10 @@ async function metaVisionJson(
   parts: JsonRecord[],
   timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
 ) {
-  // dev.meta.ai specifies the Responses API (https://api.meta.ai/v1/responses) as an option
-  // for multimodal image understanding and structured reasoning with Muse Spark, while
-  // Chat Completions (https://api.meta.ai/v1/chat/completions) is the standard OpenAI-compatible protocol.
-  // We allocate a bounded slice for Responses API. If it times out or errors (except authentication failure),
-  // we seamlessly fall back to Chat Completions with the remaining time budget.
+  // Responses API (https://api.meta.ai/v1/responses) is the multimodal endpoint.
+  // It gets the whole hop. Chat Completions runs only when Responses returns an
+  // error and at least VISION_HOP_MIN_MS is left. A 25s abort of Responses made
+  // every product-photo call time out, then the fallbacks timed out as well.
   const startedAt = Date.now();
   const responsesBudgetMs = dualProtocolPrimaryTimeoutMs(timeoutMs);
   try {

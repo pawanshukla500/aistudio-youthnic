@@ -34,7 +34,7 @@ Six-pose fashion catalog photoshoots generated from product references.
    - pose QA off unless the job or a regeneration asks for it;
    - aspect ratio 3:4 at 2K.
 7. **Multimodal provider protocols:**
-   - **Meta Muse Spark:** Implements dual-endpoint routing per [Meta Model API docs](https://dev.meta.ai/docs/overview#muse-spark). The native Responses API (`https://api.meta.ai/v1/responses`) is allocated a bounded primary slice (`dualProtocolPrimaryTimeoutMs`), falling back to Chat Completions (`/v1/chat/completions`) if Responses API errors or times out. Server secret: `META_MODEL_API_KEY`. Supported reasoning levels: `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` (`muse-spark-1.3` standard only). Never pass `none` (Meta rejects with 400).
+   - **Meta Muse Spark:** Implements dual-endpoint routing per [Meta Model API docs](https://dev.meta.ai/docs/overview#muse-spark). The native Responses API (`https://api.meta.ai/v1/responses`) gets the whole hop (`dualProtocolPrimaryTimeoutMs`). Chat Completions (`/v1/chat/completions`) runs only when Responses returns an error with time left. Server secret: `META_MODEL_API_KEY`. Supported reasoning levels: `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` (`muse-spark-1.3` standard only). Never pass `none` (Meta rejects with 400).
    - **OpenAI:** Tries Chat Completions first, falling back to Responses API (`/v1/responses`) on 404/400. Server secret: `OPENAI_API_KEY`.
 
 ## Where things live
