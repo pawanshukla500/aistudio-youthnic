@@ -346,19 +346,34 @@ export function withFastProductTruthThinking(
   return { ...route, thinkingLevel: clampProductTruthThinking(route) };
 }
 
-export const DUAL_PROTOCOL_PRIMARY_MAX_SLICE_MS = 25_000;
+export type VisionWireProtocol = "responses" | "chat";
 
 /**
- * Bounds the primary protocol slice in dual-protocol calls (e.g. Meta Responses API)
- * so that if the primary protocol stalls or times out, the secondary protocol
- * (e.g. Chat Completions) still has sufficient budget to run before the hop deadline.
+ * Which wire protocol to try first.
+ *
+ * Product-photo analysis goes to the Responses API and keeps the whole hop.
+ * A 25s cap aborted that call while it was still working, then Chat Completions
+ * started the same images over and timed out too, and every fallback did the
+ * same. Chat Completions runs only when Responses returns an error with enough
+ * of the hop left to try it. Text-only OpenAI probes stay on Chat Completions
+ * first, which is the connectivity check Administration already runs.
+ */
+export function visionProtocolOrder(
+  provider: "openai" | "meta",
+  hasImages: boolean,
+): readonly VisionWireProtocol[] {
+  if (provider === "meta" || hasImages) return ["responses", "chat"];
+  return ["chat", "responses"];
+}
+
+/**
+ * How long the first protocol may run. It gets the whole hop so a real image
+ * analysis can finish. The other protocol is not given a pre-reserved slice:
+ * it runs only when the first protocol returns an error before this deadline
+ * and at least `VISION_HOP_MIN_MS` remains.
  */
 export function dualProtocolPrimaryTimeoutMs(hopTimeoutMs: number): number {
-  if (hopTimeoutMs <= VISION_HOP_MIN_MS) return hopTimeoutMs;
-  return Math.min(
-    DUAL_PROTOCOL_PRIMARY_MAX_SLICE_MS,
-    Math.max(1, Math.floor(hopTimeoutMs * 0.45)),
-  );
+  return hopTimeoutMs;
 }
 
 /**
@@ -464,14 +479,16 @@ export function remainingVisionTimeoutMs(args: {
     args.gatewayBudgetMs - args.elapsedMs - VISION_GATEWAY_RESERVE_MS,
   );
   if (remainingWall <= 0) return 0;
-  // Product truth: the last hop gets whatever is left of the Studio wait; an
-  // earlier hop gets it minus a fixed reserve for each hop still to come.
+  // Product truth: the last hop gets whatever is left of the Studio wait. An
+  // earlier hop holds back one fallback window, not one window per later hop.
+  // Multiplying by the number of later hops (the auto Terra safety net made
+  // that 90s) cut the primary below the time a product-photo call needs, so
+  // Muse, Luna and Terra each hit their deadline.
   if (args.purpose === "product_truth") {
     if (args.remainingRouteCount <= 1) return remainingWall;
-    const reservedForLater = PRODUCT_TRUTH_FALLBACK_RESERVE_MS * (args.remainingRouteCount - 1);
     return Math.max(
       Math.min(PRODUCT_TRUTH_MIN_SLICE_MS, remainingWall),
-      remainingWall - reservedForLater,
+      remainingWall - PRODUCT_TRUTH_FALLBACK_RESERVE_MS,
     );
   }
   const preferred = args.preferredTimeoutMs ?? VISION_PROVIDER_TIMEOUT_MS;
