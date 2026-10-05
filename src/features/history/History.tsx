@@ -1,5 +1,33 @@
 import { useEffect, useRef, useState } from "react";
-import { Ban, ChevronDown, ChevronUp, Download, Image as ImageIcon, Images, RefreshCcw, Search, Trash2, Loader2, Clock, AlertCircle, X, Brain, Check, ThumbsDown, Undo2, Columns2, ChevronLeft, ChevronRight, ListChecks, Layers, Eye } from "lucide-react";
+import {
+  Ban,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Image as ImageIcon,
+  Images,
+  RefreshCcw,
+  Search,
+  Trash2,
+  Loader2,
+  Clock,
+  AlertCircle,
+  X,
+  Brain,
+  Check,
+  ThumbsDown,
+  Undo2,
+  Columns2,
+  ChevronLeft,
+  ChevronRight,
+  ListChecks,
+  Layers,
+  Eye,
+  Sparkles,
+  ShieldCheck,
+  Maximize2,
+  CheckCircle2,
+} from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, getJobReferenceImages, invokeAppApi, useMutation, useQuery, type Id } from "../../lib/backend";
 import { useWorkspace } from "../../lib/WorkspaceContext";
@@ -47,9 +75,9 @@ async function fetchPoseImageBlob(jobId: string, pose: any): Promise<{ blob?: Bl
 }
 
 function fidelityTone(score: number) {
-  if (score >= 95) return "text-success";
-  if (score >= 90) return "text-warning";
-  return "text-danger";
+  if (score >= 95) return "text-emerald-700 bg-emerald-50 border-emerald-200";
+  if (score >= 90) return "text-amber-700 bg-amber-50 border-amber-200";
+  return "text-red-700 bg-red-50 border-red-200";
 }
 
 function qaStatusLabel(status: string) {
@@ -105,9 +133,9 @@ function versionTimingDetail(version: PoseVersion) {
 }
 
 function qaStatusBanner(status: string) {
-  if (["automatically_verified", "human_approved", "passed"].includes(status)) return "bg-success/90 text-white";
-  if (["rejected_by_qa", "human_rejected", "failed"].includes(status)) return "bg-danger/90 text-white";
-  return "bg-warning/90 text-white";
+  if (["automatically_verified", "human_approved", "passed"].includes(status)) return "bg-emerald-600/90 text-white backdrop-blur-md";
+  if (["rejected_by_qa", "human_rejected", "failed"].includes(status)) return "bg-red-600/90 text-white backdrop-blur-md";
+  return "bg-amber-500/90 text-white backdrop-blur-md";
 }
 
 function qaReviewOutcome(review: any) {
@@ -120,7 +148,7 @@ function statusClass(status: string) {
   if (status === "completed") return "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20";
   if (status === "failed") return "bg-red-50 text-red-700 ring-1 ring-inset ring-red-600/10";
   if (status === "cancelled") return "bg-surface-container text-secondary ring-1 ring-inset ring-outline-variant/50";
-  if (status === "processing") return "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-700/10";
+  if (status === "processing") return "bg-primary/10 text-primary ring-1 ring-inset ring-primary/20";
   if (status === "queued") return "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20";
   return "bg-surface-container text-secondary ring-1 ring-inset ring-outline-variant/50";
 }
@@ -150,14 +178,17 @@ const ACTIVE_JOB_STATUSES = ["queued", "processing", "cancelling"];
 // Mirrors the per-pose Regenerate button on the job grid: a failed pose or a
 // delivered image, within 24 hours, while the job itself is idle.
 function canRegeneratePose(pose: any, jobStatus: string) {
-  return (pose.status === "failed" || (pose.status === "completed" && Boolean(visiblePoseOutputUrl(pose))))
-    && Boolean(pose.completedAt) && Date.now() - pose.completedAt < 86400000
-    && !ACTIVE_JOB_STATUSES.includes(jobStatus);
+  return (
+    (pose.status === "failed" || (pose.status === "completed" && Boolean(visiblePoseOutputUrl(pose)))) &&
+    Boolean(pose.completedAt) &&
+    Date.now() - pose.completedAt < 86400000 &&
+    !ACTIVE_JOB_STATUSES.includes(jobStatus)
+  );
 }
 
 function approvalBadge(status: string) {
-  if (status === "approved") return { label: "Approved", className: "bg-emerald-600/90 text-white" };
-  if (status === "rejected") return { label: "Rejected", className: "bg-red-600/90 text-white" };
+  if (status === "approved") return { label: "Approved", className: "bg-emerald-600/95 text-white" };
+  if (status === "rejected") return { label: "Rejected", className: "bg-red-600/95 text-white" };
   return null;
 }
 
@@ -237,9 +268,11 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     setQaRerunNotice("");
     try {
       const result = await rerunQa({ poseId: pose._id });
-      setQaRerunNotice(result.success
-        ? `${qaStatusLabel(result.outcome)} · AI QA estimate ${result.score}%`
-        : `QA remained unavailable. The image and previous QA history were preserved.`);
+      setQaRerunNotice(
+        result.success
+          ? `${qaStatusLabel(result.outcome)} · AI QA estimate ${result.score}%`
+          : `QA remained unavailable. The image and previous QA history were preserved.`
+      );
     } catch (reason) {
       setQaRerunNotice(reason instanceof Error ? reason.message : "Could not re-run QA.");
     } finally {
@@ -250,7 +283,10 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   // Fetched only when the user opts in — never on expand/render — so browsing History
   // doesn't cost extra Firebase Storage requests for images nobody asked to see.
   const toggleReferences = async () => {
-    if (showReferences) { setShowReferences(false); return; }
+    if (showReferences) {
+      setShowReferences(false);
+      return;
+    }
     setShowReferences(true);
     if (references || referencesLoading) return;
     setReferencesLoading(true);
@@ -270,14 +306,21 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     setRegeneratingId(regenerateTarget._id);
     setRegenerateError("");
     try {
-      await regeneratePose({ poseId: regenerateTarget._id, requestedBy: user._id, poseQa: regeneratePoseQa, extraInstructions: extraInstructions.trim() });
+      await regeneratePose({
+        poseId: regenerateTarget._id,
+        requestedBy: user._id,
+        poseQa: regeneratePoseQa,
+        extraInstructions: extraInstructions.trim(),
+      });
       setRegenerateTarget(null);
       setExtraInstructions("");
       setRegeneratePoseQa(false);
       setSelectedPose(null);
     } catch (reason) {
       setRegenerateError(reason instanceof Error ? reason.message : "Could not queue this regeneration.");
-    } finally { setRegeneratingId(null); }
+    } finally {
+      setRegeneratingId(null);
+    }
   };
 
   // Attempts rejected by consistency QA are archived server-side instead of being
@@ -308,7 +351,12 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       const assetData = await fetchPoseImageBlob(jobId, { storagePath: version.storagePath, outputUrl: version.url });
       const dlBlob = assetData.blob || base64ToBlob(assetData.base64!, assetData.mimeType || "image/png");
       const extension = dlBlob.type === "image/webp" ? "webp" : dlBlob.type === "image/jpeg" ? "jpg" : "png";
-      saveAs(dlBlob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}_v${version.version}.${extension}`);
+      saveAs(
+        dlBlob,
+        `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose")
+          .replace(/[^a-z0-9]+/gi, "_")
+          .toLowerCase()}_v${version.version}.${extension}`
+      );
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : "Could not download this version.");
     } finally {
@@ -326,14 +374,19 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       const dlBlob = assetData.blob || base64ToBlob(assetData.base64!, assetData.mimeType || "image/png");
       const extension = dlBlob.type === "image/webp" ? "webp" : dlBlob.type === "image/jpeg" ? "jpg" : "png";
       const version = hasRetainedPreviousVersion(pose) ? "_prior-retained-version" : "";
-      saveAs(dlBlob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose").replace(/[^a-z0-9]+/gi, "_").toLowerCase()}${version}.${extension}`);
+      saveAs(
+        dlBlob,
+        `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose")
+          .replace(/[^a-z0-9]+/gi, "_")
+          .toLowerCase()}${version}.${extension}`
+      );
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : "Could not download this image.");
     } finally {
       setDownloadingPoseId(null);
     }
   };
-  
+
   const downloadZip = async (approvedOnly = false) => {
     if (!job) return;
     try {
@@ -341,7 +394,9 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       setDownloadError("");
       const zip = new JSZip();
 
-      const storedPoses = job.poses.filter((pose: any) => Boolean(visiblePoseOutputUrl(pose)) && (!approvedOnly || pose.approvalStatus === "approved"));
+      const storedPoses = job.poses.filter(
+        (pose: any) => Boolean(visiblePoseOutputUrl(pose)) && (!approvedOnly || pose.approvalStatus === "approved")
+      );
       if (storedPoses.length === 0) return;
 
       const archiveName = `Youthnic_${job.skuId || "Generation"}${approvedOnly ? "_approved" : ""}`;
@@ -350,17 +405,14 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 
       // One batched call fetches every pose's bytes in a single round trip (the server fetches
       // them from Firebase in parallel, sharing one auth token) instead of one function call per
-      // image — that per-image round-tripping was what made "Download ZIP" slow. Anything missing
-      // from the batch (a storagePath-less legacy pose, or a partial batch failure) still falls
-      // back to the single-image path below.
+      // image — that per-image round-tripping was what made "Download ZIP" slow.
       const storagePaths = [...new Set(storedPoses.map((pose: any) => visiblePoseStoragePath(pose)).filter(Boolean))];
       const assetByStoragePath = new Map<string, { base64: string; mimeType: string }>();
       if (storagePaths.length) {
         try {
-          const result = await invokeAppApi<{ assets: Array<{ storagePath: string; base64?: string; mimeType?: string; error?: string }> }>(
-            "jobs.downloadAssets",
-            { jobId, storagePaths },
-          );
+          const result = await invokeAppApi<{
+            assets: Array<{ storagePath: string; base64?: string; mimeType?: string; error?: string }>;
+          }>("jobs.downloadAssets", { jobId, storagePaths });
           for (const asset of result.assets) {
             if (asset.base64) assetByStoragePath.set(asset.storagePath, { base64: asset.base64, mimeType: asset.mimeType || "image/png" });
           }
@@ -374,7 +426,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         try {
           const asset = visiblePoseAsset(pose);
           const cachedAsset = assetByStoragePath.get(asset.storagePath);
-          const safeTitle = String(pose.title || "pose").replace(/[^a-z0-9]/gi, '_').toLowerCase();
+          const safeTitle = String(pose.title || "pose").replace(/[^a-z0-9]/gi, "_").toLowerCase();
           const poseNumber = Number(pose.poseNumber) || i + 1;
 
           if (cachedAsset) {
@@ -411,7 +463,11 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       const content = await zip.generateAsync({ type: "blob" });
       saveAs(content, `${archiveName}.zip`);
       if (missingPoses.length) {
-        setDownloadError(`ZIP saved, but ${missingPoses.length} of ${storedPoses.length} images could not be downloaded: pose ${missingPoses.sort((a, b) => a - b).join(", ")}. Try the ZIP again or download them individually.`);
+        setDownloadError(
+          `ZIP saved, but ${missingPoses.length} of ${storedPoses.length} images could not be downloaded: pose ${missingPoses
+            .sort((a, b) => a - b)
+            .join(", ")}. Try the ZIP again or download them individually.`
+        );
       }
     } catch (err) {
       console.error("Error generating zip", err);
@@ -447,7 +503,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       if (!selectedPose || regenerateTarget) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable))
+        return;
       if (event.key === "Escape") {
         event.preventDefault();
         setSelectedPose(null);
@@ -457,7 +514,11 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       } else if (event.key === "ArrowRight" && nextNavPose) {
         event.preventDefault();
         setSelectedPose(nextNavPose);
-      } else if ((event.key === "d" || event.key === "D") && visiblePoseOutputUrl(selectedPose) && downloadingPoseId !== selectedPose._id) {
+      } else if (
+        (event.key === "d" || event.key === "D") &&
+        visiblePoseOutputUrl(selectedPose) &&
+        downloadingPoseId !== selectedPose._id
+      ) {
         event.preventDefault();
         void downloadPose(selectedPose);
       }
@@ -477,7 +538,10 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     const jobActive = ACTIVE_JOB_STATUSES.includes(job.status);
     const wait = batchWaitRef.current;
     if (wait) {
-      if (jobActive) { wait.sawActive = true; return; }
+      if (jobActive) {
+        wait.sawActive = true;
+        return;
+      }
       // A poll from before the submission can still report the job as idle;
       // only move on once the server has visibly picked the previous pose up.
       const waitedPose = job.poses.find((pose: any) => pose._id === wait.poseId);
@@ -488,10 +552,16 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     const next = batchEntries.find((entry) => entry.state === "waiting");
     if (!next) return;
     const pose = job.poses.find((entry: any) => entry._id === next.poseId);
-    const markEntry = (patch: Partial<BatchEntry>) => setBatchEntries((entries) => entries.map((entry) => entry.poseId === next.poseId ? { ...entry, ...patch } : entry));
+    const markEntry = (patch: Partial<BatchEntry>) =>
+      setBatchEntries((entries) => entries.map((entry) => (entry.poseId === next.poseId ? { ...entry, ...patch } : entry)));
     batchSubmittingRef.current = true;
     markEntry({ state: "submitting" });
-    void regeneratePose({ poseId: next.poseId, requestedBy: user._id, poseQa: next.poseQa, extraInstructions: next.instructions })
+    void regeneratePose({
+      poseId: next.poseId,
+      requestedBy: user._id,
+      poseQa: next.poseQa,
+      extraInstructions: next.instructions,
+    })
       .then(() => {
         batchWaitRef.current = { poseId: next.poseId, previousCompletedAt: Number(pose?.completedAt || 0), sawActive: false };
         batchSubmittingRef.current = false;
@@ -510,152 +580,213 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       .sort((left: any, right: any) => left.poseNumber - right.poseNumber);
     if (!eligible.length) return;
     batchWaitRef.current = null;
-    setBatchEntries(eligible.map((pose: any) => ({
-      poseId: pose._id,
-      poseNumber: pose.poseNumber,
-      title: pose.title,
-      state: "waiting" as const,
-      instructions: batchNote.trim(),
-      poseQa: batchPoseQa,
-    })));
+    setBatchEntries(
+      eligible.map((pose: any) => ({
+        poseId: pose._id,
+        poseNumber: pose.poseNumber,
+        title: pose.title,
+        state: "waiting" as const,
+        instructions: batchNote.trim(),
+        poseQa: batchPoseQa,
+      }))
+    );
     setBatchSelection([]);
   };
 
   const stopBatchRegeneration = () => {
-    setBatchEntries((entries) => entries.map((entry) => entry.state === "waiting" ? { ...entry, state: "skipped", error: "Stopped before it was queued." } : entry));
+    setBatchEntries((entries) =>
+      entries.map((entry) => (entry.state === "waiting" ? { ...entry, state: "skipped", error: "Stopped before it was queued." } : entry))
+    );
   };
-  
+
   if (job === undefined) {
-    return <div className="p-10 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
-  }
-  
-  if (job === null) {
-    return <div className="p-10 text-center text-sm text-secondary">Job not found.</div>;
+    return (
+      <div className="flex justify-center p-12">
+        <Loader2 className="h-7 w-7 animate-spin text-primary" />
+      </div>
+    );
   }
 
-  const promptBudgetPose = job.poses.find((pose: any) => /invalid 'prompt': string too long|safe image-generation prompt/i.test(String(pose.error || "")));
+  if (job === null) {
+    return <div className="p-10 text-center text-sm font-medium text-secondary">Job record not found.</div>;
+  }
+
+  const promptBudgetPose = job.poses.find((pose: any) =>
+    /invalid 'prompt': string too long|safe image-generation prompt/i.test(String(pose.error || ""))
+  );
   const visibleError = promptBudgetPose
     ? `Pose ${promptBudgetPose.poseNumber || 1} was blocked before image generation: ${promptBudgetPose.error}`
     : job.errorMessage;
   const selectedOutputUrl = selectedPose ? visiblePoseOutputUrl(selectedPose) : "";
   const selectedRetainedPrevious = selectedPose ? hasRetainedPreviousVersion(selectedPose) : false;
   const selectedQaStatus = selectedPose ? visibleQaStatus(selectedPose) : "";
-  const approvedPoseCount = job.poses.filter((pose: any) => pose.approvalStatus === "approved" && Boolean(visiblePoseOutputUrl(pose))).length;
+  const approvedPoseCount = job.poses.filter(
+    (pose: any) => pose.approvalStatus === "approved" && Boolean(visiblePoseOutputUrl(pose))
+  ).length;
   const selectedCanBeReviewed = Boolean(selectedPose?.generationId && selectedPose.status === "completed" && selectedPose.outputUrl);
   const selectedPreviousUrl = selectedPose && !selectedRetainedPrevious ? String(selectedPose.previousVersionUrl || "") : "";
   const selectedVersions = selectedPose ? poseVersions(selectedPose) : [];
-  const selectedViewedVersion = viewedVersion && selectedPose && viewedVersion.poseId === selectedPose._id
-    ? selectedVersions.find((version) => version.id === viewedVersion.versionId && !version.isCurrent) || null
-    : null;
+  const selectedViewedVersion =
+    viewedVersion && selectedPose && viewedVersion.poseId === selectedPose._id
+      ? selectedVersions.find((version) => version.id === viewedVersion.versionId && !version.isCurrent) || null
+      : null;
   const showCompare = Boolean(compareWithPrevious && selectedPreviousUrl && selectedOutputUrl && !selectedViewedVersion);
-  const regenerationSummary = job.regenerationSummary || { regenerations: 0, regeneratedPoses: 0, averageRegenerationMs: 0, totalRegenerationMs: 0, regenerationCostUsd: 0 };
+  const regenerationSummary = job.regenerationSummary || {
+    regenerations: 0,
+    regeneratedPoses: 0,
+    averageRegenerationMs: 0,
+    totalRegenerationMs: 0,
+    regenerationCostUsd: 0,
+  };
   const jobIsActive = ACTIVE_JOB_STATUSES.includes(job.status);
   const batchEligiblePoses = job.poses.filter((pose: any) => canRegeneratePose(pose, job.status));
   const batchSelectedCount = batchEligiblePoses.filter((pose: any) => batchSelection.includes(pose._id)).length;
   const batchSelectable = !jobIsActive && !batchRunning && batchEligiblePoses.length > 0;
-  const toggleBatchPose = (poseId: string) => setBatchSelection((current) => current.includes(poseId) ? current.filter((id) => id !== poseId) : [...current, poseId]);
+  const toggleBatchPose = (poseId: string) =>
+    setBatchSelection((current) => (current.includes(poseId) ? current.filter((id) => id !== poseId) : [...current, poseId]));
 
   return (
-    <div className="border-t border-outline-variant/30 bg-surface-container-lowest/50 p-6">
-      <div className="mb-6 flex flex-wrap gap-4 text-xs text-secondary bg-white rounded-xl p-4 border border-outline-variant/40 shadow-sm">
-        <span className="flex items-center gap-1.5"><b className="text-on-surface">Aspect Ratio:</b> {job.aspectRatio || '3:4'}</span>
-        <span className="w-px h-4 bg-outline-variant/50 hidden sm:block"></span>
-        <span className="flex items-center gap-1.5"><b className="text-on-surface">Resolution:</b> {job.imageSize || '1024x1024'}</span>
-        <span className="w-px h-4 bg-outline-variant/50 hidden sm:block"></span>
-        <span className="flex items-center gap-1.5"><b className="text-on-surface">Quality:</b> {job.quality || 'medium'}</span>
-        <span className="w-px h-4 bg-outline-variant/50 hidden sm:block"></span>
-        <span className="flex items-center gap-1.5"><b className="text-on-surface">Estimated:</b> ${Number(job.estimatedCost || 0).toFixed(2)}</span>
-        <span className="w-px h-4 bg-outline-variant/50 hidden sm:block"></span>
-        <span className="flex flex-col gap-0.5">
-          <span className="flex items-center gap-1.5"><b className="text-on-surface">Actual so far:</b> ${Number(job.actualCost || 0).toFixed(4)}</span>
-          {job.costBreakdown && (
-            <span className="text-[10px] text-secondary">
-              Analysis ${Number(job.costBreakdown.analysisUsd || 0).toFixed(4)}
-              {" · "}Images ${Number(job.costBreakdown.generationUsd || 0).toFixed(4)}
-              {job.costBreakdown.qaEnabled || job.costBreakdown.qaRan
-                ? ` · QA ${job.costBreakdown.qaRan ? `$${Number(job.costBreakdown.qaUsd || 0).toFixed(4)}` : "unavailable"}`
-                : " · QA off"}
-              {job.costBreakdown.usedAdminRates ? " · OpenAI billed rates" : ""}
-            </span>
-          )}
-        </span>
-        {regenerationSummary.regenerations > 0 && (
-          <>
-            <span className="w-px h-4 bg-outline-variant/50 hidden sm:block"></span>
-            <span className="flex flex-col gap-0.5" title="Every regenerated version is kept in each pose's version history.">
-              <span className="flex items-center gap-1.5"><Layers className="h-3 w-3" /><b className="text-on-surface">Regenerations:</b> {regenerationSummary.regenerations} across {regenerationSummary.regeneratedPoses} pose{regenerationSummary.regeneratedPoses === 1 ? "" : "s"}</span>
-              <span className="text-[10px] text-secondary">
-                {regenerationSummary.averageRegenerationMs ? `Avg ${formatDuration(regenerationSummary.averageRegenerationMs)} request→delivery · total ${formatDuration(regenerationSummary.totalRegenerationMs)}` : "Timing not recorded"}
-                {` · $${Number(regenerationSummary.regenerationCostUsd || 0).toFixed(4)}`}
+    <div className="space-y-6">
+      {/* SPECS & ACTIONS RIBBON */}
+      <div className="flex flex-col gap-4 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest/90 p-5 shadow-sm backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap items-center gap-2.5 text-xs text-secondary">
+          <div className="flex items-center gap-1.5 rounded-lg border border-outline-variant/50 bg-white px-2.5 py-1.5 font-medium shadow-xs">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Aspect</span>
+            <span className="font-mono font-bold text-on-surface">{job.aspectRatio || "3:4"}</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 rounded-lg border border-outline-variant/50 bg-white px-2.5 py-1.5 font-medium shadow-xs">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Size</span>
+            <span className="font-mono font-bold text-on-surface">{job.imageSize || "1024x1024"}</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 rounded-lg border border-outline-variant/50 bg-white px-2.5 py-1.5 font-medium shadow-xs">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Tier</span>
+            <span className="font-bold capitalize text-primary">{job.quality || "medium"}</span>
+          </div>
+
+          <div className="flex flex-col justify-center rounded-lg border border-outline-variant/50 bg-white px-3 py-1 text-[11px] shadow-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Cost so far</span>
+              <span className="font-mono font-bold text-on-surface">${Number(job.actualCost || 0).toFixed(4)}</span>
+              <span className="text-[10px] text-secondary">(${Number(job.estimatedCost || 0).toFixed(2)} est)</span>
+            </div>
+            {job.costBreakdown && (
+              <span className="text-[9px] text-secondary/80">
+                Analysis ${Number(job.costBreakdown.analysisUsd || 0).toFixed(4)} · Images ${Number(job.costBreakdown.generationUsd || 0).toFixed(4)}
+                {job.costBreakdown.qaEnabled || job.costBreakdown.qaRan
+                  ? ` · QA ${job.costBreakdown.qaRan ? `$${Number(job.costBreakdown.qaUsd || 0).toFixed(4)}` : "off"}`
+                  : " · QA off"}
               </span>
-            </span>
-          </>
-        )}
-        
-        {visibleError && (
-          <>
-             <span className="w-px h-4 bg-outline-variant/50 hidden sm:block"></span>
-             <span className="text-danger flex items-center gap-1.5 bg-danger/5 px-2 py-0.5 rounded text-danger"><AlertCircle className="h-3 w-3" /> <b className="font-bold">Error:</b> {visibleError}</span>
-          </>
-        )}
-        
-        <div className="flex-1 flex justify-end gap-2">
+            )}
+          </div>
+
+          {regenerationSummary.regenerations > 0 && (
+            <div
+              className="flex items-center gap-1.5 rounded-lg border border-primary/20 bg-soft-blush px-2.5 py-1.5 text-[11px] font-semibold text-primary shadow-xs"
+              title="Versions retained in history"
+            >
+              <Layers className="h-3.5 w-3.5" />
+              <span>
+                {regenerationSummary.regenerations} retry in {regenerationSummary.regeneratedPoses} pose{regenerationSummary.regeneratedPoses === 1 ? "" : "s"}
+              </span>
+              <span className="font-mono text-[10px] font-bold text-primary/80">
+                (${Number(regenerationSummary.regenerationCostUsd || 0).toFixed(4)})
+              </span>
+            </div>
+          )}
+
+          {visibleError && (
+            <div className="flex items-center gap-1.5 rounded-lg border border-danger/20 bg-danger/5 px-2.5 py-1.5 text-[11px] font-medium text-danger">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span className="line-clamp-1">{visibleError}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => void toggleReferences()}
             disabled={referencesLoading}
-            className="flex items-center gap-2 rounded-lg bg-surface-container px-3 py-1.5 text-xs font-bold text-on-surface transition-colors hover:bg-surface-container-high disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-xl border border-outline-variant/60 bg-white px-3.5 py-2 text-xs font-bold text-on-surface shadow-xs transition-all hover:border-primary/40 hover:bg-surface-container-low active:scale-95 disabled:opacity-50"
           >
-            {referencesLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Images className="h-3.5 w-3.5" />}
+            {referencesLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Images className="h-3.5 w-3.5 text-secondary" />}
             {referencesLoading ? "Loading..." : showReferences ? "Hide references" : "View references"}
           </button>
+
           <button
             onClick={() => void cloneJob()}
             disabled={isCloning}
-            className="flex items-center gap-2 rounded-lg bg-surface-container px-3 py-1.5 text-xs font-bold text-on-surface transition-colors hover:bg-surface-container-high disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-xl border border-outline-variant/60 bg-white px-3.5 py-2 text-xs font-bold text-on-surface shadow-xs transition-all hover:border-primary/40 hover:bg-surface-container-low active:scale-95 disabled:opacity-50"
           >
-            {isCloning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
+            {isCloning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5 text-secondary" />}
             {isCloning ? "Cloning..." : "Clone Session"}
           </button>
+
           <button
             onClick={() => void downloadZip()}
             disabled={Boolean(zipping) || !job.poses.some((pose: any) => Boolean(visiblePoseOutputUrl(pose)))}
-            className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-xl bg-primary/10 px-3.5 py-2 text-xs font-bold text-primary shadow-xs transition-all hover:bg-primary/20 active:scale-95 disabled:opacity-50"
           >
-            {zipping === "all" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronDown className="h-3.5 w-3.5" />}
-            {zipping === "all" ? "Zipping..." : "Download ZIP"}
+            {zipping === "all" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            {zipping === "all" ? "Packaging ZIP..." : "Download ZIP"}
           </button>
+
           <button
             onClick={() => void downloadZip(true)}
             disabled={Boolean(zipping) || approvedPoseCount === 0}
-            title={approvedPoseCount === 0 ? "No poses have been approved yet" : `Download the ${approvedPoseCount} approved image${approvedPoseCount === 1 ? "" : "s"}`}
-            className="flex items-center gap-2 rounded-lg border border-emerald-600/30 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+            title={approvedPoseCount === 0 ? "No poses have been approved yet" : `Download the ${approvedPoseCount} approved images`}
+            className="flex items-center gap-1.5 rounded-xl border border-emerald-600/30 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-800 shadow-xs transition-all hover:bg-emerald-100 active:scale-95 disabled:opacity-40"
           >
-            {zipping === "approved" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-            {zipping === "approved" ? "Zipping..." : `Download approved only${approvedPoseCount ? ` (${approvedPoseCount})` : ""}`}
+            {zipping === "approved" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />}
+            {zipping === "approved" ? "Packaging..." : `Approved (${approvedPoseCount})`}
           </button>
         </div>
       </div>
 
+      {/* PRODUCT & REFERENCE IMAGES DRAWER */}
       {showReferences && (
-        <div className="mb-6 rounded-xl border border-outline-variant/40 bg-white p-4 shadow-sm">
-          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-secondary">Attached product & reference images</p>
-          {referencesError && <p className="flex items-center gap-2 text-sm text-danger"><AlertCircle className="h-4 w-4" /> {referencesError}</p>}
-          {!referencesError && references && references.length === 0 && (
-            <p className="text-sm text-secondary">No reference images were stored for this generation.</p>
+        <div className="overflow-hidden rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-secondary">
+              Attached Product & Style References
+            </p>
+            <span className="text-[11px] text-secondary">Click any reference to inspect full-size</span>
+          </div>
+
+          {referencesError && (
+            <p className="flex items-center gap-2 rounded-xl bg-danger/5 p-3 text-sm text-danger">
+              <AlertCircle className="h-4 w-4" /> {referencesError}
+            </p>
           )}
+
+          {!referencesError && references && references.length === 0 && (
+            <p className="py-6 text-center text-xs text-secondary">No reference images were stored for this generation.</p>
+          )}
+
           {!referencesError && references && references.length > 0 && (
-            <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 lg:grid-cols-6">
+            <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4 lg:grid-cols-6">
               {references.map((reference) => (
                 <button
                   key={reference._id}
                   type="button"
                   onClick={() => setSelectedReference(reference)}
-                  className="group text-left"
+                  className="group relative flex flex-col overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-1.5 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md"
                 >
-                  <div className="aspect-square overflow-hidden rounded-lg border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all group-hover:border-primary/40 group-hover:shadow-md">
-                    <img src={reference.url} alt={reference.label} loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                  <div className="relative aspect-square w-full overflow-hidden rounded-lg bg-surface-container">
+                    <img
+                      src={reference.url}
+                      alt={reference.label}
+                      loading="lazy"
+                      decoding="async"
+                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    />
+                    <div className="absolute inset-0 bg-navy-soft/0 transition-colors group-hover:bg-navy-soft/20 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                      <Maximize2 className="h-5 w-5 text-white drop-shadow" />
+                    </div>
                   </div>
-                  <p className="mt-1.5 truncate text-[10px] font-semibold text-secondary">{reference.label}</p>
+                  <p className="mt-1.5 truncate px-0.5 text-[11px] font-semibold text-on-surface">{reference.label}</p>
                 </button>
               ))}
             </div>
@@ -663,63 +794,152 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         </div>
       )}
 
+      {/* BATCH REGENERATION PANEL */}
       {batchSelectable && (
-        <div className="mb-5 rounded-xl border border-outline-variant/40 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-soft-blush/60 via-white to-soft-blush/30 p-5 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <ListChecks className="h-4 w-4 text-primary" />
-              <p className="text-xs font-bold text-on-surface">Batch regenerate</p>
-              <span className="text-[11px] text-secondary">{batchSelectedCount ? `${batchSelectedCount} of ${batchEligiblePoses.length} eligible poses selected` : "Tick the poses below to regenerate them with one shared note."}</span>
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-white shadow-xs">
+                <ListChecks className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-on-surface">Batch Regeneration Studio</p>
+                <span className="text-[11px] text-secondary">
+                  {batchSelectedCount
+                    ? `${batchSelectedCount} of ${batchEligiblePoses.length} eligible poses selected`
+                    : "Check multiple pose cards below to regenerate them in sequence with a shared director's note."}
+                </span>
+              </div>
             </div>
             <div className="flex gap-2">
-              <button type="button" onClick={() => setBatchSelection(batchEligiblePoses.map((pose: any) => pose._id))} className="rounded-lg border border-outline-variant px-2.5 py-1 text-[11px] font-bold text-secondary hover:bg-surface-container">Select all eligible</button>
-              {batchSelectedCount > 0 && <button type="button" onClick={() => setBatchSelection([])} className="rounded-lg border border-outline-variant px-2.5 py-1 text-[11px] font-bold text-secondary hover:bg-surface-container">Clear</button>}
+              <button
+                type="button"
+                onClick={() => setBatchSelection(batchEligiblePoses.map((pose: any) => pose._id))}
+                className="rounded-lg border border-outline-variant/70 bg-white px-3 py-1.5 text-xs font-bold text-on-surface shadow-xs transition-colors hover:border-primary/40 hover:bg-surface-container"
+              >
+                Select all ({batchEligiblePoses.length})
+              </button>
+              {batchSelectedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setBatchSelection([])}
+                  className="rounded-lg border border-outline-variant/70 bg-white px-3 py-1.5 text-xs font-bold text-secondary shadow-xs transition-colors hover:bg-surface-container"
+                >
+                  Clear selection
+                </button>
+              )}
             </div>
           </div>
+
           {batchSelectedCount > 0 && (
-            <div className="mt-3 space-y-2">
-              <textarea maxLength={1000} rows={3} value={batchNote} onChange={(event) => setBatchNote(event.target.value)} placeholder="Shared correction for every selected pose. Leave blank to retry with the existing locked shoot plan." className="w-full resize-y rounded-xl border border-outline-variant p-3 text-sm leading-6 text-on-surface outline-none focus:border-primary" />
+            <div className="mt-4 space-y-3 pt-3 border-t border-primary/10">
+              <textarea
+                maxLength={1000}
+                rows={3}
+                value={batchNote}
+                onChange={(event) => setBatchNote(event.target.value)}
+                placeholder="Shared correction for every selected pose. (e.g., 'Ensure fabric drape falls naturally over the shoulder and remove excess jewelry. Keep original background and model identity unchanged.')"
+                className="w-full resize-y rounded-xl border border-outline-variant/80 bg-white p-3.5 text-xs leading-relaxed text-on-surface shadow-inner outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20"
+              />
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <label className="flex items-center gap-2 text-xs font-semibold text-secondary"><input type="checkbox" checked={batchPoseQa} onChange={(event) => setBatchPoseQa(event.target.checked)} className="accent-primary" /> Run Gemini consistency QA on regenerated poses (optional)</label>
-                <span className="text-[10px] text-secondary">{batchNote.length}/1000</span>
+                <label className="flex items-center gap-2 text-xs font-semibold text-on-surface cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={batchPoseQa}
+                    onChange={(event) => setBatchPoseQa(event.target.checked)}
+                    className="h-4 w-4 rounded border-outline-variant text-primary focus:ring-primary accent-primary"
+                  />
+                  <span>Run Gemini consistency QA on newly generated frames</span>
+                </label>
+                <span className="font-mono text-[10px] text-secondary">{batchNote.length}/1000</span>
               </div>
+
               {batchEligiblePoses.some((pose: any) => pose.poseNumber === 1 && batchSelection.includes(pose._id)) && (
-                <p className="rounded-lg border border-warning/30 bg-warning/5 p-2.5 text-[11px] leading-4 text-warning-dark"><AlertCircle className="mr-1 inline h-3 w-3 align-text-bottom" /> Pose 1 is the face and shoot anchor — regenerating it can change the model's face for the whole set.</p>
+                <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 shadow-xs">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                  <p className="leading-snug">
+                    <strong className="font-bold">Pose 1 is the Anchor Frame:</strong> Regenerating Pose 1 will generate a newly anchored model face and silhouette. If Pose 1 shifts, subsequent poses may also require regeneration to match.
+                  </p>
+                </div>
               )}
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-[10px] leading-4 text-secondary">Poses are queued one at a time: each waits for the previous regeneration to finish. Keep this job open until the last one is queued.</p>
-                <button type="button" onClick={startBatchRegeneration} className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-white hover:bg-primary-dark"><RefreshCcw className="h-3.5 w-3.5" /> Regenerate {batchSelectedCount} pose{batchSelectedCount === 1 ? "" : "s"}</button>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                <p className="text-[11px] text-secondary">
+                  Poses queue sequentially to guarantee strict model identity. Keep this window open until complete.
+                </p>
+                <button
+                  type="button"
+                  onClick={startBatchRegeneration}
+                  className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:bg-primary-dark hover:shadow-lg active:scale-95"
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  Regenerate {batchSelectedCount} Pose{batchSelectedCount === 1 ? "" : "s"}
+                </button>
               </div>
             </div>
           )}
         </div>
       )}
 
+      {/* BATCH PROGRESS STATUS */}
       {batchEntries.length > 0 && (
-        <div className="mb-5 rounded-xl border border-outline-variant/40 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between gap-3">
-            <p className="flex items-center gap-2 text-xs font-bold text-on-surface">
-              {batchRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> : <ListChecks className="h-3.5 w-3.5 text-primary" />}
-              Batch regeneration {batchRunning ? "in progress" : "finished queueing"}
-              <span className="font-normal text-secondary">· {batchEntries.filter((entry) => entry.state === "submitted").length} queued{batchEntries.some((entry) => entry.state === "failed") ? ` · ${batchEntries.filter((entry) => entry.state === "failed").length} failed` : ""}</span>
-            </p>
-            {batchRunning
-              ? <button type="button" onClick={stopBatchRegeneration} className="rounded-lg border border-outline-variant px-2.5 py-1 text-[11px] font-bold text-secondary hover:bg-surface-container">Stop after current</button>
-              : <button type="button" onClick={() => setBatchEntries([])} className="rounded-lg border border-outline-variant px-2.5 py-1 text-[11px] font-bold text-secondary hover:bg-surface-container">Dismiss</button>}
+            <div className="flex items-center gap-2 text-xs font-bold text-on-surface">
+              {batchRunning ? (
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+              )}
+              <span>Batch Queue {batchRunning ? "In Progress" : "Complete"}</span>
+              <span className="font-normal text-secondary">
+                · {batchEntries.filter((entry) => entry.state === "submitted").length} queued
+                {batchEntries.some((entry) => entry.state === "failed") &&
+                  ` · ${batchEntries.filter((entry) => entry.state === "failed").length} failed`}
+              </span>
+            </div>
+            {batchRunning ? (
+              <button
+                type="button"
+                onClick={stopBatchRegeneration}
+                className="rounded-lg border border-outline-variant px-3 py-1.5 text-xs font-bold text-secondary hover:bg-surface-container"
+              >
+                Stop after current
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setBatchEntries([])}
+                className="rounded-lg border border-outline-variant px-3 py-1.5 text-xs font-bold text-secondary hover:bg-surface-container"
+              >
+                Dismiss
+              </button>
+            )}
           </div>
-          <ul className="mt-3 space-y-1.5">
+          <ul className="mt-3 divide-y divide-outline-variant/20 rounded-xl border border-outline-variant/30 bg-surface-container-lowest/50">
             {batchEntries.map((entry) => {
               const livePose = job.poses.find((pose: any) => pose._id === entry.poseId);
-              const label = entry.state === "waiting" ? "Waiting for the previous pose"
-                : entry.state === "submitting" ? "Queueing…"
-                : entry.state === "skipped" ? entry.error || "Skipped"
-                : entry.state === "failed" ? `Failed: ${entry.error || "Could not queue this regeneration."}`
-                : `Queued · now ${livePose?.status || "unknown"}`;
+              const label =
+                entry.state === "waiting"
+                  ? "Waiting for previous pose to settle"
+                  : entry.state === "submitting"
+                  ? "Submitting to worker…"
+                  : entry.state === "skipped"
+                  ? entry.error || "Skipped"
+                  : entry.state === "failed"
+                  ? `Failed: ${entry.error || "Could not queue"}`
+                  : `Queued · worker status: ${livePose?.status || "unknown"}`;
               return (
-                <li key={entry.poseId} className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg px-2.5 py-1.5 text-[11px] ${entry.state === "failed" ? "bg-danger/5 text-danger" : "bg-surface-container-lowest text-secondary"}`}>
-                  <span className="font-bold text-on-surface">Pose {entry.poseNumber}. {entry.title}</span>
-                  <span>{label}</span>
-                  {entry.state === "submitted" && livePose?.status === "failed" && livePose.error && <span className="text-danger">· {livePose.error}</span>}
+                <li
+                  key={entry.poseId}
+                  className={`flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 text-xs ${
+                    entry.state === "failed" ? "bg-red-50 text-red-800" : "text-secondary"
+                  }`}
+                >
+                  <span className="font-bold text-on-surface">
+                    Pose {entry.poseNumber}. {entry.title}
+                  </span>
+                  <span className="font-medium text-[11px]">{label}</span>
                 </li>
               );
             })}
@@ -727,7 +947,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-6">
+      {/* 3:4 POSE GALLERY GRID */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         {job.poses.map((pose: any) => {
           const outputUrl = visiblePoseOutputUrl(pose);
           const retainedPrevious = hasRetainedPreviousVersion(pose);
@@ -736,16 +957,33 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           const batchEligible = batchSelectable && canRegeneratePose(pose, job.status);
           const versions = poseVersions(pose);
           const currentVersion = versions.find((version) => version.isCurrent) || null;
-          const showsQaBanner = retainedPrevious || (["unverified", "requires_human_review", "rejected_by_qa", "human_approved", "human_rejected"].includes(qaStatus) && Boolean(outputUrl));
+
           return (
-            <div key={pose._id} className={`group ${outputUrl || latestRejected(pose) ? "cursor-zoom-in" : "cursor-default"}`} onClick={() => (outputUrl || latestRejected(pose)) && setSelectedPose(pose)}>
-              <div className="relative aspect-[3/4] overflow-hidden rounded-xl border border-outline-variant/40 bg-white shadow-sm transition-all duration-300 hover:shadow-md hover:border-primary/40 group-hover:-translate-y-1">
+            <div
+              key={pose._id}
+              className={`group flex flex-col ${outputUrl || latestRejected(pose) ? "cursor-zoom-in" : "cursor-default"}`}
+              onClick={() => (outputUrl || latestRejected(pose)) && setSelectedPose(pose)}
+            >
+              {/* IMAGE TILE (3:4) */}
+              <div className="relative aspect-[3/4] w-full overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all duration-300 group-hover:-translate-y-1 group-hover:border-primary/50 group-hover:shadow-lg">
                 {outputUrl ? (
-                  <img src={outputUrl} alt={retainedPrevious ? `${pose.title} — retained prior version` : pose.title} loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                  <img
+                    src={outputUrl}
+                    alt={retainedPrevious ? `${pose.title} — retained prior version` : pose.title}
+                    loading="lazy"
+                    decoding="async"
+                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  />
                 ) : latestRejected(pose) ? (
                   <>
-                    <img src={latestRejected(pose).url} alt={`${pose.title} — rejected attempt`} loading="lazy" decoding="async" className="h-full w-full object-cover opacity-70 grayscale transition-transform duration-500 group-hover:scale-105" />
-                    <span className="absolute inset-x-0 bottom-0 bg-danger/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white">
+                    <img
+                      src={latestRejected(pose).url}
+                      alt={`${pose.title} — rejected attempt`}
+                      loading="lazy"
+                      decoding="async"
+                      className="h-full w-full object-cover opacity-70 grayscale transition-transform duration-500 group-hover:scale-105"
+                    />
+                    <span className="absolute inset-x-0 bottom-0 bg-red-600/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white backdrop-blur-xs">
                       QA rejected · attempt {latestRejected(pose).attempt}
                     </span>
                   </>
@@ -754,69 +992,83 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     {pose.status === "processing" ? (
                       <div className="flex flex-col items-center gap-2">
                         <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                        <span className="text-[10px] text-primary font-medium tracking-wide uppercase">Generating</span>
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-primary">Generating</span>
                       </div>
                     ) : (
                       <ImageIcon className="h-8 w-8 text-outline-variant/50" />
                     )}
                   </div>
                 )}
-                <span className={`absolute left-2.5 top-2.5 rounded-md px-2 py-1 text-[9px] font-bold uppercase shadow-sm backdrop-blur-md ${statusClass(pose.status)}`}>
+
+                {/* STATUS BADGE (Top Left) */}
+                <span
+                  className={`absolute left-2.5 top-2.5 rounded-md px-2 py-0.5 text-[9px] font-bold uppercase shadow-xs backdrop-blur-md ${statusClass(
+                    pose.status
+                  )}`}
+                >
                   {retainedPrevious ? "Retry failed" : pose.status}
                 </span>
+
+                {/* APPROVAL BADGE (Top Left, Below Status) */}
                 {approval && outputUrl && (
-                  <span className={`absolute left-2.5 top-9 flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-bold uppercase shadow-sm ${approval.className}`}>
+                  <span
+                    className={`absolute left-2.5 top-8 flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-bold uppercase shadow-xs ${approval.className}`}
+                  >
                     {pose.approvalStatus === "approved" ? <Check className="h-2.5 w-2.5" /> : <ThumbsDown className="h-2.5 w-2.5" />}
                     {approval.label}
                   </span>
                 )}
+
+                {/* QA VERDICT BANNER (Bottom) */}
                 {retainedPrevious ? (
-                  <span className="absolute inset-x-0 bottom-0 bg-slate-800/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white">
+                  <span className="absolute inset-x-0 bottom-0 bg-slate-900/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white backdrop-blur-xs">
                     Prior version retained · {visibleQaLabel(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)))}
                   </span>
                 ) : (
-                  /* Delivered without an automatic verdict — it must never be mistaken
-                     for a consistency-approved frame. */
-                  ["unverified", "requires_human_review", "rejected_by_qa", "human_approved", "human_rejected"].includes(qaStatus) && outputUrl && (
+                  ["unverified", "requires_human_review", "rejected_by_qa", "human_approved", "human_rejected"].includes(qaStatus) &&
+                  outputUrl && (
                     <span className={`absolute inset-x-0 bottom-0 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider ${qaStatusBanner(qaStatus)}`}>
                       {visibleQaLabel(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)))}
                     </span>
                   )
                 )}
-                {/* A pose rejected by QA never produced an image, so it must stay
-                    retryable from here — otherwise a failed shoot is a dead end. */}
-                {(pose.status === "failed" || (pose.status === "completed" && outputUrl)) && pose.completedAt && Date.now() - pose.completedAt < 86400000 && !["queued", "processing", "cancelling"].includes(job.status) && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setRegenerateError("");
-                      setExtraInstructions("");
-                      setRegenerateTarget(pose);
-                    }}
-                    disabled={regeneratingId === pose._id}
-                    title="Regenerate this pose — available for 24 hours after generation"
-                    className={`absolute right-2.5 top-2.5 z-10 flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-bold text-primary shadow-sm backdrop-blur transition-opacity hover:bg-white disabled:opacity-100 ${outputUrl ? "opacity-0 group-hover:opacity-100" : "opacity-100"}`}
-                  >
-                    {regeneratingId === pose._id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCcw className="h-3 w-3" />}
-                    Regenerate
-                  </button>
-                )}
-                {outputUrl && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void downloadPose(pose);
-                    }}
-                    disabled={downloadingPoseId === pose._id}
-                    title={retainedPrevious ? "Download retained prior version" : "Download this image"}
-                    className={`absolute right-2.5 ${showsQaBanner ? "bottom-8" : "bottom-2.5"} z-10 flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-[10px] font-bold text-primary opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 hover:bg-white disabled:opacity-100`}
-                  >
-                    {downloadingPoseId === pose._id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
-                    Download
-                  </button>
-                )}
+
+                {/* HOVER QUICK ACTIONS (Top Right) */}
+                <div className="absolute right-2 top-2 z-10 flex flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  {canRegeneratePose(pose, job.status) && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRegenerateError("");
+                        setExtraInstructions("");
+                        setRegenerateTarget(pose);
+                      }}
+                      disabled={regeneratingId === pose._id}
+                      title="Regenerate this pose"
+                      className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/95 text-primary shadow-md backdrop-blur-sm transition-transform hover:scale-105 active:scale-95"
+                    >
+                      {regeneratingId === pose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
+                    </button>
+                  )}
+
+                  {outputUrl && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void downloadPose(pose);
+                      }}
+                      disabled={downloadingPoseId === pose._id}
+                      title={retainedPrevious ? "Download retained prior version" : "Download high-res image"}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/95 text-primary shadow-md backdrop-blur-sm transition-transform hover:scale-105 active:scale-95"
+                    >
+                      {downloadingPoseId === pose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="mt-3 flex items-start gap-2">
+
+              {/* POSE CARD FOOTER */}
+              <div className="mt-2.5 flex items-start gap-2">
                 {batchEligible && (
                   <input
                     type="checkbox"
@@ -825,163 +1077,331 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     onChange={() => toggleBatchPose(pose._id)}
                     aria-label={`Select pose ${pose.poseNumber} for batch regeneration`}
                     title="Select for batch regeneration"
-                    className="mt-0.5 shrink-0 accent-primary"
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-outline-variant accent-primary cursor-pointer"
                   />
                 )}
-                <h4 className="text-xs font-semibold text-on-surface">{pose.poseNumber}. {pose.title}</h4>
+                <div className="min-w-0 flex-1">
+                  <h4 className="truncate font-syne text-xs font-bold text-on-surface">
+                    {pose.poseNumber}. {pose.title}
+                  </h4>
+                </div>
               </div>
-              {retainedPrevious && <p className="mt-1 text-[10px] font-bold text-secondary">Current regeneration failed before replacement; prior paid output remains available.</p>}
+
+              {/* FIDELITY ESTIMATE PILL */}
               {!retainedPrevious && outputUrl && pose.productFidelity > 0 && (
-                <p className={`mt-1 text-[10px] font-bold ${fidelityTone(pose.productFidelity)}`}>
-                  AI QA estimate {pose.productFidelity}% · {visibleQaLabel(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)))}
-                </p>
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] font-bold ${fidelityTone(
+                      pose.productFidelity
+                    )}`}
+                  >
+                    <ShieldCheck className="h-2.5 w-2.5" />
+                    {pose.productFidelity}% fidelity
+                  </span>
+                </div>
               )}
+
+              {/* TIMING & COST SUB-INFO */}
               {outputUrl && (
                 <div className="mt-1.5 space-y-0.5 text-[10px] text-secondary">
-                  <p>{pose.usageReported ? `${pose.inputTokens.toLocaleString()} input · ${pose.outputTokens.toLocaleString()} output tokens` : "Provider token usage not returned"}</p>
-                  <p className="font-semibold text-on-surface">${Number(pose.actualCost || 0).toFixed(4)} actual{versions.length > 1 ? " · all versions" : ""}</p>
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-semibold text-on-surface">${Number(pose.actualCost || 0).toFixed(4)}</span>
+                    {currentVersion && formatDuration(versionHeadlineMs(currentVersion)) && (
+                      <span className="text-[9px]">{formatDuration(versionHeadlineMs(currentVersion))}</span>
+                    )}
+                  </div>
                   {versions.length > 1 && (
-                    <p className="flex items-center gap-1 font-semibold text-primary" title="Every earlier version is kept. Open the image to see and download them.">
-                      <Layers className="h-3 w-3" /> v{currentVersion?.version || versions.length} of {versions.length} · regenerated {versions.length - 1}×
-                    </p>
-                  )}
-                  {currentVersion && formatDuration(versionHeadlineMs(currentVersion)) && (
-                    <p title={versionTimingDetail(currentVersion)}>
-                      {currentVersion.isRegeneration ? "Regenerated in" : "Generated in"} {formatDuration(versionHeadlineMs(currentVersion))}{currentVersion.attempts > 1 ? ` · ${currentVersion.attempts} attempts` : ""}
+                    <p className="flex items-center gap-1 text-[9px] font-semibold text-primary">
+                      <Layers className="h-2.5 w-2.5" /> v{currentVersion?.version || versions.length} of {versions.length}
                     </p>
                   )}
                 </div>
               )}
-              {pose.error && <p className="mt-1.5 line-clamp-2 text-[10px] text-danger bg-danger/10 border border-danger/20 p-2 rounded-md">{pose.error}</p>}
+
+              {pose.error && (
+                <p className="mt-1.5 line-clamp-2 rounded-lg border border-danger/20 bg-danger/10 p-1.5 text-[10px] leading-tight text-danger">
+                  {pose.error}
+                </p>
+              )}
             </div>
           );
         })}
       </div>
 
+      {/* SELECTED POSE LIGHTBOX / ATELIER INSPECTOR */}
       {selectedPose && (
-        <div className="fixed inset-0 z-[80] grid place-items-center bg-navy-soft/80 p-4" onClick={() => setSelectedPose(null)}>
-          <div className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-outline-variant/40 px-5 py-4">
-              <div><p className="text-[10px] font-bold uppercase tracking-widest text-primary">Pose {selectedPose.poseNumber}{selectedNavIndex >= 0 ? ` · ${selectedNavIndex + 1} of ${navigablePoses.length}` : ""}</p><h3 className="font-syne text-lg font-bold text-on-surface">{selectedPose.title}</h3></div>
-              <div className="flex items-center gap-1">
-                <span className="mr-2 hidden text-[10px] text-secondary md:inline">← → browse · D download · Esc close</span>
+        <div
+          className="fixed inset-0 z-[80] grid place-items-center bg-navy-soft/85 p-3 sm:p-6 backdrop-blur-md"
+          onClick={() => setSelectedPose(null)}
+        >
+          <div
+            className="flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/10"
+            onClick={(event) => event.stopPropagation()}
+          >
+            {/* LIGHTBOX HEADER */}
+            <div className="flex items-center justify-between border-b border-outline-variant/40 bg-surface-container-lowest px-6 py-4">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-primary">
+                  Pose {selectedPose.poseNumber}
+                  {selectedNavIndex >= 0 ? ` · Frame ${selectedNavIndex + 1} of ${navigablePoses.length}` : ""}
+                </p>
+                <h3 className="font-syne text-xl font-black text-on-surface">{selectedPose.title}</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="mr-2 hidden rounded-lg bg-surface-container px-2 py-1 text-[10px] font-mono text-secondary md:inline">
+                  ← / → browse · D download · Esc close
+                </span>
                 {selectedPreviousUrl && selectedOutputUrl && (
-                  <button onClick={() => setCompareWithPrevious((current) => !current)} className={`mr-1 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${compareWithPrevious ? "border-primary bg-soft-blush text-primary" : "border-outline-variant text-secondary hover:bg-surface-container"}`}>
-                    <Columns2 className="h-3.5 w-3.5" /> {compareWithPrevious ? "Hide comparison" : "Compare with previous"}
+                  <button
+                    onClick={() => setCompareWithPrevious((current) => !current)}
+                    className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-all ${
+                      compareWithPrevious
+                        ? "border-primary bg-soft-blush text-primary shadow-xs"
+                        : "border-outline-variant/70 text-secondary hover:bg-surface-container"
+                    }`}
+                  >
+                    <Columns2 className="h-3.5 w-3.5" />
+                    {compareWithPrevious ? "Hide comparison" : "Compare with previous"}
                   </button>
                 )}
-                <button onClick={() => previousNavPose && setSelectedPose(previousNavPose)} disabled={!previousNavPose} title="Previous pose (←)" className="rounded-lg p-2 text-secondary hover:bg-surface-container disabled:opacity-30"><ChevronLeft className="h-5 w-5" /></button>
-                <button onClick={() => nextNavPose && setSelectedPose(nextNavPose)} disabled={!nextNavPose} title="Next pose (→)" className="rounded-lg p-2 text-secondary hover:bg-surface-container disabled:opacity-30"><ChevronRight className="h-5 w-5" /></button>
-                <button onClick={() => setSelectedPose(null)} title="Close (Esc)" className="rounded-lg p-2 text-secondary hover:bg-surface-container"><X className="h-5 w-5" /></button>
+                <button
+                  onClick={() => previousNavPose && setSelectedPose(previousNavPose)}
+                  disabled={!previousNavPose}
+                  title="Previous frame (←)"
+                  className="rounded-xl border border-outline-variant/60 p-2 text-secondary hover:bg-surface-container disabled:opacity-30"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <button
+                  onClick={() => nextNavPose && setSelectedPose(nextNavPose)}
+                  disabled={!nextNavPose}
+                  title="Next frame (→)"
+                  className="rounded-xl border border-outline-variant/60 p-2 text-secondary hover:bg-surface-container disabled:opacity-30"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+                <button
+                  onClick={() => setSelectedPose(null)}
+                  title="Close (Esc)"
+                  className="rounded-xl border border-outline-variant/60 p-2 text-secondary hover:bg-surface-container"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
             </div>
-              <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_300px]">
-                {showCompare ? (
-                  <div className="grid min-h-0 grid-cols-2 gap-3 overflow-auto bg-neutral-950 p-4">
-                    <figure className="flex min-h-0 flex-col items-center gap-2">
-                      <figcaption className="rounded-md bg-white/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white/80">Previous version</figcaption>
-                      <img src={selectedPreviousUrl} alt={`${selectedPose.title} — previous version`} decoding="async" className="max-h-[70vh] max-w-full object-contain" />
-                    </figure>
-                    <figure className="flex min-h-0 flex-col items-center gap-2">
-                      <figcaption className="rounded-md bg-primary/80 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white">Current</figcaption>
-                      <img src={selectedOutputUrl} alt={`${selectedPose.title} — current version`} decoding="async" className="max-h-[70vh] max-w-full object-contain" />
-                    </figure>
+
+            {/* LIGHTBOX BODY (SPLIT CANVAS & INSPECTOR) */}
+            <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_340px]">
+              {/* IMAGE CANVAS */}
+              {showCompare ? (
+                <div className="grid min-h-0 grid-cols-2 gap-4 overflow-auto bg-neutral-950 p-6">
+                  <figure className="flex min-h-0 flex-col items-center justify-center gap-2.5">
+                    <figcaption className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white/90">
+                      Previous Version
+                    </figcaption>
+                    <img
+                      src={selectedPreviousUrl}
+                      alt={`${selectedPose.title} — previous version`}
+                      decoding="async"
+                      className="max-h-[72vh] max-w-full rounded-lg object-contain shadow-2xl"
+                    />
+                  </figure>
+                  <figure className="flex min-h-0 flex-col items-center justify-center gap-2.5">
+                    <figcaption className="rounded-full bg-primary px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white">
+                      Current Version
+                    </figcaption>
+                    <img
+                      src={selectedOutputUrl}
+                      alt={`${selectedPose.title} — current version`}
+                      decoding="async"
+                      className="max-h-[72vh] max-w-full rounded-lg object-contain shadow-2xl"
+                    />
+                  </figure>
+                </div>
+              ) : selectedViewedVersion ? (
+                <div className="relative grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-6">
+                  <span className="absolute left-6 top-6 rounded-full bg-white/20 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white backdrop-blur-md">
+                    Version {selectedViewedVersion.version} of {selectedVersions.length} · Archived
+                  </span>
+                  <img
+                    src={selectedViewedVersion.url}
+                    alt={`${selectedPose.title} — version ${selectedViewedVersion.version}`}
+                    decoding="async"
+                    className="max-h-[76vh] max-w-full rounded-lg object-contain shadow-2xl"
+                  />
+                </div>
+              ) : (
+                <div className="grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-6">
+                  <img
+                    src={selectedOutputUrl || latestRejected(selectedPose)?.url}
+                    alt={selectedPose.title}
+                    decoding="async"
+                    className="max-h-[76vh] max-w-full rounded-lg object-contain shadow-2xl"
+                  />
+                </div>
+              )}
+
+              {/* INSPECTOR ASIDE */}
+              <aside className="space-y-4 overflow-y-auto border-l border-outline-variant/30 bg-white p-5 text-sm">
+                {selectedViewedVersion && (
+                  <div className="rounded-2xl border border-primary/30 bg-soft-blush p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-primary">
+                      Viewing version {selectedViewedVersion.version} (Archived)
+                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-secondary">
+                      Showing earlier rendered output. Switch back to current to review latest QA verdict or submit approvals.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setViewedVersion(null)}
+                      className="mt-2.5 rounded-lg border border-primary/40 bg-white px-3 py-1.5 text-xs font-bold text-primary shadow-xs hover:bg-primary/5"
+                    >
+                      Back to current version
+                    </button>
                   </div>
-                ) : selectedViewedVersion ? (
-                  <div className="relative grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-4">
-                    <span className="absolute left-4 top-4 rounded-md bg-white/15 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white">Version {selectedViewedVersion.version} of {selectedVersions.length} · earlier version</span>
-                    <img src={selectedViewedVersion.url} alt={`${selectedPose.title} — version ${selectedViewedVersion.version}`} decoding="async" className="max-h-[76vh] max-w-full object-contain" />
-                  </div>
-                ) : (
-                  <div className="grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-4"><img src={selectedOutputUrl || latestRejected(selectedPose)?.url} alt={selectedPose.title} decoding="async" className="max-h-[76vh] max-w-full object-contain" /></div>
                 )}
-                <aside className="space-y-4 overflow-auto p-5 text-sm">
-                  {selectedViewedVersion && (
-                    <div className="rounded-xl border border-primary/30 bg-soft-blush p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-primary">Viewing version {selectedViewedVersion.version} · earlier version</p>
-                      <p className="mt-1.5 text-[11px] leading-4 text-secondary">Review, QA and the details below belong to the current version. Download this one from the version history.</p>
-                      <button type="button" onClick={() => setViewedVersion(null)} className="mt-2 rounded-md border border-primary/30 bg-white px-2.5 py-1 text-[11px] font-bold text-primary hover:bg-primary/5">Back to current version</button>
+
+                {/* REVIEW DECISION CARD */}
+                {!selectedViewedVersion && selectedCanBeReviewed && (canApprove || selectedPose.approvalStatus !== "pending") && (
+                  <div
+                    className={`rounded-2xl border p-4 shadow-xs ${
+                      selectedPose.approvalStatus === "approved"
+                        ? "border-emerald-600/30 bg-emerald-50/70"
+                        : selectedPose.approvalStatus === "rejected"
+                        ? "border-red-600/30 bg-red-50/70"
+                        : "border-outline-variant/50 bg-surface-container-lowest"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Review Decision</p>
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold capitalize ${
+                          selectedPose.approvalStatus === "approved"
+                            ? "bg-emerald-600 text-white"
+                            : selectedPose.approvalStatus === "rejected"
+                            ? "bg-red-600 text-white"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {selectedPose.approvalStatus === "pending" ? "Pending review" : selectedPose.approvalStatus}
+                      </span>
                     </div>
-                  )}
-                  {!selectedViewedVersion && selectedCanBeReviewed && (canApprove || selectedPose.approvalStatus !== "pending") && (
-                    <div className={`rounded-xl border p-4 ${selectedPose.approvalStatus === "approved" ? "border-emerald-600/30 bg-emerald-50" : selectedPose.approvalStatus === "rejected" ? "border-red-600/20 bg-red-50" : "border-outline-variant/40 bg-surface-container-lowest"}`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Review decision</p>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${selectedPose.approvalStatus === "approved" ? "bg-emerald-600 text-white" : selectedPose.approvalStatus === "rejected" ? "bg-red-600 text-white" : "bg-amber-50 text-amber-700"}`}>{selectedPose.approvalStatus === "pending" ? "Pending review" : selectedPose.approvalStatus}</span>
-                      </div>
-                      {canApprove && (
-                        selectedPose.approvalStatus === "pending" ? (
-                          <div className="mt-3 grid grid-cols-2 gap-2">
-                            <button onClick={() => void setApproval(selectedPose, "approved")} disabled={approvingId === selectedPose._id} className="flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
-                              {approvingId === selectedPose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Approve
-                            </button>
-                            <button onClick={() => void setApproval(selectedPose, "rejected")} disabled={approvingId === selectedPose._id} className="flex items-center justify-center gap-1.5 rounded-lg border border-red-600/30 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50">
-                              {approvingId === selectedPose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ThumbsDown className="h-3.5 w-3.5" />} Reject
-                            </button>
-                          </div>
-                        ) : (
-                          <button onClick={() => void setApproval(selectedPose, "pending")} disabled={approvingId === selectedPose._id} className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-outline-variant bg-white px-3 py-2 text-xs font-bold text-secondary hover:bg-surface-container disabled:opacity-50">
-                            {approvingId === selectedPose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />} Undo — back to pending
+
+                    {canApprove &&
+                      (selectedPose.approvalStatus === "pending" ? (
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => void setApproval(selectedPose, "approved")}
+                            disabled={approvingId === selectedPose._id}
+                            className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 active:scale-95 disabled:opacity-50"
+                          >
+                            {approvingId === selectedPose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                            Approve
                           </button>
-                        )
-                      )}
-                      {approvalError && approvalError.poseId === selectedPose._id && <p className="mt-2 text-[10px] leading-4 text-danger">{approvalError.message}</p>}
-                    </div>
-                  )}
-                  {selectedRetainedPrevious && (
-                    <div className="rounded-xl border border-warning/30 bg-warning/5 p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-warning-dark">Prior version retained</p>
-                      <p className="mt-1.5 text-[11px] leading-4 text-secondary">The current regeneration failed before a replacement was delivered. This is the earlier paid output, kept for review and download; it is not a successful retry.</p>
-                      <p className="mt-2 text-[10px] font-bold text-on-surface">Previous QA state: {qaStatusLabel(selectedQaStatus)}</p>
-                    </div>
-                  )}
-                  {!selectedRetainedPrevious && !selectedPose.outputUrl && latestRejected(selectedPose) && (
-                    <div className="rounded-xl border border-danger/20 bg-danger-surface p-4">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-danger">Not delivered</p>
-                    <p className="mt-1.5 text-[11px] leading-4 text-secondary">Consistency QA rejected this frame, so it was never added to the set. It is kept here because it was already generated and paid for — check it against the product before using it.</p>
+                          <button
+                            onClick={() => void setApproval(selectedPose, "rejected")}
+                            disabled={approvingId === selectedPose._id}
+                            className="flex items-center justify-center gap-1.5 rounded-xl border border-red-600/30 bg-white px-3 py-2 text-xs font-bold text-red-700 shadow-xs hover:bg-red-50 active:scale-95 disabled:opacity-50"
+                          >
+                            {approvingId === selectedPose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ThumbsDown className="h-3.5 w-3.5" />}
+                            Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => void setApproval(selectedPose, "pending")}
+                          disabled={approvingId === selectedPose._id}
+                          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-outline-variant bg-white px-3 py-2 text-xs font-bold text-secondary shadow-xs hover:bg-surface-container active:scale-95 disabled:opacity-50"
+                        >
+                          {approvingId === selectedPose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />}
+                          Reset to pending review
+                        </button>
+                      ))}
+
+                    {approvalError && approvalError.poseId === selectedPose._id && (
+                      <p className="mt-2 text-[10px] leading-tight text-danger">{approvalError.message}</p>
+                    )}
                   </div>
                 )}
-                  {(selectedQaStatus || selectedPose.productFidelity > 0 || Object.keys(selectedPose.fidelityScores || {}).length > 0) && (
-                  <div className="rounded-xl bg-surface-container-lowest p-4">
+
+                {/* AI QA & CONSISTENCY ESTIMATE */}
+                {(selectedQaStatus || selectedPose.productFidelity > 0 || Object.keys(selectedPose.fidelityScores || {}).length > 0) && (
+                  <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4 shadow-xs">
                     <div className="flex items-baseline justify-between">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">AI QA estimate</p>
-                      <p className={`font-syne text-lg font-bold ${fidelityTone(selectedPose.productFidelity)}`}>{selectedPose.productFidelity}%</p>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Gemini Vision QA Score</p>
+                      <p className={`font-mono text-xl font-black ${fidelityTone(selectedPose.productFidelity)}`}>
+                        {selectedPose.productFidelity}%
+                      </p>
                     </div>
+
                     {selectedQaStatus === "human_approved" ? (
-                      <p className="mt-1 text-[10px] leading-4 text-success">Human approved. The percentage remains the recorded AI estimate; the approval is the verified decision.</p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-emerald-700">
+                        Human approved. The percentage remains the recorded AI estimate; human review verified the output.
+                      </p>
                     ) : selectedQaStatus === "unverified" ? (
-                      <p className="mt-1 text-[10px] leading-4 text-warning">{shownQaEnabled(selectedPose, Boolean(job.poseQa)) ? "Automatic QA could not run for this frame, so it was delivered unverified." : "Automatic QA was switched off for this frame, so it was not checked."} Check it against the product references yourself.</p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
+                        {shownQaEnabled(selectedPose, Boolean(job.poseQa))
+                          ? "Automatic QA was unavailable during shoot delivery."
+                          : "Automatic QA was disabled for this run."}{" "}
+                        Verify drape, patterns, and back authority manually.
+                      </p>
                     ) : selectedQaStatus === "requires_human_review" || selectedPose.fidelityReviewRecommended ? (
-                      <p className="mt-1 text-[10px] leading-4 text-warning">This estimate is 90–94 or otherwise uncertain. It requires human review and is not verified.</p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
+                        Score falls in the 90–94% tolerance zone. Human inspection recommended before catalog export.
+                      </p>
                     ) : selectedQaStatus === "rejected_by_qa" || selectedQaStatus === "failed" ? (
-                      <p className="mt-1 text-[10px] leading-4 text-danger">Automatic QA rejected this frame. The paid output remains available for review.</p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-red-700">
+                        Automatic QA rejected this frame due to detected inconsistencies against source references.
+                      </p>
                     ) : null}
+
+                    {/* METRIC PROGRESS BARS */}
                     {Object.keys(selectedPose.fidelityScores || {}).length > 0 && (
-                      <dl className="mt-3 space-y-1.5">
+                      <dl className="mt-3.5 space-y-2 border-t border-outline-variant/30 pt-3">
                         {Object.entries(selectedPose.fidelityScores as Record<string, number>)
                           .sort((left, right) => left[1] - right[1])
                           .map(([key, score]) => (
                             <div key={key} className="flex items-center gap-2 text-[11px]">
-                              <dt className="w-32 shrink-0 truncate text-secondary" title={key}>{key.replace(/_/g, " ")}</dt>
+                              <dt className="w-28 shrink-0 truncate capitalize text-secondary" title={key}>
+                                {key.replace(/_/g, " ")}
+                              </dt>
                               <dd className="flex flex-1 items-center gap-2">
                                 <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-container-high">
-                                  <span className={`block h-full rounded-full ${score >= 95 ? "bg-success" : score >= 90 ? "bg-warning" : "bg-danger"}`} style={{ width: `${Math.max(0, Math.min(100, score))}%` }} />
+                                  <span
+                                    className={`block h-full rounded-full ${
+                                      score >= 95 ? "bg-emerald-500" : score >= 90 ? "bg-amber-500" : "bg-red-500"
+                                    }`}
+                                    style={{ width: `${Math.max(0, Math.min(100, score))}%` }}
+                                  />
                                 </span>
-                                <span className="w-9 shrink-0 text-right font-bold text-on-surface">{score}%</span>
+                                <span className="font-mono w-8 shrink-0 text-right text-[10px] font-bold text-on-surface">
+                                  {score}%
+                                </span>
                               </dd>
                             </div>
                           ))}
                       </dl>
                     )}
-                    {selectedPose.qaReason && <p className="mt-3 text-[10px] leading-4 text-secondary">{selectedPose.qaReason}</p>}
+
+                    {selectedPose.qaReason && (
+                      <p className="mt-3 rounded-lg bg-surface-container-low p-2 text-[10px] leading-relaxed text-secondary">
+                        {selectedPose.qaReason}
+                      </p>
+                    )}
+
                     {Array.isArray(selectedPose.qaHistory) && selectedPose.qaHistory.length > 0 && (
-                      <div className="mt-3 border-t border-outline-variant/40 pt-3">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">QA audit history</p>
-                        <div className="mt-2 space-y-2">
+                      <div className="mt-3 border-t border-outline-variant/30 pt-3">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">QA Audit History</p>
+                        <div className="mt-2 space-y-1.5">
                           {selectedPose.qaHistory.map((review: any) => (
-                            <div key={review.id} className="rounded-lg border border-outline-variant/40 bg-white p-2 text-[10px] leading-4">
-                              <p className="font-bold text-on-surface">{qaStatusLabel(qaReviewOutcome(review))}{String(review.reviewer_type || "").startsWith("human_") ? "" : ` · ${Number(review.score || 0)}%`}</p>
-                              <p className="text-secondary">{review.qa_version || "legacy"} · {review.created_at ? new Date(review.created_at).toLocaleString() : "time unavailable"}</p>
+                            <div key={review.id} className="rounded-lg border border-outline-variant/30 bg-white p-2 text-[10px] leading-snug">
+                              <p className="font-bold text-on-surface">
+                                {qaStatusLabel(qaReviewOutcome(review))}
+                                {String(review.reviewer_type || "").startsWith("human_") ? "" : ` · ${Number(review.score || 0)}%`}
+                              </p>
+                              <p className="text-secondary text-[9px]">
+                                {review.qa_version || "legacy"} · {review.created_at ? new Date(review.created_at).toLocaleString("en-IN") : "time n/a"}
+                              </p>
                             </div>
                           ))}
                         </div>
@@ -989,59 +1409,85 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     )}
                   </div>
                 )}
-                {Array.isArray(selectedPose.referenceManifest?.references) && selectedPose.referenceManifest.references.length > 0 && (
-                  <div className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">References sent to generator{selectedPose.poseNumber === 3 ? " — true back" : ""}</p>
-                    <p className="mt-1 text-[10px] leading-4 text-secondary">This is the immutable source manifest for this attempt. {selectedPose.poseNumber === 3 ? "Only the listed rear product image was allowed to establish the back design." : ""}</p>
-                    <ol className="mt-3 space-y-1.5">
-                      {selectedPose.referenceManifest.references.map((reference: any, index: number) => (
-                        <li key={`${reference.hash || reference.filename || reference.role}:${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-white px-2.5 py-2 text-[10px]">
-                          <span className="font-bold text-on-surface">{reference.imageNumber || index + 1}. {String(reference.role || "reference").replace(/_/g, " ")}</span>
-                          {reference.authority === "true_back_product_authority" && <span className="rounded-full bg-success-container px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-success">Rear authority</span>}
-                          <span className="min-w-0 truncate text-secondary">{reference.filename || "Stored reference"}{reference.hash ? ` · ${reference.hash}` : ""}</span>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                )}
+
+                {/* VERSION HISTORY */}
                 {selectedVersions.length > 0 && (
-                  <div className="rounded-xl border border-outline-variant/40 p-4">
+                  <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4 shadow-xs">
                     <div className="flex items-baseline justify-between gap-2">
-                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-secondary"><Layers className="h-3 w-3" /> Version history</p>
-                      <span className="text-[10px] text-secondary">{selectedVersions.length} kept · {selectedVersions.length - 1} regeneration{selectedVersions.length - 1 === 1 ? "" : "s"}</span>
+                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-secondary">
+                        <Layers className="h-3 w-3 text-primary" /> Version History
+                      </p>
+                      <span className="font-mono text-[10px] text-secondary">
+                        {selectedVersions.length} kept · {selectedVersions.length - 1} retry
+                      </span>
                     </div>
-                    <ol className="mt-3 space-y-2">
+
+                    <ol className="mt-3 space-y-2.5">
                       {[...selectedVersions].reverse().map((version) => {
                         const viewing = selectedViewedVersion ? selectedViewedVersion.id === version.id : version.isCurrent;
                         const headline = formatDuration(versionHeadlineMs(version));
                         const downloadKey = `${selectedPose._id}:v${version.version}`;
+
                         return (
-                          <li key={version.id} className={`flex gap-3 rounded-lg p-1.5 ${viewing ? "bg-soft-blush ring-1 ring-primary/30" : ""}`}>
+                          <li
+                            key={version.id}
+                            className={`flex gap-3 rounded-xl p-2 transition-colors ${
+                              viewing ? "bg-soft-blush ring-1 ring-primary/40" : "bg-white border border-outline-variant/30"
+                            }`}
+                          >
                             <button
                               type="button"
-                              onClick={() => setViewedVersion(version.isCurrent ? null : { poseId: selectedPose._id, versionId: version.id })}
-                              title={version.isCurrent ? "Show the current version" : `Show version ${version.version}`}
-                              className="shrink-0"
+                              onClick={() =>
+                                setViewedVersion(version.isCurrent ? null : { poseId: selectedPose._id, versionId: version.id })
+                              }
+                              title={version.isCurrent ? "Show current version" : `Inspect v${version.version}`}
+                              className="shrink-0 group overflow-hidden rounded-lg border border-outline-variant/40"
                             >
-                              <img src={version.url} alt={`${selectedPose.title} — version ${version.version}`} loading="lazy" decoding="async" className="h-20 w-16 rounded-md border border-outline-variant/40 object-cover" />
+                              <img
+                                src={version.url}
+                                alt={`v${version.version}`}
+                                loading="lazy"
+                                decoding="async"
+                                className="h-16 w-12 object-cover transition-transform group-hover:scale-105"
+                              />
                             </button>
-                            <div className="min-w-0 flex-1 text-[10px] leading-4 text-secondary">
-                              <p className="flex items-center gap-1.5 text-[11px] font-bold text-on-surface">
+                            <div className="min-w-0 flex-1 text-[10px] leading-snug text-secondary">
+                              <p className="flex items-center gap-1.5 font-syne text-[11px] font-bold text-on-surface">
                                 Version {version.version}
-                                {version.isCurrent && <span className="rounded-full bg-primary px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">Current</span>}
+                                {version.isCurrent && (
+                                  <span className="rounded-full bg-primary px-1.5 py-0.2 text-[8px] font-bold uppercase text-white">
+                                    Current
+                                  </span>
+                                )}
                               </p>
-                              <p>{version.createdAt ? new Date(version.createdAt).toLocaleString() : "Time unavailable"}</p>
-                              {headline && <p title={versionTimingDetail(version)}>{version.isRegeneration ? "Regenerated in" : "Generated in"} {headline}{version.attempts > 1 ? ` · ${version.attempts} attempts` : ""}</p>}
-                              <p>${version.actualCostUsd.toFixed(4)} image{version.quality ? ` · ${version.quality}` : ""}{version.qaStatus ? ` · ${visibleQaLabel(version.qaStatus, version.qaEnabled ?? Boolean(job.poseQa))}` : ""}</p>
-                              {version.instructions && <p className="line-clamp-2 italic" title={version.instructions}>“{version.instructions}”</p>}
-                              <div className="mt-1 flex gap-1.5">
+                              <p>{version.createdAt ? new Date(version.createdAt).toLocaleString("en-IN") : "Time n/a"}</p>
+                              {headline && (
+                                <p className="font-medium text-on-surface/80" title={versionTimingDetail(version)}>
+                                  {version.isRegeneration ? "Regenerated in" : "Generated in"} {headline}
+                                </p>
+                              )}
+                              <div className="mt-2 flex gap-1.5">
                                 {!version.isCurrent && !viewing && (
-                                  <button type="button" onClick={() => setViewedVersion({ poseId: selectedPose._id, versionId: version.id })} className="flex items-center gap-1 rounded-md border border-outline-variant px-2 py-1 font-bold text-secondary hover:bg-surface-container">
+                                  <button
+                                    type="button"
+                                    onClick={() => setViewedVersion({ poseId: selectedPose._id, versionId: version.id })}
+                                    className="flex items-center gap-1 rounded-md border border-outline-variant bg-white px-2 py-0.5 font-bold text-secondary hover:bg-surface-container"
+                                  >
                                     <Eye className="h-3 w-3" /> View
                                   </button>
                                 )}
-                                <button type="button" onClick={() => void downloadVersion(selectedPose, version)} disabled={downloadingPoseId === downloadKey} className="flex items-center gap-1 rounded-md border border-outline-variant px-2 py-1 font-bold text-secondary hover:bg-surface-container disabled:opacity-50">
-                                  {downloadingPoseId === downloadKey ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} Download
+                                <button
+                                  type="button"
+                                  onClick={() => void downloadVersion(selectedPose, version)}
+                                  disabled={downloadingPoseId === downloadKey}
+                                  className="flex items-center gap-1 rounded-md border border-outline-variant bg-white px-2 py-0.5 font-bold text-secondary hover:bg-surface-container disabled:opacity-50"
+                                >
+                                  {downloadingPoseId === downloadKey ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Download className="h-3 w-3" />
+                                  )}
+                                  Download
                                 </button>
                               </div>
                             </div>
@@ -1051,49 +1497,87 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     </ol>
                   </div>
                 )}
-                <div className="rounded-xl bg-surface-container-lowest p-4">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">OpenAI usage</p>
-                  <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
-                    <div><dt className="text-secondary">Input</dt><dd className="font-bold">{selectedPose.inputTokens.toLocaleString()}</dd></div>
-                    <div><dt className="text-secondary">Output</dt><dd className="font-bold">{selectedPose.outputTokens.toLocaleString()}</dd></div>
-                    <div><dt className="text-secondary">Image input</dt><dd className="font-bold">{selectedPose.inputImageTokens.toLocaleString()}</dd></div>
-                    <div><dt className="text-secondary">Text input</dt><dd className="font-bold">{selectedPose.inputTextTokens.toLocaleString()}</dd></div>
-                    <div><dt className="text-secondary">Total</dt><dd className="font-bold">{selectedPose.totalTokens.toLocaleString()}</dd></div>
-                    <div><dt className="text-secondary">Actual cost</dt><dd className="font-bold">${Number(selectedPose.actualCost || 0).toFixed(4)}</dd></div>
-                  </dl>
-                  {!selectedPose.usageReported && <p className="mt-3 text-[10px] leading-4 text-warning">This provider response did not include token usage, so no token cost was invented.</p>}
+
+                {/* PRIMARY ACTIONS */}
+                <div className="space-y-2 pt-2">
+                  {selectedPose.completedAt &&
+                    Date.now() - selectedPose.completedAt < 86400000 &&
+                    !["queued", "processing", "cancelling"].includes(job.status) && (
+                      <button
+                        onClick={() => {
+                          setRegenerateError("");
+                          setExtraInstructions("");
+                          setRegeneratePoseQa(false);
+                          setRegenerateTarget(selectedPose);
+                        }}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-soft-blush px-4 py-3 font-bold text-primary shadow-xs transition-colors hover:bg-primary/15"
+                      >
+                        <RefreshCcw className="h-4 w-4" /> Regenerate with instructions
+                      </button>
+                    )}
+
+                  {selectedOutputUrl && (
+                    <button
+                      onClick={() => void downloadPose(selectedPose)}
+                      disabled={downloadingPoseId === selectedPose._id}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-bold text-white shadow-md transition-all hover:bg-primary-dark hover:shadow-lg active:scale-95 disabled:opacity-50"
+                    >
+                      {downloadingPoseId === selectedPose._id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="h-4 w-4" />
+                      )}
+                      {downloadingPoseId === selectedPose._id
+                        ? "Preparing Asset…"
+                        : selectedRetainedPrevious
+                        ? "Download retained prior version"
+                        : "Download High-Res Image"}
+                    </button>
+                  )}
+
+                  {workspace.isAdmin && selectedPose.outputUrl && !selectedViewedVersion && (
+                    <button
+                      onClick={() => void runLatestQa(selectedPose)}
+                      disabled={rerunningQaId === selectedPose._id}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant bg-white px-4 py-2.5 text-xs font-bold text-secondary shadow-xs hover:border-primary/40 hover:text-primary disabled:opacity-50"
+                    >
+                      {rerunningQaId === selectedPose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Brain className="h-3.5 w-3.5" />}
+                      Re-run QA Model
+                    </button>
+                  )}
+
+                  {qaRerunNotice && (
+                    <p className="rounded-xl bg-surface-container p-2.5 text-[11px] leading-tight text-secondary">
+                      {qaRerunNotice}
+                    </p>
+                  )}
                 </div>
-                {selectedPose.completedAt && Date.now() - selectedPose.completedAt < 86400000 && !["queued", "processing", "cancelling"].includes(job.status) && <button onClick={() => { setRegenerateError(""); setExtraInstructions(""); setRegeneratePoseQa(false); setRegenerateTarget(selectedPose); }} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-soft-blush px-4 py-3 font-semibold text-primary hover:bg-primary/15"><RefreshCcw className="h-4 w-4" /> Regenerate with instructions</button>}
-                {selectedOutputUrl && (
-                  <button onClick={() => void downloadPose(selectedPose)} disabled={downloadingPoseId === selectedPose._id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
-                    {downloadingPoseId === selectedPose._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                    {downloadingPoseId === selectedPose._id ? "Downloading…" : selectedRetainedPrevious ? "Download retained prior version" : "Download image"}
-                  </button>
-                )}
-                {workspace.isAdmin && selectedPose.outputUrl && !selectedViewedVersion && (
-                  <button onClick={() => void runLatestQa(selectedPose)} disabled={rerunningQaId === selectedPose._id} className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-white px-4 py-3 font-semibold text-primary hover:bg-primary/5 disabled:opacity-50">
-                    {rerunningQaId === selectedPose._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
-                    Re-run latest QA
-                  </button>
-                )}
-                {qaRerunNotice && <p className="rounded-lg bg-surface-container px-3 py-2 text-[10px] leading-4 text-secondary">{qaRerunNotice}</p>}
+
+                {/* ARCHIVED REJECTED ATTEMPTS */}
                 {rejectedOf(selectedPose).length > 0 && (
-                  <div className="rounded-xl border border-outline-variant/40 p-4">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">QA-rejected attempts</p>
-                    <div className="mt-3 space-y-3">
+                  <div className="rounded-2xl border border-outline-variant/40 bg-white p-4 shadow-xs">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">QA-Rejected Retries</p>
+                    <div className="mt-3 space-y-2.5">
                       {rejectedOf(selectedPose).map((attempt: any) => (
-                        <div key={attempt.storagePath} className="flex gap-3">
-                          <img src={attempt.url} alt={`Attempt ${attempt.attempt}`} loading="lazy" decoding="async" className="h-20 w-16 shrink-0 rounded-md border border-outline-variant/40 object-cover" />
+                        <div key={attempt.storagePath} className="flex gap-2.5 rounded-lg border border-outline-variant/30 p-2">
+                          <img
+                            src={attempt.url}
+                            alt={`Attempt ${attempt.attempt}`}
+                            loading="lazy"
+                            decoding="async"
+                            className="h-14 w-11 shrink-0 rounded object-cover"
+                          />
                           <div className="min-w-0 flex-1">
-                            <p className="text-[11px] font-bold text-on-surface">{Number(attempt.generationEpoch) > 1 ? `Round ${attempt.generationEpoch} · ` : ""}Attempt {attempt.attempt} · score {Number(attempt.score || 0)}</p>
-                            <p className="mt-0.5 line-clamp-3 text-[10px] leading-4 text-secondary" title={attempt.reason}>{attempt.reason}</p>
+                            <p className="text-[10px] font-bold text-on-surface">
+                              Attempt {attempt.attempt} · score {Number(attempt.score || 0)}%
+                            </p>
+                            <p className="mt-0.5 line-clamp-2 text-[9px] text-secondary">{attempt.reason}</p>
                             <button
                               onClick={() => void downloadArchived(selectedPose, attempt)}
                               disabled={downloadingPoseId === `${selectedPose._id}:${attempt.storagePath}`}
-                              className="mt-1.5 flex items-center gap-1.5 rounded-md border border-outline-variant px-2 py-1 text-[10px] font-bold text-secondary hover:bg-surface-container disabled:opacity-50"
+                              className="mt-1 flex items-center gap-1 text-[9px] font-bold text-primary hover:underline disabled:opacity-50"
                             >
-                              {downloadingPoseId === `${selectedPose._id}:${attempt.storagePath}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
-                              Download
+                              Download rejected output
                             </button>
                           </div>
                         </div>
@@ -1106,42 +1590,143 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           </div>
         </div>
       )}
-      {selectedReference && (
-        <div className="fixed inset-0 z-[80] grid place-items-center bg-navy-soft/80 p-4" onClick={() => setSelectedReference(null)}>
-          <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-outline-variant/40 px-5 py-4">
-              <div><p className="text-[10px] font-bold uppercase tracking-widest text-primary">Reference</p><h3 className="font-syne text-lg font-bold text-on-surface">{selectedReference.label}</h3></div>
-              <button onClick={() => setSelectedReference(null)} className="rounded-lg p-2 text-secondary hover:bg-surface-container"><X className="h-5 w-5" /></button>
+
+      {/* SINGLE POSE REGENERATE MODAL */}
+      {regenerateTarget && (
+        <div
+          className="fixed inset-0 z-[110] grid place-items-center bg-navy-soft/85 p-4 backdrop-blur-md"
+          onClick={() => !regeneratingId && setRegenerateTarget(null)}
+        >
+          <form
+            onSubmit={submitRegeneration}
+            onClick={(event) => event.stopPropagation()}
+            className="w-full max-w-xl rounded-3xl bg-white p-7 shadow-2xl ring-1 ring-black/10"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">
+                  Pose {regenerateTarget.poseNumber}
+                </p>
+                <h3 className="mt-1 font-syne text-2xl font-black text-on-surface">Regenerate {regenerateTarget.title}</h3>
+                <p className="mt-1 text-xs leading-relaxed text-secondary">
+                  Specify targeted corrections. Original garment silhouette, fabric texture, model identity, and camera setup remain locked.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={Boolean(regeneratingId)}
+                onClick={() => setRegenerateTarget(null)}
+                className="rounded-xl border border-outline-variant/60 p-2 text-secondary hover:bg-surface-container disabled:opacity-40"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
-            <div className="grid min-h-0 flex-1 place-items-center overflow-auto bg-neutral-950 p-4">
-              <img src={selectedReference.url} alt={selectedReference.label} decoding="async" className="max-h-[76vh] max-w-full object-contain" />
+
+            {regenerateTarget.poseNumber === 1 && (
+              <div className="mt-4 flex items-start gap-2 rounded-2xl border border-amber-300 bg-amber-50 p-3.5 text-xs text-amber-900 shadow-xs">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                <p className="leading-snug">
+                  <strong className="font-bold">Pose 1 is the Face & Shoot Anchor:</strong> Modifying Pose 1 alters the model facial structure and lighting setup for subsequent poses. Regenerate poses 2–6 afterward if you update Pose 1.
+                </p>
+              </div>
+            )}
+
+            <label className="mt-5 block text-xs font-bold uppercase tracking-wider text-secondary">
+              Correction instructions
+              <textarea
+                autoFocus
+                maxLength={1000}
+                rows={4}
+                value={extraInstructions}
+                onChange={(event) => setExtraInstructions(event.target.value)}
+                placeholder="Example: Back side should have no hanging latkan elements. Preserve clean zari border along the pallu edge exactly as in reference."
+                className="mt-2 w-full resize-y rounded-xl border border-outline-variant p-3.5 text-xs font-normal normal-case leading-relaxed text-on-surface outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20"
+              />
+            </label>
+            <div className="mt-1.5 flex justify-between text-[10px] text-secondary">
+              <span>Leave blank to re-render with existing locked shoot plan.</span>
+              <span className="font-mono">{extraInstructions.length}/1000</span>
+            </div>
+
+            <label className="mt-4 flex items-center gap-2 text-xs font-semibold text-on-surface cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={regeneratePoseQa}
+                onChange={(event) => setRegeneratePoseQa(event.target.checked)}
+                className="h-4 w-4 rounded border-outline-variant text-primary focus:ring-primary accent-primary"
+              />
+              <span>Run consistency QA on regenerated frame</span>
+            </label>
+
+            {regenerateError && (
+              <p className="mt-4 rounded-xl border border-danger/20 bg-danger/10 p-3 text-xs text-danger">{regenerateError}</p>
+            )}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={Boolean(regeneratingId)}
+                onClick={() => setRegenerateTarget(null)}
+                className="rounded-xl border border-outline-variant px-4 py-2.5 text-xs font-bold text-secondary hover:bg-surface-container"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={Boolean(regeneratingId)}
+                className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-white shadow-md hover:bg-primary-dark active:scale-95 disabled:opacity-50"
+              >
+                {regeneratingId ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                {regeneratingId ? "Queueing…" : "Regenerate Pose"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* REFERENCE DETAIL MODAL */}
+      {selectedReference && (
+        <div
+          className="fixed inset-0 z-[80] grid place-items-center bg-navy-soft/85 p-4 backdrop-blur-md"
+          onClick={() => setSelectedReference(null)}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/10"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-outline-variant/40 px-6 py-4">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Reference Asset</p>
+                <h3 className="font-syne text-lg font-bold text-on-surface">{selectedReference.label}</h3>
+              </div>
+              <button
+                onClick={() => setSelectedReference(null)}
+                className="rounded-xl border border-outline-variant/60 p-2 text-secondary hover:bg-surface-container"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="grid min-h-0 flex-1 place-items-center overflow-auto bg-neutral-950 p-6">
+              <img
+                src={selectedReference.url}
+                alt={selectedReference.label}
+                decoding="async"
+                className="max-h-[76vh] max-w-full rounded-lg object-contain"
+              />
             </div>
           </div>
         </div>
       )}
-      {regenerateTarget && (
-        <div className="fixed inset-0 z-[110] grid place-items-center bg-navy-soft/75 p-4" onClick={() => !regeneratingId && setRegenerateTarget(null)}>
-          <form onSubmit={submitRegeneration} onClick={(event) => event.stopPropagation()} className="w-full max-w-xl rounded-3xl bg-white p-7 shadow-2xl">
-            <div className="flex items-start justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">Pose {regenerateTarget.poseNumber}</p><h3 className="mt-2 font-syne text-2xl font-bold text-on-surface">Regenerate {regenerateTarget.title}</h3><p className="mt-1 text-sm leading-6 text-secondary">Add a precise correction. Original front, back, fabric, product identity, model, and scene remain authoritative.</p></div><button type="button" disabled={Boolean(regeneratingId)} onClick={() => setRegenerateTarget(null)} className="rounded-lg p-2 text-secondary hover:bg-surface-container disabled:opacity-40"><X className="h-5 w-5" /></button></div>
-            {regenerateTarget.poseNumber === 1 && (
-              <p className="mt-4 rounded-xl border border-warning/30 bg-warning/5 p-3 text-xs leading-5 text-warning-dark">
-                <AlertCircle className="mr-1.5 inline h-3.5 w-3.5 align-text-bottom" />
-                Pose 1 is the face and shoot anchor for this whole set — poses 2–6 were generated to match it. Regenerating it can change the model's face; if it does, regenerate the other poses afterward so every image still shows the same person.
-              </p>
-            )}
-            <label className="mt-6 block text-xs font-bold uppercase tracking-wider text-secondary">Extra instructions<textarea autoFocus maxLength={1000} rows={5} value={extraInstructions} onChange={(event) => setExtraInstructions(event.target.value)} placeholder="Example: Back side should not have hanging/latkan elements. Preserve the plain uploaded back construction exactly." className="mt-2 w-full resize-y rounded-xl border border-outline-variant p-3 text-sm font-normal normal-case leading-6 tracking-normal text-on-surface outline-none focus:border-primary" /></label>
-            <div className="mt-2 flex justify-between text-[10px] text-secondary"><span>Leave blank to retry with the existing locked shoot plan.</span><span>{extraInstructions.length}/1000</span></div>
-            <label className="mt-4 flex items-center gap-2 text-xs font-semibold text-secondary"><input type="checkbox" checked={regeneratePoseQa} onChange={(event) => setRegeneratePoseQa(event.target.checked)} className="accent-primary" /> Run Gemini consistency QA on regenerated pose (optional)</label>
-            {regenerateError && <p className="mt-4 rounded-xl border border-danger/20 bg-danger-surface p-3 text-sm text-danger">{regenerateError}</p>}
-            <div className="mt-6 flex justify-end gap-3"><button type="button" disabled={Boolean(regeneratingId)} onClick={() => setRegenerateTarget(null)} className="rounded-xl border border-outline-variant px-4 py-2.5 text-sm font-bold text-secondary">Cancel</button><button disabled={Boolean(regeneratingId)} className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{regeneratingId ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}{regeneratingId ? "Queueing…" : "Regenerate pose"}</button></div>
-          </form>
-        </div>
-      )}
+
       {downloadError && (
-        <div className="fixed bottom-6 right-6 z-[120] flex items-center gap-3 rounded-xl border border-danger/20 bg-white px-5 py-4 text-sm text-danger shadow-xl">
-          <AlertCircle className="h-5 w-5" />
-          <span className="font-medium">{downloadError}</span>
-          <button onClick={() => setDownloadError("")} className="ml-4 text-xs font-bold uppercase tracking-widest text-secondary hover:text-on-surface">Dismiss</button>
+        <div className="fixed bottom-6 right-6 z-[120] flex items-center gap-3 rounded-2xl border border-danger/30 bg-white px-5 py-4 text-xs text-danger shadow-2xl">
+          <AlertCircle className="h-5 w-5 shrink-0" />
+          <span className="font-semibold">{downloadError}</span>
+          <button
+            onClick={() => setDownloadError("")}
+            className="ml-3 text-[10px] font-bold uppercase tracking-widest text-secondary hover:text-on-surface"
+          >
+            Dismiss
+          </button>
         </div>
       )}
     </div>
@@ -1160,8 +1745,7 @@ export function History() {
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  // History is an archive, so it must open on stored generations rather than
-  // the empty active queue. Active is still available as an explicit filter.
+  // History opens on stored generations rather than empty active queue.
   const [status, setStatus] = useState("");
   const [sourceType, setSourceType] = useState(() => {
     const source = params.get("source");
@@ -1171,6 +1755,7 @@ export function History() {
   const [error, setError] = useState("");
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingHistoryAction | null>(null);
+
   const { data: jobsPage, error: _jobsPageError } = useQuery(api.jobs.list, {
     organizationId: organization._id,
     page,
@@ -1178,7 +1763,10 @@ export function History() {
     search,
     status,
     sourceType,
-  }) as { data: { items: any[]; page: number; pageSize: number; total: number; totalPages: number } | undefined, error: any };
+  }) as {
+    data: { items: any[]; page: number; pageSize: number; total: number; totalPages: number } | undefined;
+    error: any;
+  };
   const jobs = jobsPage?.items;
 
   useEffect(() => {
@@ -1204,26 +1792,61 @@ export function History() {
 
   const stopGeneration = async (jobId: string) => {
     setBusyJobId(jobId);
-    try { await cancelJob({ jobId }); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not stop generation."); } finally { setBusyJobId(null); }
+    try {
+      await cancelJob({ jobId });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not stop generation.");
+    } finally {
+      setBusyJobId(null);
+    }
   };
 
   const deleteGeneration = async (jobId: string) => {
     setBusyJobId(jobId);
-    try { await removeJob({ jobId }); if (expanded === jobId) setExpanded(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete generation."); } finally { setBusyJobId(null); }
+    try {
+      await removeJob({ jobId });
+      if (expanded === jobId) setExpanded(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not delete generation.");
+    } finally {
+      setBusyJobId(null);
+    }
   };
 
   const regenerateFailedSession = async (jobId: string) => {
     setBusyJobId(jobId);
-    try { await regenerateSession({ jobId }); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not regenerate this session."); } finally { setBusyJobId(null); }
+    try {
+      await regenerateSession({ jobId });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not regenerate this session.");
+    } finally {
+      setBusyJobId(null);
+    }
   };
 
-  const actionDialog = pendingAction?.type === "stop"
-    ? { title: `Stop ${pendingAction.sku}?`, description: "All remaining poses will be cancelled. Images that already completed remain saved in this generation history.", confirmLabel: "Stop generation", tone: "danger" as const }
-    : pendingAction?.type === "delete"
-      ? { title: `Delete ${pendingAction.sku}?`, description: "This permanently removes the generation record and its stored generated images. This action cannot be undone.", confirmLabel: "Delete generation", tone: "danger" as const }
+  const actionDialog =
+    pendingAction?.type === "stop"
+      ? {
+          title: `Stop ${pendingAction.sku}?`,
+          description: "All remaining poses will be cancelled. Images that already completed remain saved in this generation history.",
+          confirmLabel: "Stop generation",
+          tone: "danger" as const,
+        }
+      : pendingAction?.type === "delete"
+      ? {
+          title: `Delete ${pendingAction.sku}?`,
+          description: "This permanently removes the generation record and its stored generated images. This action cannot be undone.",
+          confirmLabel: "Delete generation",
+          tone: "danger" as const,
+        }
       : pendingAction?.type === "regenerate"
-        ? { title: `Retry failed poses for ${pendingAction.sku}?`, description: "Every pose that did not complete will be attempted again. Poses already completed remain unchanged.", confirmLabel: "Retry failed poses", tone: "primary" as const }
-        : null;
+      ? {
+          title: `Retry failed poses for ${pendingAction.sku}?`,
+          description: "Every pose that did not complete will be attempted again. Poses already completed remain unchanged.",
+          confirmLabel: "Retry failed poses",
+          tone: "primary" as const,
+        }
+      : null;
 
   const confirmPendingAction = async () => {
     const action = pendingAction;
@@ -1235,195 +1858,335 @@ export function History() {
   };
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-8">
-      <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
-         <div>
-            <p className="mb-1 text-[11px] font-label-caps uppercase tracking-widest text-primary font-bold">Generation archive</p>
-            <h2 className="text-display-md text-on-surface font-black tracking-tight">History</h2>
-         </div>
-         <div className="flex gap-3">
-            <div className="relative">
-               <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-secondary" />
-               <input 
-                  value={searchInput} 
-                  onChange={(event) => setSearchInput(event.target.value)} 
-                  placeholder="Search SKU or prompt…" 
-                  className="h-10 w-64 rounded-xl border border-outline-variant bg-white pl-10 pr-4 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20 shadow-sm" 
-               />
-            </div>
-            <select 
-               value={sourceType} 
-               onChange={(event) => { setSourceType(event.target.value); setPage(1); setExpanded(null); }} 
-               className="h-10 rounded-xl border border-outline-variant bg-white px-4 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20 shadow-sm cursor-pointer"
+    <div className="mx-auto max-w-[1400px] space-y-6 pb-12">
+      {/* EDITORIAL ATELIER HEADER */}
+      <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end border-b border-outline-variant/30 pb-6">
+        <div>
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-soft-blush px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
+              <Sparkles className="h-3 w-3" /> Youthnic Atelier Archive
+            </span>
+            {jobsPage?.total !== undefined && (
+              <span className="font-mono text-xs text-secondary">({jobsPage.total} shoots)</span>
+            )}
+          </div>
+          <h1 className="font-syne text-display-md font-black tracking-tight text-on-surface">
+            History & Productions
+          </h1>
+          <p className="mt-1 text-xs text-secondary">
+            Inspect model fidelity scores, audit 6-pose collections, download high-res assets, and manage batch regenerations.
+          </p>
+        </div>
+
+        {/* SEARCH & FILTERS TOOLBAR */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-secondary" />
+            <input
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder="Search SKU or prompt…"
+              className="h-10 w-60 rounded-xl border border-outline-variant/70 bg-white pl-9 pr-8 text-xs font-medium text-on-surface shadow-xs outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
+            {searchInput && (
+              <button
+                type="button"
+                onClick={() => setSearchInput("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-secondary hover:text-on-surface"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="relative">
+            <select
+              value={sourceType}
+              onChange={(event) => {
+                setSourceType(event.target.value);
+                setPage(1);
+                setExpanded(null);
+              }}
+              className="h-10 appearance-none rounded-xl border border-outline-variant/70 bg-white pl-3.5 pr-8 text-xs font-semibold text-on-surface shadow-xs outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20 cursor-pointer"
             >
-               <option value="">All Sources</option>
-               <option value="studio">Studio</option>
-               <option value="catalog">Catalog Production</option>
+              <option value="">All Sources</option>
+              <option value="studio">Studio</option>
+              <option value="catalog">Catalog Production</option>
             </select>
-            <select 
-               value={status} 
-               onChange={(event) => { setStatus(event.target.value); setPage(1); setExpanded(null); }} 
-               className="h-10 rounded-xl border border-outline-variant bg-white px-4 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20 shadow-sm cursor-pointer"
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-secondary" />
+          </div>
+
+          <div className="relative">
+            <select
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value);
+                setPage(1);
+                setExpanded(null);
+              }}
+              className="h-10 appearance-none rounded-xl border border-outline-variant/70 bg-white pl-3.5 pr-8 text-xs font-semibold text-on-surface shadow-xs outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20 cursor-pointer"
             >
-               <option value="">All generations</option>
-               <option value="active">Active generations</option>
-               <option value="queued">Queued</option>
-               <option value="processing">Processing</option>
-               <option value="completed">Completed</option>
-               <option value="failed">Failed</option>
-               <option value="cancelled">Cancelled</option>
+              <option value="">All Statuses</option>
+              <option value="active">Active Productions</option>
+              <option value="queued">Queued</option>
+              <option value="processing">Processing</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
+              <option value="cancelled">Cancelled</option>
             </select>
-         </div>
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-secondary" />
+          </div>
+        </div>
       </div>
 
-      <div className="flex flex-col overflow-hidden rounded-2xl border border-outline-variant/40 bg-white shadow-sm">
+      {/* JOBS ARCHIVE ACCORDION TABLE */}
+      <div className="flex flex-col overflow-hidden rounded-3xl border border-outline-variant/40 bg-white shadow-sm ring-1 ring-black/5">
         {jobs === undefined && (
-           <div className="flex flex-col items-center justify-center py-20 text-secondary">
-              <Loader2 className="mb-4 h-8 w-8 animate-spin text-primary/50" />
-              <span className="text-sm font-medium">Loading history...</span>
-           </div>
+          <div className="flex flex-col items-center justify-center py-24 text-secondary">
+            <Loader2 className="mb-3 h-8 w-8 animate-spin text-primary" />
+            <span className="font-syne text-xs font-bold uppercase tracking-wider text-secondary">
+              Synchronizing Archive…
+            </span>
+          </div>
         )}
-        
-        {(jobs || []).map((job: any) => { 
-           const open = expanded === job._id; 
-            const delivery = generationDeliveryProgress({
-              ...job,
-              completedPoses: Math.max(Number(job.completedPoses || 0), Number(job.storedPoseCount || 0)),
-            });
-           const progress = delivery.deliveredPercent;
-           
-           return (
-             <article key={job._id} className="group relative border-b border-outline-variant/30 bg-white last:border-b-0 transition-colors duration-200 hover:bg-surface-container-lowest">
-               <div 
-                 onClick={() => setExpanded(open ? null : job._id)}
-                 className={`flex cursor-pointer items-center gap-4 p-4 lg:grid lg:grid-cols-[minmax(0,1fr)_160px_160px_auto] ${open ? 'bg-surface-container-lowest' : ''}`}
-               >
-                 
-                 {/* COL 1: Image & Details */}
-                 <div className="flex min-w-0 items-center gap-4">
-                    <div className="flex-shrink-0 h-10 w-10 overflow-hidden rounded-lg bg-surface-container shadow-inner ring-1 ring-inset ring-black/5">
-                       {job.thumbnailUrl ? (
-                          <img src={job.thumbnailUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
-                       ) : (
-                          <ImageIcon className="m-2.5 h-5 w-5 text-secondary/40" />
-                       )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="truncate font-mono text-xs font-semibold text-on-surface">{job.skuId}</h3>
-                        <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${statusClass(job.status)}`}>
-                          {job.status === "queued" && <Clock className="h-2.5 w-2.5" />}
-                          {job.status === "processing" && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
-                          {job.detailedStatus || job.status}
-                        </span>
-                      </div>
-                      <p className="truncate text-sm text-secondary">{job.skuName || 'Untitled product'}</p>
-                    </div>
-                 </div>
 
-                 {/* COL 2: Progress */}
-                 <div className="hidden lg:block">
-                    <div className="mb-1 flex items-center justify-between text-xs font-medium text-secondary">
-                      <span>{job.status === "processing" ? `Pose ${Math.max(1, job.currentPose || delivery.resolvedPoses + 1)} · ` : ""}{delivery.imagesStored} / {delivery.totalPoses} images stored{delivery.failedPoses ? ` · ${delivery.failedPoses} failed` : ""}</span>
-                      <span>{progress}%</span>
-                    </div>
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-container-highest shadow-inner">
-                      <div className={`h-full rounded-full transition-all duration-500 ${job.status === "failed" ? "bg-red-500" : job.status === "completed" ? "bg-emerald-500" : "bg-primary"}`} style={{ width: `${progress}%` }} />
-                    </div>
-                 </div>
+        {(jobs || []).map((job: any) => {
+          const open = expanded === job._id;
+          const delivery = generationDeliveryProgress({
+            ...job,
+            completedPoses: Math.max(Number(job.completedPoses || 0), Number(job.storedPoseCount || 0)),
+          });
+          const progress = delivery.deliveredPercent;
 
-                 {/* COL 3: User & Time */}
-                 <div className="hidden flex-col text-xs text-secondary lg:flex">
-                    <span className="truncate font-medium text-on-surface" title={job.creatorEmail}>{job.creatorName}</span>
-                    <span>{new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(job.createdAt)}</span>
-                 </div>
-
-                 {/* COL 4: Actions */}
-                 <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 lg:pl-4">
-                   {['queued', 'processing'].includes(job.status) && (
-                      <button disabled={busyJobId === job._id} title="Stop generation" onClick={(e) => { e.stopPropagation(); setPendingAction({ type: "stop", jobId: job._id, sku: job.skuName || job.skuId }); }} className="rounded-md p-1.5 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
-                         {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
-                      </button>
-                   )}
-                   {job.status === "failed" && (
-                      <button disabled={busyJobId === job._id} title="Regenerate failed poses" onClick={(e) => { e.stopPropagation(); setPendingAction({ type: "regenerate", jobId: job._id, sku: job.skuName || job.skuId }); }} className="rounded-md p-1.5 text-secondary hover:bg-primary/10 hover:text-primary disabled:opacity-50">
-                         {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-                      </button>
-                   )}
-                   {!['queued', 'processing', 'cancelling'].includes(job.status) && (
-                      <button disabled={busyJobId === job._id} title="Delete generation" onClick={(e) => { e.stopPropagation(); setPendingAction({ type: "delete", jobId: job._id, sku: job.skuName || job.skuId }); }} className="rounded-md p-1.5 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
-                         {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                      </button>
-                   )}
-                   <button onClick={(e) => { e.stopPropagation(); navigate(`/history/flow/${job._id}`); }} title="View Generation Flow" className="rounded-md p-1.5 text-secondary hover:bg-primary/10 hover:text-primary">
-                      <Brain className="h-4 w-4" />
-                   </button>
-                   <button title="Toggle details" className={`rounded-md p-1.5 transition-colors ${open ? 'bg-primary/10 text-primary' : 'text-secondary hover:bg-surface-container hover:text-on-surface'}`}>
-                      {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                   </button>
-                 </div>
-               </div>
-               
-               {open && (
-                  <div className="border-t border-outline-variant/30 bg-surface-container-lowest/50 p-6">
-                    <JobDetails jobId={job._id} />
+          return (
+            <article
+              key={job._id}
+              className={`group relative border-b border-outline-variant/20 last:border-b-0 transition-colors duration-200 ${
+                open ? "bg-surface-container-lowest" : "bg-white hover:bg-surface-container-lowest/60"
+              }`}
+            >
+              {/* ACCORDION HEADER ROW */}
+              <div
+                onClick={() => setExpanded(open ? null : job._id)}
+                className="flex cursor-pointer items-center gap-4 p-4 lg:grid lg:grid-cols-[minmax(0,1.2fr)_180px_180px_auto]"
+              >
+                {/* COL 1: SKU & Thumbnail */}
+                <div className="flex min-w-0 items-center gap-3.5">
+                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-surface-container border border-outline-variant/40 shadow-xs">
+                    {job.thumbnailUrl ? (
+                      <img
+                        src={job.thumbnailUrl}
+                        alt=""
+                        loading="lazy"
+                        decoding="async"
+                        className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                      />
+                    ) : (
+                      <ImageIcon className="m-3.5 h-5 w-5 text-secondary/40" />
+                    )}
                   </div>
-               )}
-             </article>
-           );
-        })}
-        
-        {jobs !== undefined && jobs.length === 0 && (
-           <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-surface-container">
-                 <RefreshCcw className="h-5 w-5 text-secondary" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-on-surface bg-surface-container-low px-2 py-0.5 rounded-md border border-outline-variant/40">
+                        {job.skuId}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${statusClass(
+                          job.status
+                        )}`}
+                      >
+                        {job.status === "queued" && <Clock className="h-2.5 w-2.5" />}
+                        {job.status === "processing" && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
+                        {job.detailedStatus || job.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate text-xs font-semibold text-secondary">
+                      {job.skuName || "Untitled Studio Production"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* COL 2: Delivery Progress */}
+                <div className="hidden lg:block">
+                  <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-secondary">
+                    <span>
+                      {job.status === "processing" ? `Pose ${Math.max(1, job.currentPose || delivery.resolvedPoses + 1)} · ` : ""}
+                      {delivery.imagesStored} / {delivery.totalPoses} images
+                    </span>
+                    <span className="font-mono font-bold text-on-surface">{progress}%</span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-container-highest">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        job.status === "failed"
+                          ? "bg-red-500"
+                          : job.status === "completed"
+                          ? "bg-emerald-500"
+                          : "bg-primary"
+                      }`}
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* COL 3: Creator & Date */}
+                <div className="hidden flex-col text-xs text-secondary lg:flex">
+                  <span className="truncate font-semibold text-on-surface" title={job.creatorEmail}>
+                    {job.creatorName}
+                  </span>
+                  <span className="text-[10px] text-secondary">
+                    {new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(job.createdAt)}
+                  </span>
+                </div>
+
+                {/* COL 4: Actions & Expand Chevron */}
+                <div className="flex items-center justify-end gap-1.5 lg:pl-3">
+                  {["queued", "processing"].includes(job.status) && (
+                    <button
+                      disabled={busyJobId === job._id}
+                      title="Stop generation"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPendingAction({ type: "stop", jobId: job._id, sku: job.skuName || job.skuId });
+                      }}
+                      className="rounded-lg p-2 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                    >
+                      {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+                    </button>
+                  )}
+
+                  {job.status === "failed" && (
+                    <button
+                      disabled={busyJobId === job._id}
+                      title="Regenerate failed poses"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPendingAction({ type: "regenerate", jobId: job._id, sku: job.skuName || job.skuId });
+                      }}
+                      className="rounded-lg p-2 text-secondary hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+                    >
+                      {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                    </button>
+                  )}
+
+                  {!["queued", "processing", "cancelling"].includes(job.status) && (
+                    <button
+                      disabled={busyJobId === job._id}
+                      title="Delete generation"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPendingAction({ type: "delete", jobId: job._id, sku: job.skuName || job.skuId });
+                      }}
+                      className="rounded-lg p-2 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                    >
+                      {busyJobId === job._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    </button>
+                  )}
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/history/flow/${job._id}`);
+                    }}
+                    title="View Generation Flow"
+                    className="rounded-lg p-2 text-secondary hover:bg-primary/10 hover:text-primary"
+                  >
+                    <Brain className="h-4 w-4" />
+                  </button>
+
+                  <div
+                    className={`flex h-8 w-8 items-center justify-center rounded-xl transition-all ${
+                      open ? "bg-primary text-white shadow-xs" : "text-secondary group-hover:bg-surface-container"
+                    }`}
+                  >
+                    {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </div>
+                </div>
               </div>
-              <p className="text-sm font-semibold text-on-surface">No generations match this view</p>
-              <p className="mt-1 text-xs text-secondary">Try adjusting your filters or search query.</p>
-           </div>
+
+              {/* EXPANDED JOB DETAILS */}
+              {open && (
+                <div className="border-t border-outline-variant/30 bg-surface-container-lowest/40 p-6">
+                  <JobDetails jobId={job._id} />
+                </div>
+              )}
+            </article>
+          );
+        })}
+
+        {jobs !== undefined && jobs.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-container text-secondary">
+              <RefreshCcw className="h-6 w-6" />
+            </div>
+            <p className="font-syne text-base font-bold text-on-surface">No productions found</p>
+            <p className="mt-1 text-xs text-secondary">Try adjusting your filters, source selector, or search term.</p>
+          </div>
         )}
       </div>
 
+      {/* PAGINATION TOOLBAR */}
       {jobsPage && jobsPage.total > 0 && (
         <div className="flex flex-col items-center justify-between gap-4 rounded-2xl border border-outline-variant/40 bg-white px-5 py-4 shadow-sm sm:flex-row">
-          <p className="text-sm text-secondary">
-            Showing <span className="font-semibold text-on-surface">{(jobsPage.page - 1) * jobsPage.pageSize + 1}–{Math.min(jobsPage.page * jobsPage.pageSize, jobsPage.total)}</span> of <span className="font-semibold text-on-surface">{jobsPage.total}</span> generations
+          <p className="text-xs font-medium text-secondary">
+            Showing{" "}
+            <span className="font-bold text-on-surface">
+              {(jobsPage.page - 1) * jobsPage.pageSize + 1}–{Math.min(jobsPage.page * jobsPage.pageSize, jobsPage.total)}
+            </span>{" "}
+            of <span className="font-bold text-on-surface">{jobsPage.total}</span> generations
           </p>
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               disabled={page <= 1}
-              onClick={() => { setPage((value) => Math.max(1, value - 1)); setExpanded(null); }}
-              className="rounded-lg border border-outline-variant px-3 py-2 text-xs font-semibold text-on-surface transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => {
+                setPage((value) => Math.max(1, value - 1));
+                setExpanded(null);
+              }}
+              className="rounded-xl border border-outline-variant/70 px-3 py-1.5 text-xs font-semibold text-on-surface shadow-xs transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
               Previous
             </button>
+
             {Array.from({ length: jobsPage.totalPages }, (_, index) => index + 1)
               .filter((value) => value === 1 || value === jobsPage.totalPages || Math.abs(value - page) <= 1)
               .map((value, index, visiblePages) => (
-                <div key={value} className="flex items-center gap-2">
-                  {index > 0 && value - visiblePages[index - 1] > 1 && <span className="px-1 text-secondary">…</span>}
+                <div key={value} className="flex items-center gap-1.5">
+                  {index > 0 && value - visiblePages[index - 1] > 1 && <span className="px-1 text-xs text-secondary">…</span>}
                   <button
                     type="button"
-                    onClick={() => { setPage(value); setExpanded(null); }}
-                    className={`h-9 min-w-9 rounded-lg px-3 text-xs font-bold transition-colors ${value === page ? "bg-primary text-white shadow-sm" : "border border-outline-variant text-on-surface hover:border-primary hover:text-primary"}`}
+                    onClick={() => {
+                      setPage(value);
+                      setExpanded(null);
+                    }}
+                    className={`h-8 min-w-8 rounded-xl px-2.5 text-xs font-bold transition-all ${
+                      value === page
+                        ? "bg-primary text-white shadow-xs"
+                        : "border border-outline-variant/70 text-on-surface hover:border-primary hover:text-primary"
+                    }`}
                   >
                     {value}
                   </button>
                 </div>
               ))}
+
             <button
               type="button"
               disabled={page >= jobsPage.totalPages}
-              onClick={() => { setPage((value) => Math.min(jobsPage.totalPages, value + 1)); setExpanded(null); }}
-              className="rounded-lg border border-outline-variant px-3 py-2 text-xs font-semibold text-on-surface transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => {
+                setPage((value) => Math.min(jobsPage.totalPages, value + 1));
+                setExpanded(null);
+              }}
+              className="rounded-xl border border-outline-variant/70 px-3 py-1.5 text-xs font-semibold text-on-surface shadow-xs transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
               Next
             </button>
           </div>
         </div>
       )}
-      
+
+      {/* ACTION CONFIRMATION DIALOG */}
       <ActionDialog
         open={Boolean(pendingAction && actionDialog)}
         title={actionDialog?.title || "Confirm generation action"}
@@ -1436,11 +2199,16 @@ export function History() {
       />
 
       {error && (
-         <div className="fixed bottom-6 right-6 rounded-xl border border-danger/20 bg-white px-5 py-4 text-sm text-danger shadow-xl flex items-center gap-3 z-50 animate-in slide-in-from-bottom-5">
-            <AlertCircle className="h-5 w-5" />
-            <span className="font-medium">{error}</span>
-            <button onClick={() => setError("")} className="ml-4 text-secondary hover:text-on-surface text-xs font-bold uppercase tracking-widest">Dismiss</button>
-         </div>
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-2xl border border-danger/30 bg-white px-5 py-4 text-xs text-danger shadow-2xl animate-in slide-in-from-bottom-5">
+          <AlertCircle className="h-5 w-5 shrink-0" />
+          <span className="font-semibold">{error}</span>
+          <button
+            onClick={() => setError("")}
+            className="ml-3 text-[10px] font-bold uppercase tracking-widest text-secondary hover:text-on-surface"
+          >
+            Dismiss
+          </button>
+        </div>
       )}
     </div>
   );

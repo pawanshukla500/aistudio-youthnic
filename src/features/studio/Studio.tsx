@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Ban, CheckCircle2, Images, Loader2, Sparkles, X } from "lucide-react";
+import { AlertTriangle, Ban, Check, CheckCircle2, ChevronRight, History as HistoryIcon, Images, Loader2, Sparkles, Wand2, X } from "lucide-react";
 import { api, useAction, useMutation, useQuery, type Id } from "../../lib/backend";
 import { Button } from "../../components/ui/Button";
 import { ActionDialog } from "../../components/ui/ActionDialog";
@@ -103,44 +103,74 @@ function submissionStatusLabel(job: any) {
 
 function SessionSubmissionRow({ jobId, latest, onRemove }: { jobId: string; latest: boolean; onRemove: () => void }) {
   const [finished, setFinished] = useState(false);
-  // Finished rows stop polling; up to 12 rows each re-fetching a whole job
-  // every 2.5s would otherwise keep the backend busy for nothing.
   const { data: job, error } = useQuery(api.jobs.get, { jobId }, { poll: !finished });
   const delivery = job ? generationDeliveryProgress(job) : null;
   const terminal = Boolean(job && ["completed", "failed", "cancelled"].includes(job.status));
-  // Follows the latest status: a refresh on tab focus that finds the job running
-  // again (e.g. regenerated from another tab) resumes polling.
+
   useEffect(() => { if (job !== undefined) setFinished(terminal || job === null); }, [terminal, job]);
+
   return (
-    <li className="flex items-center gap-3 rounded-lg border border-outline-variant/40 bg-white px-3 py-2">
-      <div className="h-9 w-9 flex-shrink-0 overflow-hidden rounded-md bg-surface-container">
-        {job?.thumbnailUrl ? <img src={job.thumbnailUrl} alt="" className="h-full w-full object-cover" /> : <Images className="m-2.5 h-4 w-4 text-secondary" />}
+    <li className="flex items-center gap-3 rounded-xl border border-outline-variant/40 bg-white p-2.5 shadow-xs transition hover:border-primary/30">
+      <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-surface-container border border-outline-variant/30">
+        {job?.thumbnailUrl ? (
+          <img src={job.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <Images className="m-3 h-4 w-4 text-secondary/50" />
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <p className="truncate text-xs font-bold text-on-surface">{job ? job.skuName || job.skuId || "Untitled SKU" : job === null ? "Deleted submission" : "Loading…"}</p>
-          {latest && <span className="rounded-full bg-soft-blush px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary">Latest</span>}
+          <p className="truncate text-xs font-bold text-on-surface">
+            {job ? job.skuName || job.skuId || "Untitled SKU" : job === null ? "Deleted submission" : "Loading…"}
+          </p>
+          {latest && (
+            <span className="rounded-full bg-soft-blush px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary border border-primary/20">
+              Latest
+            </span>
+          )}
         </div>
         {job && delivery ? (
-          <div className="mt-1 flex items-center gap-2">
+          <div className="mt-1 flex items-center gap-2.5">
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-container">
-              <div className={`h-full rounded-full transition-all ${job.status === "failed" ? "bg-error" : "bg-primary"}`} style={{ width: `${delivery.deliveredPercent}%` }} />
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  job.status === "failed" ? "bg-danger" : job.status === "completed" ? "bg-emerald-500" : "bg-primary"
+                }`}
+                style={{ width: `${delivery.deliveredPercent}%` }}
+              />
             </div>
-            <span className={`shrink-0 text-[10px] font-semibold ${job.status === "failed" ? "text-error" : "text-secondary"}`}>
-              {submissionStatusLabel(job)} · {delivery.imagesStored}/{delivery.totalPoses}{delivery.failedPoses ? ` · ${delivery.failedPoses} failed` : ""}
+            <span
+              className={`shrink-0 text-[10px] font-bold ${
+                job.status === "failed" ? "text-danger" : job.status === "completed" ? "text-emerald-700" : "text-secondary"
+              }`}
+            >
+              {submissionStatusLabel(job)} · {delivery.imagesStored}/{delivery.totalPoses}
+              {delivery.failedPoses ? ` · ${delivery.failedPoses} failed` : ""}
             </span>
           </div>
         ) : job === null ? (
           <p className="mt-0.5 text-[10px] text-secondary">No longer in History.</p>
         ) : error && job === undefined ? (
-          <p className="mt-0.5 truncate text-[10px] text-error">Could not load status: {error.message}</p>
+          <p className="mt-0.5 truncate text-[10px] text-danger">Could not load status: {error.message}</p>
         ) : (
-          <p className="mt-0.5 flex items-center gap-1 text-[10px] text-secondary"><Loader2 className="h-3 w-3 animate-spin" /> Fetching status…</p>
+          <p className="mt-0.5 flex items-center gap-1 text-[10px] text-secondary">
+            <Loader2 className="h-3 w-3 animate-spin text-primary" /> Fetching status…
+          </p>
         )}
       </div>
-      {job && !terminal && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />}
-      <Link to="/history" className="shrink-0 text-[11px] font-bold text-primary underline">History</Link>
-      <button type="button" onClick={onRemove} aria-label="Remove from this list" title="Remove from this list (the job keeps running)" className="shrink-0 rounded-md p-1 text-secondary hover:bg-surface-container"><X className="h-3.5 w-3.5" /></button>
+      {job && !terminal && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />}
+      <Link to="/history" className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold text-primary hover:bg-primary/5">
+        View
+      </Link>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label="Remove from this list"
+        title="Remove from this list (the job keeps running)"
+        className="shrink-0 rounded-lg p-1.5 text-secondary hover:bg-surface-container hover:text-on-surface"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
     </li>
   );
 }
@@ -171,11 +201,6 @@ export function Studio() {
   const [analysis, setAnalysis] = useState<StudioAnalysis | null>(null);
   const [savingStylingPlan, setSavingStylingPlan] = useState(false);
   const [analysisSourceKey, setAnalysisSourceKey] = useState<string | null>(null);
-  // User-editable corrections layered onto the AI's own "Scene direction"/"Garment summary"
-  // read-out in AnalysisProfile. Empty means "use whatever Gemini derived" (shown as a fallback
-  // display value below); once the member types something, it's sent back as an extra director's
-  // note on the next analysis and is never silently overwritten by a fresh analysis result, the
-  // same way productDetails already behaves.
   const [sceneDirectionNote, setSceneDirectionNote] = useState("");
   const [garmentSummaryNote, setGarmentSummaryNote] = useState("");
   const [options, setOptions] = useState(defaultOptions);
@@ -183,8 +208,6 @@ export function Studio() {
   const [generating, setGenerating] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [stopDialogOpen, setStopDialogOpen] = useState(false);
-  // Every job queued from this browser tab (most recent first), kept in
-  // sessionStorage so a refresh does not lose track of earlier submissions.
   const [sessionJobIds, setSessionJobIds] = useState<string[]>(readSessionSubmissions);
   const [submittedJobId, setSubmittedJobId] = useState<Id<"generationJobs"> | null>(() => sessionJobIds[0] || null);
   const [referenceHashes, setReferenceHashes] = useState<Record<string, string>>({});
@@ -201,22 +224,9 @@ export function Studio() {
   const { data: queuePosition, error: _queuePositionError } = useQuery(api.jobs.getQueuePosition, submittedJobId && submittedJob?.status === "queued" ? { jobId: submittedJobId } : "skip");
   const { data: effectiveRouting, error: effectiveRoutingError } = useQuery(api.ai.getEffectiveRouting, organization?._id ? { organizationId: organization._id } : "skip");
 
-  // Whatever Administration actually routes to, reported as-is. Rewriting one
-  // approved model into another here made this panel show an "Admin route" the
-  // organization had not chosen, and sent that model as an explicit per-request
-  // override that outranked the real policy at queue time.
   const orgModel = (effectiveRouting as any)?.imageGeneration?.model as OutputOptions["model"] | undefined;
   const orgModelLabel = (effectiveRouting as any)?.imageGeneration?.displayLabel as string | undefined;
   const orgModelOptions = ((effectiveRouting as any)?.imageGeneration?.allowedModels || []) as Array<{ id: OutputOptions["model"]; label: string }>;
-  // Discarding this error let a failed lookup render as "no route configured",
-  // which is the opposite of what it means: the organization has a route, it is
-  // invalid, and queueing throws on the same policy. Report it instead.
-  //
-  // Data outranks a later error, though. useQuery keeps the last good value
-  // when a refresh fails, so a transient gateway cut on this one small read
-  // would otherwise blank a route the panel already holds - disabling the
-  // picker and reading "route unavailable" while the badge beside it still
-  // named the configured model.
   const routingStatus: "loading" | "ready" | "error" = effectiveRouting
     ? "ready"
     : effectiveRoutingError
@@ -225,9 +235,6 @@ export function Studio() {
 
   useEffect(() => { writeSessionSubmissions(sessionJobIds); }, [sessionJobIds]);
 
-  // Hash each product photo once (keyed by reference id) so the same file
-  // placed in two slots - e.g. the front shot also dropped in as Back - can be
-  // flagged before it silently weakens the analysis.
   useEffect(() => {
     const pending = Object.values(productReferences).filter((reference): reference is StudioReference =>
       Boolean(reference && !referenceHashes[reference.id] && !hashingReferenceIdsRef.current.has(reference.id)));
@@ -265,9 +272,7 @@ export function Studio() {
     : Boolean(productReferences.front && productReferences.back);
   const effectiveSkuId = skuId.trim() || `studio-${(productReferences.saree_front_drape || productReferences.front)?.id.slice(0, 8) || "draft"}`;
   const effectiveSkuName = skuName.trim() || skuId.trim() || "Untitled studio product";
-  // What AnalysisProfile actually shows: the member's own edit if they've made one, else the AI's
-  // derived read-out of the last analysis. Kept here (not inside AnalysisProfile) so the same
-  // values can both render and feed the next analysis request below.
+
   const derivedSceneDirection = useMemo(() => analysis ? [
     analysis.creativeDirection.backgroundStyle,
     analysis.creativeDirection.studioEnvironment,
@@ -288,7 +293,7 @@ export function Studio() {
     setStopping(true);
     try {
       await cancelJob({ jobId: submittedJobId });
-      setNotice({ tone: "success", text: "Photoshoot cancellation requested. Completed images remain saved.", jobId: submittedJobId });
+      setNotice({ tone: "success", text: "Photoshoot cancellation requested. Completed images remain saved in History.", jobId: submittedJobId });
       setStopDialogOpen(false);
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not stop this photoshoot." });
@@ -296,6 +301,7 @@ export function Studio() {
       setStopping(false);
     }
   };
+
   const analysisInputKey = useMemo(
     () => JSON.stringify({
       references: allReferences.map((reference) => ({
@@ -313,6 +319,7 @@ export function Studio() {
     }),
     [allReferences, category, effectiveSkuId, effectiveSkuName, options.backgroundStyle, options.modelIdentity, productDetails, sceneDirectionNote, garmentSummaryNote],
   );
+
   const latestAnalysisKeyRef = useRef(analysisInputKey);
   latestAnalysisKeyRef.current = analysisInputKey;
   const analysisIsCurrent = Boolean(analysis && analysisSourceKey === analysisInputKey);
@@ -366,8 +373,6 @@ export function Studio() {
     targetRole: "saree_pallu_spread" | "saree_body_detail",
   ) => {
     setProductReferences((current) => {
-      // This is an explicit member decision, not an AI inference. Generic evidence
-      // is reclassified to one proven region; it is not silently used as both.
       return promoteLegacySareeReference(current, sourceRole, targetRole, crypto.randomUUID());
     });
     markAnalysisStale();
@@ -435,8 +440,6 @@ export function Studio() {
     const inFlight = uploadPromisesRef.current.get(reference.id);
     if (inFlight) return inFlight;
     const promise = (async () => {
-      // Cap at 2048px so fabric, zari and small motifs survive while large
-      // camera originals still upload quickly (see REFERENCE_MAX_DIMENSION).
       const resizedFile = await resizeImageFile(reference.file);
       const uploaded = await uploadCatalogAsset({
         organizationId: String(organization._id),
@@ -477,12 +480,7 @@ export function Studio() {
       setProductReferences((current) => Object.fromEntries(Object.entries(current).map(([role, reference]) => [role, reference ? uploadedById.get(reference.id) || reference : reference])) as Partial<Record<ProductReferenceRole, StudioReference>>);
       setStyleReferences((current) => current.map((reference) => uploadedById.get(reference.id) || reference));
       setModelReference((current) => current ? uploadedById.get(current.id) || current : current);
-      // Fold the member's Scene direction / Garment summary edits into the same director's-note
-      // params the rest of this form already sends - buildCombinedAnalysisPrompt treats them as
-      // "requested scene direction" / "user product notes", so Gemini re-derives both the product
-      // identity and the six-pose plan around the correction. Because these strings also flow
-      // into the backend's cache key (productHash), repeating an edit you've already sent (or
-      // reverting one) hits the existing 30-day analysis cache instead of a fresh Gemini call.
+
       const result = await analyzeReferences({
         organizationId: organization._id,
         createdBy: user._id,
@@ -517,7 +515,7 @@ export function Studio() {
         setNotice({ tone: "success", text: `Saree detected. Front and rear references were preserved; now confirm or upload: ${missingEvidence}. Gemini will reanalyse before generation.` });
       } else {
         setAnalysisSourceKey(sourceKey);
-        setNotice({ tone: "success", text: "Product identity, creative direction, and the six-pose shoot plan are ready." });
+        setNotice({ tone: "success", text: "Authoritative product identity, creative direction, and the six-pose shoot plan are ready." });
       }
     } catch (error) {
       if (analysisRequestRef.current === requestId) {
@@ -534,8 +532,6 @@ export function Studio() {
     void runAnalysis(analysisInputKey, false, Boolean(analysis));
   };
 
-  // Saved onto the session rather than re-running analysis: styling is not a
-  // product fact, so the analysis fingerprint stays valid and queueing still works.
   const handleSaveStylingPlan = async (plan: StylingPlan) => {
     if (!analysis?.sessionId) return false;
     setSavingStylingPlan(true);
@@ -557,9 +553,6 @@ export function Studio() {
     void runAnalysis(analysisInputKey, false, true);
   };
 
-  // The serialized key intentionally owns this effect. Including runAnalysis would
-  // retrigger it when uploaded IDs are attached to otherwise unchanged references.
-  // oxlint-disable react-hooks/exhaustive-deps
   useEffect(() => {
     analysisRequestRef.current += 1;
     setAnalysisSourceKey((current) => current === analysisInputKey ? current : null);
@@ -574,16 +567,15 @@ export function Studio() {
       if (autoAnalyzeTimerRef.current) clearTimeout(autoAnalyzeTimerRef.current);
     };
   }, [analysisInputKey, requiredReady]);
-  // oxlint-enable react-hooks/exhaustive-deps
 
   const handleGenerate = async () => {
     setNotice(null);
     if (!analysis || !analysisIsCurrent || analyzing) {
-      setNotice({ tone: "error", text: "Wait for Gemini analysis and the current six-pose plan to finish before generating." });
+      setNotice({ tone: "error", text: "Wait for Gemini vision analysis and the 6-pose plan to complete before generating." });
       return;
     }
     if (enabledPoseCount !== REQUIRED_POSE_COUNT) {
-      setNotice({ tone: "error", text: `All ${REQUIRED_POSE_COUNT} required poses must be ready before generation.` });
+      setNotice({ tone: "error", text: `All ${REQUIRED_POSE_COUNT} required poses must be enabled before generation.` });
       return;
     }
     setGenerating(true);
@@ -626,10 +618,6 @@ export function Studio() {
       setSessionJobIds((current) => [String(result.jobId), ...current.filter((id) => id !== String(result.jobId))].slice(0, MAX_SESSION_SUBMISSIONS));
       setNotice({
         tone: "success",
-        // Submitting twice now returns the run already going rather than
-        // starting a second one, so say which of the two happened: "submitted"
-        // on a shoot that was already running reads as a new job that never
-        // appears.
         text: result.alreadyQueued
           ? "This shoot was already generating, so we reopened that run instead of starting a second one. Studio is ready for your next product."
           : "Generation submitted successfully. Studio is ready for your next product.",
@@ -644,44 +632,126 @@ export function Studio() {
 
   return (
     <div className="mx-auto max-w-7xl pb-16">
-      {/* Header Row */}
-      <header className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+      {/* Studio Header Bar */}
+      <header className="mb-6 flex flex-col justify-between gap-4 rounded-3xl border border-outline-variant/40 bg-white p-5 shadow-xs sm:flex-row sm:items-center">
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-widest text-primary">Studio</span>
+          <div className="flex items-center gap-2">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-soft-blush text-primary">
+              <Wand2 className="h-4 w-4" />
+            </span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-primary">Studio Generation Atelier</span>
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-bold text-emerald-700 border border-emerald-200">
+              6-Pose Engine Active
+            </span>
+          </div>
+          <h1 className="mt-1 font-syne text-2xl font-bold tracking-tight text-on-surface">
+            Catalog Photoshoot Production
+          </h1>
         </div>
 
-        <div className="flex items-center gap-3">
-          <Button variant="secondary" className="bg-surface-container-low hover:bg-surface-container" onClick={() => document.getElementById("product-reference-section")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
-            {isSareeCategory ? "Add saree evidence" : "Add front + back photos"}
-          </Button>
-          <Link to="/history" className="inline-flex h-10 items-center justify-center rounded-lg px-4 text-sm font-semibold text-tertiary transition-colors hover:bg-tertiary-container hover:text-on-tertiary-container">
-            <Images className="mr-2 h-4 w-4" /> History
-          </Link>
-          <Button 
-            onClick={handleGenerate} 
-            disabled={generating || !generationReady} 
-            className="bg-gradient-to-r from-pink-400 to-rose-400 text-white hover:from-pink-500 hover:to-rose-500 shadow-sm border-none"
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="secondary"
+            className="rounded-xl border border-outline-variant/60 bg-surface-container-low px-4 text-xs font-bold text-on-surface hover:bg-surface-container"
+            onClick={() => document.getElementById("product-reference-section")?.scrollIntoView({ behavior: "smooth", block: "start" })}
           >
-            {generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-            Generate
+            {isSareeCategory ? "Upload Saree Evidence" : "Upload Front + Back Photos"}
           </Button>
+
+          <Link
+            to="/history"
+            className="inline-flex h-10 items-center justify-center rounded-xl border border-outline-variant/60 bg-white px-4 text-xs font-bold text-secondary transition hover:border-primary hover:text-primary shadow-xs"
+          >
+            <HistoryIcon className="mr-2 h-4 w-4 text-primary" />
+            <span>History Archive</span>
+          </Link>
+
+          <button
+            onClick={handleGenerate}
+            disabled={generating || !generationReady}
+            className="group relative flex h-11 items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-primary via-[#b81059] to-[#be185d] px-6 text-sm font-bold text-white shadow-lg shadow-primary/25 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-primary/35 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+          >
+            {generating ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Queueing Shoot…</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4 transition-transform group-hover:scale-110" />
+                <span>Generate Shoot (6 Poses)</span>
+              </>
+            )}
+          </button>
         </div>
       </header>
 
+      {/* Production Stepper Indicator */}
+      <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[
+          { step: "1", title: "Product References", ready: requiredReady, desc: requiredReady ? "Evidence Ready" : "Front & Back Required" },
+          { step: "2", title: "SKU & Output Engine", ready: Boolean(effectiveSkuId), desc: options.imageSize + " · " + options.aspectRatio },
+          { step: "3", title: "Vision Ground Truth", ready: analysisIsCurrent, desc: analyzing ? "Analyzing…" : analysisIsCurrent ? "Locked" : "Pending Analysis" },
+          { step: "4", title: "6-Pose Catalog Set", ready: enabledPoseCount === REQUIRED_POSE_COUNT, desc: `${enabledPoseCount}/${REQUIRED_POSE_COUNT} Poses Validated` },
+        ].map((s) => (
+          <div
+            key={s.step}
+            className={`flex items-center gap-3 rounded-2xl border p-3 shadow-xs transition-all ${
+              s.ready
+                ? "border-emerald-600/30 bg-emerald-50/50"
+                : "border-outline-variant/40 bg-white"
+            }`}
+          >
+            <div
+              className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl text-xs font-bold ${
+                s.ready ? "bg-emerald-600 text-white" : "bg-surface-container text-secondary"
+              }`}
+            >
+              {s.ready ? <Check className="h-4 w-4" /> : s.step}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-bold text-on-surface">{s.title}</p>
+              <p className="truncate text-[10px] text-secondary font-medium">{s.desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Notice Banner */}
       {notice && (
-        <div className={`mb-8 flex flex-wrap items-center justify-between gap-4 rounded-xl border p-4 text-sm ${notice.tone === "success" ? "border-success/20 bg-success-surface text-success" : "border-danger/20 bg-danger-surface text-danger"}`}>
-          <span className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> {notice.text}</span>
-          {notice.jobId && <Link to="/history" className="font-bold underline">Track in history</Link>}
+        <div
+          className={`mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-4 text-xs font-semibold shadow-xs animate-in fade-in ${
+            notice.tone === "success"
+              ? "border-emerald-600/20 bg-emerald-50 text-emerald-900"
+              : "border-danger/20 bg-danger-surface text-danger"
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            <span>{notice.text}</span>
+          </span>
+          {notice.jobId && (
+            <Link to="/history" className="flex items-center gap-1 font-bold underline hover:opacity-80">
+              <span>Track in History</span>
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Link>
+          )}
         </div>
       )}
 
+      {/* Session Submissions Tray */}
       {sessionJobIds.length > 0 && (
-        <section className="mb-4 rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3 shadow-sm">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-secondary">Submitted this session ({sessionJobIds.length})</p>
-            <Link to="/history" className="text-[11px] font-bold text-primary underline">Open History</Link>
+        <section className="mb-6 rounded-2xl border border-outline-variant/40 bg-white p-4 shadow-xs">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-secondary">
+              <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+              <span>Active Browser Session Shoots ({sessionJobIds.length})</span>
+            </p>
+            <Link to="/history" className="text-xs font-bold text-primary hover:underline">
+              Open Full History Archive →
+            </Link>
           </div>
-          <ul className="max-h-64 space-y-1.5 overflow-auto">
+          <ul className="max-h-64 space-y-2 overflow-auto">
             {sessionJobIds.map((jobId, index) => (
               <SessionSubmissionRow
                 key={jobId}
@@ -694,159 +764,290 @@ export function Studio() {
         </section>
       )}
 
+      {/* Submitted Job Live Progress Monitor */}
       {submittedJobId && (
-        <div className="mb-8 rounded-xl border border-primary/20 bg-primary/5 p-4 shadow-sm">
+        <div className="mb-8 rounded-2xl border border-primary/25 bg-gradient-to-r from-soft-blush/60 via-white to-soft-blush/30 p-5 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            {submittedJob ? (
-              <>
-                <div className="h-10 w-10 overflow-hidden rounded-md bg-surface-container flex-shrink-0">
-                  {submittedJob.thumbnailUrl ? (
-                    <img src={submittedJob.thumbnailUrl} alt="Thumbnail" className="h-full w-full object-cover" />
-                  ) : (
-                    <Images className="h-5 w-5 m-2.5 text-secondary" />
-                  )}
+            <div className="flex items-center gap-4">
+              {submittedJob ? (
+                <>
+                  <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl border border-primary/20 bg-white shadow-xs">
+                    {submittedJob.thumbnailUrl ? (
+                      <img src={submittedJob.thumbnailUrl} alt="Thumbnail" className="h-full w-full object-cover" />
+                    ) : (
+                      <Images className="m-3.5 h-5 w-5 text-secondary" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-sm text-on-surface">
+                        {submittedJob.skuName || submittedJob.skuId}
+                      </h3>
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary">
+                        {submissionStatusLabel(submittedJob)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-secondary mt-0.5">
+                      {submittedJob.status === "completed"
+                        ? "Photoshoot delivered successfully. All 6 frames ready for download."
+                        : submittedJob.status === "failed"
+                          ? "Photoshoot encountered an issue. Poses can be retried individually."
+                          : submittedJob.status === "cancelling"
+                            ? "Stopping… finishing active image model generation."
+                            : submittedJob.status === "cancelled"
+                              ? `Stopped — ${submittedJob.completedPoses} image${submittedJob.completedPoses === 1 ? "" : "s"} safely preserved in History.`
+                              : submittedJob.status === "queued"
+                                ? ((queuePosition || 1) === 1 ? "Queued — next in line for generation" : `Queued — ${(queuePosition || 1) - 1} task ahead`)
+                                : `Generating poses: ${submittedJob.completedPoses} of ${submittedJob.totalPoses} complete.`}
+                    </p>
+                  </div>
+                </>
+              ) : submittedJob === null || (submittedJobError && submittedJob === undefined) ? (
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-medium text-danger">
+                    {submittedJob === null ? "This submission no longer exists in History." : `Could not load submission status: ${submittedJobError?.message}`}
+                  </span>
+                  <button onClick={() => setSubmittedJobId(null)} className="rounded-lg border border-outline-variant bg-white px-3 py-1.5 text-xs font-semibold text-secondary">
+                    Dismiss
+                  </button>
                 </div>
-                <div>
-                  <h3 className="font-bold text-sm text-on-surface">Submission: {submittedJob.skuName || submittedJob.skuId}</h3>
-                  <p className="text-xs text-secondary mt-0.5">
-                    {submittedJob.status === "completed" ? "Generation complete." : 
-                     submittedJob.status === "failed" ? "Generation failed." : 
-                     submittedJob.status === "cancelling" ? "Stopping… finishing the pose in progress." :
-                     submittedJob.status === "cancelled" ? `Stopped — ${submittedJob.completedPoses} image${submittedJob.completedPoses === 1 ? "" : "s"} saved.` :
-                     submittedJob.status === "queued" ? ((queuePosition || 1) === 1 ? "Queued — next task" : `Queued — ${(queuePosition || 1) - 1} task${(queuePosition || 1) - 1 === 1 ? "" : "s"} ahead`) :
-                     `Processing... ${submittedJob.completedPoses} / ${submittedJob.totalPoses} poses complete.`}
-                  </p>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                  <span className="text-sm font-medium">Connecting to generation worker…</span>
                 </div>
-              </>
-            ) : submittedJob === null || (submittedJobError && submittedJob === undefined) ? (
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-medium text-error">{submittedJob === null ? "This submission no longer exists. It may have been deleted from History." : `Could not load submission status: ${submittedJobError?.message}`}</span>
-                <button onClick={() => setSubmittedJobId(null)} className="rounded-lg border border-outline-variant bg-white px-3 py-1.5 text-xs font-semibold text-secondary">Dismiss</button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-3">
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                <span className="text-sm font-medium">Fetching submission status...</span>
-              </div>
-            )}
+              )}
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              {submittedJob && ["queued", "processing"].includes(submittedJob.status) && (
+                <button
+                  disabled={stopping}
+                  onClick={() => setStopDialogOpen(true)}
+                  className="flex items-center gap-1.5 rounded-xl border border-warning/30 bg-white px-3.5 py-2 text-xs font-semibold text-warning transition hover:bg-warning-surface disabled:opacity-50"
+                >
+                  {stopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
+                  <span>Stop Shoot</span>
+                </button>
+              )}
+              <Link
+                to="/history"
+                className="flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-xs font-bold text-primary shadow-xs border border-primary/20 transition hover:bg-primary/5"
+              >
+                <span>Open in History</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {submittedJob && ["queued", "processing"].includes(submittedJob.status) && <button disabled={stopping} onClick={() => setStopDialogOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-warning/30 bg-white px-3 py-2 text-xs font-semibold text-warning disabled:opacity-50">{stopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Stop</button>}
-            <Link to="/history" className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-primary underline">View in History</Link>
-          </div>
-          </div>
+
           {submittedJob && (
             <div className="mt-4">
               {(() => {
                 const delivery = generationDeliveryProgress(submittedJob);
-                return <><div className="mb-1.5 flex justify-between text-[11px] font-semibold text-secondary"><span>{submittedJob.status === "processing" ? `Pose ${Math.max(1, submittedJob.currentPose || delivery.resolvedPoses + 1)} is generating · ` : ""}{delivery.imagesStored}/{delivery.totalPoses} images stored{delivery.failedPoses ? ` · ${delivery.failedPoses} failed` : ""}</span><span>{delivery.deliveredPercent}% delivered</span></div><div className="h-2 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${delivery.deliveredPercent}%` }} /></div></>;
+                return (
+                  <>
+                    <div className="mb-1.5 flex justify-between text-[11px] font-semibold text-secondary">
+                      <span>
+                        {submittedJob.status === "processing"
+                          ? `Pose ${Math.max(1, submittedJob.currentPose || delivery.resolvedPoses + 1)} is generating · `
+                          : ""}
+                        {delivery.imagesStored}/{delivery.totalPoses} images stored
+                        {delivery.failedPoses ? ` · ${delivery.failedPoses} failed` : ""}
+                      </span>
+                      <span className="font-bold text-primary">{delivery.deliveredPercent}% complete</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-white shadow-inner">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-primary to-primary-container transition-all duration-500"
+                        style={{ width: `${delivery.deliveredPercent}%` }}
+                      />
+                    </div>
+                  </>
+                );
               })()}
-              {submittedJob.poses?.length > 0 && <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">{submittedJob.poses.map((pose: any) => <div key={pose._id} className="relative aspect-[3/4] overflow-hidden rounded-lg border border-outline-variant/40 bg-white">{pose.outputUrl ? <img src={pose.outputUrl} alt={pose.title} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">{pose.status === "processing" ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <Images className="h-4 w-4 text-outline" />}</div>}<span className="absolute inset-x-1 bottom-1 truncate rounded bg-navy-soft/70 px-1 py-0.5 text-center text-[8px] font-semibold text-white">{pose.poseNumber}. {pose.status}</span></div>)}</div>}
+
+              {submittedJob.poses?.length > 0 && (
+                <div className="mt-4 grid grid-cols-3 gap-2.5 sm:grid-cols-6">
+                  {submittedJob.poses.map((pose: any) => (
+                    <div
+                      key={pose._id}
+                      className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-outline-variant/40 bg-white shadow-xs"
+                    >
+                      {pose.outputUrl ? (
+                        <img src={pose.outputUrl} alt={pose.title} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="grid h-full place-items-center bg-surface-container-low">
+                          {pose.status === "processing" ? (
+                            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                          ) : (
+                            <Images className="h-5 w-5 text-secondary/40" />
+                          )}
+                        </div>
+                      )}
+                      <span className="absolute inset-x-1 bottom-1 truncate rounded-md bg-navy-soft/80 px-1.5 py-0.5 text-center text-[8px] font-bold uppercase tracking-wider text-white backdrop-blur-xs">
+                        {pose.poseNumber}. {pose.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {/* Top: product photos (upper-left) + SKU details & settings (right) */}
+      {/* Main Studio 2-Column Grid */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 items-start">
-        {/* LEFT: Product photos */}
+        {/* Left Column: Product Photos & References (5 cols) */}
         <div className="lg:col-span-5">
-          <section id="product-reference-section" className="scroll-mt-6 rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-5 shadow-sm">
+          <section id="product-reference-section" className="scroll-mt-6 rounded-2xl border border-outline-variant/40 bg-white p-5 sm:p-6 shadow-xs">
             <div className="mb-4">
-              <h2 className="text-base font-bold text-on-surface">Product photos</h2>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-primary">Ground Truth Assets</span>
+              <h2 className="text-base font-bold text-on-surface">Product Photos</h2>
               <p className="mt-1 text-xs leading-relaxed text-secondary">
                 {isSareeCategory
-                  ? "Required: full saree front, rear/back drape, fully spread pallu, and body fabric/pattern detail. Border/tassel and blouse references are strongly recommended."
-                  : "Front and back are required. Fabric / pattern detail and an additional product photo are optional — all four are treated as the same product. Style reference only guides scene, mood, and lighting."}
+                  ? "Required: full saree front, rear/back drape, fully spread pallu, and body fabric detail. Border/tassels and blouse are recommended."
+                  : "Front and back photos are required. Fabric close-up and additional angles are optional — all are locked into the same garment identity."}
               </p>
             </div>
+
             {duplicateProductSlots.length > 0 && (
-              <div role="alert" className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs leading-5 text-amber-900">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+              <div role="alert" className="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-xs leading-relaxed text-amber-900">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                 <div>
                   {duplicateProductSlots.map((roles) => (
                     <p key={roles.join(":")}>
-                      <b>Same photo used twice:</b> {roles.map((role) => `"${PRODUCT_SLOT_NAMES[role] || role}"`).join(" and ")} {roles.length > 2 ? "all contain" : "contain"} the identical image file.
+                      <b>Duplicate photo:</b> {roles.map((role) => `"${PRODUCT_SLOT_NAMES[role] || role}"`).join(" and ")} share the identical file.
                     </p>
                   ))}
-                  <p className="mt-0.5 text-[11px] text-amber-800">Each slot should show a different view so the model can reproduce every side of the product. Replace one of them if this was a mistake.</p>
+                  <p className="mt-1 text-[11px] text-amber-800">
+                    Each slot should show a distinct angle so the model learns front, back, and detail construction accurately.
+                  </p>
                 </div>
               </div>
             )}
+
             <ProductReferences
               references={productReferences}
               onChange={changeProductReference}
               saree={isSareeCategory}
               onPromoteLegacyReference={isSareeCategory ? promoteLegacyReference : undefined}
             />
-            <div className="mt-4 border-t border-outline-variant/30 pt-4">
-              <h3 className="mb-2 text-sm font-bold text-on-surface">Model face lock</h3>
-              <ModelFaceReference reference={modelReference || undefined} onFile={changeModelReference} onRemove={() => changeModelReference(null)} />
+
+            <div className="mt-5 border-t border-outline-variant/30 pt-4">
+              <ModelFaceReference
+                reference={modelReference || undefined}
+                onFile={changeModelReference}
+                onRemove={() => changeModelReference(null)}
+              />
             </div>
-            <div className="mt-4 border-t border-outline-variant/30 pt-4">
-              <StyleReferences references={styleReferences} onAdd={addStyleReferences} onReplace={replaceStyleReference} onRemove={removeStyleReference} />
+
+            <div className="mt-5 border-t border-outline-variant/30 pt-4">
+              <StyleReferences
+                references={styleReferences}
+                onAdd={addStyleReferences}
+                onReplace={replaceStyleReference}
+                onRemove={removeStyleReference}
+              />
             </div>
           </section>
         </div>
 
-        {/* RIGHT: SKU details, then output settings & scene styling */}
-        <div className="space-y-4 lg:col-span-7">
-          <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-5 shadow-sm">
+        {/* Right Column: SKU Details, Output Settings, Scene Analysis (7 cols) */}
+        <div className="space-y-5 lg:col-span-7">
+          {/* SKU Details Card */}
+          <section className="rounded-2xl border border-outline-variant/40 bg-white p-5 sm:p-6 shadow-xs">
             <div className="mb-4">
-              <h2 className="text-base font-bold text-on-surface">SKU details</h2>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-primary">Catalog Metadata</span>
+              <h2 className="text-base font-bold text-on-surface">SKU Details</h2>
             </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block text-xs font-semibold text-secondary">
-                SKU code (optional)
-                <input value={skuId} onChange={(event) => updateText(setSkuId, event.target.value)} placeholder="e.g. YTH-KUR-2041" className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant bg-white px-3 font-mono text-sm text-on-surface outline-none focus:border-primary" />
-              </label>
-              <label className="block text-xs font-semibold text-secondary">
-                Product name (optional)
-                <input value={skuName} onChange={(event) => updateText(setSkuName, event.target.value)} placeholder="e.g. Indigo printed kaftan set" className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant bg-white px-3 text-sm text-on-surface outline-none focus:border-primary" />
-              </label>
-              <label className="block text-xs font-semibold text-secondary sm:col-span-2">
-                Product details
-                <textarea value={productDetails} onChange={(event) => updateText(setProductDetails, event.target.value)} rows={3} placeholder="Preserve the garment exactly from the uploaded references. Keep color, print, fabric, trims, neckline, sleeves..." className="mt-1.5 w-full rounded-lg border border-outline-variant bg-white px-3 py-2 text-sm text-on-surface outline-none focus:border-primary resize-none" />
-              </label>
-              <label className="block text-xs font-semibold text-secondary sm:col-span-2">
-                Category
-                <select value={category} onChange={(event) => updateText(setCategory, event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-outline-variant bg-white px-3 text-sm text-on-surface outline-none focus:border-primary">
-                  <option value="ethnic/fusion">Ethnic / fusion</option>
-                  <option value="saree">Saree</option>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-secondary">
+                  SKU Code (Optional)
+                </label>
+                <input
+                  value={skuId}
+                  onChange={(event) => updateText(setSkuId, event.target.value)}
+                  placeholder="e.g. YTH-KUR-2041"
+                  className="mt-1.5 h-11 w-full rounded-xl border border-outline-variant/70 bg-white px-3.5 font-mono text-sm text-on-surface outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-secondary">
+                  Product Name (Optional)
+                </label>
+                <input
+                  value={skuName}
+                  onChange={(event) => updateText(setSkuName, event.target.value)}
+                  placeholder="e.g. Indigo printed kaftan set"
+                  className="mt-1.5 h-11 w-full rounded-xl border border-outline-variant/70 bg-white px-3.5 text-sm text-on-surface outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-secondary">
+                  Garment Category
+                </label>
+                <select
+                  value={category}
+                  onChange={(event) => updateText(setCategory, event.target.value)}
+                  className="mt-1.5 h-11 w-full rounded-xl border border-outline-variant/70 bg-white px-3.5 text-sm text-on-surface outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10 cursor-pointer"
+                >
+                  <option value="ethnic/fusion">Ethnic / fusion (Kurtis, Anarkalis, Sets)</option>
+                  <option value="saree">Saree (Specialized 6-zone drape pipeline)</option>
                   <option value="western/casual">Western / casual</option>
                   <option value="dress">Dress</option>
                   <option value="formal">Formal</option>
                   <option value="streetwear">Streetwear</option>
                   <option value="activewear">Activewear</option>
                 </select>
-              </label>
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-secondary">
+                  Garment Truth & Construction Notes
+                </label>
+                <textarea
+                  value={productDetails}
+                  onChange={(event) => updateText(setProductDetails, event.target.value)}
+                  rows={2}
+                  placeholder="Preserve the garment exactly from uploaded references: neckline, sleeves, embroidery, fabric drape, color tone, hem finish…"
+                  className="mt-1.5 w-full resize-y rounded-xl border border-outline-variant/70 bg-white p-3 text-xs leading-relaxed text-on-surface outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
+                />
+              </div>
             </div>
           </section>
 
-          <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm">
-            <OutputSettings value={options} onChange={updateOptions} orgModel={orgModel} orgModelLabel={orgModelLabel} orgModelOptions={orgModelOptions} routingStatus={routingStatus} routingError={effectiveRoutingError?.message} />
-          </section>
+          {/* Output Engine Settings */}
+          <OutputSettings
+            value={options}
+            onChange={updateOptions}
+            orgModel={orgModel}
+            orgModelLabel={orgModelLabel}
+            orgModelOptions={orgModelOptions}
+            routingStatus={routingStatus}
+            routingError={effectiveRoutingError?.message}
+          />
 
-          <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all overflow-hidden">
-             <AnalysisProfile
-               analysis={analysis}
-               analyzing={analyzing}
-               ready={requiredReady}
-               stale={analysisIsStale}
-               current={analysisIsCurrent}
-               onAnalyze={handleAnalyze}
-               onImprovePosePlan={handleImprovePosePlan}
-               sceneDirection={sceneDirectionValue}
-               onSceneDirectionChange={(value) => updateText(setSceneDirectionNote, value)}
-               garmentSummary={garmentSummaryValue}
-               onGarmentSummaryChange={(value) => updateText(setGarmentSummaryNote, value)}
-             />
-          </section>
+          {/* Scene & Styling Profile */}
+          <AnalysisProfile
+            analysis={analysis}
+            analyzing={analyzing}
+            ready={requiredReady}
+            stale={analysisIsStale}
+            current={analysisIsCurrent}
+            onAnalyze={handleAnalyze}
+            onImprovePosePlan={handleImprovePosePlan}
+            sceneDirection={sceneDirectionValue}
+            onSceneDirectionChange={(value) => updateText(setSceneDirectionNote, value)}
+            garmentSummary={garmentSummaryValue}
+            onGarmentSummaryChange={(value) => updateText(setGarmentSummaryNote, value)}
+          />
 
-          {/* Hidden while the analysis is stale: analysis.sessionId still points at
-              the previous references, so a save would land on a session the next
-              auto-analysis replaces, losing the edit silently. */}
+          {/* Styling Plan Editor */}
           {analysis && analysisIsCurrent && (
             <StylingPlanEditor
               plan={normalizePlan(analysis.stylingPlan)}
@@ -860,11 +1061,18 @@ export function Studio() {
         </div>
       </div>
 
-      {/* Bottom: six-pose plan, horizontal, full width */}
-      <section className="mt-6 rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all overflow-hidden">
-         <PosePlan poses={poses} onChange={setPoses} enabledCount={enabledPoseCount} ready={analysisIsCurrent} stale={analysisIsStale} />
+      {/* Bottom: 6-Pose Fashion Catalog Plan */}
+      <section className="mt-8">
+        <PosePlan
+          poses={poses}
+          onChange={setPoses}
+          enabledCount={enabledPoseCount}
+          ready={analysisIsCurrent}
+          stale={analysisIsStale}
+        />
       </section>
 
+      {/* Stop Photoshoot Dialog */}
       <ActionDialog
         open={stopDialogOpen}
         title={`Stop ${submittedJob?.skuName || submittedJob?.skuId || "this photoshoot"}?`}
