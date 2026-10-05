@@ -358,6 +358,7 @@
         "npm:firebase@^12.17.1",
         "npm:jszip@^3.10.1",
         "npm:lucide-react@^1.31.0",
+        "npm:motion@^14.0.0",
         "npm:oxlint@^1.75.0",
         "npm:pg-query-emscripten@^5.1.0",
         "npm:postcss@^8.5.26",

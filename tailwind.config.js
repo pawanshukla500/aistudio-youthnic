@@ -7,6 +7,10 @@ export default {
   theme: {
     extend: {
       colors: {
+        card: {
+          DEFAULT: 'var(--card, #ffffff)',
+          foreground: 'var(--card-foreground, #131b2e)',
+        },
         surface: '#faf8ff',
         'surface-dim': '#d2d9f4',
         'surface-bright': '#faf8ff',
