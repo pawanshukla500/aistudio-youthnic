@@ -11,6 +11,27 @@ export default {
           DEFAULT: 'var(--card, #ffffff)',
           foreground: 'var(--card-foreground, #131b2e)',
         },
+        border: 'var(--border, #e0bec4)',
+        input: 'var(--input, #e0bec4)',
+        ring: 'var(--ring, #970046)',
+        'primary-foreground': 'var(--primary-foreground, #ffffff)',
+        'secondary-foreground': 'var(--secondary-foreground, #131b2e)',
+        destructive: {
+          DEFAULT: 'var(--destructive, #ba1a1a)',
+          foreground: 'var(--destructive-foreground, #ffffff)',
+        },
+        muted: {
+          DEFAULT: 'var(--muted, #f2f3ff)',
+          foreground: 'var(--muted-foreground, #575f69)',
+        },
+        accent: {
+          DEFAULT: 'var(--accent, #eaedff)',
+          foreground: 'var(--accent-foreground, #131b2e)',
+        },
+        popover: {
+          DEFAULT: 'var(--popover, #ffffff)',
+          foreground: 'var(--popover-foreground, #131b2e)',
+        },
         surface: '#faf8ff',
         'surface-dim': '#d2d9f4',
         'surface-bright': '#faf8ff',

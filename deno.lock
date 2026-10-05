@@ -343,6 +343,8 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:@radix-ui/react-label@^2.1.15",
+        "npm:@radix-ui/react-slot@^1.3.3",
         "npm:@supabase/supabase-js@2.112.2",
         "npm:@types/file-saver@^2.0.7",
         "npm:@types/jszip@^3.4.0",
@@ -352,10 +354,12 @@
         "npm:@vitejs/plugin-react@^6.0.4",
         "npm:@xyflow/react@^12.11.3",
         "npm:autoprefixer@^10.5.4",
+        "npm:class-variance-authority@^0.7.1",
         "npm:clsx@^2.1.1",
         "npm:exceljs@^4.4.0",
         "npm:file-saver@^2.0.5",
         "npm:firebase@^12.17.1",
+        "npm:framer-motion@^14.0.0",
         "npm:jszip@^3.10.1",
         "npm:lucide-react@^1.31.0",
         "npm:motion@^14.0.0",
