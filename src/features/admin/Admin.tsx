@@ -184,7 +184,7 @@ function MemberEditor({
             <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">
               Access control
             </p>
-            <h3 className="mt-2 font-syne text-2xl font-bold text-on-surface">
+            <h3 className="mt-2 font-manrope text-2xl font-bold tracking-tight text-on-surface">
               Edit member access
             </h3>
             <p className="mt-1 text-sm text-secondary">
@@ -376,7 +376,7 @@ function TeamEditor({
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">Operational ownership</p>
-            <h3 id="organization-team-editor-title" className="mt-2 font-syne text-2xl font-bold text-on-surface">{team ? "Edit team" : "Create team"}</h3>
+            <h3 id="organization-team-editor-title" className="mt-2 font-manrope text-2xl font-bold tracking-tight text-on-surface">{team ? "Edit team" : "Create team"}</h3>
             <p className="mt-1 text-sm text-secondary">Teams own work and receive handoffs. Roles continue to control permissions.</p>
           </div>
           <button type="button" onClick={onClose} disabled={saving} aria-label="Close team editor" className="rounded-lg p-2 text-secondary hover:bg-surface-container disabled:opacity-40"><X className="h-5 w-5" /></button>
@@ -864,7 +864,7 @@ export function Admin() {
             <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.2em] text-primary">
               Admin console
             </span>
-            <h2 className="font-syne text-3xl font-bold text-on-surface">
+            <h2 className="font-manrope text-2xl sm:text-[28px] font-bold tracking-tight text-on-surface">
               People, teams, roles, and system access
             </h2>
             <p className="mt-1 text-sm text-secondary">
@@ -922,7 +922,7 @@ export function Admin() {
           <section className="space-y-4">
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
               <div>
-                <h3 className="font-syne text-xl font-bold text-on-surface">
+                <h3 className="font-manrope text-xl font-bold tracking-tight text-on-surface">
                   Organization members
                 </h3>
                 <p className="mt-1 text-sm text-secondary">
@@ -1013,7 +1013,7 @@ export function Admin() {
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">Operational ownership</p>
-                <h3 className="mt-1 font-syne text-xl font-bold text-on-surface">Organization teams</h3>
+                <h3 className="mt-1 font-manrope text-xl font-bold tracking-tight text-on-surface">Organization teams</h3>
                 <p className="mt-1 max-w-2xl text-sm text-secondary">Teams group the people who plan, generate, review, and list. Permission-bearing roles remain independently controlled.</p>
               </div>
               {overview.capabilities.canManageUsers && <button onClick={() => setEditingTeam("new")} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white"><Plus className="h-4 w-4" />Create team</button>}
@@ -1023,7 +1023,7 @@ export function Admin() {
                 const lead = team.memberships.find((membership) => membership.membership_role === "lead")?.member;
                 return <article key={team._id} className={`rounded-2xl border bg-white p-5 shadow-sm ${team.active ? "border-outline-variant/40" : "border-outline-variant/30 opacity-70"}`}>
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-soft-blush px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-primary">{team.team_type}</span>{team.is_system && <span className="rounded-full bg-surface-container-high px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-secondary">Built in</span>}<span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase ${team.active ? "bg-success-surface text-success" : "bg-danger-surface text-danger"}`}>{team.active ? "Active" : "Archived"}</span></div><h4 className="mt-3 truncate font-syne text-lg font-bold text-on-surface">{team.name}</h4><p className="mt-1 line-clamp-2 min-h-10 text-xs leading-5 text-secondary">{team.description || "No team description."}</p></div>
+                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-soft-blush px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-primary">{team.team_type}</span>{team.is_system && <span className="rounded-full bg-surface-container-high px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-secondary">Built in</span>}<span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase ${team.active ? "bg-success-surface text-success" : "bg-danger-surface text-danger"}`}>{team.active ? "Active" : "Archived"}</span></div><h4 className="mt-3 truncate font-manrope text-lg font-bold tracking-tight text-on-surface">{team.name}</h4><p className="mt-1 line-clamp-2 min-h-10 text-xs leading-5 text-secondary">{team.description || "No team description."}</p></div>
                     {overview.capabilities.canManageUsers && <button onClick={() => setEditingTeam(team)} className="shrink-0 rounded-lg border border-outline-variant/50 px-3 py-2 text-xs font-bold text-primary hover:bg-soft-blush">Edit</button>}
                   </div>
                   <div className="mt-5 flex items-center justify-between border-t border-outline-variant/25 pt-4">
@@ -1032,7 +1032,7 @@ export function Admin() {
                   </div>
                 </article>;
               })}
-              {!overview.teams.length && <div className="md:col-span-2 xl:col-span-3 rounded-2xl border-2 border-dashed border-outline-variant/40 bg-white p-12 text-center"><Users className="mx-auto h-7 w-7 text-outline" /><h4 className="mt-3 font-syne text-lg font-bold text-on-surface">No operational teams</h4><p className="mt-1 text-sm text-secondary">Create the first team and assign active organization members.</p></div>}
+              {!overview.teams.length && <div className="md:col-span-2 xl:col-span-3 rounded-2xl border-2 border-dashed border-outline-variant/40 bg-white p-12 text-center"><Users className="mx-auto h-7 w-7 text-outline" /><h4 className="mt-3 font-manrope text-lg font-bold tracking-tight text-on-surface">No operational teams</h4><p className="mt-1 text-sm text-secondary">Create the first team and assign active organization members.</p></div>}
             </div>
           </section>
         )}
@@ -1041,7 +1041,7 @@ export function Admin() {
           <section className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
             <div className="overflow-hidden rounded-2xl border border-outline-variant/40 bg-white shadow-sm">
               <div className="border-b border-outline-variant/30 p-4">
-                <h3 className="font-syne text-lg font-bold text-on-surface">
+                <h3 className="font-manrope text-lg font-bold tracking-tight text-on-surface">
                   Organization roles
                 </h3>
                 <p className="mt-1 text-xs text-secondary">
@@ -1078,7 +1078,7 @@ export function Admin() {
                   <div>
                     <div className="flex items-center gap-2">
                       <Shield className="h-5 w-5 text-primary" />
-                      <h3 className="font-syne text-xl font-bold text-on-surface">
+                      <h3 className="font-manrope text-xl font-bold tracking-tight text-on-surface">
                         {selectedRole.name}
                       </h3>
                     </div>
@@ -1166,7 +1166,7 @@ export function Admin() {
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">Event automation</p>
-                    <h3 className="mt-2 font-syne text-xl font-bold text-on-surface">Monthly reports and planning reminders</h3>
+                    <h3 className="mt-2 font-manrope text-xl font-bold tracking-tight text-on-surface">Monthly reports and planning reminders</h3>
                     <p className="mt-1 max-w-2xl text-sm leading-6 text-secondary">Supabase Cron runs an idempotent mail workflow. The default sends the full report on day 1 and a reminder 30 days before each event.</p>
                   </div>
                   <button disabled={saving || !overview.capabilities.canManageSettings} onClick={() => void saveAutomation()} className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">Save settings</button>
@@ -1183,11 +1183,11 @@ export function Admin() {
                 </div>
               </div>
               <aside className="space-y-4">
-                <div className="rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-sm"><Mail className="h-5 w-5 text-primary" /><h3 className="mt-3 font-syne text-lg font-bold">Email readiness</h3><p className="mt-1 text-sm text-secondary">{overview.health.emailConfigured ? "Resend secrets are configured." : "Add RESEND_API_KEY and RESEND_FROM as Supabase Edge Function secrets."}</p><span className={`mt-4 inline-flex rounded-full px-2 py-1 text-[10px] font-bold uppercase ${overview.health.emailConfigured ? "bg-success-surface text-success" : "bg-warning-surface text-warning"}`}>{overview.health.emailConfigured ? "Ready" : "Needs setup"}</span></div>
-                <div className="rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-sm"><div className="flex items-start justify-between"><div><p className="text-[10px] font-bold uppercase tracking-wider text-secondary">OpenAI organization billing</p><p className="mt-2 font-syne text-2xl font-bold">${Number(overview.openaiUsage?.costUsd || 0).toFixed(4)}</p><p className="mt-1 text-xs text-secondary">{overview.openaiUsage?.images || 0} images · {overview.openaiUsage?.requests || 0} requests</p></div><button disabled={saving || !overview.health.openaiAdminConfigured} onClick={() => void syncUsage()} title="Sync the last 31 days" className="rounded-xl border border-outline-variant p-2 text-primary disabled:opacity-30"><RefreshCcw className={`h-4 w-4 ${saving ? "animate-spin" : ""}`} /></button></div><p className="mt-4 text-xs leading-5 text-secondary">{overview.health.openaiAdminConfigured ? `Last synced ${overview.openaiUsage?.lastSyncedAt ? new Date(overview.openaiUsage.lastSyncedAt).toLocaleString("en-IN") : "never"}.` : "Add OPENAI_ADMIN_KEY to fetch authoritative Usage and Costs API totals."}</p></div>
+                <div className="rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-sm"><Mail className="h-5 w-5 text-primary" /><h3 className="mt-3 font-manrope text-lg font-bold tracking-tight text-on-surface">Email readiness</h3><p className="mt-1 text-sm text-secondary">{overview.health.emailConfigured ? "Resend secrets are configured." : "Add RESEND_API_KEY and RESEND_FROM as Supabase Edge Function secrets."}</p><span className={`mt-4 inline-flex rounded-full px-2 py-1 text-[10px] font-bold uppercase ${overview.health.emailConfigured ? "bg-success-surface text-success" : "bg-warning-surface text-warning"}`}>{overview.health.emailConfigured ? "Ready" : "Needs setup"}</span></div>
+                <div className="rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-sm"><div className="flex items-start justify-between"><div><p className="text-[10px] font-bold uppercase tracking-wider text-secondary">OpenAI organization billing</p><p className="mt-2 font-manrope text-2xl font-bold tracking-tight text-on-surface">${Number(overview.openaiUsage?.costUsd || 0).toFixed(4)}</p><p className="mt-1 text-xs text-secondary">{overview.openaiUsage?.images || 0} images · {overview.openaiUsage?.requests || 0} requests</p></div><button disabled={saving || !overview.health.openaiAdminConfigured} onClick={() => void syncUsage()} title="Sync the last 31 days" className="rounded-xl border border-outline-variant p-2 text-primary disabled:opacity-30"><RefreshCcw className={`h-4 w-4 ${saving ? "animate-spin" : ""}`} /></button></div><p className="mt-4 text-xs leading-5 text-secondary">{overview.health.openaiAdminConfigured ? `Last synced ${overview.openaiUsage?.lastSyncedAt ? new Date(overview.openaiUsage.lastSyncedAt).toLocaleString("en-IN") : "never"}.` : "Add OPENAI_ADMIN_KEY to fetch authoritative Usage and Costs API totals."}</p></div>
               </aside>
             </div>
-            <div className="overflow-hidden rounded-2xl border border-outline-variant/40 bg-white shadow-sm"><div className="border-b border-outline-variant/30 p-5"><h3 className="font-syne text-lg font-bold">Recent email deliveries</h3><p className="mt-1 text-xs text-secondary">Idempotent audit trail for reports and reminders.</p></div>{overview.recentEventDeliveries?.length ? overview.recentEventDeliveries.map((delivery) => <div key={delivery.id} className="grid gap-2 border-b border-outline-variant/20 px-5 py-3 text-xs last:border-0 sm:grid-cols-[170px_1fr_120px_180px]"><span className="font-bold text-on-surface">{String(delivery.delivery_kind).replace(/_/g, " ")}</span><span className="truncate text-secondary">{delivery.subject}</span><span className={delivery.status === "sent" ? "text-success" : delivery.status === "failed" ? "text-danger" : "text-warning"}>{delivery.status}</span><span className="text-secondary">{new Date(delivery.created_at).toLocaleString("en-IN")}</span></div>) : <div className="p-8 text-center text-sm text-secondary">No report or reminder has been sent yet.</div>}</div>
+            <div className="overflow-hidden rounded-2xl border border-outline-variant/40 bg-white shadow-sm"><div className="border-b border-outline-variant/30 p-5"><h3 className="font-manrope text-lg font-bold tracking-tight text-on-surface">Recent email deliveries</h3><p className="mt-1 text-xs text-secondary">Idempotent audit trail for reports and reminders.</p></div>{overview.recentEventDeliveries?.length ? overview.recentEventDeliveries.map((delivery) => <div key={delivery.id} className="grid gap-2 border-b border-outline-variant/20 px-5 py-3 text-xs last:border-0 sm:grid-cols-[170px_1fr_120px_180px]"><span className="font-bold text-on-surface">{String(delivery.delivery_kind).replace(/_/g, " ")}</span><span className="truncate text-secondary">{delivery.subject}</span><span className={delivery.status === "sent" ? "text-success" : delivery.status === "failed" ? "text-danger" : "text-warning"}>{delivery.status}</span><span className="text-secondary">{new Date(delivery.created_at).toLocaleString("en-IN")}</span></div>) : <div className="p-8 text-center text-sm text-secondary">No report or reminder has been sent yet.</div>}</div>
           </section>
         )}
 
@@ -1196,7 +1196,7 @@ export function Admin() {
             <div className="flex flex-col justify-between gap-4 rounded-2xl border border-outline-variant/40 bg-white p-6 shadow-sm lg:flex-row lg:items-start">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">Server-side AI routing</p>
-                <h3 className="mt-2 font-syne text-xl font-bold text-on-surface">Generation, vision analysis, pose planning, and QA</h3>
+                <h3 className="mt-2 font-manrope text-xl font-bold tracking-tight text-on-surface">Generation, vision analysis, pose planning, and QA</h3>
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-secondary">Choose approved server-side routes for final image generation, structured product analysis, and image QA. API keys are never shown or stored in this screen. Only providers with a tested adapter can be selected for each task; a vision model can never become a final image generator by configuration alone.</p>
               </div>
               <button disabled={saving || !overview.capabilities.canManageSettings} onClick={() => void saveAiPolicies()} className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"><Brain className="h-4 w-4" />Save AI routing</button>
@@ -1204,7 +1204,7 @@ export function Admin() {
 
             <div className="grid gap-4 lg:grid-cols-3">
               <div className="rounded-2xl border border-primary/20 bg-soft-blush p-5 lg:col-span-3">
-                <div className="flex items-start gap-3"><LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-primary" /><div><h4 className="font-syne text-base font-bold text-on-surface">Secrets stay in Supabase Edge Function configuration</h4><p className="mt-1 text-sm leading-6 text-secondary">A provider marked <strong>Configured</strong> has its server secret available. Missing providers are visible for planning, but cannot be selected until their secret is added by an administrator outside this application.</p></div></div>
+                <div className="flex items-start gap-3"><LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-primary" /><div><h4 className="font-manrope text-base font-bold tracking-tight text-on-surface">Secrets stay in Supabase Edge Function configuration</h4><p className="mt-1 text-sm leading-6 text-secondary">A provider marked <strong>Configured</strong> has its server secret available. Missing providers are visible for planning, but cannot be selected until their secret is added by an administrator outside this application.</p></div></div>
               </div>
             </div>
 
@@ -1344,7 +1344,7 @@ export function Admin() {
             </div>
             <div>
               <div className="mb-4">
-                <h3 className="font-syne text-xl font-bold text-on-surface">
+                <h3 className="font-manrope text-xl font-bold tracking-tight text-on-surface">
                   Recent audit activity
                 </h3>
                 <p className="mt-1 text-sm text-secondary">
@@ -1389,7 +1389,7 @@ export function Admin() {
                 <UserCog className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="font-syne text-lg font-bold text-on-surface">
+                <h3 className="font-manrope text-lg font-bold tracking-tight text-on-surface">
                   Secure configuration boundary
                 </h3>
                 <p className="mt-1 max-w-3xl text-sm leading-6 text-secondary">
@@ -1459,7 +1459,7 @@ export function Admin() {
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">
                   New team member
                 </p>
-                <h3 className="mt-2 font-syne text-2xl font-bold text-on-surface">
+                <h3 className="mt-2 font-manrope text-2xl font-bold tracking-tight text-on-surface">
                   Create user account
                 </h3>
                 <p className="mt-1 text-sm text-secondary">

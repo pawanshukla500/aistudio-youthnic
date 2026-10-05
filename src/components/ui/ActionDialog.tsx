@@ -93,7 +93,7 @@ export function ActionDialog({
             {danger ? <AlertTriangle className="h-5 w-5" /> : <CheckCircle2 className="h-5 w-5" />}
           </span>
           <div className="min-w-0 flex-1">
-            <h2 id={titleId} className="font-syne text-lg font-bold text-on-surface">{title}</h2>
+            <h2 id={titleId} className="font-manrope text-lg font-bold tracking-tight text-on-surface">{title}</h2>
             <p id={descriptionId} className="mt-1.5 text-sm leading-6 text-secondary">{description}</p>
           </div>
           <button type="button" onClick={onCancel} disabled={busy} aria-label="Close dialog" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-surface-container text-secondary transition hover:text-on-surface disabled:opacity-40">

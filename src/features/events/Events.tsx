@@ -249,7 +249,7 @@ function StatCard({ label, value, hint, icon: Icon, tone = "text-primary" }: { l
         <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-secondary">{label}</p>
         <Icon className={`h-4 w-4 ${tone}`} />
       </div>
-      <p className={`mt-2 truncate font-syne text-2xl font-bold leading-none ${tone}`} title={String(value)}>{value}</p>
+      <p className={`mt-2 truncate font-manrope text-2xl font-bold tracking-tight leading-none ${tone}`} title={String(value)}>{value}</p>
       {hint && <p className="mt-1.5 truncate text-[11px] text-secondary" title={hint}>{hint}</p>}
     </div>
   );
@@ -288,7 +288,7 @@ function DateBlock({ event }: { event: RoadmapEvent }) {
   return (
     <div className="w-16 shrink-0 text-center">
       <div className="rounded-xl bg-soft-blush py-2">
-        <p className="font-syne text-xl font-bold leading-none text-primary">{dayFmt.format(event.date)}</p>
+        <p className="font-manrope text-xl font-bold tracking-tight leading-none text-primary">{dayFmt.format(event.date)}</p>
         <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.14em] text-secondary">{shortMonthFmt.format(event.date)}</p>
       </div>
       <p className="mt-1 text-[10px] font-semibold text-secondary">{weekdayFmt.format(event.date)}</p>
@@ -302,7 +302,7 @@ function TimelineRow({ event, onOpen }: { event: RoadmapEvent; onOpen: () => voi
       <DateBlock event={event} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <button onClick={onOpen} className="truncate text-left font-syne text-base font-bold text-on-surface hover:text-primary">{event.name}</button>
+          <button onClick={onOpen} className="truncate text-left font-manrope text-base font-bold text-on-surface hover:text-primary">{event.name}</button>
           <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${priorityBadge(event.priority)}`}>{event.priority || "normal"}</span>
           <span className="rounded-full bg-info-surface px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-info">{countdownLabel(event.daysUntil)}</span>
         </div>
@@ -335,7 +335,7 @@ function EventCard({ event, onOpen }: { event: RoadmapEvent; onOpen: () => void 
         </div>
       </div>
 
-      <button onClick={onOpen} className="mt-4 text-left font-syne text-lg font-bold leading-tight text-on-surface hover:text-primary">{event.name}</button>
+      <button onClick={onOpen} className="mt-4 text-left font-manrope text-lg font-bold tracking-tight leading-tight text-on-surface hover:text-primary">{event.name}</button>
       <p className="mt-1 text-xs font-semibold uppercase tracking-wider text-secondary">{event.campaignSeason || typeLabel(event.type)}</p>
       {event.description && <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-secondary">{event.description}</p>}
 
@@ -439,7 +439,7 @@ function DetailDrawer({ event, onClose }: { event: RoadmapEvent; onClose: () => 
         <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-outline-variant/40 bg-white p-5">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">{typeLabel(event.type)}</p>
-            <h3 className="mt-1 font-syne text-xl font-bold text-on-surface">{event.name}</h3>
+            <h3 className="mt-1 font-manrope text-xl font-bold tracking-tight text-on-surface">{event.name}</h3>
             <p className="mt-1 text-xs text-secondary">{dateRangeLabel(event)} · {countdownLabel(event.daysUntil)}</p>
           </div>
           <button onClick={onClose} className="rounded p-2 text-secondary transition hover:bg-surface-container"><X className="h-5 w-5" /></button>
@@ -763,6 +763,7 @@ export function Events() {
               key={value}
               onClick={() => setView(value)}
               title={label}
+              aria-label={label}
               className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-bold transition ${view === value ? "bg-soft-blush text-primary" : "text-secondary hover:text-on-surface"}`}
             >
               <Icon className="h-3.5 w-3.5" /> {label}
@@ -830,7 +831,7 @@ export function Events() {
             {grouped.map(([key, monthEvents]) => (
               <div key={key}>
                 <div className="mb-2 flex items-baseline gap-3">
-                  <h4 className="font-syne text-sm font-bold uppercase tracking-[0.18em] text-primary">{monthFmt.format(monthEvents[0].date)}</h4>
+                  <h4 className="font-manrope text-sm font-bold uppercase tracking-[0.18em] text-primary">{monthFmt.format(monthEvents[0].date)}</h4>
                   <span className="text-[11px] text-secondary">{monthEvents.length} event{monthEvents.length === 1 ? "" : "s"}</span>
                   <span className="h-px flex-1 bg-outline-variant/40" />
                 </div>
@@ -851,7 +852,7 @@ export function Events() {
             <div className="mb-5 flex items-start justify-between">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-widest text-primary">Event reporting</p>
-                <h3 className="font-syne text-xl font-bold">Email the planning report</h3>
+                <h3 className="font-manrope text-xl font-bold tracking-tight text-on-surface">Email the planning report</h3>
                 <p className="mt-1 text-xs text-secondary">
                   Sends the {visible.filter((event) => event.daysUntil >= 0).length} upcoming event{visible.filter((event) => event.daysUntil >= 0).length === 1 ? "" : "s"} in the current view, themed like this page, with the date-wise Excel plan attached.
                 </p>
@@ -896,7 +897,7 @@ export function Events() {
             <div className="mb-6 flex items-center justify-between">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-widest text-primary">Campaign calendar</p>
-                <h3 className="font-syne text-xl font-bold">Add event</h3>
+                <h3 className="font-manrope text-xl font-bold tracking-tight text-on-surface">Add event</h3>
               </div>
               <button type="button" onClick={() => setShowCreate(false)} className="rounded p-2 text-secondary transition hover:bg-surface-container"><X className="h-5 w-5" /></button>
             </div>

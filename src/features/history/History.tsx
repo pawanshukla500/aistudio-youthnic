@@ -1081,7 +1081,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   />
                 )}
                 <div className="min-w-0 flex-1">
-                  <h4 className="truncate font-syne text-xs font-bold text-on-surface">
+                  <h4 className="truncate font-manrope text-xs font-bold text-on-surface">
                     {pose.poseNumber}. {pose.title}
                   </h4>
                 </div>
@@ -1452,7 +1452,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                               />
                             </button>
                             <div className="min-w-0 flex-1 text-[10px] leading-snug text-secondary">
-                              <p className="flex items-center gap-1.5 font-syne text-[11px] font-bold text-on-surface">
+                              <p className="flex items-center gap-1.5 font-manrope text-[11px] font-bold text-on-surface">
                                 Version {version.version}
                                 {version.isCurrent && (
                                   <span className="rounded-full bg-primary px-1.5 py-0.2 text-[8px] font-bold uppercase text-white">
@@ -1696,7 +1696,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             <div className="flex items-center justify-between border-b border-outline-variant/40 px-6 py-4">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Reference Asset</p>
-                <h3 className="font-syne text-lg font-bold text-on-surface">{selectedReference.label}</h3>
+                <h3 className="font-manrope text-lg font-bold tracking-tight text-on-surface">{selectedReference.label}</h3>
               </div>
               <button
                 onClick={() => setSelectedReference(null)}
@@ -1944,7 +1944,7 @@ export function History() {
         {jobs === undefined && (
           <div className="flex flex-col items-center justify-center py-24 text-secondary">
             <Loader2 className="mb-3 h-8 w-8 animate-spin text-primary" />
-            <span className="font-syne text-xs font-bold uppercase tracking-wider text-secondary">
+            <span className="font-manrope text-xs font-bold uppercase tracking-wider text-secondary">
               Synchronizing Archive…
             </span>
           </div>
@@ -2119,7 +2119,7 @@ export function History() {
             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-container text-secondary">
               <RefreshCcw className="h-6 w-6" />
             </div>
-            <p className="font-syne text-base font-bold text-on-surface">No productions found</p>
+            <p className="font-manrope text-base font-bold text-on-surface">No productions found</p>
             <p className="mt-1 text-xs text-secondary">Try adjusting your filters, source selector, or search term.</p>
           </div>
         )}

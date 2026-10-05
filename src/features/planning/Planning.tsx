@@ -607,7 +607,7 @@ export function Planning() {
                   <div className="grid h-10 w-10 place-items-center rounded-lg bg-soft-blush text-primary"><Layers className="h-5 w-5" /></div>
                   <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${statusChip(catalog.status)}`}>{statusLabel(catalog.status)}</span>
                 </div>
-                <h3 className="mt-4 font-syne text-lg font-bold text-on-surface">{catalog.name}</h3>
+                <h3 className="mt-4 font-manrope text-lg font-bold tracking-tight text-on-surface">{catalog.name}</h3>
                 <p className="mt-1 text-xs text-secondary">{catalog.eventName ? `${catalog.eventName} · ` : ""}{catalog.variantCount} colourway{catalog.variantCount === 1 ? "" : "s"}</p>
                 <div className="mt-4 flex items-center justify-between border-t border-outline-variant/30 pt-3 text-[12px]">
                   <span className="text-secondary">{catalog.readyCount}/{catalog.variantCount} ready</span>
@@ -637,7 +637,7 @@ export function Planning() {
                 <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
                   <div>
                     <div className="flex flex-wrap items-center gap-3">
-                      <h2 className="font-syne text-2xl font-bold text-on-surface">{selected.name}</h2>
+                      <h2 className="font-manrope text-2xl font-bold tracking-tight text-on-surface">{selected.name}</h2>
                       <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${statusChip(selected.status)}`}>{statusLabel(selected.status)}</span>
                       {["scheduled", "queued", "processing", "generating"].includes(selected.status) && (
                         <button disabled={busy === "stop-catalog-generation"} onClick={() => setPendingAction({ type: "stop_catalog" })} className="flex items-center gap-1.5 rounded-lg border border-warning/20 px-2 py-1 text-[11px] font-semibold text-warning hover:bg-warning-surface disabled:opacity-50">
@@ -653,7 +653,7 @@ export function Planning() {
                   </div>
                   <div className="rounded-xl bg-surface-container-low px-4 py-3 text-right">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-secondary">Catalog readiness</p>
-                    <p className="mt-1 font-syne text-xl font-bold text-on-surface">{readyCount}/{selected.variants.length || 0}</p>
+                    <p className="mt-1 font-manrope text-xl font-bold tracking-tight text-on-surface">{readyCount}/{selected.variants.length || 0}</p>
                     <p className="text-[11px] text-secondary">colourways ready</p>
                   </div>
                 </div>
@@ -684,7 +684,7 @@ export function Planning() {
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Step 1 · Creative direction</p>
-                    <h3 className="mt-1 font-syne text-lg font-bold text-on-surface">Shared style / scene references</h3>
+                    <h3 className="mt-1 font-manrope text-lg font-bold tracking-tight text-on-surface">Shared style / scene references</h3>
                     <p className="mt-1 max-w-2xl text-xs leading-5 text-secondary">Upload up to three references for background, composition, lighting, mood, and styling. They apply to every colourway but never replace the uploaded product.</p>
                   </div>
                   {canEditReferences && selected.styleReferences.length < 3 && (
@@ -715,7 +715,7 @@ export function Planning() {
                   <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                     <div>
                       <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Catalogue styling plan</p>
-                      <h3 className="mt-1 font-syne text-lg font-bold text-on-surface">Footwear, jewellery & styling</h3>
+                      <h3 className="mt-1 font-manrope text-lg font-bold tracking-tight text-on-surface">Footwear, jewellery & styling</h3>
                       <p className="mt-1 max-w-2xl text-xs leading-5 text-secondary">
                         Proposed from the first analysed colourway and the shared references. Approve it once and every SKU in this catalog is styled identically.
                       </p>
@@ -749,7 +749,7 @@ export function Planning() {
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Optional · Model face lock</p>
-                    <h3 className="mt-1 font-syne text-lg font-bold text-on-surface">Model identity reference</h3>
+                    <h3 className="mt-1 font-manrope text-lg font-bold tracking-tight text-on-surface">Model identity reference</h3>
                     <p className="mt-1 max-w-2xl text-xs leading-5 text-secondary">Upload one clear face photo to lock every colourway in this catalog to that exact model, instead of letting the shoot design and self-lock its own face. Leave empty to keep the default behaviour.</p>
                   </div>
                   {canEditReferences && !selected.modelReference && (
@@ -777,7 +777,7 @@ export function Planning() {
 
               <section className="space-y-4">
                 <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
-                  <div><p className="text-[10px] font-bold uppercase tracking-widest text-primary">Step 2 · Product truth</p><h3 className="mt-1 font-syne text-lg font-bold text-on-surface">Colourways and garment references</h3><p className="mt-1 text-xs text-secondary">Front and back are required for each SKU. Fabric detail and an additional product photo improve product accuracy.</p></div>
+                  <div><p className="text-[10px] font-bold uppercase tracking-widest text-primary">Step 2 · Product truth</p><h3 className="mt-1 font-manrope text-lg font-bold tracking-tight text-on-surface">Colourways and garment references</h3><p className="mt-1 text-xs text-secondary">Front and back are required for each SKU. Fabric detail and an additional product photo improve product accuracy.</p></div>
                   <p className={`text-xs font-semibold ${incompleteCount ? "text-warning" : "text-success"}`}>{incompleteCount ? `${incompleteCount} colourway${incompleteCount === 1 ? "" : "s"} still need references` : "All colourways are ready"}</p>
                 </div>
                 {canEditReferences && (
@@ -881,7 +881,7 @@ export function Planning() {
                 <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_430px]">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Steps 3–4 · Analyze and generate</p>
-                    <h3 className="mt-1 font-syne text-lg font-bold text-on-surface">Automatic catalog generation</h3>
+                    <h3 className="mt-1 font-manrope text-lg font-bold tracking-tight text-on-surface">Automatic catalog generation</h3>
                     <p className="mt-1 max-w-2xl text-xs leading-5 text-secondary">At the scheduled time, Gemini analyzes the hero references and locks the six-pose plan. GPT Image 2 generates the hero first, then each ready colourway one-by-one with the same approved model and scene.</p>
                     <div className="mt-4 grid gap-2 sm:grid-cols-2">
                       {[
@@ -902,7 +902,7 @@ export function Planning() {
                     {selected.status === "scheduled" ? (
                       <div>
                         <div className="flex items-center gap-2 text-info"><CalendarClock className="h-5 w-5" /><p className="text-sm font-bold">Automatic run scheduled</p></div>
-                        <p className="mt-3 font-syne text-xl font-bold text-on-surface">{selected.scheduledAt ? new Date(selected.scheduledAt).toLocaleDateString("en-IN", { dateStyle: "long" }) : "Scheduled"}</p>
+                        <p className="mt-3 font-manrope text-xl font-bold tracking-tight text-on-surface">{selected.scheduledAt ? new Date(selected.scheduledAt).toLocaleDateString("en-IN", { dateStyle: "long" }) : "Scheduled"}</p>
                         <p className="mt-1 text-sm text-secondary">{selected.scheduledAt ? new Date(selected.scheduledAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""} · Asia/Kolkata</p>
                         <label className="mt-4 block text-xs font-bold text-on-surface">Change run time<input type="datetime-local" value={scheduleAt} min={toDateTimeInput(Date.now())} onChange={(event) => setScheduleAt(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-outline-variant bg-white px-3 text-sm font-normal outline-none focus:border-primary" /></label>
                         <button disabled={busy === "schedule" || !scheduleAt} onClick={() => void runSchedule(new Date(scheduleAt).getTime())} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{busy === "schedule" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />} Save new time</button>
@@ -944,7 +944,7 @@ export function Planning() {
               <section className="mt-6 rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-sm">
                 <div className="mb-4">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Proper Trail</p>
-                  <h3 className="mt-1 font-syne text-lg font-bold text-on-surface">Variants &amp; Session History</h3>
+                  <h3 className="mt-1 font-manrope text-lg font-bold tracking-tight text-on-surface">Variants &amp; Session History</h3>
                   <p className="mt-1 text-xs leading-5 text-secondary">
                     Below are all the colourways in this catalog. Copy the <b>Session ID</b> to look up the exact generation trail, status, and logs in the History tab.
                   </p>
@@ -1013,7 +1013,7 @@ export function Planning() {
         <div className="fixed inset-0 z-50 grid place-items-center bg-navy-soft/45 p-4">
           <form onSubmit={submitCreate} className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-auto rounded-2xl bg-white p-6 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
-              <div><p className="text-[11px] font-bold uppercase tracking-widest text-primary">New catalog</p><h3 className="font-syne text-xl font-bold">Colourway batch &amp; shared look</h3></div>
+              <div><p className="text-[11px] font-bold uppercase tracking-widest text-primary">New catalog</p><h3 className="font-manrope text-xl font-bold tracking-tight text-on-surface">Colourway batch &amp; shared look</h3></div>
               <button type="button" onClick={() => setShowCreate(false)} className="rounded-md p-2 text-secondary hover:bg-surface-container"><X className="h-5 w-5" /></button>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

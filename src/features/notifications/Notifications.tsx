@@ -15,7 +15,7 @@ export function Notifications() {
 
   return (
     <div className="mx-auto min-h-[calc(100vh-80px)] max-w-[800px] space-y-6 bg-paper-canvas p-8">
-      <div className="flex items-end justify-between border-b border-outline-variant/30 pb-4"><h2 className="flex items-center gap-3 font-syne text-3xl font-bold text-on-surface"><Bell className="h-8 w-8 text-primary" /> Notifications</h2><button onClick={() => markAllRead({  organizationId: organization._id })} className="text-[13px] font-semibold text-primary hover:underline">Mark all as read</button></div>
+      <div className="flex items-end justify-between border-b border-outline-variant/30 pb-4"><h2 className="flex items-center gap-3 font-manrope text-2xl sm:text-[28px] font-bold tracking-tight text-on-surface"><Bell className="h-8 w-8 text-primary" /> Notifications</h2><button onClick={() => markAllRead({  organizationId: organization._id })} className="text-[13px] font-semibold text-primary hover:underline">Mark all as read</button></div>
       <div className="space-y-3">
         {_notificationsError && <div className="p-8 text-center text-sm text-red-500">Failed to load notifications.</div>}
         {!_notificationsError && notifications === undefined && <div className="p-8 text-center text-sm text-secondary">Loading notifications…</div>}
