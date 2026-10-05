@@ -42,6 +42,18 @@ const skillsToInstall = [
     path: 'testing/testing-api-tester.md',
     name: 'agency-testing-api-tester',
   },
+  {
+    path: 'engineering/engineering-code-reviewer.md',
+    name: 'agency-engineering-code-reviewer',
+  },
+  {
+    path: 'engineering/engineering-software-architect.md',
+    name: 'agency-engineering-software-architect',
+  },
+  {
+    path: 'engineering/engineering-ai-engineer.md',
+    name: 'agency-engineering-ai-engineer',
+  },
 ];
 
 const RAW_BASE = 'https://raw.githubusercontent.com/msitarzewski/agency-agents/main/';

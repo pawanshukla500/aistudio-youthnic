@@ -134,7 +134,7 @@ export function PosePlan({
                   <span className="text-[10px] font-bold uppercase tracking-widest text-primary">
                     Inspecting Pose {poses.findIndex((p) => p.id === selected.id) + 1} of {poses.length}
                   </span>
-                  <h3 className="font-syne text-lg font-bold text-on-surface">{selected.title}</h3>
+                  <h3 className="font-manrope text-lg font-bold tracking-tight text-on-surface">{selected.title}</h3>
                 </div>
                 <span className="rounded-full bg-soft-blush px-3 py-1 text-xs font-semibold text-primary border border-primary/20">
                   {selected.purpose}
