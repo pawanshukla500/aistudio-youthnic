@@ -10,6 +10,22 @@
     --card-foreground: #131b2e;
     --color-foreground: #131b2e;
     --color-muted-foreground: #575f69;
+    --popover: #ffffff;
+    --popover-foreground: #131b2e;
+    --primary: #970046;
+    --primary-foreground: #ffffff;
+    --secondary: #f2f3ff;
+    --secondary-foreground: #131b2e;
+    --muted: #f2f3ff;
+    --muted-foreground: #575f69;
+    --accent: #eaedff;
+    --accent-foreground: #131b2e;
+    --destructive: #ba1a1a;
+    --destructive-foreground: #ffffff;
+    --border: #e0bec4;
+    --input: #e0bec4;
+    --ring: #970046;
+    --radius: 0.5rem;
   }
 
   *, ::before, ::after {

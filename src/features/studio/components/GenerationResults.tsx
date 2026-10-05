@@ -1,6 +1,6 @@
 import { CheckCircle2, Clock3, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 import type { Id } from "../../../lib/backend";
-import { Button } from "../../../components/ui/Button";
+import { Button } from "@/components/ui/button";
 import { generationDeliveryProgress } from "../../../lib/generationProgress";
 
 export function GenerationResults({

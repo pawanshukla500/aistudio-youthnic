@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, Ban, Check, CheckCircle2, ChevronRight, History as HistoryIcon, Images, Loader2, Sparkles, Wand2, X } from "lucide-react";
 import { api, useAction, useMutation, useQuery, type Id } from "../../lib/backend";
-import { Button } from "../../components/ui/Button";
+import { Button } from "@/components/ui/button";
 import { ActionDialog } from "../../components/ui/ActionDialog";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import { uploadCatalogAsset } from "../../lib/catalogStorage";

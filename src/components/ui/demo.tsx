@@ -1,4 +1,7 @@
 import { ImageGeneration } from "@/components/ui/ai-chat-image-generation-1";
+import { ImageSliderLoginDemo } from "@/components/ui/image-slider-login-demo";
+
+export { ImageSliderLoginDemo };
 
 export function ImageGenerationDemo() {
   return (
@@ -14,4 +17,4 @@ export function ImageGenerationDemo() {
   );
 }
 
-export default ImageGenerationDemo;
+export default ImageSliderLoginDemo;
