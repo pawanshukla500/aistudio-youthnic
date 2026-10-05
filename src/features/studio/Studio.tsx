@@ -180,7 +180,10 @@ function makeReference(role: StudioReference["role"], file: File): StudioReferen
 }
 
 function validateFile(file: File) {
-  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+  const allowedMimes = ["image/png", "image/jpeg", "image/webp", "image/jpg"];
+  const extension = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+  const allowedExts = [".png", ".jpg", ".jpeg", ".webp"];
+  if (!allowedMimes.includes(file.type.toLowerCase()) && !allowedExts.includes(extension)) {
     return `${file.name} must be PNG, JPEG, or WebP.`;
   }
   if (file.size > 20 * 1024 * 1024) return `${file.name} is larger than 20 MB.`;
@@ -261,6 +264,19 @@ export function Studio() {
     () => [...Object.values(productReferences).filter(Boolean), ...(modelReference ? [modelReference] : []), ...styleReferences] as StudioReference[],
     [modelReference, productReferences, styleReferences],
   );
+
+  // Revoke active blob preview URLs on unmount to free browser memory
+  const allReferencesRef = useRef(allReferences);
+  allReferencesRef.current = allReferences;
+  useEffect(() => {
+    return () => {
+      allReferencesRef.current.forEach((reference) => {
+        if (reference.previewUrl && reference.previewUrl.startsWith("blob:")) {
+          URL.revokeObjectURL(reference.previewUrl);
+        }
+      });
+    };
+  }, []);
   const isSareeCategory = category === "saree";
   const requiredReady = isSareeCategory
     ? Boolean(
@@ -553,6 +569,9 @@ export function Studio() {
     void runAnalysis(analysisInputKey, false, true);
   };
 
+  const runAnalysisRef = useRef(runAnalysis);
+  runAnalysisRef.current = runAnalysis;
+
   useEffect(() => {
     analysisRequestRef.current += 1;
     setAnalysisSourceKey((current) => current === analysisInputKey ? current : null);
@@ -561,7 +580,7 @@ export function Studio() {
       return;
     }
     autoAnalyzeTimerRef.current = setTimeout(() => {
-      void runAnalysis(analysisInputKey, true);
+      void runAnalysisRef.current(analysisInputKey, true);
     }, AUTO_ANALYZE_DELAY_MS);
     return () => {
       if (autoAnalyzeTimerRef.current) clearTimeout(autoAnalyzeTimerRef.current);
