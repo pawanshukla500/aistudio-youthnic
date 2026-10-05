@@ -1145,7 +1145,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   Pose {selectedPose.poseNumber}
                   {selectedNavIndex >= 0 ? ` · Frame ${selectedNavIndex + 1} of ${navigablePoses.length}` : ""}
                 </p>
-                <h3 className="font-syne text-xl font-black text-on-surface">{selectedPose.title}</h3>
+                <h3 className="font-manrope text-xl font-bold text-on-surface">{selectedPose.title}</h3>
               </div>
               <div className="flex items-center gap-2">
                 <span className="mr-2 hidden rounded-lg bg-surface-container px-2 py-1 text-[10px] font-mono text-secondary md:inline">
@@ -1329,7 +1329,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4 shadow-xs">
                     <div className="flex items-baseline justify-between">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Gemini Vision QA Score</p>
-                      <p className={`font-mono text-xl font-black ${fidelityTone(selectedPose.productFidelity)}`}>
+                      <p className={`font-mono text-xl font-bold ${fidelityTone(selectedPose.productFidelity)}`}>
                         {selectedPose.productFidelity}%
                       </p>
                     </div>
@@ -1607,7 +1607,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">
                   Pose {regenerateTarget.poseNumber}
                 </p>
-                <h3 className="mt-1 font-syne text-2xl font-black text-on-surface">Regenerate {regenerateTarget.title}</h3>
+                <h3 className="mt-1 font-manrope text-2xl font-bold text-on-surface">Regenerate {regenerateTarget.title}</h3>
                 <p className="mt-1 text-xs leading-relaxed text-secondary">
                   Specify targeted corrections. Original garment silhouette, fabric texture, model identity, and camera setup remain locked.
                 </p>
@@ -1870,7 +1870,7 @@ export function History() {
               <span className="font-mono text-xs text-secondary">({jobsPage.total} shoots)</span>
             )}
           </div>
-          <h1 className="font-syne text-display-md font-black tracking-tight text-on-surface">
+          <h1 className="font-manrope text-2xl sm:text-[28px] font-bold tracking-tight text-on-surface">
             History & Productions
           </h1>
           <p className="mt-1 text-xs text-secondary">

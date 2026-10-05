@@ -644,7 +644,7 @@ export function Studio() {
               6-Pose Engine Active
             </span>
           </div>
-          <h1 className="mt-1 font-syne text-2xl font-bold tracking-tight text-on-surface">
+          <h1 className="mt-1 font-manrope text-2xl sm:text-[28px] font-bold tracking-tight text-on-surface">
             Catalog Photoshoot Production
           </h1>
         </div>

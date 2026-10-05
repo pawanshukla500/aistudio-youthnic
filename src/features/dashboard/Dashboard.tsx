@@ -54,7 +54,7 @@ export function Dashboard() {
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div>
         <p className="mb-1 text-[11px] font-label-caps uppercase tracking-widest text-secondary">Operations summary</p>
-        <h2 className="text-display-md text-on-surface">Dashboard</h2>
+        <h2 className="font-manrope text-2xl sm:text-[28px] font-bold tracking-tight text-on-surface">Dashboard</h2>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-secondary">Live generation health, output volume, token telemetry, and authoritative organization cost in one view.</p>
         </div>
         <span className="w-fit rounded-full border border-outline-variant/50 bg-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-secondary">14-day window</span>

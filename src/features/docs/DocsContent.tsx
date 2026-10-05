@@ -44,7 +44,7 @@ export function DocsContent({ content, title, description, group }: DocsContentP
         <div className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
           <span>{group}</span>
         </div>
-        <h1 className="font-syne text-3xl font-bold tracking-tight text-on-surface lg:text-4xl">
+        <h1 className="font-manrope text-2xl sm:text-[28px] font-bold tracking-tight text-on-surface lg:text-3xl">
           {title}
         </h1>
         {description && (

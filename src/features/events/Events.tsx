@@ -689,7 +689,7 @@ export function Events() {
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div>
           <p className="mb-1 text-[11px] font-label-caps uppercase tracking-widest text-secondary">Campaign intelligence</p>
-          <h2 className="text-display-md text-on-surface">Events roadmap</h2>
+          <h2 className="font-manrope text-2xl sm:text-[28px] font-bold tracking-tight text-on-surface">Events roadmap</h2>
           <p className="mt-1 max-w-2xl text-sm text-secondary">
             State festivals, marketplace sale windows and seasonal peaks with dated prep deadlines, so catalog work is planned backward from every event.
             {lastRun && (

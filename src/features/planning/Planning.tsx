@@ -562,7 +562,7 @@ export function Planning() {
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <p className="mb-1 text-[11px] font-label-caps uppercase tracking-widest text-secondary">Planning</p>
-          <h2 className="text-display-md text-on-surface">Catalogs & campaigns</h2>
+          <h2 className="font-manrope text-2xl sm:text-[28px] font-bold tracking-tight text-on-surface">Catalogs & campaigns</h2>
           <p className="mt-1 text-sm text-secondary">Build a colourway catalog, upload front/back per colour, and schedule one consistent shoot.</p>
         </div>
         {!selectedId && (
