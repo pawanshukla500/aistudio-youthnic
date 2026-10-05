@@ -1769,7 +1769,8 @@ async function analyze(request: Request, args: JsonRecord) {
     await service.from("analysis_cache").upsert({
       organization_id: orgId, org_key: orgId, cache_kind: "studio_product_analysis", cache_key: cacheKey,
       sku_name: String(args.skuName || ""), product_category: String(args.category || ""), payload: normalized,
-      expires_at: new Date(Date.now() + 30 * 86400_000).toISOString(), updated_at: new Date().toISOString(),
+      // Long-term retention: guarantee 2-3 year preservation (1,095 days) without short-term 30-day expiration
+      expires_at: new Date(Date.now() + 3 * 365 * 86400_000).toISOString(), updated_at: new Date().toISOString(),
     }, { onConflict: "org_key,cache_kind,cache_key" });
     const calculated = await pricedVisionUsage(result.raw, result.policy.provider, result.policy.model);
     const winner = result.attempts.find((attempt) => attempt.outcome === "completed");
