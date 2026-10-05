@@ -33,7 +33,7 @@ export function GenerationResults({
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
         {job.poses.map((pose: any) => (
           <article key={pose._id} className="overflow-hidden rounded-xl border border-outline-variant/40 bg-white shadow-sm">
             <div className="relative aspect-[3/4] bg-surface-container-low">

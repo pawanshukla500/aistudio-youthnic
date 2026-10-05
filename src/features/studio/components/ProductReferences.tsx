@@ -48,7 +48,16 @@ function ReferenceCard({
   return (
     <div className="group/card relative">
       <label
-        className={`group relative flex aspect-[4/3] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed bg-white p-3.5 text-center shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-soft-blush/30 hover:shadow-md ${
+        tabIndex={0}
+        role="button"
+        aria-label={reference ? `Replace ${label}` : label}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            (event.currentTarget.querySelector("input[type=file]") as HTMLInputElement)?.click();
+          }
+        }}
+        className={`group relative flex aspect-[4/3] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed bg-white p-3.5 text-center shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/50 hover:bg-soft-blush/30 hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/20 focus-visible:border-primary ${
           dragging ? "border-primary bg-primary/8 ring-4 ring-primary/10 scale-[1.01]" : "border-outline-variant/60"
         } ${reference ? "border-solid border-outline-variant/40 bg-white" : ""}`}
         onDragEnter={(event) => {
