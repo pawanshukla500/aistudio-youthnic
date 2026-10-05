@@ -1862,9 +1862,12 @@ export function History() {
       {/* EDITORIAL ATELIER HEADER */}
       <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end border-b border-outline-variant/30 pb-6">
         <div>
-          <div className="flex items-center gap-2 mb-1.5">
+          <div className="flex flex-wrap items-center gap-2 mb-1.5">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-soft-blush px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
               <Sparkles className="h-3 w-3" /> Youthnic Atelier Archive
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+              <ShieldCheck className="h-3 w-3" /> 2–3 Year Cloud Retention
             </span>
             {jobsPage?.total !== undefined && (
               <span className="font-mono text-xs text-secondary">({jobsPage.total} shoots)</span>

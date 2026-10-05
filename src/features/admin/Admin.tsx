@@ -1401,6 +1401,24 @@ export function Admin() {
                 </p>
               </div>
             </div>
+            <div className="flex items-start gap-4 rounded-2xl border border-emerald-500/30 bg-emerald-50/40 p-5">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-100 text-emerald-700">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-manrope text-lg font-bold tracking-tight text-on-surface">
+                    Asset retention & cloud preservation policy
+                  </h3>
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+                    2–3 Year Guarantee (1,095 Days)
+                  </span>
+                </div>
+                <p className="mt-1 max-w-3xl text-sm leading-6 text-secondary">
+                  All generated photoshoot assets, multi-pose master files, ZIP archives, and product reference analyses are retained in cloud storage for 2–3 years (1,095 days). The legacy 30–60 day auto-deletion lifecycle has been disabled; photoshoots remain persistently accessible for e-commerce feeds, marketing replays, and catalog downloads.
+                </p>
+              </div>
+            </div>
           </section>
         )}
         
