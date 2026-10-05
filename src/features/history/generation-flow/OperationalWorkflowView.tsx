@@ -420,7 +420,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
                 <span>{item.request_code}</span><span className="h-1 w-1 rounded-full bg-white/25" /><span>{data.batch?.name || "Standalone requirement"}</span>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/15 px-2.5 py-1 text-[10px] tracking-[0.12em] text-emerald-200"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300" /> Live</span>
               </div>
-              <h1 className="mt-3 font-syne text-2xl font-bold tracking-tight sm:text-3xl">{item.sku_name}</h1>
+              <h1 className="mt-3 font-manrope text-2xl font-bold tracking-tight sm:text-3xl">{item.sku_name}</h1>
               <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-white/65">
                 <span className="inline-flex items-center gap-1.5"><PackageCheck className="h-3.5 w-3.5" /> {currentStage?.title || words(item.workflow_stage)}</span>
                 <span className="inline-flex items-center gap-1.5"><UserRound className="h-3.5 w-3.5" /> {memberName(item.generation_assigned_member)}</span>
