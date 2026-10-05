@@ -5,6 +5,13 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --card: #ffffff;
+    --card-foreground: #131b2e;
+    --color-foreground: #131b2e;
+    --color-muted-foreground: #575f69;
+  }
+
   *, ::before, ::after {
     box-sizing: border-box;
   }
