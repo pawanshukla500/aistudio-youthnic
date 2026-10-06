@@ -1001,6 +1001,145 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   });
   assertStringIncludes(pose6Prompt, "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE)");
   assertStringIncludes(pose6Prompt, "Framing, angle, and physical stance MUST visibly diverge from Pose 1");
+  assertStringIncludes(pose6Prompt, "It must complement the other five images while showing a distinctly different pose");
+});
+
+Deno.test("composeGenerationPrompt enforces anatomical integrity and eliminates extra hands", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "GREEN-BANARASI-SAREE",
+    productDetails: "Bottle green banarasi saree with gold zari butti and heavy pallu",
+    pose: {
+      id: "full_front",
+      title: "Hero Front Saree Pose",
+      poseNumber: 1,
+      description: "Full front standing pose holding pallu edge",
+      cameraAngle: "eye level",
+      framing: "full length",
+      bodyPosition: "tall elegant posture",
+      handPlacement: "left hand holds pallu edge, right hand at side",
+      expression: "gentle smile",
+      highlightedDetails: ["pallu zari", "body butti"],
+      productVisibilityRules: ["pallu visible", "pleats visible"],
+      purpose: "hero catalog shot",
+      consistencyNotes: "establish identity",
+      prompt: "Model standing wearing green saree.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "saree",
+        mainColor: "bottle green",
+        sareeTruth: {},
+        sareeDrapePlan: {},
+      },
+      creativeDirection: {
+        backgroundStyle: "Terracotta studio with warm spotlight",
+      },
+    },
+    references: [
+      { role: "front" },
+      { role: "style_reference" },
+    ],
+  });
+
+  // Verify anatomical integrity directive in prompt
+  assertStringIncludes(prompt, "STRICT HUMAN ANATOMY & NATURAL LIMB INTEGRITY (ZERO TOLERANCE FOR EXTRA LIMBS):");
+  assertStringIncludes(prompt, "EXACTLY TWO ARMS AND TWO HANDS: The model must have strictly and exactly TWO arms and TWO hands in total.");
+  assertStringIncludes(prompt, "It is STRICTLY FORBIDDEN to render a third hand, extra hand, extra arm, duplicate wrist, floating hand, or phantom limb");
+  assertStringIncludes(prompt, "COORDINATED HAND PLACEMENT: When one hand is holding, touching, or adjusting the garment/pallu/dupatta, the other hand must be naturally placed");
+  assertStringIncludes(prompt, "NO THIRD HAND may appear resting on the waist, navel, or pleats");
+  assertStringIncludes(prompt, "STRICT ANATOMICAL RULE: NEVER render three hands, extra arms, duplicate hands, floating hands, phantom limbs, or extra body parts.");
+});
+
+Deno.test("composeGenerationPrompt enforces absolute quarantine of style reference clothing", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "ROYAL-KURTI-SET",
+    productDetails: "Navy blue silk kurti with delicate gold butti work and matching trousers",
+    pose: {
+      id: "angled",
+      title: "Three-Quarter Angle",
+      poseNumber: 2,
+      description: "35 degree angle turn",
+      cameraAngle: "slight low",
+      framing: "three quarter",
+      bodyPosition: "turned 40 degrees",
+      handPlacement: "one hand relaxed at side",
+      expression: "composed editorial",
+      highlightedDetails: ["kurti butti work", "side slit"],
+      productVisibilityRules: ["kurti visible", "trousers visible"],
+      purpose: "side angle shot",
+      consistencyNotes: "locked scene",
+      prompt: "Model turned at angle showing side construction.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "navy blue",
+      },
+      creativeDirection: {
+        backgroundStyle: "Minimal modern interior with arched doorway",
+      },
+    },
+    references: [
+      { role: "front" },
+      { role: "style_reference" },
+    ],
+  });
+
+  // Verify critical product integrity rule in EDIT GOAL
+  assertStringIncludes(prompt, "CRITICAL PRODUCT INTEGRITY RULE: The product clothing (garment, fabric, colors, prints, embroidery, neckline, sleeves, and bottom wear) must be taken EXCLUSIVELY and EXACTLY from the UPLOADED PRODUCT reference images.");
+  assertStringIncludes(prompt, "The clothing/outfit worn by the person in the STYLE REFERENCE image is strictly ignored and 100% DISCARDED.");
+  assertStringIncludes(prompt, "Absolutely DO NOT copy, transfer, or blend the style reference image's garment onto the model.");
+  assertStringIncludes(prompt, "Dress the model ONLY in the uploaded product.");
+
+  // Verify scope directive
+  assertStringIncludes(prompt, "ABSOLUTE PROHIBITION ON COPYING THE STYLE REFERENCE GARMENT: The clothing, outfit, saree, dress, fabric, color, embroidery, or prints shown on the person in the STYLE REFERENCE image MUST BE 100% DISCARDED.");
+  assertStringIncludes(prompt, "STRICT PRODUCT ISOLATION RULE: Never copy, transfer, or borrow the clothing, saree, dress, colors, prints, or embroidery from the STYLE REFERENCE image. Dress the model ONLY in the uploaded product.");
+});
+
+Deno.test("composeGenerationPrompt ensures Pose 5 highlights primary garment butti/craft and forbids dupatta hijack", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "EMBROIDERED-KURTI-SET",
+    productDetails: "Cream kurti with intricate floral butti work, matching pants, and plain red dupatta",
+    pose: {
+      id: "closeup",
+      title: "Kurti Butti Craftsmanship Detail",
+      poseNumber: 5,
+      description: "Zoomed in macro shot of kurti butti work",
+      cameraAngle: "straight on macro",
+      framing: "tight detail",
+      bodyPosition: "slight turn",
+      handPlacement: "away from chest",
+      expression: "gentle smile",
+      highlightedDetails: ["kurti butti work", "neckline craft"],
+      productVisibilityRules: ["butti work catalog readable"],
+      purpose: "macro craftsmanship sell",
+      consistencyNotes: "locked identity",
+      prompt: "Macro close up of kurti butti work embroidery.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "cream",
+      },
+      creativeDirection: {
+        closeupMode: "product_detail",
+        closeupHeroDetail: "intricate floral butti work on kurti body",
+      },
+    },
+    references: [
+      { role: "front" },
+      { role: "fabric_pattern" },
+    ],
+  });
+
+  assertStringIncludes(prompt, "POSE 5 PRIMARY PRODUCT FOCUS: Pose 5 MUST highlight the PRIMARY UPLOADED PRODUCT GARMENT's key signature details (such as kurti butti work, yoke/chest embroidery, neckline craft, handwork, or weave).");
+  assertStringIncludes(prompt, "It is STRICTLY FORBIDDEN to focus on or fill the frame with a secondary accessory like a dupatta, stole, or scarf when the primary garment has butti work, embroidery, or craftsmanship to showcase.");
+  assertStringIncludes(prompt, "Highlight the core product!");
+  assertStringIncludes(prompt, "CURRENT FRAME (POSE 5 - ZOOMED-IN DETAIL): Genuinely zoomed in on product craftsmanship and selling details.");
+  assertStringIncludes(prompt, "must NEVER focus on a secondary accessory like a dupatta or stole");
 });
 
 
