@@ -550,7 +550,7 @@ function defaultVisionRoute(args: {
 }): NormalizedAiModelRoute {
   if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
     return assertAllowedAiModelRoute(
-      FAST_PRODUCT_TRUTH_ROUTE,
+      FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE,
       args.purpose,
       { strictJson: true },
     );
@@ -572,7 +572,7 @@ function defaultVisionRoute(args: {
 function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiModelRoute {
   if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
     return assertAllowedAiModelRoute(
-      CHEAP_OPENAI_VISION_ROUTE,
+      LUNA_HIGH_THINKING_VISION_ROUTE,
       args.purpose,
       { strictJson: true },
     );
@@ -588,7 +588,7 @@ function defaultVisionFallbacks(args: { purpose: VisionPurpose }): NormalizedAiM
   if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
     return [
       assertAllowedAiModelRoute(
-        CHEAP_OPENAI_VISION_ROUTE,
+        LUNA_HIGH_THINKING_VISION_ROUTE,
         args.purpose,
         { strictJson: true },
       ),
@@ -1415,6 +1415,14 @@ async function openAiVisionJson(
   }
 }
 
+function metaModelSibling(model: string): string | null {
+  if (model === "muse-spark-1.2-contributor") return "muse-spark-1.3-contributor";
+  if (model === "muse-spark-1.3-contributor") return "muse-spark-1.2-contributor";
+  if (model === "muse-spark-1.3") return "muse-spark-1.2";
+  if (model === "muse-spark-1.2") return "muse-spark-1.3";
+  return null;
+}
+
 async function metaResponsesVisionJson(
   route: NormalizedAiModelRoute,
   parts: JsonRecord[],
@@ -1424,45 +1432,59 @@ async function metaResponsesVisionJson(
   const effort = route.thinkingLevel === "none" ? "minimal" : route.thinkingLevel;
   const content = responseContentFromParts(parts);
   const inputVariants = [
-    [{ type: "message", role: "user", content }],
     [{ role: "user", content }],
+    [{ type: "message", role: "user", content }],
   ];
+  const sibling = metaModelSibling(route.model);
+  const modelCandidates = sibling ? [route.model, sibling] : [route.model];
+
   let lastError: unknown;
   const startedAt = Date.now();
-  for (const input of inputVariants) {
-    const elapsed = Date.now() - startedAt;
-    const remainingMs = timeoutMs - elapsed;
-    if (remainingMs < 2_000) {
-      throw lastError || visionHopTimeoutError("Meta Responses API timed out.");
-    }
-    const response = await fetch("https://api.meta.ai/v1/responses", {
-      method: "POST",
-      signal: AbortSignal.timeout(remainingMs),
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${requiredEnv("META_MODEL_API_KEY")}`,
-      },
-      body: JSON.stringify({
-        model: route.model,
-        input,
-        reasoning: { effort },
-        max_output_tokens: 16384,
-      }),
-    });
-    const data = await response.json().catch(() => ({})) as JsonRecord;
-    if (!response.ok) {
-      const providerError = data.error as JsonRecord | undefined;
-      lastError = visionProviderError(route, {
-        status: response.status,
-        message: String(providerError?.message || data.message || `Meta Muse Spark vision request failed (${response.status}).`),
-        code: String(providerError?.code || providerError?.type || ""),
+
+  for (const modelCandidate of modelCandidates) {
+    for (const input of inputVariants) {
+      const elapsed = Date.now() - startedAt;
+      const remainingMs = timeoutMs - elapsed;
+      if (remainingMs < 2_000) {
+        throw lastError || visionHopTimeoutError("Meta Responses API timed out.");
+      }
+      const response = await fetch("https://api.meta.ai/v1/responses", {
+        method: "POST",
+        signal: AbortSignal.timeout(remainingMs),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${requiredEnv("META_MODEL_API_KEY")}`,
+        },
+        body: JSON.stringify({
+          model: modelCandidate,
+          input,
+          reasoning: { effort },
+          max_output_tokens: 16384,
+        }),
       });
-      if (response.status === 400 && input === inputVariants[0]) continue;
-      throw lastError;
+      const data = await response.json().catch(() => ({})) as JsonRecord;
+      if (!response.ok) {
+        const providerError = data.error as JsonRecord | undefined;
+        lastError = visionProviderError({ ...route, model: modelCandidate }, {
+          status: response.status,
+          message: String(providerError?.message || data.message || `Meta Muse Spark vision request failed (${response.status}).`),
+          code: String(providerError?.code || providerError?.type || ""),
+        });
+        // If 404 or model not found, try sibling model if one remains
+        if (
+          (response.status === 404 || /not found|not available/i.test(String(providerError?.message || data.message || ""))) &&
+          modelCandidate === modelCandidates[0] &&
+          modelCandidates.length > 1
+        ) {
+          break; // break inputVariants loop to try the sibling candidate
+        }
+        if (response.status === 400 && input === inputVariants[0]) continue;
+        throw lastError;
+      }
+      const text = extractResponseApiText(data);
+      if (!text) throw visionProviderError({ ...route, model: modelCandidate }, { message: "meta returned no structured visual response." });
+      return { raw: data, text, json: parseJsonResponse(text) };
     }
-    const text = extractResponseApiText(data);
-    if (!text) throw visionProviderError(route, { message: "meta returned no structured visual response." });
-    return { raw: data, text, json: parseJsonResponse(text) };
   }
   throw lastError;
 }
@@ -1474,15 +1496,14 @@ async function metaVisionJson(
 ) {
   // Responses API (https://api.meta.ai/v1/responses) is the multimodal endpoint.
   // It gets the whole hop. Chat Completions runs only when Responses returns an
-  // error and at least VISION_HOP_MIN_MS is left. A 25s abort of Responses made
-  // every product-photo call time out, then the fallbacks timed out as well.
+  // error, no image parts are present (text probes only), and at least VISION_HOP_MIN_MS is left.
   const startedAt = Date.now();
   const responsesBudgetMs = dualProtocolPrimaryTimeoutMs(timeoutMs);
   try {
     return await metaResponsesVisionJson(route, parts, responsesBudgetMs);
   } catch (error) {
     const classified = asVisionProviderError(error, route);
-    if (classified.failure.code === "provider_authentication_failed") {
+    if (classified.failure.code === "provider_authentication_failed" || visionPartsHaveImages(parts)) {
       throw classified;
     }
     const elapsed = Date.now() - startedAt;

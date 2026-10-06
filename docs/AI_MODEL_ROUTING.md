@@ -94,8 +94,11 @@ For example:
 With only one configured model the message ends "No fallback model is configured for
 this purpose in Administration."
 
-OpenAI and Meta Muse Spark vision calls support dual protocols. The first protocol gets the whole hop (`dualProtocolPrimaryTimeoutMs`). The other protocol runs only when the first returns an error and at least 8s remains. A timeout means that hop is over; the chain moves to the next configured model instead of sending the same photos to a second protocol with no time left.
-- **Product photos** (Meta and OpenAI) use the Responses API first (`/v1/responses`). Chat Completions is the alternate when Responses rejects the call in time to retry.
+OpenAI and Meta Muse Spark vision calls support dual protocols. The first protocol gets the whole hop (`dualProtocolPrimaryTimeoutMs`).
+- **Product photos** (Meta and OpenAI) use the Responses API (`/v1/responses`).
+  - Meta uses the canonical `input: [{ role: "user", content }]` payload schema to eliminate 400 Bad Request retry delays.
+  - Meta includes in-provider sibling candidate retry: if `muse-spark-1.2-contributor` encounters a 404 (model not found / unavailable in that account tier), it immediately retries with `muse-spark-1.3-contributor` (and vice-versa) before ever declaring provider failure or falling back to OpenAI.
+  - When image parts are present, Chat Completions is bypassed on Meta because Chat Completions does not support multimodal images; this prevents corrupting error logs with misleading 404s.
 - **OpenAI text probes** try Chat Completions first, then the Responses API. When Chat Completions rejects the model (404 or 400), the error reported is the Responses API's.
 
 ## Debugging a failure
@@ -119,9 +122,11 @@ OpenAI and Meta Muse Spark vision calls support dual protocols. The first protoc
 
 | Purpose | Primary | Fallback |
 | --- | --- | --- |
-| `product_truth` | Meta `muse-spark-1.3` (or `muse-spark-1.3-contributor`), or OpenAI `gpt-5.6-luna` when Meta key is not set | Hop 1: OpenAI `gpt-5.6-luna` (high thinking) · Hop 2: OpenAI `gpt-5.6-terra` (low) |
+| `product_truth` | Meta `muse-spark-1.2-contributor` (low), or OpenAI `gpt-5.6-luna` when Meta key is not set | Hop 1: OpenAI `gpt-5.6-luna` (high thinking) · Hop 2: OpenAI `gpt-5.6-terra` (low) |
 | `qa` | OpenAI `gpt-5.6-luna` | OpenAI `gpt-5.6-terra` |
 | `image_generation` | OpenAI `gpt-image-2.5-flare-2026-09-08` | — |
+
+See [MEMORY.md](../MEMORY.md) and [AGENTS.md](../AGENTS.md) for core architectural memory and PR 131 product truth contracts.
 
 Image quality defaults to `medium` (`DEFAULT_IMAGE_QUALITY`); see
 [Generation orchestration](GENERATION_ORCHESTRATION.md).
