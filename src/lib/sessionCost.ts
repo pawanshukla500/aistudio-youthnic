@@ -1,4 +1,6 @@
 export const ANALYSIS_RUN_KINDS = ["product_reference_analysis", "catalog_product_preflight"] as const;
+export const GENERATION_RUN_KIND = "image_generation";
+export const QA_RUN_KIND = "quality_assurance";
 
 export type CostBucket = "analysis" | "generation" | "qa" | "other";
 
@@ -14,6 +16,12 @@ export type CostRun = {
   status?: string | null;
   pose_index?: number | null;
   cost_source?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  thinking_level?: string | null;
+  purpose?: string | null;
+  attempt_number?: number | null;
+  latency_ms?: number | null;
 };
 
 export type SessionCostRollup = {

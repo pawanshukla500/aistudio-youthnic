@@ -5,7 +5,7 @@ import { visibleGenerationDetailedStatus } from "./generationStatus";
 import { functionInvokeErrorMessage, appApiInvokeTimeoutMs, isGatewayCutFailure, isRetryableInvokeOperation } from "./errors";
 import { scopePoseRowsToJob } from "./generationRuns";
 import { buildPoseVersions, summarizeRegenerations } from "./poseVersions";
-import { ANALYSIS_RUN_KINDS, attributeJobCostRuns, rollupSessionCost, type CostRun } from "./sessionCost";
+import { ANALYSIS_RUN_KINDS, GENERATION_RUN_KIND, QA_RUN_KIND, attributeJobCostRuns, rollupSessionCost, type CostRun } from "./sessionCost";
 
 export type Id<_Table extends string> = string;
 export type BackendEndpoint = string;
@@ -175,6 +175,9 @@ function jobSummary(row: Record<string, any>, members: Record<string, any>[] = [
     totalTokens: Number(row.total_tokens || 0),
     thumbnailUrl: generatedThumbnailUrl || references.find((entry: any) => entry.role === "saree_front_drape")?.downloadUrl || references.find((entry: any) => entry.role === "front")?.downloadUrl || references[0]?.downloadUrl || null,
     productDetails: String(jobData.productDetails || ""),
+    generationModel: row.model || "gpt-image-2.5-flare-2026-09-08",
+    generationProvider: row.provider || "openai",
+    analysisModel: String(jobData.analysisModel || record(jobData.productTruthPolicy).model || ""),
     creatorName: member?.display_name || (row.user_id === "catalog-worker" ? "Automatic catalog" : row.user_email || "Workspace member"),
     creatorEmail: row.user_email || member?.email || "",
   };
@@ -419,7 +422,7 @@ async function getJob(jobId: string) {
   }
   mappedPoses.sort((left, right) => left.poseNumber - right.poseNumber);
   const fingerprint = String(sessionResult.data?.analysis_fingerprint || record(resolvedJob.job_data).analysisFingerprint || "");
-  const runSelect = "id,run_kind,cost_usd,cost_source,job_id,session_id,planning_request_id,input_fingerprint,created_at,status,pose_index";
+  const runSelect = "id,run_kind,cost_usd,cost_source,job_id,session_id,planning_request_id,input_fingerprint,created_at,status,pose_index,provider,model,thinking_level,purpose,attempt_number,latency_ms";
   const linkedFilter = [
     `job_id.eq.${jobId}`,
     job.session_id ? `session_id.eq.${job.session_id}` : "",
@@ -443,6 +446,11 @@ async function getJob(jobId: string) {
   });
   const costRollup = rollupSessionCost(attributedRuns, Number(job.actual_cost_usd || 0));
   const actualCost = costRollup.totalUsd;
+  const analysisRun = attributedRuns.find((r) => (ANALYSIS_RUN_KINDS as readonly string[]).includes(r.run_kind));
+  const qaRuns = attributedRuns.filter((r) => r.run_kind === QA_RUN_KIND);
+  const generationRuns = attributedRuns.filter((r) => r.run_kind === GENERATION_RUN_KIND);
+  const sessionData = record(sessionResult.data?.session_data);
+  const productTruthPolicy = record(sessionData.productTruthPolicy);
   return {
     ...summary,
     model: job.model,
@@ -452,6 +460,15 @@ async function getJob(jobId: string) {
     estimatedCost: Number(job.estimated_cost_usd || 0),
     actualCost,
     poseQa: Boolean(job.pose_qa),
+    analysisModel: analysisRun?.model || String(productTruthPolicy.model || "") || null,
+    analysisProvider: analysisRun?.provider || String(productTruthPolicy.provider || "") || null,
+    analysisThinking: analysisRun?.thinking_level || String(productTruthPolicy.thinkingLevel || "") || null,
+    analysisLatencyMs: analysisRun?.latency_ms ?? null,
+    generationModel: job.model || generationRuns[0]?.model || "gpt-image-2.5-flare-2026-09-08",
+    generationProvider: job.provider || generationRuns[0]?.provider || "openai",
+    qaModel: qaRuns[0]?.model || null,
+    qaProvider: qaRuns[0]?.provider || null,
+    pipelineRuns: attributedRuns,
     costBreakdown: {
       analysisUsd: costRollup.analysisUsd,
       generationUsd: costRollup.generationUsd,

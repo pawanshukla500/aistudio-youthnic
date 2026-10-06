@@ -1432,7 +1432,7 @@ async function metaResponsesVisionJson(
   for (const input of inputVariants) {
     const elapsed = Date.now() - startedAt;
     const remainingMs = timeoutMs - elapsed;
-    if (remainingMs < VISION_HOP_MIN_MS) {
+    if (remainingMs < 2_000) {
       throw lastError || visionHopTimeoutError("Meta Responses API timed out.");
     }
     const response = await fetch("https://api.meta.ai/v1/responses", {
@@ -7877,11 +7877,11 @@ async function probeAiRouteOperation(request: Request, args: JsonRecord) {
         purpose: purpose === "qa_escalation" ? "qa_escalation" : purpose === "qa" ? "qa" : "product_truth",
         model: route.model,
         thinkingLevel: "low",
-      }, parts, 8_000);
+      }, parts, 25_000);
     } else if (route.provider === "openai") {
-      await openAiVisionJson(probeRoute, parts, 8_000);
+      await openAiVisionJson(probeRoute, parts, 25_000);
     } else if (route.provider === "meta") {
-      await metaVisionJson(probeRoute, parts, 8_000);
+      await metaVisionJson(probeRoute, parts, 25_000);
     } else if (route.provider === "qwen") {
       await qwenVisionJson(route, parts);
     } else {

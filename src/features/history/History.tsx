@@ -101,6 +101,28 @@ function visibleQaLabel(status: string, poseQaEnabled: boolean) {
   return qaStatusLabel(status);
 }
 
+function formatModelName(model?: string | null): string {
+  if (!model) return "Default Model";
+  const map: Record<string, string> = {
+    "muse-spark-1.2-contributor": "Meta Muse Spark 1.2",
+    "muse-spark-1.3-contributor": "Meta Muse Spark 1.3",
+    "muse-spark-1.3": "Meta Muse Spark 1.3",
+    "muse-spark-1.2": "Meta Muse Spark 1.2",
+    "gpt-5.6-luna": "GPT 5.6 Luna",
+    "gpt-5.6-terra": "GPT 5.6 Terra",
+    "gpt-5.6-sol": "GPT 5.6 Sol",
+    "gemini-3.8-flash": "Gemini 3.8 Flash",
+    "gemini-3.6-flash": "Gemini 3.6 Flash",
+    "qwen3.8-max": "Qwen 3.8 Max",
+    "gpt-image-2.5-flare-2026-09-08": "GPT Image 2.5 Flare",
+    "gpt-image-2.5-flare": "GPT Image 2.5 Flare",
+    "gpt-image-2.5-sunburst": "GPT Image 2.5 Sunburst",
+    "gpt-image-2": "GPT Image 2",
+    "reve-2.1-image": "Reve 2.1 Image",
+  };
+  return map[model] || model.split("-").map((s) => (s ? s[0].toUpperCase() + s.slice(1) : "")).join(" ");
+}
+
 function poseVersions(pose: any): PoseVersion[] {
   return Array.isArray(pose?.versions) ? pose.versions : [];
 }
@@ -247,6 +269,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const [rerunningQaId, setRerunningQaId] = useState<string | null>(null);
   const [qaRerunNotice, setQaRerunNotice] = useState("");
   const [isCloning, setIsCloning] = useState(false);
+  const [showModelRoutingModal, setShowModelRoutingModal] = useState(false);
 
   const cloneJob = async () => {
     if (!job) return;
@@ -665,6 +688,28 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             <span className="font-bold capitalize text-primary">{job.quality || "medium"}</span>
           </div>
 
+          <div
+            className="flex items-center gap-1.5 rounded-lg border border-primary/25 bg-soft-blush px-2.5 py-1.5 font-medium shadow-xs"
+            title={`Vision Analysis Engine: ${job.analysisModel || "Meta Muse Spark 1.2 Contributor"}`}
+          >
+            <Brain className="h-3.5 w-3.5 text-primary" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Analysis</span>
+            <span className="font-bold text-primary truncate max-w-[130px]">
+              {formatModelName(job.analysisModel || "muse-spark-1.2-contributor")}
+            </span>
+          </div>
+
+          <div
+            className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50/70 px-2.5 py-1.5 font-medium shadow-xs"
+            title={`Image Generation Engine: ${job.generationModel || job.model || "GPT Image 2.5 Flare"}`}
+          >
+            <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Image Gen</span>
+            <span className="font-bold text-indigo-700 truncate max-w-[130px]">
+              {formatModelName(job.generationModel || job.model || "gpt-image-2.5-flare-2026-09-08")}
+            </span>
+          </div>
+
           <div className="flex flex-col justify-center rounded-lg border border-outline-variant/50 bg-white px-3 py-1 text-[11px] shadow-xs">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Cost so far</span>
@@ -706,6 +751,15 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setShowModelRoutingModal(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3.5 py-2 text-xs font-bold text-primary shadow-xs transition-all hover:bg-primary/10 hover:border-primary/50 active:scale-95"
+            title="Inspect vision analysis and image generation models, routing, and mode details"
+          >
+            <Brain className="h-3.5 w-3.5 text-primary" />
+            Pipeline Modes
+          </button>
+
           <button
             onClick={() => void toggleReferences()}
             disabled={referencesLoading}
@@ -1717,6 +1771,160 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         </div>
       )}
 
+      {/* MODEL ROUTING & PIPELINE MODES MODAL */}
+      {showModelRoutingModal && (
+        <div
+          className="fixed inset-0 z-[80] grid place-items-center bg-navy-soft/85 p-4 backdrop-blur-md"
+          onClick={() => setShowModelRoutingModal(false)}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/10"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-outline-variant/40 px-6 py-4">
+              <div className="flex items-center gap-2.5">
+                <div className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary">
+                  <Brain className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="font-manrope text-base font-bold tracking-tight text-on-surface">
+                    AI Pipeline Modes & Model Execution
+                  </h3>
+                  <p className="text-[11px] text-secondary">
+                    SKU: <span className="font-mono font-bold text-on-surface">{job.skuId}</span> · {job.skuName}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowModelRoutingModal(false)}
+                className="rounded-xl border border-outline-variant/60 p-2 text-secondary hover:bg-surface-container"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 overflow-y-auto p-6 text-xs">
+              {/* STAGE 1: PRODUCT TRUTH & VISION ANALYSIS */}
+              <div className="rounded-2xl border border-primary/20 bg-soft-blush/40 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-primary">
+                    <Brain className="h-4 w-4 text-primary" />
+                    Stage 1 · Product Truth Vision & 6-Pose Planning
+                  </span>
+                  <span className="rounded-full bg-success-surface px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-success">
+                    Active Mode
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-outline-variant/30 bg-white p-3">
+                    <span className="block text-[10px] font-bold uppercase text-secondary">Vision Analysis Model</span>
+                    <span className="mt-0.5 block font-mono text-xs font-bold text-on-surface">
+                      {job.analysisModel || "muse-spark-1.2-contributor"}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] font-semibold text-primary">
+                      {formatModelName(job.analysisModel || "muse-spark-1.2-contributor")}
+                    </span>
+                  </div>
+                  <div className="rounded-xl border border-outline-variant/30 bg-white p-3">
+                    <span className="block text-[10px] font-bold uppercase text-secondary">Provider & Reasoning</span>
+                    <span className="mt-0.5 block font-mono text-xs font-bold text-on-surface">
+                      {job.analysisProvider ? `${job.analysisProvider[0].toUpperCase()}${job.analysisProvider.slice(1)}` : "Meta Muse Spark"}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] text-secondary">
+                      Thinking Effort: <strong className="text-on-surface">{job.analysisThinking || "Low (Fast analysis)"}</strong>
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-primary/10 pt-3 text-[11px] text-secondary">
+                  <span>
+                    Cost: <strong className="text-on-surface">${Number(job.costBreakdown?.analysisUsd || 0).toFixed(4)}</strong>
+                  </span>
+                  {job.analysisLatencyMs && (
+                    <span>
+                      Latency: <strong className="text-on-surface">{job.analysisLatencyMs} ms</strong>
+                    </span>
+                  )}
+                  <span className="rounded-md bg-white px-2 py-0.5 text-[10px] text-secondary border border-outline-variant/30">
+                    Fallback: OpenAI GPT 5.6 Luna enabled
+                  </span>
+                </div>
+              </div>
+
+              {/* STAGE 2: MULTI-POSE IMAGE GENERATION */}
+              <div className="rounded-2xl border border-indigo-200/80 bg-indigo-50/30 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-indigo-700">
+                    <Sparkles className="h-4 w-4 text-indigo-600" />
+                    Stage 2 · Multi-Pose Photorealistic Generation
+                  </span>
+                  <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-700">
+                    Engine
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-outline-variant/30 bg-white p-3">
+                    <span className="block text-[10px] font-bold uppercase text-secondary">Generation Model</span>
+                    <span className="mt-0.5 block font-mono text-xs font-bold text-on-surface">
+                      {job.generationModel || job.model || "gpt-image-2.5-flare-2026-09-08"}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] font-semibold text-indigo-700">
+                      {formatModelName(job.generationModel || job.model || "gpt-image-2.5-flare-2026-09-08")}
+                    </span>
+                  </div>
+                  <div className="rounded-xl border border-outline-variant/30 bg-white p-3">
+                    <span className="block text-[10px] font-bold uppercase text-secondary">Specs & Format</span>
+                    <span className="mt-0.5 block text-xs font-bold text-on-surface">
+                      Aspect {job.aspectRatio || "3:4"} · {job.imageSize || "1024x1024"}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] text-secondary">
+                      Quality: <strong className="capitalize text-on-surface">{job.quality || "medium"}</strong> · Provider: OpenAI
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-indigo-100 pt-3 text-[11px] text-secondary">
+                  <span>
+                    Delivered: <strong className="text-on-surface">{job.completedPoses} / {job.totalPoses} poses</strong>
+                  </span>
+                  <span>
+                    Cost: <strong className="text-on-surface">${Number(job.costBreakdown?.generationUsd || 0).toFixed(4)}</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* STAGE 3: CONSISTENCY QA */}
+              <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-secondary">
+                    <ShieldCheck className="h-4 w-4 text-secondary" />
+                    Stage 3 · Consistency Quality Assurance
+                  </span>
+                  <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${job.poseQa ? "bg-success-surface text-success" : "bg-surface-container text-secondary"}`}>
+                    {job.poseQa ? "Enabled" : "Off"}
+                  </span>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-secondary">
+                  <span>
+                    Status: {job.costBreakdown?.qaRan ? "Automated validation executed" : job.poseQa ? "Configured for poses" : "QA not requested for this shoot"}
+                  </span>
+                  <span>
+                    QA Cost: <strong className="text-on-surface">${Number(job.costBreakdown?.qaUsd || 0).toFixed(4)}</strong>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end border-t border-outline-variant/30 bg-surface-container-low px-6 py-3.5">
+              <button
+                onClick={() => setShowModelRoutingModal(false)}
+                className="rounded-xl bg-primary px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-primary-dark"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {downloadError && (
         <div className="fixed bottom-6 right-6 z-[120] flex items-center gap-3 rounded-2xl border border-danger/30 bg-white px-5 py-4 text-xs text-danger shadow-2xl">
           <AlertCircle className="h-5 w-5 shrink-0" />
@@ -1989,7 +2197,7 @@ export function History() {
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-mono text-xs font-bold text-on-surface bg-surface-container-low px-2 py-0.5 rounded-md border border-outline-variant/40">
                         {job.skuId}
                       </span>
@@ -2002,6 +2210,24 @@ export function History() {
                         {job.status === "processing" && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
                         {job.detailedStatus || job.status}
                       </span>
+                      {job.analysisModel && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-md bg-purple-50 px-1.5 py-0.5 text-[9px] font-semibold text-purple-700 border border-purple-200/60"
+                          title={`Vision Analysis: ${job.analysisModel}`}
+                        >
+                          <Brain className="h-2.5 w-2.5 text-purple-500" />
+                          {formatModelName(job.analysisModel)}
+                        </span>
+                      )}
+                      {job.generationModel && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-700 border border-indigo-200/60"
+                          title={`Image Generation: ${job.generationModel}`}
+                        >
+                          <Sparkles className="h-2.5 w-2.5 text-indigo-500" />
+                          {formatModelName(job.generationModel)}
+                        </span>
+                      )}
                     </div>
                     <p className="mt-1 truncate text-xs font-semibold text-secondary">
                       {job.skuName || "Untitled Studio Production"}

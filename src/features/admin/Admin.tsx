@@ -626,8 +626,10 @@ export function Admin() {
       return;
     }
     const metaModel =
+      metaModels.find((model) => model.id === "muse-spark-1.2-contributor") ||
       metaModels.find((model) => model.id === "muse-spark-1.3-contributor") ||
       metaModels.find((model) => model.id === "muse-spark-1.3") ||
+      metaModels.find((model) => model.id === "muse-spark-1.2") ||
       metaModels[0];
     const openAiModel =
       openAiModels.find((model) => model.id === "gpt-5.6-luna") ||
@@ -1234,7 +1236,7 @@ export function Admin() {
                               onClick={applyRecommendedProductTruth}
                               disabled={saving || !overview.capabilities.canManageSettings || !canApplyRecommendedProductTruth}
                               className="rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-primary hover:bg-primary/10 disabled:opacity-50"
-                              title="Set Primary: Meta Muse Spark, Fallback: OpenAI GPT 5.6 Luna High"
+                              title="Set Primary: Meta Muse Spark 1.2 Contributor, Fallback: OpenAI GPT 5.6 Luna High"
                             >
                               Recommended routing
                             </button>
@@ -1250,8 +1252,8 @@ export function Admin() {
                         canApplyRecommendedProductTruth && (
                         <div className="flex flex-col gap-2 rounded-xl border border-primary/30 bg-soft-blush p-3 sm:flex-row sm:items-center sm:justify-between">
                           <div>
-                            <p className="text-xs font-bold text-on-surface">Switch to Meta Muse Spark + Luna to reduce token cost</p>
-                            <p className="text-[11px] leading-4 text-secondary">GPT 5.6 Terra has high per-token pricing. Meta Muse Spark with GPT 5.6 Luna (High thinking) fallback provides superior cost efficiency.</p>
+                            <p className="text-xs font-bold text-on-surface">Switch to Meta Muse Spark 1.2 Contributor + Luna to reduce token cost</p>
+                            <p className="text-[11px] leading-4 text-secondary">GPT 5.6 Terra has high per-token pricing. Meta Muse Spark 1.2 Contributor ($0.10 / $0.20 per 1M) with GPT 5.6 Luna fallback provides maximum vision cost efficiency and reliability.</p>
                           </div>
                           <button
                             type="button"
@@ -1273,7 +1275,7 @@ export function Admin() {
                           <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Thinking<select value={policy.primaryThinking} disabled={saving || !overview.capabilities.canManageSettings || policy.primaryProvider === "qwen"} onChange={(event) => updateAiPolicy(policy.purpose, (current) => ({ ...current, primaryThinking: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50">{primaryThinkingLevels.map((level) => <option key={level} value={level}>{thinkingLabel(level)}</option>)}</select></label>
                         </div>
                         {policy.primaryProvider === "qwen" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Qwen structured vision runs with thinking off so the Product Truth JSON contract remains reliable.</p>}
-                        {policy.primaryProvider === "meta" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Muse Spark 1.3 Standard is recommended for fashion product data (~$1.25 / 1M input, $4.25 / 1M output). Contributor is cheaper (~$0.10 / $0.20) but Meta may train on prompts — do not select it unless the organization opts in. Reasoning cannot be turned off.</p>}
+                        {policy.primaryProvider === "meta" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Muse Spark 1.2 Contributor is highly recommended for ultra-low token cost (~$0.10 / $0.20 per 1M tokens). Standard models (~$1.25 / $4.25) do not train on your data. Reasoning cannot be turned off.</p>}
                         {primaryModels.find((model) => model.id === policy.primaryModel)?.help && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">{primaryModels.find((model) => model.id === policy.primaryModel)?.help}</p>}
                         {policy.purpose === "image_generation" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">GPT Image 2.5 (Sunburst and Flare) and GPT Image 2 are supported for production catalog generation. Gemini, Qwen, and Muse Spark are available only for vision analysis or QA until a separately tested image-generation adapter is added.</p>}
                         {policy.repairRequired && <p className="mt-3 rounded-lg border border-warning/25 bg-warning-surface px-3 py-2 text-xs leading-5 text-warning">{policy.repairMessage || "This stored policy needs review. Save the displayed route to repair it."}</p>}
