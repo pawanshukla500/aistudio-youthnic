@@ -28,7 +28,8 @@ const registry: AdminAiRegistryEntry[] = [
     models: [
       { id: "muse-spark-1.3", label: "Muse Spark 1.3", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "max"] },
       { id: "muse-spark-1.2", label: "Muse Spark 1.2", purposes: ["product_truth", "qa"], thinkingLevels: ["low"] },
-      { id: "muse-spark-1.3-contributor", label: "Contributor", purposes: ["product_truth", "qa"], thinkingLevels: ["low"] },
+      { id: "muse-spark-1.3-contributor", label: "Contributor 1.3", purposes: ["product_truth", "qa"], thinkingLevels: ["low"] },
+      { id: "muse-spark-1.2-contributor", label: "Contributor 1.2", purposes: ["product_truth", "qa"], thinkingLevels: ["low"] },
     ],
   },
 ];
@@ -45,7 +46,7 @@ Deno.test("fallback model lists stay on the selected provider", () => {
 });
 
 Deno.test("preferred vision models are Muse Spark Contributor and Luna, not Sol or Terra", () => {
-  assertEquals(preferredModelId("meta", registry.find((entry) => entry.provider === "meta")!.models), "muse-spark-1.3-contributor");
+  assertEquals(preferredModelId("meta", registry.find((entry) => entry.provider === "meta")!.models), "muse-spark-1.2-contributor");
   assertEquals(preferredModelId("openai", modelsForProviderPurpose(registry, "openai", "product_truth")), "gpt-5.6-luna");
 });
 
@@ -70,7 +71,7 @@ Deno.test("product truth routing prefers Meta Muse Spark as primary and OpenAI L
   assertEquals(primary?.provider, "meta");
   assertEquals(
     preferredModelId("meta", modelsForProviderPurpose(registry, "meta", "product_truth")),
-    "muse-spark-1.3-contributor",
+    "muse-spark-1.2-contributor",
   );
   const fallback = preferredConfiguredProvider(registry, "product_truth", {
     exclude: primary?.provider,

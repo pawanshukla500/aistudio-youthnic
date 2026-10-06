@@ -421,7 +421,7 @@ Deno.test("Gemini 3.8 Flash and Gemini 3.1 Pro are approved for visual analysis 
   );
   assertEquals(
     allowedModelsForPurpose("meta", "product_truth"),
-    ["muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.3-contributor"],
+    ["muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.3-contributor", "muse-spark-1.2-contributor"],
   );
   assertEquals(
     allowedModelsForPurpose("openai", "product_truth"),
@@ -535,7 +535,7 @@ Deno.test("product truth runs exactly the Administration primary, then its fallb
   assertEquals(
     chain(FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE, [LUNA_HIGH_THINKING_VISION_ROUTE, OPENAI_TERRA_VISION_ROUTE]),
     [
-      "meta:muse-spark-1.3-contributor:low",
+      "meta:muse-spark-1.2-contributor:low",
       "openai:gpt-5.6-luna:high",
       "openai:gpt-5.6-terra:low",
     ],

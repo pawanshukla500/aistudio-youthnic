@@ -84,6 +84,7 @@ export const META_VISION_PRICING: Record<string, VisionTokenRates> = {
   "muse-spark-1.3": { input: 1.25, output: 4.25, cached: 0.125, version: "2026-09", source: "meta_standard_muse" },
   "muse-spark-1.2": { input: 1.25, output: 4.25, cached: 0.125, version: "2026-09", source: "meta_standard_muse" },
   "muse-spark-1.3-contributor": { input: 0.10, output: 0.20, cached: 0.002, version: "2026-09", source: "meta_contributor_muse" },
+  "muse-spark-1.2-contributor": { input: 0.10, output: 0.20, cached: 0.002, version: "2026-09", source: "meta_contributor_muse" },
 };
 
 export const ANALYSIS_RUN_KINDS = ["product_reference_analysis", "catalog_product_preflight"] as const;
@@ -107,6 +108,12 @@ export type CostRun = {
   status?: string | null;
   pose_index?: number | null;
   cost_source?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  thinking_level?: string | null;
+  purpose?: string | null;
+  attempt_number?: number | null;
+  latency_ms?: number | null;
 };
 
 export type SessionCostRollup = {

@@ -116,9 +116,24 @@ export const AI_MODEL_REGISTRY: Registry = {
     qa_escalation: ["qwen3.8-max"],
   },
   meta: {
-    product_truth: ["muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.3-contributor"],
-    qa: ["muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.3-contributor"],
-    qa_escalation: ["muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.3-contributor"],
+    product_truth: [
+      "muse-spark-1.3",
+      "muse-spark-1.2",
+      "muse-spark-1.3-contributor",
+      "muse-spark-1.2-contributor",
+    ],
+    qa: [
+      "muse-spark-1.3",
+      "muse-spark-1.2",
+      "muse-spark-1.3-contributor",
+      "muse-spark-1.2-contributor",
+    ],
+    qa_escalation: [
+      "muse-spark-1.3",
+      "muse-spark-1.2",
+      "muse-spark-1.3-contributor",
+      "muse-spark-1.2-contributor",
+    ],
   },
   reve: {
     image_generation: ["reve-2.1-image"],
@@ -249,7 +264,7 @@ export const FAST_PRODUCT_TRUTH_ROUTE = {
 
 export const FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE = {
   provider: "meta",
-  model: "muse-spark-1.3-contributor",
+  model: "muse-spark-1.2-contributor",
   thinkingLevel: "low",
 } as const satisfies NormalizedAiModelRoute;
 
@@ -727,6 +742,7 @@ export function aiModelDisplayLabel(model: string): string {
     "muse-spark-1.3": "Muse Spark 1.3 · Standard",
     "muse-spark-1.2": "Muse Spark 1.2 · Standard",
     "muse-spark-1.3-contributor": "Muse Spark 1.3 Contributor · trains on prompts",
+    "muse-spark-1.2-contributor": "Muse Spark 1.2 Contributor · trains on prompts",
     "gemini-3.8-flash": "Gemini 3.8 Flash",
     "gemini-3.6-flash": "Gemini 3.6 Flash",
     "gemini-3.1-pro": "Gemini 3.1 Pro",
@@ -739,7 +755,7 @@ export function aiModelDisplayLabel(model: string): string {
 }
 
 export function aiModelHelpText(model: string): string {
-  if (text(model) === "muse-spark-1.3-contributor") {
+  if (text(model) === "muse-spark-1.2-contributor" || text(model) === "muse-spark-1.3-contributor") {
     return "Contributor is cheaper (~$0.10 / $0.20 per 1M tokens) but Meta may train on prompts and completions. Do not use it for fashion product data unless the organization opts in.";
   }
   if (text(model) === "muse-spark-1.3" || text(model) === "muse-spark-1.2") {
@@ -775,7 +791,10 @@ export function preferredModelId(
   if (provider === "openai" && models.includes("gpt-image-2.5-flare")) return "gpt-image-2.5-flare";
   if (provider === "openai" && models.includes("gpt-image-2.5-sunburst")) return "gpt-image-2.5-sunburst";
   if (provider === "openai" && models.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
+  if (provider === "meta" && models.includes("muse-spark-1.2-contributor")) return "muse-spark-1.2-contributor";
+  if (provider === "meta" && models.includes("muse-spark-1.3-contributor")) return "muse-spark-1.3-contributor";
   if (provider === "meta" && models.includes("muse-spark-1.3")) return "muse-spark-1.3";
+  if (provider === "meta" && models.includes("muse-spark-1.2")) return "muse-spark-1.2";
   if (provider === "gemini" && models.includes("gemini-3.8-flash")) return "gemini-3.8-flash";
   return models[0];
 }

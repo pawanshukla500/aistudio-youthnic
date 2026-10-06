@@ -37,17 +37,28 @@ Deno.test("vision cost subtracts cached tokens and uses Luna public rates", () =
 });
 
 Deno.test("vision cost calculates Meta Muse Spark Contributor low rates and cached tokens", () => {
-  const calculated = extractVisionUsageAndCost({
+  const calculated12 = extractVisionUsageAndCost({
+    usage: {
+      prompt_tokens: 15000,
+      completion_tokens: 1200,
+      prompt_tokens_details: { cached_tokens: 5000 },
+    },
+  }, "meta", "muse-spark-1.2-contributor");
+  assertEquals(calculated12.cachedTok, 5000);
+  assertAlmostEquals(calculated12.costUsd, (10000 * 0.10 + 5000 * 0.002 + 1200 * 0.20) / 1_000_000, 1e-8);
+  assertEquals(calculated12.costSource, "estimated_public_rates_2026-09");
+
+  const calculated13 = extractVisionUsageAndCost({
     usage: {
       prompt_tokens: 15000,
       completion_tokens: 1200,
       prompt_tokens_details: { cached_tokens: 5000 },
     },
   }, "meta", "muse-spark-1.3-contributor");
-  assertEquals(calculated.cachedTok, 5000);
+  assertEquals(calculated13.cachedTok, 5000);
   // 10000 uncached * $0.10 + 5000 cached * $0.002 + 1200 output * $0.20 = $0.001 + $0.00001 + $0.00024 = $0.00125
-  assertAlmostEquals(calculated.costUsd, (10000 * 0.10 + 5000 * 0.002 + 1200 * 0.20) / 1_000_000, 1e-8);
-  assertEquals(calculated.costSource, "estimated_public_rates_2026-09");
+  assertAlmostEquals(calculated13.costUsd, (10000 * 0.10 + 5000 * 0.002 + 1200 * 0.20) / 1_000_000, 1e-8);
+  assertEquals(calculated13.costSource, "estimated_public_rates_2026-09");
 });
 
 Deno.test("vision cost prefers OpenAI admin-derived rates when present", () => {
