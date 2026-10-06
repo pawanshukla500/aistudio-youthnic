@@ -422,11 +422,13 @@ function poseCategoryRules(category: string) {
 }
 
 function pose5HardRule(args: { closeupMode: string; heroDetail: string }) {
-  const detail = args.heroDetail || "the garment's most important real selling detail (embroidery, neckline, print scale, drape, or fabric texture)";
+  const detail = args.heroDetail || "the garment's most important real selling detail (embroidery, butti work, neckline craft, print scale, drape, or fabric texture)";
+  const primaryGarmentNote =
+    "- POSE 5 PRIMARY PRODUCT FOCUS: Pose 5 MUST highlight the PRIMARY UPLOADED PRODUCT GARMENT's key signature details (such as kurti butti work, yoke/chest embroidery, neckline craft, handwork, or weave). It is STRICTLY FORBIDDEN to focus on or fill the frame with a secondary accessory like a dupatta, stole, or scarf when the primary garment has butti work, embroidery, or craftsmanship to showcase. Highlight the core product!";
   if (args.closeupMode === CLOSEUP_PRODUCT_DETAIL) {
-    return `- POSE 5 HARD RULE (PRODUCT DETAIL PRIMARY): this frame sells craftsmanship, not a beauty headshot. Fill the frame with ${detail} so construction, embroidery, print scale, or texture is catalog-readable. Never a full-body or wide hero repeat. Never a face-only crop that shrinks the selling detail. The face may be partial at the edge or omitted entirely when a full face would make that detail too small. If any face is visible it must match the identity lock.`;
+    return `- POSE 5 HARD RULE (PRODUCT DETAIL PRIMARY): this frame sells craftsmanship, not a beauty headshot. Fill the frame with ${detail} so construction, embroidery, butti work, print scale, or texture is catalog-readable. Never a full-body or wide hero repeat. Never a face-only crop that shrinks the selling detail. The face may be partial at the edge or omitted entirely when a full face would make that detail too small. If any face is visible it must match the identity lock.\n${primaryGarmentNote}`;
   }
-  return `- POSE 5 HARD RULE (FACE + PRODUCT DETAIL): genuine ZOOMED-IN face-to-chest or face-to-waist shot - tighter than the hero pose, never a full-body repeat. The face is sharp with a natural Gen-Z expression, AND ${detail} must occupy a LARGE, sharp, catalog-readable portion of the same frame - not a tiny hint of embroidery under a beauty close-up.`;
+  return `- POSE 5 HARD RULE (FACE + PRODUCT DETAIL): genuine ZOOMED-IN face-to-chest or face-to-waist shot - tighter than the hero pose, never a full-body repeat. The face is sharp with a natural Gen-Z expression, AND ${detail} must occupy a LARGE, sharp, catalog-readable portion of the same frame - not a tiny hint of embroidery under a beauty close-up.\n${primaryGarmentNote}`;
 }
 
 /**
@@ -608,11 +610,11 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
     }
   } else if (isPose5) {
     lines.push(
-      "CURRENT FRAME (POSE 5 - ZOOMED-IN DETAIL): Genuinely zoomed in on product craftsmanship and selling details. NEVER repeat a full-body or wide hero frame.",
+      "CURRENT FRAME (POSE 5 - ZOOMED-IN DETAIL): Genuinely zoomed in on product craftsmanship and selling details. NEVER repeat a full-body or wide hero frame. The close-up MUST highlight the primary uploaded garment's signature details (such as kurti butti work, chest/yoke embroidery, or neckline craft), and must NEVER focus on a secondary accessory like a dupatta or stole.",
     );
   } else if (isPose6) {
     lines.push(
-      "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE): Framing, angle, and physical stance MUST visibly diverge from Pose 1. Feet separated or angled to showcase feature volume/flare. Never repeat the flat frontal hero stance.",
+      "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE): Framing, angle, and physical stance MUST visibly diverge from Pose 1. Feet separated or angled to showcase feature volume/flare. Never repeat the flat frontal hero stance. It must complement the other five images while showing a distinctly different pose, maintaining complete consistency of model, uploaded product, background set, and overall styling.",
     );
   }
 
@@ -623,7 +625,19 @@ function referenceImageScopeDirective(): string {
   return [
     "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:",
     "- STYLE / REFERENCE IMAGE SCOPE: from the reference image (style reference / model reference), take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction.",
-    "- PRODUCT INTEGRITY (SOLE TRUTH FROM UPLOADED PRODUCT IMAGES): the product itself (fabric, colors, prints, pattern geometry, neckline, sleeves, hem, embroidery, trims, closures, and complete bottom wear) MUST come exclusively from uploaded product references. The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows.",
+    "- ABSOLUTE PROHIBITION ON COPYING THE STYLE REFERENCE GARMENT: The clothing, outfit, saree, dress, fabric, color, embroidery, or prints shown on the person in the STYLE REFERENCE image MUST BE 100% DISCARDED. Absolutely DO NOT copy, borrow, blend, or reproduce the style reference's clothing onto the model.",
+    "- PRODUCT INTEGRITY (SOLE TRUTH FROM UPLOADED PRODUCT IMAGES): the product itself (fabric, colors, prints, pattern geometry, neckline, sleeves, hem, embroidery, trims, closures, and complete bottom wear) MUST come exclusively from uploaded product references. The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows. Our product and its design must stay exactly as uploaded in the product photos.",
+  ].join("\n");
+}
+
+function anatomicalIntegrityDirective(): string {
+  return [
+    "STRICT HUMAN ANATOMY & NATURAL LIMB INTEGRITY (ZERO TOLERANCE FOR EXTRA LIMBS):",
+    "- EXACTLY TWO ARMS AND TWO HANDS: The model must have strictly and exactly TWO arms and TWO hands in total. It is STRICTLY FORBIDDEN to render a third hand, extra hand, extra arm, duplicate wrist, floating hand, or phantom limb anywhere on the body, garment, waist, drape, or set.",
+    "- COORDINATED HAND PLACEMENT: When one hand is holding, touching, or adjusting the garment/pallu/dupatta, the other hand must be naturally placed (e.g. resting at the side, on hip, or relaxed). NO THIRD HAND may appear resting on the waist, navel, or pleats. There must never be hands sprouting from the drape or floating disconnected from an arm.",
+    "- REAL ANATOMICAL CONNECTION: Every visible hand MUST connect seamlessly to a real, visible, anatomically correct forearm and arm belonging to the model. Knuckles, wrists, and elbows must bend naturally.",
+    "- NATURAL FINGERS: Each hand must have exactly five natural, cleanly formed fingers with realistic nails and knuckles — never fused, melted, webbed, mangled, missing, or extra fingers.",
+    "- PROHIBITED ANATOMICAL DEFECTS: Three hands, extra arms, duplicate hands, phantom hands, severed limbs, unnatural joint angles, or extra body parts under any circumstances.",
   ].join("\n");
 }
 
@@ -797,11 +811,13 @@ ${generationMemory}
 
 EDIT GOAL:
 Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${boundedText(args.pose.title, 160)}. The finished image must look like the same real professional photoshoot as every other frame in this set.
+CRITICAL PRODUCT INTEGRITY RULE: The product clothing (garment, fabric, colors, prints, embroidery, neckline, sleeves, and bottom wear) must be taken EXCLUSIVELY and EXACTLY from the UPLOADED PRODUCT reference images. The clothing/outfit worn by the person in the STYLE REFERENCE image is strictly ignored and 100% DISCARDED. Absolutely DO NOT copy, transfer, or blend the style reference image's garment onto the model. Dress the model ONLY in the uploaded product.
 Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE${hasApprovedAnchor ? " as already photographed in APPROVED POSE 1 - rebuild exactly the set Pose 1 shows, including in a back view" : " (if supplied)"} and the SCENE LOCK below - never a different or generic set. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
 
 ${sceneLock}
 
 PHOTOGRAPHIC REALISM - MUST READ AS CAPTURED BY A REAL CAMERA, NEVER AS AI-GENERATED:
+${anatomicalIntegrityDirective()}
 - Camera and optics: full-frame camera with a lens suited to this framing (about 85mm for full-length and three-quarter frames, macro-style close focus for detail crops), low ISO, real optical depth of field with gradual focus falloff. No fake bokeh, cut-out or halo edges, or pasted-on subject.
 - Colour and tone: true-to-life colours and exposure from a restrained professional RAW edit. Accurate, varied skin tones with natural redness and undertones; very fine sensor grain; soft highlight roll-off and detail in the shadows. No HDR, bloom, glow, haze, oversaturation, teal-orange grade, glossy beauty retouch, painterly, illustrated, 3D or CGI look.
 - Real person: an individual, believable face with natural character, not an idealized stock face; relaxed, weight-bearing posture with slight natural asymmetry; correct hands with five fingers, knuckles and nails; natural neck, shoulder and limb proportions. Hair shows individual strands and a few flyaways, never a solid helmet-like mass.
@@ -976,6 +992,8 @@ ${faceRequired ? `- Render the eyes with correct anatomy: two naturally shaped, 
 
 PROHIBITED UNRELATED CHANGES:
 ${rules.map((rule) => `- ${rule}`).join("\n")}
+- STRICT ANATOMICAL RULE: NEVER render three hands, extra arms, duplicate hands, floating hands, phantom limbs, or extra body parts. The model must have strictly and exactly two arms and two hands with five natural fingers each.
+- STRICT PRODUCT ISOLATION RULE: Never copy, transfer, or borrow the clothing, saree, dress, colors, prints, or embroidery from the STYLE REFERENCE image. Dress the model ONLY in the uploaded product.
 - Never render duplicate or identical frontal standing poses across different pose slots (Poses 2, 4, and 6 must visibly physically diverge from Pose 1).
 - Never render artificial, forced, stiff, or frozen stock catalog smiles.
 - Never redesign the product or copy garment details from the style reference.
