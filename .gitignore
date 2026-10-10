@@ -39,4 +39,8 @@ scratch/
 # IDE Agent configuration
 .agents/
 
+# Test artifacts
+mogra_farshi_verified/
+*.tmp
+
 
