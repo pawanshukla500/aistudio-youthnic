@@ -91,7 +91,25 @@ function joined(values: unknown[]) {
 
 export function recordedBottomWearText(productIdentity: unknown): string {
   const product = objectValue(productIdentity);
-  return text(product.bottomWearDetails ?? product.bottom_wear_details);
+  const raw = product.bottomWearDetails ?? product.bottom_wear_details;
+  if (typeof raw === "string") return raw.trim();
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const obj = raw as Record<string, unknown>;
+    const parts = [
+      text(obj.classification),
+      text(obj.cutTruth),
+      text(obj.waistAndPleating),
+      text(obj.legVolume),
+      text(obj.hemline),
+      text(obj.fabricColorPrint),
+      text(obj.negativeConstraints),
+    ].filter(Boolean);
+    if (parts.length > 0) return parts.join(". ");
+    return Object.entries(obj)
+      .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v || "")}`)
+      .join(". ");
+  }
+  return "";
 }
 
 /**
@@ -111,12 +129,23 @@ export function hasBottomWearInAnalysis(productIdentity: unknown): boolean {
 }
 
 export function classifyBottomCut(detailsOrProduct: unknown): BottomCutClass {
+  const isObj = detailsOrProduct && typeof detailsOrProduct === "object" && !Array.isArray(detailsOrProduct);
   const details = typeof detailsOrProduct === "string"
     ? detailsOrProduct
     : recordedBottomWearText(detailsOrProduct);
   const positive = positiveBottomWearPortion(details);
-  if (!positive) return "none";
+  if (!positive && !isObj) return "none";
   if (/\b(farshi|farsi)\b/i.test(positive)) return "farshi";
+  if (isObj) {
+    const product = detailsOrProduct as JsonRecord;
+    const extra = [
+      text(product.silhouette),
+      text(product.bottomWear),
+      text(product.bottom_wear),
+      recordedBottomWearText(product),
+    ].join(" ");
+    if (/\b(farshi|farsi)\b/i.test(extra)) return "farshi";
+  }
   if (/\b(sharara|gharara)\b/i.test(positive)) return "sharara_gharara";
   if (/\bpalazzo\b/i.test(positive)) return "palazzo";
   if (/\b(churidar|patiala|salwar)\b/i.test(positive)) return "salwar_churidar";

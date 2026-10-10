@@ -5610,9 +5610,10 @@ async function fashionKnowledgeBrief(orgId: string, category = "", garmentFamily
     const { data, error } = await service.from("fashion_knowledge_base")
       .select("id,organization_id,category,topic,title,guidance,tags,priority,source,is_active")
       .eq("is_active", true)
+      .neq("category", "event_intelligence")
       .or(orgFilter)
       .order("priority", { ascending: false })
-      .limit(40);
+      .limit(100);
     if (error) {
       console.error(`Could not load fashion knowledge: ${error.message}`);
       return "";

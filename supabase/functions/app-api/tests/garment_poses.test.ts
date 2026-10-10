@@ -98,12 +98,16 @@ Deno.test("a co-ord set follows the rest of the garment, not the word itself", (
 
 Deno.test("bottom-wear classification reads the positive half of the specification", () => {
   assertEquals(classifyBottomCut("Farshi Pajama, extreme volume; NOT palazzo, NOT lehenga"), "farshi");
+  assertEquals(classifyBottomCut("Farshi pants with flared volume and vertical pleats, ankle-length"), "farshi");
+  assertEquals(classifyBottomCut("Farshi Pajama / Farshi pants, ankle-length, chevron print; NOT palazzo"), "farshi");
+  assertEquals(classifyBottomCut({ silhouette: "straight kurti + flared farshi pants", bottomWearDetails: "chevron printed pants with sequin lace" }), "farshi");
   assertEquals(classifyBottomCut("Palazzo, wide straight legs; NOT farshi"), "palazzo");
   assertEquals(classifyBottomCut("Gharara with ruched knee joint"), "sharara_gharara");
   assertEquals(classifyBottomCut("Churidar with ankle churis"), "salwar_churidar");
   assertEquals(classifyBottomCut("Cigarette pants, tailored straight"), "straight_trouser");
   assertEquals(classifyBottomCut("none - standalone garment"), "none");
   assert(hasBottomWearInAnalysis({ bottomWearDetails: "Palazzo in ivory crepe" }));
+  assert(hasBottomWearInAnalysis({ bottomWearDetails: "Farshi pants with chevron print" }));
   assert(!hasBottomWearInAnalysis({ bottomWearDetails: "none - standalone garment" }));
 });
 

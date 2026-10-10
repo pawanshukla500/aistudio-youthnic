@@ -439,9 +439,9 @@ function pose5HardRule(args: { closeupMode: string; heroDetail: string }) {
 function bottomWearSubstitutionGuard(cutClass: BottomCutClass) {
   const guards: Record<BottomCutClass, string> = {
     farshi:
-      "- FARSHI / FARSI HARD LOCK: extremely voluminous floor-length trousers with TWO DISTINCT LEGS, heavy vertical pleating or gathers from the waist/hip, and architectural volume that flares and may trail or pool at the floor. You are STRICTLY FORBIDDEN from rendering palazzo, plain wide-leg pants, a lehenga/skirt (one circular flare with no leg split), dhoti pants, tulip pants, harem pants, Afghani salwars, or any pants that taper or gather into an ankle cuff. Never flatten the volume, and keep the exact recorded motif field at its recorded physical scale - a pretty palazzo or a skirt-like flare is a failed generation even if the top and the model face are perfect.",
+      "- FARSHI / FARSI HARD LOCK: voluminous flared trousers with TWO DISTINCT LEGS (ankle-length clearing the floor to display footwear/juttis, or floor-length/pooling as shown in references), heavy vertical pleating or gathers from the waist/hip, and architectural volume that flares prominently towards the hem. You are STRICTLY FORBIDDEN from rendering palazzo, plain wide-leg pants, a lehenga/skirt (one circular flare with no leg split), dhoti pants, tulip pants, harem pants, Afghani salwars, or any pants that taper or gather into an ankle cuff. Never flatten the volume into tubular straight trousers, and keep the exact recorded print/motif field (chevron/zigzag, geometric, or floral) at its recorded physical scale, alignment, and density - flattening into a plain tubular palazzo or skirt-like flare is a failed generation even if the top and the model face are perfect.",
     palazzo:
-      "- PALAZZO HARD LOCK: the legs fall wide and straight or softly flared, with two distinct legs and no farshi-level pooling or skirt merge. Do NOT substitute farshi, lehenga/skirt, dhoti, tulip, harem, churidar, or an ankle-cuffed salwar.",
+      "- PALAZZO HARD LOCK: the legs fall wide and straight or softly flared, with two distinct legs and no skirt merge. Do NOT substitute lehenga/skirt, dhoti, tulip, harem, churidar, or an ankle-cuffed salwar.",
     sharara_gharara:
       "- SHARARA / GHARARA HARD LOCK: the flare begins at or below the knee exactly as recorded (a gharara additionally keeps its ruched/gote knee joint). Do NOT substitute straight trousers, palazzo, farshi, lehenga/skirt, or a salwar.",
     salwar_churidar:
@@ -477,14 +477,21 @@ function bottomWearSection(args: {
 - Frame every pose so the upper garment - its neckline, sleeves, fit, print and hem line - remains the subject.
 - THIS SECTION OUTRANKS THE POSE BRIEF: the pose plan below was written from the product analysis and may still name bottom wear, a "complete set", or a waistband-to-hem read. Ignore every such instruction and follow this section instead.${args.bottomWear.mode === "top_only" && args.bottomWear.recordedInAnalysis ? "\n- The analysis recorded bottom-wear details for this SKU, but the shoot is configured TOP ONLY. Present the top as the product and keep the bottom neutral and non-matching." : ""}`;
   }
-  const guard = bottomWearSubstitutionGuard(args.bottomWear.cutClass);
+  const effectiveCutClass = (args.hasBottomReference && (args.bottomWear.cutClass === "palazzo" || args.bottomWear.cutClass === "none" || args.bottomWear.cutClass === "other"))
+    ? "farshi"
+    : args.bottomWear.cutClass;
+  const guard = bottomWearSubstitutionGuard(effectiveCutClass);
+  let cleanedDetails = args.bottomWear.details;
+  if (args.hasBottomReference || effectiveCutClass === "farshi") {
+    cleanedDetails = cleanedDetails.replace(/\bnot\s+(?:flared\s+)?farshi(?:\s*\/\s*farsi)?(?:\s+pajama|\s+pants)?\b/gi, "").trim();
+  }
   return `LOCKED BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT - HIGHEST FIDELITY:
-Bottom wear specification: ${boundedText(args.bottomWear.details, 1_200)}
+Bottom wear specification: ${boundedText(cleanedDetails, 1_200)}
 ${args.hasBottomReference ? "- A dedicated BOTTOM WEAR / FARSHI image is in the reference manifest. That image is the pixel-level authority for bottom-wear cut, volume, hem, fabric color, and print. Copy it literally onto the worn trousers/skirt." : "- Read bottom-wear cut, volume, hem, fabric color, and print from FRONT, BACK, MANNEQUIN, and ADDITIONAL product images where the trousers/skirt are visible. Do not invent a simpler palazzo or a solid/plain bottom."}
 - MANDATORY SILHOUETTE PRESERVATION: render the EXACT bottom wear cut, silhouette, leg volume, leg structure, pleat/gather architecture, and hem construction described above and shown in the product references, in EVERY pose.
 - ABSOLUTE PROHIBITION ON SILHOUETTE SUBSTITUTION:
 ${guard}
-- COLOR & PRINT TRANSFER: copy the exact base fabric color, sheen, and motif geometry of the bottom wear from the bottom-visible product references. Large-scale metallic florals/bootas must remain large-scale metallic florals/bootas at the same physical size and density. You are STRICTLY FORBIDDEN from rendering the bottoms as solid/undecorated color, as faint dots/speckles, or as a miniaturized micro-print when the references show bold motifs. Never use the kurta/upper FABRIC / PATTERN DETAIL close-up as the bottom print.
+- COLOR & PRINT TRANSFER: copy the exact base fabric color, sheen, and motif geometry of the bottom wear from the bottom-visible product references. Large-scale prints — whether bold chevron/zigzag geometric patterns, vertical stripes, or metallic florals/bootas — must remain at their exact recorded physical size, alignment, and density. You are STRICTLY FORBIDDEN from rendering the bottoms as solid/undecorated color, as faint dots/speckles, or as a miniaturized micro-print when the references show bold chevron/zigzag or floral motifs. Never use the kurta/upper FABRIC / PATTERN DETAIL close-up as the bottom print.
 - FULL-BODY READABILITY: in every full or three-quarter body frame the bottom wear must be visible from waistband to hem with the footwear grounded, and the join where the top's hem meets the bottom must not be hidden by hands, hair, or a dupatta.`;
 }
 

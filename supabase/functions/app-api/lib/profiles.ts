@@ -749,6 +749,28 @@ function stringValue(value: unknown, fallback = "Not visible in the supplied ref
   return fallback;
 }
 
+function bottomWearDetailsValue(value: unknown, fallback = "Not visible in the supplied references"): string {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>;
+    const parts = [
+      typeof obj.classification === "string" ? obj.classification.trim() : "",
+      typeof obj.cutTruth === "string" ? obj.cutTruth.trim() : "",
+      typeof obj.waistAndPleating === "string" ? obj.waistAndPleating.trim() : "",
+      typeof obj.legVolume === "string" ? obj.legVolume.trim() : "",
+      typeof obj.hemline === "string" ? obj.hemline.trim() : "",
+      typeof obj.fabricColorPrint === "string" ? obj.fabricColorPrint.trim() : "",
+      typeof obj.negativeConstraints === "string" ? obj.negativeConstraints.trim() : "",
+    ].filter(Boolean);
+    if (parts.length > 0) return parts.join(". ");
+    return Object.entries(obj)
+      .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v || "")}`)
+      .join(". ");
+  }
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return fallback;
+}
+
 function stringArray(value: unknown, fallback: string[] = []) {
   if (typeof value === "string" && value.trim()) return [value.trim()];
   if (!Array.isArray(value)) return fallback;
@@ -1321,7 +1343,7 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     buttons: stringValue(product.buttons), zippers: stringValue(product.zippers), pockets: stringValue(product.pockets),
     embroidery: stringValue(product.embroidery), logos: stringValue(product.logos),
     accessoriesIncluded: stringValue(product.accessoriesIncluded ?? product.accessories_included),
-    bottomWearDetails: stringValue(product.bottomWearDetails ?? product.bottom_wear_details),
+    bottomWearDetails: bottomWearDetailsValue(product.bottomWearDetails ?? product.bottom_wear_details),
     footwearDetails: stringValue(product.footwearDetails ?? product.footwear_details),
     detailPlacementMap: sanitizeDetailPlacementMap(product.detailPlacementMap ?? product.detail_placement_map, normalizedGarmentEvidence),
     absenceConstraints: stringArray(product.absenceConstraints ?? product.absence_constraints),
@@ -1425,6 +1447,8 @@ export function buildCombinedAnalysisPrompt(args: {
   analysisLearning?: string; showcaseFeedback?: string;
 }) {
   const manifest = args.referenceManifest.map(({ number, role }) => `IMAGE ${number}: ${role}`).join("\n");
+  const hasBottomRef = args.referenceManifest.some((m) => m.role === "bottom" || /bottom/i.test(m.role));
+  const isFarshiSku = hasBottomRef || /farshi|farsi/i.test(`${args.skuName} ${args.productDetails}`);
   return `You are the visual merchandiser and shoot planner for a fashion e-commerce studio.
 
 Analyze EVERY supplied image before answering.
@@ -1465,9 +1489,18 @@ Anything you genuinely cannot measure goes in uncertaintyNotes - never guess a g
 
 BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT (MANDATORY FOR SUITS, SETS, & CO-ORDS):
 When the product is a multi-piece outfit (kurti/kurta set, salwar suit, co-ord set, lehenga, Indo-western), the customer buys the complete set and expects the EXACT bottom wear cut, silhouette, color, and pattern shown in the product references. NEVER gloss over bottom wear with generic words like "matching pants". You MUST inspect the bottom wear in FRONT PRODUCT, BACK PRODUCT, MANNEQUIN / FLAT-LAY, ADDITIONAL PRODUCT, and BOTTOM WEAR / FARSHI references (if supplied) and record an exhaustive, specific specification in 'productIdentity.bottomWearDetails'. FABRIC / PATTERN DETAIL is NOT authority for bottoms unless that image itself shows the trousers/skirt.
+${isFarshiSku ? `
+AUTHORITATIVE FARSHI CUT DIRECTIVE:
+A dedicated "BOTTOM WEAR / FARSHI" reference is present in the manifest (or this SKU is designated Farshi).
+The bottom wear in this SKU is AUTHORITATIVELY CLASSIFIED AS "Farshi / Farshi Pajama / Farshi Pants" (NEVER Palazzo).
+Its true cut features voluminous flared trousers with TWO DISTINCT LEGS, vertical gathers/pleats or wide A-line flared drape from hip/waist down to hem, whether ankle-length (clearing the floor to display traditional footwear/juttis) or floor-length, with sequin lace hem trim.
+You MUST record 'productIdentity.bottomWearDetails.classification' as "Farshi / Farshi Pajama / Farshi Pants".
+You are STRICTLY FORBIDDEN from classifying it as Palazzo, and you must NEVER write "NOT Farshi".
+Under negativeConstraints, explicitly state: "NOT palazzo, NOT tubular straight pants, NOT lehenga, NOT skirt, NOT sharara, NOT gharara, NOT churidar".
+` : ""}
 1. EXACT CUT & CLASSIFICATION: Explicitly classify the cut from the worn silhouette in the references, not from a generic ethnic-wear prior:
-   - "Farshi / Farsi / Farshi Pajama": Extremely voluminous floor-length trousers with TWO DISTINCT LEGS (never a lehenga or circular skirt). Heavy vertical pleating or gathering from the waist/hip creates architectural volume that flares and often trails or pools at the floor. Do NOT require a specific hem-band width to classify as Farshi - classify from volume, two-leg structure, and floor-trailing drape. Distinct from Palazzo (simpler wide-leg, less volume, no floor trail) and from Sharara (flare starts at or below the knee).
-   - "Palazzo": Wide straight or softly flared trousers without farshi-level volume or floor-trailing pools; typically hangs as a simpler wide-leg.
+   - "Farshi / Farsi / Farshi Pajama / Farshi Pants": Voluminous flared trousers with TWO DISTINCT LEGS (never a lehenga or circular skirt). Heavy vertical pleating, gathers, or wide A-line flared drape from waist/hip creates architectural volume that flares prominently towards the hem. Length may be ankle-length (clearing the floor to display traditional footwear/juttis), floor-length, or floor-trailing/pooling. Hemline often features an embellished border, sequin lace trim, or print band. Classify based on flared volume, two-leg structure, and pleat/gather drape. Distinct from basic straight/tubular palazzo (which lacks flared volume and waist pleats/gathers) and from Sharara (where flare begins at or below a knee join seam). When a dedicated BOTTOM WEAR / FARSHI reference is supplied or the trousers show flared volume with pleats/gathers/hem lace, classify as Farshi / Farshi Pajama / Farshi Pants, NOT palazzo.
+   - "Palazzo": Simple standard-width straight or softly flared wide-leg trousers without farshi flared volume, gathers, or architectural flair. If a BOTTOM WEAR / FARSHI reference is attached or flared volume/lace is present, DO NOT classify as Palazzo.
    - "Straight Trousers / Cigarette Pants": Narrow straight tailored cut ending at the ankle, with side slits or plain hem.
    - "Sharara": Fitted from waist to knee, flaring out dramatically from the knee down.
    - "Gharara": Ruched/gathered below the knee with decorative gote/piping, flaring out below.
@@ -1475,12 +1508,12 @@ When the product is a multi-piece outfit (kurti/kurta set, salwar suit, co-ord s
    - "Churidar": Fitted closely to calf and ankle with fabric gathers/rings (churis) at the ankle.
    - "Skirt / Lehenga": Full-length circular or pleated flare with NO separate trouser legs.
 2. WAIST & PLEATING ARCHITECTURE: Document pleat structure: e.g., "deep front inverted box pleats running vertically down each leg", "dense gathers from a fitted waistband", "knife pleats", or "gather-free tailored waist".
-3. LEG VOLUME & SILHOUETTE: Describe the leg profile from hip to hem, including whether fabric trails/pools at the floor. Farshi must be described as extreme volume with two visible legs, not as "wide-leg pants".
-4. HEMLINE & BORDER FINISH: Document the hem finish actually visible: e.g., "broad 3 to 4 inch horizontal hem band", "plain turned hem", "metallic zari border". Do not invent a hem band.
-5. FABRIC, COLOR & MOTIF GEOMETRY: Record bottom-wear fabric, base color, sheen, AND print as its own geometry - motif shape inventory, physical scale relative to the leg (e.g. "each gold floral is roughly palm-sized, scattered not micro-dotted"), density, metallic color, and orientation. Example: "magenta/raspberry silk with bold large-scale metallic gold/silver floral bootas scattered across both legs; NOT solid magenta; NOT tiny speckles". If the kurta is embroidered white and the bottoms have a large gold floral, those are TWO different treatments - never merge them.
+3. LEG VOLUME & SILHOUETTE: Describe the leg profile from hip to hem, including whether fabric trails/pools or clears the floor at the ankles. Farshi must be described as extreme volume with two visible legs, not as "wide-leg pants".
+4. HEMLINE & BORDER FINISH: Document the hem finish actually visible: e.g., "broad 3 to 4 inch horizontal hem band", "sequin lace trim above hem", "plain turned hem", "metallic zari border". Do not invent a hem band.
+5. FABRIC, COLOR & MOTIF GEOMETRY: Record bottom-wear fabric, base color, sheen, AND print/patterns as its own geometry - motif shape inventory, physical scale relative to the leg (e.g. "each gold floral is roughly palm-sized, scattered not micro-dotted", or "bold dark chocolate-brown chevron / zigzag print on beige ground stacked vertically across each leg"), density, metallic color, orientation, and hem embellishments (e.g. sequin lace band or contrast border). Example: "dark chocolate-brown on beige ground with bold large-scale chevron zigzag print running across both legs, finished with gold sequin lace above the hem; NOT solid; NOT micro-dots; NOT upper kurta floral". If the kurta is floral and the bottoms have a chevron zigzag or floral boota, those are TWO different treatments - never merge them.
 6. EXPLICIT NEGATIVE CONSTRAINTS (WHAT IT IS NOT):
-   - For Farshi / Farsi pajama: Explicitly state "NOT palazzo, NOT plain wide-leg, NOT lehenga, NOT skirt, NOT dhoti pants, NOT tulip pants, NOT tapered at ankle, NOT gathered into an ankle cuff, NOT balloon/harem pants, NOT churidar". Also state "NOT solid/undecorated" when motifs are visible, and "NOT micro-dot/speckle print" when motifs are large-scale.
-   - For Palazzo: Explicitly state "NOT farshi, NOT lehenga, NOT dhoti pants, NOT tulip pants, NOT tapered at ankle".
+   - For Farshi / Farsi pajama / Farshi pants: Explicitly state "NOT palazzo, NOT plain wide-leg, NOT lehenga, NOT tubular straight pants, NOT skirt, NOT dhoti pants, NOT tulip pants, NOT tapered at ankle, NOT gathered into an ankle cuff, NOT balloon/harem pants, NOT churidar". Also state "NOT solid/undecorated" when motifs are visible, and "NOT micro-dot/speckle print" when motifs or chevron prints are bold.
+   - For Palazzo: Explicitly state "NOT lehenga, NOT dhoti pants, NOT tulip pants, NOT tapered at ankle". NEVER state "NOT Farshi" when an image is labeled BOTTOM WEAR / FARSHI.
    - For Straight Pants: Explicitly state "NOT palazzo, NOT flared, NOT dhoti pants, NOT salwar".
 If the SKU is a standalone upper garment (e.g. single kurti, standalone dress, saree), explicitly state "none - standalone garment".
 
@@ -1639,10 +1672,9 @@ export const CONSISTENCY_RULES = [
 // (Bengali saree pallu placement, ethnic saree drape, kurti fit/length/sleeve,
 // playful short-kurti/top framing) and the configurable bottom-wear
 // presentation, so a cached v20 plan would still be a five-pose plan.
-// v22 makes the sixth frame's subject a per-SKU decision recorded in
-// showcasePlan instead of one of four fixed intents, so a cached v21 plan would
-// still carry the fixed "complete set" brief that duplicated the hero frame.
-export const ANALYSIS_VERSION = "generation-session-v22-showcase-feature-chosen";
+// v23 expands Farshi bottom wear definition to include ankle-length/floor-clearing
+// flared volume, vertical pleats/gathers, and chevron geometric prints without palazzo flattening.
+export const ANALYSIS_VERSION = "generation-session-v23-farshi-flared-fidelity";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

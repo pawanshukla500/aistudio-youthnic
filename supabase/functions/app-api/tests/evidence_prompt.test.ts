@@ -505,6 +505,44 @@ Deno.test("composeGenerationPrompt treats a dedicated bottom reference as print 
   assertEquals(prompt.includes("If the bottom wear is Farshi / Farshi Pajama, palazzo, or wide-leg pants"), false);
 });
 
+Deno.test("composeGenerationPrompt preserves ankle-length Farshi flared cut and chevron geometric print", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "MOGRA-FARSHI-SET",
+    productDetails: "Kurti set with Farshi bottom in chevron print",
+    pose: {
+      id: "full_front",
+      title: "Hero Stance",
+      poseNumber: 1,
+      description: "Full body hero",
+      cameraAngle: "straight",
+      framing: "full",
+      bodyPosition: "standing",
+      handPlacement: "sides",
+      expression: "confident",
+      highlightedDetails: ["Farshi flare", "chevron print"],
+      productVisibilityRules: ["complete bottom wear visible"],
+      purpose: "hero",
+      consistencyNotes: "locked",
+      prompt: "Show complete farshi kurti set.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "mustard yellow",
+        bottomWearDetails: "Farshi Pajama / Farshi pants, voluminous flared two-leg cut with vertical pleats and soft gathers, ankle-length displaying gold juttis, bold dark chocolate-brown chevron zigzag print on beige ground with gold-red sequin lace trim above hem; NOT palazzo, NOT plain tubular wide-leg, NOT lehenga",
+      },
+    },
+    references: [{ role: "front" }, { role: "fabric_pattern" }, { role: "bottom" }],
+  });
+
+  assertStringIncludes(prompt, "FARSHI / FARSI HARD LOCK:");
+  assertStringIncludes(prompt, "ankle-length clearing the floor to display footwear/juttis");
+  assertStringIncludes(prompt, "chevron/zigzag geometric patterns");
+  assertStringIncludes(prompt, "gold-red sequin lace trim above hem");
+  assertEquals(prompt.includes("PALAZZO HARD LOCK:"), false);
+});
+
 Deno.test("true-back pose preserves bottom wear architecture without leaking front decoration", () => {
   const prompt = composeGenerationPrompt({
     skuName: "FARSHI-KURTI-SET-BACK",
