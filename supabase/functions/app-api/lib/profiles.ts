@@ -10,6 +10,7 @@ import {
 import {
   classifyBottomCut,
   detectGarmentPoseFamily,
+  FARSHI_SILHOUETTE_STRUCTURE,
   type GarmentPoseFamily,
   hasBottomWearInAnalysis,
   isSareePoseFamily,
@@ -609,13 +610,24 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
   });
   // The sixth frame's brief must agree with how the shoot will actually be
   // rendered, so a top-only shoot never stores a "show the bottom wear" brief.
-  const hasBottoms = resolveBottomWearPresentation({
+  const bottomPresentation = resolveBottomWearPresentation({
     mode: context.bottomWearMode,
     productIdentity: context.productIdentity ?? {},
-  }).includesBottomWear || (
+  });
+  const hasBottoms = bottomPresentation.includesBottomWear || (
     normalizeBottomWearMode(context.bottomWearMode) !== "top_only" &&
     (family === "kurta_set" || family === "lehenga")
   );
+  const farshiBottom = bottomPresentation.cutClass === "farshi";
+  const frontBottomRule = farshiBottom
+    ? "exact Farshi structure: three waist pleats each side, one large side-joint pleat each side, 6-inch joined hem with a 4-inch taper; never palazzo, lehenga, skirt, or a gathered salwar cuff; motifs stay at recorded scale"
+    : "exact authentic bottom wear cut, volume, and print strictly preserved (farshi must never flatten into palazzo/lehenga/skirt; large motifs must never become solid or dots)";
+  const angledBottomRule = farshiBottom
+    ? "Farshi structure stays readable from the side: soft structured drape, three waist pleats each side, one large pleat at each side joint, and the 6-inch joined hem with its 4-inch taper; never a palazzo, lehenga, or dhoti"
+    : "authentic bottom wear cut, leg volume, and print strictly preserved - never flattened into palazzo/lehenga or tapered into dhoti";
+  const rearBottomRule = farshiBottom
+    ? "Farshi from the rear keeps two legs, three waist pleats each side, one large pleat at each side joint, and the 6-inch joined hem with its 4-inch taper; never a skirt, open palazzo hem, or gathered salwar cuff"
+    : "exact bottom wear cut, volume, and print visible from rear - never flattened, never a skirt, never gathered into cuffs";
 
   return [
     {
@@ -627,7 +639,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       expression: "Natural, warm, approachable expression with a soft, genuine smile or calm composed glance; never a forced, stiff, or artificial toothy smile",
       productVisibilityRules: [
         "front construction unobstructed",
-        "exact authentic bottom wear cut, volume, and print strictly preserved (farshi must never flatten into palazzo/lehenga/skirt; large motifs must never become solid or dots)",
+        frontBottomRule,
         "complete bottom wear visible from waist to hem",
         "no garment detail hidden by hands or hair",
       ],
@@ -652,7 +664,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
         : [
           "front and side construction remain readable",
           "silhouette is not compressed",
-          "authentic bottom wear cut, leg volume, and print strictly preserved - never flattened into palazzo/lehenga or tapered into dhoti",
+          angledBottomRule,
           "bottom wear remains unchanged and visible",
         ],
       consistencyNotes: "Use Pose 1 only as the model and shoot anchor; preserve the original product references as garment truth",
@@ -679,7 +691,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
           "dupatta or shawl draped forward over arms/front only - back of kurti/dress must be 100% visible and unobstructed",
           "hair swept forward or in an updo - back neckline, ties, and rear details completely unobstructed",
           "never infer back details from the front",
-          "exact bottom wear cut, volume, and print visible from rear - never flattened, never a skirt, never gathered into cuffs",
+          rearBottomRule,
           "exact same backdrop wall, floor, and lighting from Pose 1 - zero new props",
         ],
       consistencyNotes: "Keep the exact same model identity, hair, accessories, footwear, exact bottom wear, and identical studio set/backdrop wall from Pose 1 while showcasing the authoritative back",
@@ -1493,13 +1505,15 @@ ${isFarshiSku ? `
 AUTHORITATIVE FARSHI CUT DIRECTIVE:
 A dedicated "BOTTOM WEAR / FARSHI" reference is present in the manifest (or this SKU is designated Farshi).
 The bottom wear in this SKU is AUTHORITATIVELY CLASSIFIED AS "Farshi / Farshi Pajama / Farshi Pants" (NEVER Palazzo).
-Its true cut features voluminous flared trousers with TWO DISTINCT LEGS, vertical gathers/pleats or wide A-line flared drape from hip/waist down to hem, whether ankle-length (clearing the floor to display traditional footwear/juttis) or floor-length, with sequin lace hem trim.
+Record this structure in bottomWearDetails (classification, waistAndPleating, legVolume, and hemline). Print, colour, motif scale, and length still come from the references. Do not replace this construction with a palazzo, a skirt, or a gathered salwar cuff.
+${FARSHI_SILHOUETTE_STRUCTURE}
 You MUST record 'productIdentity.bottomWearDetails.classification' as "Farshi / Farshi Pajama / Farshi Pants".
 You are STRICTLY FORBIDDEN from classifying it as Palazzo, and you must NEVER write "NOT Farshi".
-Under negativeConstraints, explicitly state: "NOT palazzo, NOT tubular straight pants, NOT lehenga, NOT skirt, NOT sharara, NOT gharara, NOT churidar".
+Under negativeConstraints, explicitly state: "NOT palazzo, NOT tubular straight pants, NOT lehenga, NOT skirt, NOT sharara, NOT gharara, NOT churidar, NOT a gathered salwar poncha, NOT an open palazzo hem".
+Do NOT write "NOT tapered" or "NOT gathered into an ankle cuff" for this Farshi. The 4-inch hem taper and the joined 6-inch hem panel are part of the silhouette.
 ` : ""}
 1. EXACT CUT & CLASSIFICATION: Explicitly classify the cut from the worn silhouette in the references, not from a generic ethnic-wear prior:
-   - "Farshi / Farsi / Farshi Pajama / Farshi Pants": Voluminous flared trousers with TWO DISTINCT LEGS (never a lehenga or circular skirt). Heavy vertical pleating, gathers, or wide A-line flared drape from waist/hip creates architectural volume that flares prominently towards the hem. Length may be ankle-length (clearing the floor to display traditional footwear/juttis), floor-length, or floor-trailing/pooling. Hemline often features an embellished border, sequin lace trim, or print band. Classify based on flared volume, two-leg structure, and pleat/gather drape. Distinct from basic straight/tubular palazzo (which lacks flared volume and waist pleats/gathers) and from Sharara (where flare begins at or below a knee join seam). When a dedicated BOTTOM WEAR / FARSHI reference is supplied or the trousers show flared volume with pleats/gathers/hem lace, classify as Farshi / Farshi Pajama / Farshi Pants, NOT palazzo.
+   - "Farshi / Farsi / Farshi Pajama / Farshi Pants": Two distinct trouser legs with this construction only: ${FARSHI_SILHOUETTE_STRUCTURE} Length may be ankle-length (clearing the floor to display footwear) or floor-length as the references show. Hem embellishment (lace, print band, or a plain finish) is whatever the references show on that joined hem panel — do not invent lace. Distinct from palazzo (no three-per-side waist pleats and no joined tapered hem panel) and from Sharara (where the flare begins at or below a knee join). When a dedicated BOTTOM WEAR / FARSHI reference is supplied, or the trousers show this pleated waist and joined hem, classify as Farshi / Farshi Pajama / Farshi Pants, NOT palazzo.
    - "Palazzo": Simple standard-width straight or softly flared wide-leg trousers without farshi flared volume, gathers, or architectural flair. If a BOTTOM WEAR / FARSHI reference is attached or flared volume/lace is present, DO NOT classify as Palazzo.
    - "Straight Trousers / Cigarette Pants": Narrow straight tailored cut ending at the ankle, with side slits or plain hem.
    - "Sharara": Fitted from waist to knee, flaring out dramatically from the knee down.
@@ -1507,12 +1521,12 @@ Under negativeConstraints, explicitly state: "NOT palazzo, NOT tubular straight 
    - "Patiala / Salwar": Traditional pleated volume draped into narrow ankle cuff (poncha).
    - "Churidar": Fitted closely to calf and ankle with fabric gathers/rings (churis) at the ankle.
    - "Skirt / Lehenga": Full-length circular or pleated flare with NO separate trouser legs.
-2. WAIST & PLEATING ARCHITECTURE: Document pleat structure: e.g., "deep front inverted box pleats running vertically down each leg", "dense gathers from a fitted waistband", "knife pleats", or "gather-free tailored waist".
-3. LEG VOLUME & SILHOUETTE: Describe the leg profile from hip to hem, including whether fabric trails/pools or clears the floor at the ankles. Farshi must be described as extreme volume with two visible legs, not as "wide-leg pants".
-4. HEMLINE & BORDER FINISH: Document the hem finish actually visible: e.g., "broad 3 to 4 inch horizontal hem band", "sequin lace trim above hem", "plain turned hem", "metallic zari border". Do not invent a hem band.
+2. WAIST & PLEATING ARCHITECTURE: Document pleat structure: e.g., "deep front inverted box pleats running vertically down each leg", "dense gathers from a fitted waistband", "knife pleats", or "gather-free tailored waist". When the cut is Farshi/Farsi, record three waist pleats on each side plus one large pleat on each side at the side-seam joint.
+3. LEG VOLUME & SILHOUETTE: Describe the leg profile from hip to hem, including whether fabric trails/pools or clears the floor at the ankles. Farshi must be described with the structure lock above (soft structured drape, two visible legs), not as "wide-leg pants".
+4. HEMLINE & BORDER FINISH: Document the hem finish actually visible: e.g., "broad 3 to 4 inch horizontal hem band", "sequin lace trim above hem", "plain turned hem", "metallic zari border". Do not invent a hem band or lace. When the cut is Farshi/Farsi, the hemline field must state the 6-inch panel joined to the leg and the 4-inch taper from the upper edge of that panel to its lower edge.
 5. FABRIC, COLOR & MOTIF GEOMETRY: Record bottom-wear fabric, base color, sheen, AND print/patterns as its own geometry - motif shape inventory, physical scale relative to the leg (e.g. "each gold floral is roughly palm-sized, scattered not micro-dotted", or "bold dark chocolate-brown chevron / zigzag print on beige ground stacked vertically across each leg"), density, metallic color, orientation, and hem embellishments (e.g. sequin lace band or contrast border). Example: "dark chocolate-brown on beige ground with bold large-scale chevron zigzag print running across both legs, finished with gold sequin lace above the hem; NOT solid; NOT micro-dots; NOT upper kurta floral". If the kurta is floral and the bottoms have a chevron zigzag or floral boota, those are TWO different treatments - never merge them.
 6. EXPLICIT NEGATIVE CONSTRAINTS (WHAT IT IS NOT):
-   - For Farshi / Farsi pajama / Farshi pants: Explicitly state "NOT palazzo, NOT plain wide-leg, NOT lehenga, NOT tubular straight pants, NOT skirt, NOT dhoti pants, NOT tulip pants, NOT tapered at ankle, NOT gathered into an ankle cuff, NOT balloon/harem pants, NOT churidar". Also state "NOT solid/undecorated" when motifs are visible, and "NOT micro-dot/speckle print" when motifs or chevron prints are bold.
+   - For Farshi / Farsi pajama / Farshi pants: Explicitly state "NOT palazzo, NOT plain wide-leg, NOT lehenga, NOT tubular straight pants, NOT skirt, NOT dhoti pants, NOT tulip pants, NOT balloon/harem pants, NOT churidar, NOT a gathered salwar poncha, NOT an open straight hem". Do NOT state "NOT tapered at ankle" or "NOT gathered into an ankle cuff" — the Farshi hem is the joined 6-inch panel with the 4-inch taper. Also state "NOT solid/undecorated" when motifs are visible, and "NOT micro-dot/speckle print" when motifs or chevron prints are bold.
    - For Palazzo: Explicitly state "NOT lehenga, NOT dhoti pants, NOT tulip pants, NOT tapered at ankle". NEVER state "NOT Farshi" when an image is labeled BOTTOM WEAR / FARSHI.
    - For Straight Pants: Explicitly state "NOT palazzo, NOT flared, NOT dhoti pants, NOT salwar".
 If the SKU is a standalone upper garment (e.g. single kurti, standalone dress, saree), explicitly state "none - standalone garment".
@@ -1615,7 +1629,7 @@ sareeTruth: Record exact base and secondary colours; fabric family; weave/lattic
 sareeDrapePlan: Choose a baseDrapeFamily (e.g., "shoulder-side/open-pallu" or "shoulder-side/pleated-pallu"), frontPleatTreatment, palluShoulderPlacement, handInteraction, borderVisibility, and poseSpecificDrapeState (e.g. how the angled pose shows the pallu fall).
 
 posePlan: Design 6 distinct poses (full_front, angled, back, creative, closeup, showcase). For each, specify the cameraAngle, framing, bodyPosition, handPlacement, expression, and write a detailed photorealistic 'prompt' that combines these elements with the product and model identity.
-CRITICAL: Every individual 'prompt' MUST be completely self-contained. The image generator does not see the other poses. You MUST explicitly describe the model's exact face, hair, skin tone, makeup, styling, bottom wear (exact cut, leg volume, two-leg vs skirt structure, pleating, hem, color, AND print/motif scale), and footwear inside EVERY SINGLE 'prompt' string. NEVER use phrases like "consistent with previous poses", "same as full_front", or "locked scene" inside the 'prompt' string itself.
+CRITICAL: Every individual 'prompt' MUST be completely self-contained. The image generator does not see the other poses. You MUST explicitly describe the model's exact face, hair, skin tone, makeup, styling, bottom wear (exact cut, leg volume, two-leg vs skirt structure, pleating, hem, color, AND print/motif scale), and footwear inside EVERY SINGLE 'prompt' string. When the bottom is Farshi/Farsi, every prompt must repeat the Farshi structure: soft structured drape, three waist pleats on each side, one large pleat on each side joint, and a 6-inch hem panel joined to the leg with a 4-inch taper from the upper hem edge to the lower hem edge. Never describe that Farshi as untapered or cuff-less. NEVER use phrases like "consistent with previous poses", "same as full_front", or "locked scene" inside the 'prompt' string itself.
 SCENE IS SHARED, NOT PER POSE: do NOT describe the background, set, walls, floor, location, props or lighting inside any pose 'prompt'. Describe the set once, concretely, in creativeDirection (backgroundStyle, studioEnvironment, propUsage, lighting, setContinuity); the generator applies that one description to all six frames. Six separate backdrop descriptions are how frames drift onto different sets - for example a back view on a different wall. The back, close-up, creative and showcase frames are the same room from another camera position.
 
 Across all six, ONLY pose, angle, framing, and expression may change.
@@ -1674,7 +1688,11 @@ export const CONSISTENCY_RULES = [
 // presentation, so a cached v20 plan would still be a five-pose plan.
 // v23 expands Farshi bottom wear definition to include ankle-length/floor-clearing
 // flared volume, vertical pleats/gathers, and chevron geometric prints without palazzo flattening.
-export const ANALYSIS_VERSION = "generation-session-v23-farshi-flared-fidelity";
+// v24 locks the Farshi/Farsi silhouette structure only: soft structured drape,
+// three waist pleats on each side, one large pleat at each side joint, and a
+// 6-inch hem panel joined to the leg with a 4-inch taper. Cached v23 analyses
+// still forbid that hem, so they must be re-read.
+export const ANALYSIS_VERSION = "generation-session-v24-farshi-joined-hem";
 
 export function smallHash(value: string) {
   let hash = 2166136261;
