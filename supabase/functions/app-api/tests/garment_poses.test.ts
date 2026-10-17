@@ -2,9 +2,12 @@ import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import {
   classifyBottomCut,
   detectGarmentPoseFamily,
+  effectiveBottomCutClass,
   hasBottomWearInAnalysis,
   normalizeBottomWearMode,
+  reconcileFarshiVisibilityRules,
   resolveBottomWearPresentation,
+  withoutFarshiStructureContradictions,
 } from "../lib/garmentPoses.ts";
 import { getPoseSlots, REQUIRED_POSE_IDS, normalizeAnalysis } from "../lib/profiles.ts";
 import { composeGenerationPrompt } from "../lib/generationPrompt.ts";
@@ -151,6 +154,32 @@ Deno.test("the pose plan is six ordered frames and the sixth adapts to the garme
   assertStringIncludes(top[5].title, "Playful");
 });
 
+Deno.test("Farshi structure is recorded on Farshi pose slots and stripped of the old untapered ban", () => {
+  const farshi = getPoseSlots({
+    productIdentity: { garmentFamily: "kurta_or_kurti_set", bottomWearDetails: "Farsi pajama, soft drape" },
+  });
+  assertStringIncludes(farshi[0].productVisibilityRules.join(" "), "6-inch joined hem with a 4-inch taper");
+  assertStringIncludes(farshi[2].productVisibilityRules.join(" "), "one large pleat at each side joint");
+  const palazzo = getPoseSlots({
+    productIdentity: { garmentFamily: "kurta_or_kurti_set", bottomWearDetails: "Palazzo, wide straight legs; NOT farshi" },
+  });
+  assertEquals(palazzo[0].productVisibilityRules.join(" ").includes("6-inch joined hem"), false);
+  assertEquals(palazzo[2].productVisibilityRules.join(" ").includes("never gathered into cuffs"), true);
+
+  const cleaned = withoutFarshiStructureContradictions(
+    "Farshi pajama, gold lace; NOT tapered at ankle, NOT gathered into an ankle cuff, NOT tapered into dhoti",
+  );
+  assertEquals(cleaned, "Farshi pajama, gold lace; NOT tapered into dhoti");
+  assertEquals(cleaned.includes("ankle cuff"), false);
+  assertEquals(
+    reconcileFarshiVisibilityRules("never gathered into cuffs"),
+    "keep the 6-inch joined Farshi hem with its 4-inch taper; never a gathered salwar cuff",
+  );
+  assertEquals(effectiveBottomCutClass("sharara_gharara", true), "sharara_gharara");
+  assertEquals(effectiveBottomCutClass("palazzo", true), "farshi");
+  assertEquals(effectiveBottomCutClass("palazzo", false), "palazzo");
+});
+
 Deno.test("normalizeAnalysis always returns the ordered six-pose plan", () => {
   const normalized = normalizeAnalysis({
     productIdentity: { garmentFamily: "kurta_or_kurti_set", bottomWearDetails: "Palazzo, wide legs" },
@@ -200,8 +229,10 @@ Deno.test("a kurta set showcase frame demands top and bottom in one frame", () =
   assertStringIncludes(prompt, "SHOWCASE FRAME HARD RULE (COMPLETE SET)");
   assertStringIncludes(prompt, "LOCKED BOTTOM WEAR ARCHITECTURE");
   assertStringIncludes(prompt, "PALAZZO HARD LOCK");
-  // Only the guard for the recorded cut is sent.
+  // Only the guard for the recorded cut is sent. The Farshi hem is not applied
+  // to a palazzo, including when catalog bulk uses this same prompt compiler.
   assertEquals(prompt.includes("FARSHI / FARSI HARD LOCK"), false);
+  assertEquals(prompt.includes("hem panel 6 inches wide"), false);
   assertEquals(prompt.includes("SHARARA / GHARARA HARD LOCK"), false);
 });
 

@@ -54,6 +54,51 @@ export const BOTTOM_CUT_CLASSES = [
 ] as const;
 export type BottomCutClass = typeof BOTTOM_CUT_CLASSES[number];
 
+/**
+ * Construction of the Farshi / Farsi pajama only.
+ * Print, colour, motif scale, and length still come from the product references.
+ * Palazzo, sharara, salwar, and every other cut must not receive this construction.
+ */
+export const FARSHI_SILHOUETTE_STRUCTURE =
+  "FALL: soft and flowy, but structured, with a fluid or heavy drape. " +
+  "WAIST: high-waisted or mid-rise, with an elasticated or fitted waistband, and three waist pleats on each side. " +
+  "SIDE JOINT: one large pleat on each side at the side-seam joint (one on the left and one on the right), in addition to the three waist pleats. " +
+  "HEM: the hem is narrower than the volume at the waist. A separate hem panel 6 inches wide is joined (seamed) onto the bottom of each leg, and that panel tapers 4 inches from its upper edge to its lower edge, so the opening at the bottom of the hem is 4 inches narrower than the seam where the hem joins the leg. " +
+  "Keep two distinct trouser legs. This joined hem is not a gathered salwar poncha, not churidar rings, and not an open straight palazzo hem.";
+
+/**
+ * A dedicated bottom-wear photo is the Farshi authority when analysis was
+ * unsure or called the cut a plain palazzo. Named cuts such as sharara stay put.
+ */
+export function effectiveBottomCutClass(cutClass: BottomCutClass, hasBottomReference: boolean): BottomCutClass {
+  if (hasBottomReference && (cutClass === "palazzo" || cutClass === "none" || cutClass === "other")) return "farshi";
+  return cutClass;
+}
+
+/**
+ * Analyses written before the joined-hem lock told the model the Farshi was
+ * untapered. Those clauses cancel the silhouette, so they are removed only
+ * from Farshi specifications. A dhoti taper ban is kept.
+ */
+export function withoutFarshiStructureContradictions(details: string): string {
+  return details
+    .replace(/\bnot\s+tapered\s+at\s+(?:the\s+)?ankle\b/gi, "")
+    .replace(/\bnot\s+gathered\s+into\s+an\s+ankle\s+cuff\b/gi, "")
+    .replace(/\bnot\s+tapered\b(?!\s+into\b)/gi, "")
+    .replace(/([,;])(?:\s*[,;])+/g, "$1")
+    .replace(/\s+([,.;])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/** Pose briefs that forbid every cuff would delete the Farshi hem panel. */
+export function reconcileFarshiVisibilityRules(rules: string): string {
+  return rules
+    .replace(/never gathered into cuffs/gi, "keep the 6-inch joined Farshi hem with its 4-inch taper; never a gathered salwar cuff")
+    .replace(/\bnot\s+tapered\s+at\s+(?:the\s+)?ankle\b/gi, "keep the 4-inch Farshi hem taper")
+    .replace(/\bnot\s+gathered\s+into\s+an\s+ankle\s+cuff\b/gi, "not a gathered salwar poncha");
+}
+
 const ABSENT_BOTTOM_WEAR =
   /^(unknown|unproven|none|n\/a|na|n\.a\.?|not applicable|standalone|not visible|not recorded|not specified|no bottom(?:s)?(?:\s+wear)?|no trousers?|no pants?)(\b|[.\s-]|$)/i;
 const BOTTOM_GARMENT_CLASS =

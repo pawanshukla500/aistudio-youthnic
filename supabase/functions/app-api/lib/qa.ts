@@ -1,5 +1,5 @@
 import { parseJsonResponse, resolveCloseupMode, CLOSEUP_PRODUCT_DETAIL, type JsonRecord } from "./profiles.ts";
-import { resolveBottomWearPresentation } from "./garmentPoses.ts";
+import { effectiveBottomCutClass, FARSHI_SILHOUETTE_STRUCTURE, resolveBottomWearPresentation } from "./garmentPoses.ts";
 import { isDirectBackProductRole } from "./referencePolicy.ts";
 
 const GENERIC_CHECK_KEYS = [
@@ -130,6 +130,12 @@ export function buildPoseQaPrompt(args: {
   // coordinated bottom to match, so bottom-wear fidelity is not a gate there.
   const bottomWear = resolveBottomWearPresentation({ mode: args.bottomWearMode, productIdentity: args.productIdentity });
   const hasBottomWear = bottomWear.includesBottomWear;
+  const hasBottomReference = args.referenceManifest.some((line) => /\bbottom\b/i.test(line));
+  const farshiBottom = hasBottomWear &&
+    effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference) === "farshi";
+  const farshiStructureCheck = farshiBottom
+    ? ` When the bottom is Farshi/Farsi, also fail bottom_wear unless the worn trousers match this structure: ${FARSHI_SILHOUETTE_STRUCTURE} Fail a wide-open palazzo hem and fail a gathered salwar poncha. Do not fail the joined 6-inch hem panel itself.`
+    : "";
   const { checkKeys, isSaree } = qaKeys(args.garmentFamily, args.poseType, hasBottomWear);
   const qaProductIdentity = args.poseType === "back" ? rearOnlyQaProductIdentity(args.productIdentity) : args.productIdentity;
   const exampleChecks = Object.fromEntries(checkKeys.map((key) => [key, "pass"]));
@@ -177,7 +183,7 @@ PRODUCT FIDELITY - the failure mode that matters most here is a garment that rea
 - pattern_geometry: compare motif shape, motif scale relative to the body, spacing, orientation, repeat interval and density PANEL BY PANEL. Upper-garment motifs against the FABRIC / PATTERN DETAIL and FRONT references. Bottom-wear motifs against FRONT, BACK, MANNEQUIN, ADDITIONAL, and BOTTOM WEAR / FARSHI references where the trousers/skirt are visible - never against an upper-only fabric close-up. Fail it when motifs are enlarged, simplified, redrawn, reduced to fewer larger shapes, re-angled, made denser or sparser, or when accent colours inside the print are missing - even when the print type and colour family are right. A perfect kurta with missing or miniaturized bottom print is still a fail.
 - print_pattern: fail when a recorded bottom print is replaced by solid color, faint dots/speckles, or a different motif family, even if the upper garment matches.
 - embroidery_geometry: compare the internal construction - lattice or motif structure, the count and rhythm of repeated units, borders, coverage area relative to the garment, and the relationship to neckline, tie, drawstring and tassel. Fail it when the embroidery is a different arrangement of the same craft, when unit count or shape changes, or when its coverage grows or shrinks.
-- bottom_wear: when a separate bottom garment is recorded, this is SKU-critical on full_front, angled, and back. Creative three-quarter editorial crops and close-ups stay non-critical because they often omit trousers. Compare cut, volume, two-leg vs skirt structure, pleating, hem, fabric color, AND print/motif scale against the bottom-visible product references. Fail if Farshi/farsi pajama is flattened into palazzo, plain wide-leg, lehenga/skirt, dhoti, tulip, or ankle-cuffed salwar. Fail if two distinct trouser legs merge into a single circular skirt flare. Fail if large-scale florals/bootas become solid color, faint dots, speckles, or micro-print, or if bold chevron/zigzag prints are miniaturized, blurred, or replaced by plain solid color. A high face/kurta score cannot rescue a wrong bottom.
+- bottom_wear: when a separate bottom garment is recorded, this is SKU-critical on full_front, angled, and back. Creative three-quarter editorial crops and close-ups stay non-critical because they often omit trousers. Compare cut, volume, two-leg vs skirt structure, pleating, hem, fabric color, AND print/motif scale against the bottom-visible product references. Fail if Farshi/farsi pajama is flattened into palazzo, plain wide-leg, lehenga/skirt, dhoti, tulip, or ankle-cuffed salwar. Fail if two distinct trouser legs merge into a single circular skirt flare. Fail if large-scale florals/bootas become solid color, faint dots, speckles, or micro-print, or if bold chevron/zigzag prints are miniaturized, blurred, or replaced by plain solid color. A high face/kurta score cannot rescue a wrong bottom.${farshiStructureCheck}
 - side_construction: verify side seams, slits, and closures strictly against the references. Fail if a side slit, opening, or side trim is invented where it wasn't explicitly proven.
 - trim_location: verify that trim (lace, border, piping) only appears exactly where proven. Fail if, for example, hem trim extends vertically up a side seam.
 - unknown_region_invention: fail if any explicitly "unknown" or unproven region contains invented product-defining construction or decoration. UNKNOWN DOES NOT MEAN INFER. Unknown means plain base fabric without unproven decoration.

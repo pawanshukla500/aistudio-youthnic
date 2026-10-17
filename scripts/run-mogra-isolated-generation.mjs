@@ -219,7 +219,7 @@ async function main() {
     modelIdentity: verifiedAnalysis.modelIdentity,
     stylingPlan: verifiedAnalysis.stylingPlan,
     posePlan,
-    productDnaVersion: "generation-session-v23-farshi-flared-fidelity",
+    productDnaVersion: "generation-session-v24-farshi-joined-hem",
   };
 
   const analysisFingerprint = crypto.createHash("sha256").update(JSON.stringify(sessionData)).digest("hex").slice(0, 8);

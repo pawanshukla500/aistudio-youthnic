@@ -462,6 +462,11 @@ Deno.test("composeGenerationPrompt locks bottom wear architecture and strictly p
   assertStringIncludes(prompt, "STRICTLY FORBIDDEN from rendering palazzo, plain wide-leg pants, a lehenga/skirt");
   assertStringIncludes(prompt, "ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION:");
   assertStringIncludes(prompt, "FARSHI / FARSI HARD LOCK:");
+  assertStringIncludes(prompt, "three waist pleats on each side");
+  assertStringIncludes(prompt, "one large pleat on each side at the side-seam joint");
+  assertStringIncludes(prompt, "hem panel 6 inches wide is joined");
+  assertStringIncludes(prompt, "tapers 4 inches from its upper edge to its lower edge");
+  assertEquals(prompt.includes("NOT tapered at ankle"), false);
   assertStringIncludes(prompt, "Never use the kurta/upper FABRIC / PATTERN DETAIL close-up as the bottom print");
 });
 
@@ -538,6 +543,7 @@ Deno.test("composeGenerationPrompt preserves ankle-length Farshi flared cut and 
 
   assertStringIncludes(prompt, "FARSHI / FARSI HARD LOCK:");
   assertStringIncludes(prompt, "ankle-length clearing the floor to display footwear/juttis");
+  assertStringIncludes(prompt, "6-inch joined hem and its 4-inch taper");
   assertStringIncludes(prompt, "chevron/zigzag geometric patterns");
   assertStringIncludes(prompt, "gold-red sequin lace trim above hem");
   assertEquals(prompt.includes("PALAZZO HARD LOCK:"), false);

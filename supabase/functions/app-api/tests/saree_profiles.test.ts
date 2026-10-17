@@ -61,7 +61,7 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v23-farshi-flared-fidelity");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v24-farshi-joined-hem");
 });
 
 Deno.test("analysis prompt distinguishes farshi from palazzo and does not take bottom print from upper fabric close-ups", () => {
@@ -80,8 +80,12 @@ Deno.test("analysis prompt distinguishes farshi from palazzo and does not take b
     analysisLearning: "- Keep the terracotta courtyard locked; back pose drapes the dupatta forward.",
   });
   assertStringIncludes(prompt, "Farshi / Farsi / Farshi Pajama");
-  assertStringIncludes(prompt, "TWO DISTINCT LEGS");
+  assertStringIncludes(prompt, "three waist pleats on each side");
+  assertStringIncludes(prompt, "one large pleat on each side at the side-seam joint");
+  assertStringIncludes(prompt, "hem panel 6 inches wide is joined");
+  assertStringIncludes(prompt, "tapers 4 inches from its upper edge to its lower edge");
   assertStringIncludes(prompt, "NOT palazzo, NOT plain wide-leg, NOT lehenga");
+  assertStringIncludes(prompt, "Do NOT state \"NOT tapered at ankle\"");
   assertStringIncludes(prompt, "SUCCESSFUL HOUSE PATTERNS");
   assertStringIncludes(prompt, "terracotta courtyard");
   assertStringIncludes(prompt, "FABRIC / PATTERN DETAIL is NOT authority for bottoms");

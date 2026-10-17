@@ -120,6 +120,8 @@ Deno.test("missing or miniaturized bottom print fails QA even when face and kurt
   assertStringIncludes(prompt, "large-scale florals/bootas become solid color, faint dots");
   assertStringIncludes(prompt, "Farshi/farsi pajama is flattened into palazzo");
   assertStringIncludes(prompt, "never against an upper-only fabric close-up");
+  assertStringIncludes(prompt, "hem panel 6 inches wide is joined");
+  assertStringIncludes(prompt, "Do not fail the joined 6-inch hem panel itself");
 
   const keys = [...genericCritical, "bottom_wear"];
   const result = normalizePoseQaResult({
@@ -215,5 +217,27 @@ Deno.test("close-up QA requires a large product detail and can omit the face in 
   assertStringIncludes(productDetail, "Pass model_face when no recognizable face is in frame");
   assertStringIncludes(productDetail, "apply only when a recognizable face is in frame");
   assertStringIncludes(productDetail, "pass face_realism and model_face");
+});
+
+Deno.test("QA applies the Farshi hem structure only when the bottom is Farshi", () => {
+  const palazzo = buildPoseQaPrompt({
+    poseNumber: 1,
+    poseType: "full_front",
+    poseTitle: "Hero",
+    poseDirection: { id: "full_front", title: "Hero" },
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      bottomWearDetails: "Palazzo, wide straight legs; NOT farshi",
+    },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: false,
+    hasModelReference: false,
+    referenceManifest: ["IMAGE 1: Front product"],
+  });
+  assertEquals(palazzo.includes("hem panel 6 inches wide"), false);
+  assertEquals(palazzo.includes("Do not fail the joined 6-inch hem panel"), false);
 });
 

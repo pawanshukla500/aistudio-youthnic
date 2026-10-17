@@ -20,10 +20,14 @@ import {
   type BottomCutClass,
   type BottomWearPresentation,
   detectGarmentPoseFamily,
+  effectiveBottomCutClass,
+  FARSHI_SILHOUETTE_STRUCTURE,
   type GarmentPoseFamily,
   garmentPoseDirection,
   isSareePoseFamily,
+  reconcileFarshiVisibilityRules,
   resolveBottomWearPresentation,
+  withoutFarshiStructureContradictions,
 } from "./garmentPoses.ts";
 import { isDirectBackProductRole, roleLabel } from "./referencePolicy.ts";
 import { sceneLockBlock } from "./sceneLock.ts";
@@ -439,7 +443,7 @@ function pose5HardRule(args: { closeupMode: string; heroDetail: string }) {
 function bottomWearSubstitutionGuard(cutClass: BottomCutClass) {
   const guards: Record<BottomCutClass, string> = {
     farshi:
-      "- FARSHI / FARSI HARD LOCK: voluminous flared trousers with TWO DISTINCT LEGS (ankle-length clearing the floor to display footwear/juttis, or floor-length/pooling as shown in references), heavy vertical pleating or gathers from the waist/hip, and architectural volume that flares prominently towards the hem. You are STRICTLY FORBIDDEN from rendering palazzo, plain wide-leg pants, a lehenga/skirt (one circular flare with no leg split), dhoti pants, tulip pants, harem pants, Afghani salwars, or any pants that taper or gather into an ankle cuff. Never flatten the volume into tubular straight trousers, and keep the exact recorded print/motif field (chevron/zigzag, geometric, or floral) at its recorded physical scale, alignment, and density - flattening into a plain tubular palazzo or skirt-like flare is a failed generation even if the top and the model face are perfect.",
+      `- FARSHI / FARSI HARD LOCK: ${FARSHI_SILHOUETTE_STRUCTURE} Length follows the references (ankle-length clearing the floor to display footwear/juttis, or floor-length). You are STRICTLY FORBIDDEN from rendering palazzo, plain wide-leg pants, a lehenga/skirt (one circular flare with no leg split), dhoti pants, tulip pants, harem pants, Afghani salwars, sharara, gharara, or a gathered ankle cuff. Never drop the three waist pleats on each side, the one large pleat at each side joint, or the 6-inch joined hem and its 4-inch taper. Never flatten the volume into tubular straight trousers, and keep the exact recorded print/motif field (chevron/zigzag, geometric, or floral) at its recorded physical scale, alignment, and density. A wide-open hem or a missing joined hem panel is a failed generation even if the top and the model face are perfect. This structure outranks any note that says the Farshi is not tapered, must not have a hem band, or names a different hem width. Lace, print, or a plain finish on that panel still follows the references.`,
     palazzo:
       "- PALAZZO HARD LOCK: the legs fall wide and straight or softly flared, with two distinct legs and no skirt merge. Do NOT substitute lehenga/skirt, dhoti, tulip, harem, churidar, or an ankle-cuffed salwar.",
     sharara_gharara:
@@ -477,13 +481,14 @@ function bottomWearSection(args: {
 - Frame every pose so the upper garment - its neckline, sleeves, fit, print and hem line - remains the subject.
 - THIS SECTION OUTRANKS THE POSE BRIEF: the pose plan below was written from the product analysis and may still name bottom wear, a "complete set", or a waistband-to-hem read. Ignore every such instruction and follow this section instead.${args.bottomWear.mode === "top_only" && args.bottomWear.recordedInAnalysis ? "\n- The analysis recorded bottom-wear details for this SKU, but the shoot is configured TOP ONLY. Present the top as the product and keep the bottom neutral and non-matching." : ""}`;
   }
-  const effectiveCutClass = (args.hasBottomReference && (args.bottomWear.cutClass === "palazzo" || args.bottomWear.cutClass === "none" || args.bottomWear.cutClass === "other"))
-    ? "farshi"
-    : args.bottomWear.cutClass;
+  const effectiveCutClass = effectiveBottomCutClass(args.bottomWear.cutClass, args.hasBottomReference);
   const guard = bottomWearSubstitutionGuard(effectiveCutClass);
   let cleanedDetails = args.bottomWear.details;
   if (args.hasBottomReference || effectiveCutClass === "farshi") {
     cleanedDetails = cleanedDetails.replace(/\bnot\s+(?:flared\s+)?farshi(?:\s*\/\s*farsi)?(?:\s+pajama|\s+pants)?\b/gi, "").trim();
+  }
+  if (effectiveCutClass === "farshi") {
+    cleanedDetails = withoutFarshiStructureContradictions(cleanedDetails);
   }
   return `LOCKED BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT - HIGHEST FIDELITY:
 Bottom wear specification: ${boundedText(cleanedDetails, 1_200)}
@@ -702,14 +707,24 @@ export function composeGenerationPrompt(args: {
     mode: args.bottomWearMode ?? args.session.bottomWearMode ?? args.session.bottom_wear_mode,
     productIdentity: product,
   });
+  const hasBottomReference = args.references.some((reference) => reference.role === "bottom");
+  const farshiGeneration = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference) === "farshi";
+  const productForPrompt = farshiGeneration && typeof product.bottomWearDetails === "string"
+    ? {
+      ...product,
+      bottomWearDetails: withoutFarshiStructureContradictions(
+        product.bottomWearDetails.replace(/\bnot\s+(?:flared\s+)?farshi(?:\s*\/\s*farsi)?(?:\s+pajama|\s+pants)?\b/gi, ""),
+      ),
+    }
+    : product;
   const isShowcase = args.pose.id === "showcase";
   // Exact garmentFamily drives the saree truth blocks; the pose taxonomy is
   // broader, and a shoot either taxonomy calls a saree has no bottom wear.
   const isSareeShoot = isSaree || isSareePoseFamily(poseFamily);
   const productCoreJson = compactJson(
     isTrueBack
-      ? rearOnlyProductCore(product, bottomWear.includesBottomWear)
-      : productCore(product, bottomWear.includesBottomWear),
+      ? rearOnlyProductCore(productForPrompt, bottomWear.includesBottomWear)
+      : productCore(productForPrompt, bottomWear.includesBottomWear),
     { maxString: 360, maxItems: 16, maxKeys: 32 },
   );
   const modelJson = compactJson(model, { maxString: 500, maxItems: 16, maxKeys: 32 });
@@ -728,7 +743,6 @@ export function composeGenerationPrompt(args: {
     throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
   }
   const manifest = promptReferences.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
-  const hasBottomReference = promptReferences.some((reference) => reference.role === "bottom");
   const showcaseIntent = showcaseIntentFor({ creative, family: poseFamily, includesBottomWear: bottomWear.includesBottomWear });
   const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
@@ -771,7 +785,10 @@ export function composeGenerationPrompt(args: {
   const learnings = boundedText(args.learnings, 900);
   const fashionKnowledge = boundedText(args.fashionKnowledge, 700);
   const generationMemory = boundedText(args.generationMemory, 900);
-  const visibilityRules = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
+  const recordedVisibility = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
+  const visibilityRules = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference) === "farshi"
+    ? reconcileFarshiVisibilityRules(recordedVisibility)
+    : recordedVisibility;
   const poseCategory = (isTrueBack || args.pose.id === "back")
     ? "back"
     // The sixth frame carries its own intent-specific hard rule below, so the
