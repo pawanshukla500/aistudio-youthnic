@@ -226,3 +226,24 @@ Deno.test("showcase reference selection promotes preferred evidenceReference and
   assert(roles.includes("bottom"));
   assert(roles.includes("back"));
 });
+
+Deno.test("showcase evidenceReference promotes exact verbose analysis manifest labels", () => {
+  const references = [
+    { role: "front", hash: "front" },
+    { role: "fabric_pattern", hash: "fabric" },
+    { role: "bottom", hash: "bottom" },
+    { role: "back", hash: "back" },
+  ];
+
+  for (const role of ["fabric_pattern", "bottom", "back"]) {
+    const selected = selectReferences(
+      references,
+      [],
+      "showcase",
+      "kurta_or_kurti_set",
+      MAX_IMAGE_REFERENCES,
+      roleLabel(role),
+    );
+    assertEquals(selected[0]?.role, role);
+  }
+});

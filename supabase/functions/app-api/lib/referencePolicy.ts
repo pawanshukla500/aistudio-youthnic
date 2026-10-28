@@ -223,8 +223,14 @@ function preferredProductOrder(poseType: string, garmentFamily: string, preferre
     }
   }
   const normalizedPreferred = String(preferredRole || "").trim().toLowerCase();
-  if (normalizedPreferred && baseOrder.includes(normalizedPreferred)) {
-    return [normalizedPreferred, ...baseOrder.filter((role) => role !== normalizedPreferred)];
+  // Analysis receives roleLabel(...) in its image manifest, so its chosen
+  // evidenceReference can be that full label rather than the canonical role.
+  // Accept only an exact known label; never fuzzy-match prose into evidence.
+  const canonicalPreferred = baseOrder.includes(normalizedPreferred)
+    ? normalizedPreferred
+    : PRODUCT_REFERENCE_ROLES.find((role) => roleLabel(role).toLowerCase() === normalizedPreferred) ?? normalizedPreferred;
+  if (canonicalPreferred && baseOrder.includes(canonicalPreferred)) {
+    return [canonicalPreferred, ...baseOrder.filter((role) => role !== canonicalPreferred)];
   }
   return baseOrder;
 }
