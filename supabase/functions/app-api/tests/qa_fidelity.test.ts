@@ -288,3 +288,48 @@ Deno.test("Pose 6 showcase QA enforces heroFeature non-duplication and exempts b
   assertEquals(result.pass, true);
   assertEquals(result.automaticallyVerified, true);
 });
+
+Deno.test("Pose 6 macro QA applies the anatomy veto even when the face is absent", () => {
+  const creativeDirection = {
+    showcasePlan: {
+      heroFeature: "mirror-work bell sleeve cuff",
+      featureRegion: "sleeve",
+      shotType: "macro_detail",
+    },
+  };
+  const prompt = buildPoseQaPrompt({
+    poseNumber: 6,
+    poseType: "showcase",
+    poseTitle: "Sleeve Cuff Showcase",
+    poseDirection: { id: "showcase", title: "Sleeve Cuff Showcase" },
+    productIdentity: { garmentFamily: "kurta_or_kurti_set" },
+    creativeDirection,
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: true,
+    hasModelReference: false,
+    referenceManifest: ["IMAGE 1: Fabric / pattern detail"],
+  });
+  assertStringIncludes(prompt, "ANATOMICAL REALISM - apply to every pose and every crop");
+  assertStringIncludes(prompt, "Fail pose_requirement for THREE HANDS, EXTRA HANDS, EXTRA ARMS");
+  assertStringIncludes(prompt, "This anatomy veto is independent of face visibility");
+
+  const result = normalizePoseQaResult({
+    pass: true,
+    score: 98,
+    checks: { pose_requirement: "fail", model_face: "pass", face_realism: "pass" },
+    scores: { pose_requirement: 40, model_face: 100, face_realism: 100 },
+    failed: ["pose_requirement"],
+    reason: "A duplicate hand is visible beside the sleeve cuff.",
+    correction: "Remove the duplicate hand and restore one continuous forearm connection.",
+  }, {
+    garmentFamily: "kurta_or_kurti_set",
+    poseType: "showcase",
+    hasBottomWear: false,
+    creativeDirection,
+  });
+  assertEquals(result.pass, false);
+  assertEquals(result.automaticallyVerified, false);
+  assertEquals(result.failed.includes("pose_requirement"), true);
+});
