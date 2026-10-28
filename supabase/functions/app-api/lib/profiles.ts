@@ -1985,7 +1985,7 @@ export function mergeVariantColorways(
   const colorModifier = "(?:light|dark|deep|bright|pale|soft|muted|rich|warm|cool|dusty|pastel|vivid|royal|emerald|ruby|sapphire|navy|midnight|sky|powder|steel|forest|bottle|olive|sage|mint|lime|sea|teal|turquoise|mustard|gold|golden|coral|peach|fuchsia|magenta|blush|rose|hot|lavender|lilac|mauve|plum|chocolate|coffee|camel|charcoal|ivory|cream|beige|wine|blood|cherry|burnt)";
   const colorBase = "(?:off-white|off\\s+white|chocolate-brown|ivory|white|ecru|cream|beige|black|blue|navy|red|ruby|maroon|burgundy|wine|green|emerald|olive|sage|mint|teal|turquoise|yellow|mustard|gold|golden|orange|rust|coral|peach|pink|fuchsia|magenta|purple|violet|lavender|lilac|mauve|plum|brown|chocolate|coffee|tan|camel|grey|gray|silver|charcoal)";
   const bottomColorPhrase = `(?:${colorModifier}(?:-[a-z]+)?\\s+){0,2}${colorBase}`;
-  const bottomGarment = "(?:farshi|farsi|pajama|pyjama|palazzo|trousers?|pants?|sharara|gharara|salwar|patiala|churidar|skirt|lehenga|leggings?|dhoti|culottes?|shorts?)";
+  const bottomGarment = "(?:farshi|farsi|pajama|pyjama|palazzo|trousers?|pants?|sharara|gharara|salwar|patiala|churidar|skirt|lehenga|leggings?|dhoti|culottes?|shorts?|bottoms?|bottom\\s+wear)";
   const bottomFabric = "(?:crepe|silk|cotton|chanderi|organza|georgette|satin|linen|rayon|viscose|muslin|velvet|chiffon|net|tulle|denim|khadi|cambric|lawn|poplin|brocade|jacquard|modal|tencel|polyester)";
   const recordedBottomColors = (details: string) => {
     const leading = details.match(new RegExp(`^\\s*(${bottomColorPhrase})(?=\\s+${bottomGarment}\\b)`, "i"));
@@ -2005,9 +2005,13 @@ export function mergeVariantColorways(
     if (bottomWearColor) {
       for (const oldColor of baseBottomColors) {
         // A shared upper/bottom base colour is already handled by the established
-        // main-colour path. Only a distinct bottom colour needs this extra pass.
+        // main-colour path. Replace a distinct bottom colour only when it directly
+        // describes a bottom garment or its fabric, never same-coloured upper craft.
         if (oldColor.toLowerCase() !== baseMainColor.toLowerCase()) {
-          updated = replaceColor(updated, oldColor, bottomWearColor);
+          const token = escapeRegExp(oldColor);
+          updated = updated
+            .replace(new RegExp(`(?<![\\p{L}\\p{N}_])${token}(?=\\s+${bottomGarment}\\b)`, "giu"), bottomWearColor)
+            .replace(new RegExp(`(\\b(?:in|of)\\s+)${token}(?=\\s+${bottomFabric}\\b)`, "giu"), `$1${bottomWearColor}`);
         }
       }
     }

@@ -406,3 +406,45 @@ Deno.test("F-21 contrasting bottom color replaces an in-fabric color phrase with
   assertStringIncludes(prompt, "wide straight legs, botanical block print");
   assertStringIncludes(prompt, "scalloped gold hem");
 });
+
+Deno.test("F-22 bottom recoloring preserves same-colored upper garment craftsmanship", () => {
+  const baseAnalysis = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "royal blue",
+      embroidery: "ivory thread on the upper yoke",
+      bottomWearDetails: "Ivory Farshi Pajama with wide flared legs and a joined gold hem",
+    },
+    creativeDirection: {
+      closeupMode: "product_detail",
+      closeupHeroDetail: "ivory thread upper-yoke embroidery",
+      showcasePlan: {
+        heroFeature: "ivory thread upper-yoke embroidery",
+        featureRegion: "embroidery",
+        shotType: "macro_detail",
+        visibilityRules: ["ivory upper-yoke thread stays sharp beside the ivory Farshi silhouette"],
+      },
+    },
+  }, "kurta set");
+
+  const merged = mergeVariantColorways(baseAnalysis, {
+    mainColor: "emerald green",
+    bottomWearColor: "ruby red",
+  });
+  assertStringIncludes(merged.productIdentity.embroidery, "ivory thread on the upper yoke");
+  assertStringIncludes(merged.creativeDirection.closeupHeroDetail, "ivory thread upper-yoke embroidery");
+  assertStringIncludes(merged.creativeDirection.showcasePlan?.heroFeature || "", "ivory thread upper-yoke embroidery");
+  assertStringIncludes(merged.creativeDirection.showcasePlan?.visibilityRules[0] || "", "ruby red Farshi silhouette");
+  assertStringIncludes(merged.productIdentity.bottomWearDetails, "ruby red Farshi Pajama");
+
+  const prompt = composeGenerationPrompt({
+    skuName: "SKU-CONTRAST-03",
+    productDetails: "",
+    pose: { ...merged.posePlan[5], poseNumber: 6 },
+    session: { ...merged, category: "kurta set" },
+    references: [{ role: "front" }, { role: "bottom" }, { role: "fabric_pattern" }],
+  });
+  assertStringIncludes(prompt, "ivory thread upper-yoke embroidery");
+  assertStringIncludes(prompt, "ruby red Farshi Pajama");
+  assertEquals(/ruby red thread upper-yoke/i.test(prompt), false);
+});
