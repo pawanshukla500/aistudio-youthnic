@@ -156,7 +156,7 @@ export function PosePlan({
                         Region: {showcasePlan.featureRegion.replace(/_/g, " ")}
                       </span>
                       <span className="rounded-md bg-white px-2 py-0.5 text-[10px] font-bold text-on-surface border border-outline-variant/50">
-                        Shot: {showcasePlan.shotType.replace(/_/g, " ")}
+                        Planned shot: {showcasePlan.shotType.replace(/_/g, " ")}
                       </span>
                     </div>
                   </div>

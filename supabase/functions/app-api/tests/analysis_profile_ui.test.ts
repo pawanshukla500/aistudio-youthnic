@@ -1,5 +1,19 @@
-import { assertEquals } from "jsr:@std/assert@1";
+import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { sareeProfilePresentation } from "../../../../src/features/studio/sareeProfilePresentation.ts";
+
+const posePlanSource = Deno.readTextFileSync(
+  new URL("../../../../src/features/studio/components/PosePlan.tsx", import.meta.url),
+).replace(/\r\n/g, "\n");
+const analysisProfileSource = Deno.readTextFileSync(
+  new URL("../../../../src/features/studio/components/AnalysisProfile.tsx", import.meta.url),
+).replace(/\r\n/g, "\n");
+
+Deno.test("showcase shot type is labeled as planned while actual framing stays visible", () => {
+  assertStringIncludes(posePlanSource, 'Planned shot: {showcasePlan.shotType.replace(/_/g, " ")}');
+  assertStringIncludes(posePlanSource, '{selected.framing || "3:4 Full Body Portrait"}');
+  assertStringIncludes(analysisProfileSource, '"Pose 6 region & planned shot type"');
+  assertEquals(posePlanSource.includes("Shot: {showcasePlan.shotType"), false);
+});
 
 Deno.test("partial saree profile produces safe UI values and an actionable warning", () => {
   const presentation = sareeProfilePresentation({

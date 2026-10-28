@@ -294,7 +294,7 @@ export function AnalysisProfile({
                           ? ([
                             ["Pose 6 showcase feature", analysis.creativeDirection.showcasePlan.heroFeature],
                             [
-                              "Pose 6 region & shot type",
+                              "Pose 6 region & planned shot type",
                               `${analysis.creativeDirection.showcasePlan.featureRegion} · ${analysis.creativeDirection.showcasePlan.shotType}`,
                             ],
                             ...(analysis.creativeDirection.showcasePlan.whyItSells
