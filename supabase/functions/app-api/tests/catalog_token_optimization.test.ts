@@ -336,3 +336,73 @@ Deno.test("F-15 colorway recoloring protects identity, scene, canonical fields a
   assertEquals(merged.posePlan[5].primaryReference, "fabric_pattern");
   assertEquals(merged.creativeDirection.closeupHeroDetail, "emerald green yoke");
 });
+
+Deno.test("F-21 contrasting bottom color replaces a leading base color in the actual prompt", () => {
+  const baseAnalysis = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "royal blue",
+      frontConstruction: "royal blue silk kurti",
+      bottomWearDetails: "Ivory Farshi Pajama with wide flared legs, three waist pleats, large gold floral print and a 6-inch joined gold hem",
+    },
+  }, "kurta set");
+
+  const merged = mergeVariantColorways(baseAnalysis, {
+    mainColor: "emerald green",
+    bottomWearColor: "ruby red",
+  });
+
+  assertEquals(merged.productIdentity.mainColor, "emerald green");
+  assertEquals(/ivory/i.test(merged.productIdentity.bottomWearDetails), false);
+  assertStringIncludes(merged.productIdentity.bottomWearDetails, "ruby red Farshi Pajama");
+  assertEquals(merged.productIdentity.bottomWearDetails.includes("Variant Colorway"), false);
+
+  const prompt = composeGenerationPrompt({
+    skuName: "SKU-CONTRAST-01",
+    productDetails: "",
+    pose: { ...merged.posePlan[5], poseNumber: 6 },
+    session: { ...merged, category: "kurta set" },
+    references: [{ role: "front" }, { role: "bottom" }],
+  });
+  assertEquals(/ivory/i.test(prompt), false);
+  assertStringIncludes(prompt, "emerald green silk kurti");
+  assertStringIncludes(prompt, "ruby red Farshi Pajama");
+  assertStringIncludes(prompt, "wide flared legs, three waist pleats");
+  assertStringIncludes(prompt, "large gold floral print");
+  assertStringIncludes(prompt, "6-inch joined gold hem");
+});
+
+Deno.test("F-21 contrasting bottom color replaces an in-fabric color phrase without broad recoloring", () => {
+  const baseAnalysis = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      category: "royal blue canonical category",
+      mainColor: "royal blue",
+      frontConstruction: "royal blue silk kurti",
+      bottomWearDetails: "Palazzo in ivory crepe with wide straight legs, botanical block print and a scalloped gold hem",
+    },
+    modelIdentity: { face: "Model with royal blue eyes" },
+  }, "kurta set");
+
+  const merged = mergeVariantColorways(baseAnalysis, {
+    mainColor: "emerald green",
+    bottomWearColor: "ruby red",
+  });
+
+  assertEquals(merged.productIdentity.bottomWearDetails, "Palazzo in ruby red crepe with wide straight legs, botanical block print and a scalloped gold hem");
+  assertEquals(merged.productIdentity.category, "royal blue canonical category");
+  assertEquals(merged.modelIdentity.face, "Model with royal blue eyes");
+
+  const prompt = composeGenerationPrompt({
+    skuName: "SKU-CONTRAST-02",
+    productDetails: "",
+    pose: { ...merged.posePlan[5], poseNumber: 6 },
+    session: { ...merged, category: "kurta set" },
+    references: [{ role: "front" }],
+  });
+  assertEquals(/ivory/i.test(prompt), false);
+  assertStringIncludes(prompt, "emerald green silk kurti");
+  assertStringIncludes(prompt, "Palazzo in ruby red crepe");
+  assertStringIncludes(prompt, "wide straight legs, botanical block print");
+  assertStringIncludes(prompt, "scalloped gold hem");
+});

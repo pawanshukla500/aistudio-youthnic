@@ -305,6 +305,26 @@ export function normalizeShowcaseIntent(value: unknown): ShowcaseIntent | "" {
   return (SHOWCASE_INTENTS as readonly string[]).includes(normalized) ? normalized as ShowcaseIntent : "";
 }
 
+export function effectiveShowcaseIntent(args: {
+  creative: JsonRecord;
+  family: GarmentPoseFamily;
+  includesBottomWear: boolean;
+}): ShowcaseIntent {
+  const recorded = normalizeShowcaseIntent(args.creative.showcaseIntent ?? args.creative.showcase_intent);
+  if (isSareePoseFamily(args.family)) return "saree_drape";
+  // A complete-set frame is only coherent when this shoot actually renders the
+  // bottom. Consumers must serialize this same effective intent, not the stale
+  // analysis value that was suppressed for a top-only shoot.
+  if (!args.includesBottomWear && (recorded === "set_full_length" || !recorded)) {
+    return args.family === "short_kurti_top" || args.family === "western_casual"
+      ? "playful_backdrop"
+      : "full_length_silhouette";
+  }
+  if (recorded) return recorded;
+  if (args.includesBottomWear) return "set_full_length";
+  return "full_length_silhouette";
+}
+
 function joinedCreativeText(creative: JsonRecord | undefined) {
   if (!creative) return "";
   return Object.values(creative)
@@ -1962,9 +1982,37 @@ export function mergeVariantColorways(
   };
   const replaceBaseColor = (input: string) => replaceColor(input, baseMainColor, mainColor);
   const hasColor = (input: string, color: string) => colorTokenPattern(color)?.test(input) ?? false;
+  const colorModifier = "(?:light|dark|deep|bright|pale|soft|muted|rich|warm|cool|dusty|pastel|vivid|royal|emerald|ruby|sapphire|navy|midnight|sky|powder|steel|forest|bottle|olive|sage|mint|lime|sea|teal|turquoise|mustard|gold|golden|coral|peach|fuchsia|magenta|blush|rose|hot|lavender|lilac|mauve|plum|chocolate|coffee|camel|charcoal|ivory|cream|beige|wine|blood|cherry|burnt)";
+  const colorBase = "(?:off-white|off\\s+white|chocolate-brown|ivory|white|ecru|cream|beige|black|blue|navy|red|ruby|maroon|burgundy|wine|green|emerald|olive|sage|mint|teal|turquoise|yellow|mustard|gold|golden|orange|rust|coral|peach|pink|fuchsia|magenta|purple|violet|lavender|lilac|mauve|plum|brown|chocolate|coffee|tan|camel|grey|gray|silver|charcoal)";
+  const bottomColorPhrase = `(?:${colorModifier}(?:-[a-z]+)?\\s+){0,2}${colorBase}`;
+  const bottomGarment = "(?:farshi|farsi|pajama|pyjama|palazzo|trousers?|pants?|sharara|gharara|salwar|patiala|churidar|skirt|lehenga|leggings?|dhoti|culottes?|shorts?)";
+  const bottomFabric = "(?:crepe|silk|cotton|chanderi|organza|georgette|satin|linen|rayon|viscose|muslin|velvet|chiffon|net|tulle|denim|khadi|cambric|lawn|poplin|brocade|jacquard|modal|tencel|polyester)";
+  const recordedBottomColors = (details: string) => {
+    const leading = details.match(new RegExp(`^\\s*(${bottomColorPhrase})(?=\\s+${bottomGarment}\\b)`, "i"));
+    const inFabric = details.match(new RegExp(`\\b(?:in|of)\\s+(${bottomColorPhrase})(?=\\s+${bottomFabric}\\b)`, "i"));
+    return [...new Map(
+      [leading?.[1], inFabric?.[1]]
+        .filter((color): color is string => Boolean(color))
+        .map((color) => [color.toLowerCase(), color.trim()] as const),
+    ).values()];
+  };
 
   const cloned = structuredClone(baseAnalysis);
   const currentBottom = cloned.productIdentity.bottomWearDetails;
+  const baseBottomColors = recordedBottomColors(currentBottom.replace(/\s*\(Variant Colorway:\s*[^)]*\)/gi, "").trim());
+  const replaceDirectionColor = (input: string) => {
+    let updated = replaceBaseColor(input);
+    if (bottomWearColor) {
+      for (const oldColor of baseBottomColors) {
+        // A shared upper/bottom base colour is already handled by the established
+        // main-colour path. Only a distinct bottom colour needs this extra pass.
+        if (oldColor.toLowerCase() !== baseMainColor.toLowerCase()) {
+          updated = replaceColor(updated, oldColor, bottomWearColor);
+        }
+      }
+    }
+    return updated;
+  };
   // Product identity is generation-visible garment truth, but provenance and
   // canonical classifiers are not prose to repaint. Bottom wear needs its own
   // colour below because it may differ from the upper garment's colourway.
@@ -1992,10 +2040,13 @@ export function mergeVariantColorways(
 
   if (currentBottom) {
     if (bottomWearColor) {
-      // Replace the previous colour instruction instead of retaining it beside
-      // a conflicting variant suffix. Cut, pleats, print and hem prose survive.
+      // Replace the previous dominant bottom colour in its recorded position;
+      // cut, pleats, print, hem and differently coloured accent prose survive.
       const withoutOldVariantSuffix = currentBottom.replace(/\s*\(Variant Colorway:\s*[^)]*\)/gi, "").trim();
       let updatedBottom = replaceColor(withoutOldVariantSuffix, baseMainColor, bottomWearColor);
+      for (const oldColor of recordedBottomColors(withoutOldVariantSuffix)) {
+        updatedBottom = replaceColor(updatedBottom, oldColor, bottomWearColor);
+      }
       if (!hasColor(updatedBottom, bottomWearColor)) {
         updatedBottom = `${updatedBottom}${updatedBottom ? " " : ""}(Variant Colorway: ${bottomWearColor})`;
       }
@@ -2020,33 +2071,33 @@ export function mergeVariantColorways(
   if (cloned.creativeDirection?.showcasePlan && mainColor) {
     cloned.creativeDirection.showcasePlan = {
       ...cloned.creativeDirection.showcasePlan,
-      heroFeature: replaceBaseColor(cloned.creativeDirection.showcasePlan.heroFeature),
-      whyItSells: replaceBaseColor(cloned.creativeDirection.showcasePlan.whyItSells),
-      framing: replaceBaseColor(cloned.creativeDirection.showcasePlan.framing),
-      cameraAngle: replaceBaseColor(cloned.creativeDirection.showcasePlan.cameraAngle),
-      bodyPosition: replaceBaseColor(cloned.creativeDirection.showcasePlan.bodyPosition),
-      handPlacement: replaceBaseColor(cloned.creativeDirection.showcasePlan.handPlacement),
-      expression: replaceBaseColor(cloned.creativeDirection.showcasePlan.expression),
-      distinctFrom: replaceBaseColor(cloned.creativeDirection.showcasePlan.distinctFrom),
-      visibilityRules: cloned.creativeDirection.showcasePlan.visibilityRules.map(replaceBaseColor),
+      heroFeature: replaceDirectionColor(cloned.creativeDirection.showcasePlan.heroFeature),
+      whyItSells: replaceDirectionColor(cloned.creativeDirection.showcasePlan.whyItSells),
+      framing: replaceDirectionColor(cloned.creativeDirection.showcasePlan.framing),
+      cameraAngle: replaceDirectionColor(cloned.creativeDirection.showcasePlan.cameraAngle),
+      bodyPosition: replaceDirectionColor(cloned.creativeDirection.showcasePlan.bodyPosition),
+      handPlacement: replaceDirectionColor(cloned.creativeDirection.showcasePlan.handPlacement),
+      expression: replaceDirectionColor(cloned.creativeDirection.showcasePlan.expression),
+      distinctFrom: replaceDirectionColor(cloned.creativeDirection.showcasePlan.distinctFrom),
+      visibilityRules: cloned.creativeDirection.showcasePlan.visibilityRules.map(replaceDirectionColor),
     };
   }
 
   if (Array.isArray(cloned.posePlan) && mainColor) {
     cloned.posePlan = cloned.posePlan.map((pose) => ({
       ...pose,
-      title: replaceBaseColor(pose.title),
-      description: replaceBaseColor(pose.description),
-      cameraAngle: replaceBaseColor(pose.cameraAngle),
-      framing: replaceBaseColor(pose.framing),
-      bodyPosition: replaceBaseColor(pose.bodyPosition),
-      handPlacement: replaceBaseColor(pose.handPlacement),
-      expression: replaceBaseColor(pose.expression),
-      purpose: replaceBaseColor(pose.purpose),
-      consistencyNotes: replaceBaseColor(pose.consistencyNotes),
-      prompt: replaceBaseColor(pose.prompt),
-      highlightedDetails: pose.highlightedDetails.map(replaceBaseColor),
-      productVisibilityRules: pose.productVisibilityRules.map(replaceBaseColor),
+      title: replaceDirectionColor(pose.title),
+      description: replaceDirectionColor(pose.description),
+      cameraAngle: replaceDirectionColor(pose.cameraAngle),
+      framing: replaceDirectionColor(pose.framing),
+      bodyPosition: replaceDirectionColor(pose.bodyPosition),
+      handPlacement: replaceDirectionColor(pose.handPlacement),
+      expression: replaceDirectionColor(pose.expression),
+      purpose: replaceDirectionColor(pose.purpose),
+      consistencyNotes: replaceDirectionColor(pose.consistencyNotes),
+      prompt: replaceDirectionColor(pose.prompt),
+      highlightedDetails: pose.highlightedDetails.map(replaceDirectionColor),
+      productVisibilityRules: pose.productVisibilityRules.map(replaceDirectionColor),
     }));
   }
 

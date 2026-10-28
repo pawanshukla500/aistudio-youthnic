@@ -8,8 +8,8 @@
  * remains an audit ledger and is not accepted here.
  */
 
-import { type JsonRecord } from "./profiles.ts";
-import { resolveBottomWearPresentation } from "./garmentPoses.ts";
+import { effectiveShowcaseIntent, type JsonRecord } from "./profiles.ts";
+import { detectGarmentPoseFamily, resolveBottomWearPresentation } from "./garmentPoses.ts";
 import { PRODUCT_REFERENCE_ROLES } from "./referencePolicy.ts";
 import { type PromptPatternKind } from "./promptPatterns.ts";
 import { effectiveShowcaseShot, normalizeShowcaseShotType } from "./showcaseFeature.ts";
@@ -202,8 +202,15 @@ function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirect
   if (showcaseShot) {
     details.push(`Pose 6 sells: ${boundedText(showcaseShot.plan.heroFeature, 120)} (${showcaseShot.shotType})`);
   } else {
-    const showcaseIntent = boundedText(creativeDirection.showcaseIntent ?? creativeDirection.showcase_intent, 40);
-    if (showcaseIntent) details.push(`Pose 6 showcase intent: ${showcaseIntent}`);
+    const recordedShowcaseIntent = boundedText(creativeDirection.showcaseIntent ?? creativeDirection.showcase_intent, 40);
+    if (recordedShowcaseIntent) {
+      const showcaseIntent = effectiveShowcaseIntent({
+        creative: creativeDirection,
+        family: detectGarmentPoseFamily({ productIdentity }),
+        includesBottomWear,
+      });
+      details.push(`Pose 6 showcase intent: ${showcaseIntent}`);
+    }
   }
   details.push("Product images are garment/SKU truth. Style reference is set/backdrop/jewellery taste only.");
   return details.slice(0, MAX_MEMORY_PRESERVED_DETAILS);

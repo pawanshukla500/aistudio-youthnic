@@ -303,7 +303,7 @@ Deno.test("a standalone top gets playful, set-matched showcase direction without
   assertStringIncludes(prompt, "The product references prove no bottom garment ships with this SKU.");
 });
 
-Deno.test("a top-only kurta set never gets a complete-set showcase rule", () => {
+Deno.test("F-20 a top-only kurta set never emits raw set_full_length in its composed prompt", () => {
   const prompt = composeGenerationPrompt({
     skuName: "KURTA-SET-01",
     productDetails: "Kurta set with palazzo",
@@ -321,6 +321,8 @@ Deno.test("a top-only kurta set never gets a complete-set showcase rule", () => 
   });
   assertEquals(prompt.includes("SHOWCASE FRAME HARD RULE (COMPLETE SET)"), false);
   assertStringIncludes(prompt, "SHOWCASE FRAME HARD RULE (TRUE FALL AND LENGTH)");
+  assertStringIncludes(prompt, '"showcaseIntent":"full_length_silhouette"');
+  assertEquals(prompt.includes("set_full_length"), false);
   assertStringIncludes(prompt, "THIS SECTION OUTRANKS THE POSE BRIEF");
 });
 

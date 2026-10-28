@@ -1,8 +1,8 @@
 import {
   CLOSEUP_PRODUCT_DETAIL,
   CONSISTENCY_RULES,
+  effectiveShowcaseIntent,
   isSeatedEditorialPoseDemanded,
-  normalizeShowcaseIntent,
   normalizeStylingPlan,
   resolveCloseupMode,
   type JsonRecord,
@@ -505,27 +505,6 @@ function garmentPoseFamilyHeading(family: GarmentPoseFamily) {
   return family.replace(/_/g, " ").toUpperCase();
 }
 
-function showcaseIntentFor(args: {
-  creative: JsonRecord;
-  family: GarmentPoseFamily;
-  includesBottomWear: boolean;
-}): ShowcaseIntent {
-  const recorded = normalizeShowcaseIntent(args.creative.showcaseIntent ?? args.creative.showcase_intent);
-  if (isSareePoseFamily(args.family)) return "saree_drape";
-  // A complete-set frame is only coherent when this shoot actually renders the
-  // bottom. Without that, "set_full_length" would demand a waistband-to-hem read
-  // of a bottom the same prompt forbids, whether the intent was recorded by the
-  // analysis or inferred from the garment family.
-  if (!args.includesBottomWear && (recorded === "set_full_length" || !recorded)) {
-    return args.family === "short_kurti_top" || args.family === "western_casual"
-      ? "playful_backdrop"
-      : "full_length_silhouette";
-  }
-  if (recorded) return recorded;
-  if (args.includesBottomWear) return "set_full_length";
-  return "full_length_silhouette";
-}
-
 /**
  * The sixth frame's rule, written around the feature the analysis chose.
  *
@@ -750,7 +729,12 @@ export function composeGenerationPrompt(args: {
     { maxString: 360, maxItems: 16, maxKeys: 32 },
   );
   const modelJson = compactJson(model, { maxString: 500, maxItems: 16, maxKeys: 32 });
-  const creativeJson = compactJson(creative, { maxString: 500, maxItems: 16, maxKeys: 32 });
+  const showcaseIntent = effectiveShowcaseIntent({ creative, family: poseFamily, includesBottomWear: bottomWear.includesBottomWear });
+  const creativeForPrompt: JsonRecord = { ...creative, showcaseIntent };
+  // A legacy snake_case alias must not survive beside the corrected camelCase
+  // value and reintroduce the raw complete-set direction in the serialized JSON.
+  delete creativeForPrompt.showcase_intent;
+  const creativeJson = compactJson(creativeForPrompt, { maxString: 500, maxItems: 16, maxKeys: 32 });
   const sareeTruthJson = isSaree ? requiredJsonSection(isTrueBack ? "Direct rear saree truth" : "Canonical saree truth", sareeTruth, 10_000) : "";
   const sareeDrapePlanJson = isSaree && !isTrueBack ? requiredJsonSection("Canonical saree drape plan", sareeDrapePlan, 4_000) : "";
   const patternGeometryJson = compactJson(patternGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
@@ -765,7 +749,6 @@ export function composeGenerationPrompt(args: {
     throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
   }
   const manifest = promptReferences.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
-  const showcaseIntent = showcaseIntentFor({ creative, family: poseFamily, includesBottomWear: bottomWear.includesBottomWear });
   const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
