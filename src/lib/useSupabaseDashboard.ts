@@ -64,6 +64,9 @@ type GenerationJobRow = {
   sku_name: string;
   job_data: JsonObject;
   created_at: string;
+  total_poses?: number | null;
+  completed_poses?: number | null;
+  failed_poses?: number | null;
   actual_cost_usd?: number;
   total_tokens?: number;
   batch_id?: string | null;
@@ -84,15 +87,15 @@ function numberFrom(value: unknown, fallback = 0) {
 
 function mapGenerationJob(row: GenerationJobRow): DashboardJob {
   const data = row.job_data || {};
-  const totalPoses = numberFrom(data.totalPoses, 5);
+  const totalPoses = numberFrom(row.total_poses, numberFrom(data.totalPoses, 6));
   return {
     _id: row.job_id,
     status: row.status,
     detailedStatus: visibleGenerationDetailedStatus(row.status, data.detailedStatus),
     skuId: row.sku_name || row.job_id,
     skuName: row.sku_name,
-    completedPoses: numberFrom(data.completedPoses),
-    failedPoses: numberFrom(data.failedPoses),
+    completedPoses: numberFrom(row.completed_poses, numberFrom(data.completedPoses)),
+    failedPoses: numberFrom(row.failed_poses, numberFrom(data.failedPoses)),
     totalPoses,
     createdAt: Date.parse(row.created_at),
   };
@@ -108,7 +111,7 @@ function mapLearning(row: LearningRow): DashboardJob {
     skuName: row.sku_name,
     completedPoses: failed ? 0 : poseCount,
     failedPoses: failed ? Math.max(1, poseCount) : 0,
-    totalPoses: Math.max(5, poseCount),
+    totalPoses: Math.max(6, poseCount),
     createdAt: Date.parse(row.created_at),
   };
 }
@@ -127,12 +130,12 @@ async function loadSummary(): Promise<SupabaseDashboardSummary> {
       .is("archived_at", null),
     supabase
       .from("generation_jobs")
-      .select("job_id,status,sku_name,job_data,created_at,actual_cost_usd,total_tokens,batch_id")
+      .select("job_id,status,sku_name,job_data,created_at,total_poses,completed_poses,failed_poses,actual_cost_usd,total_tokens,batch_id")
       .order("created_at", { ascending: false })
       .limit(10),
     supabase
       .from("generation_jobs")
-      .select("job_id,status,sku_name,job_data,created_at,actual_cost_usd,total_tokens,batch_id")
+      .select("job_id,status,sku_name,job_data,created_at,total_poses,completed_poses,failed_poses,actual_cost_usd,total_tokens,batch_id")
       .gte("created_at", analyticsStart.toISOString())
       .order("created_at", { ascending: true }),
     supabase
