@@ -14,8 +14,13 @@ Deno.test("dashboard pose counters prefer database values and retain legacy comp
   assertStringIncludes(dashboardSource, "numberFrom(row.total_poses, numberFrom(data.totalPoses, 6))");
   assertStringIncludes(dashboardSource, "numberFrom(row.completed_poses, numberFrom(data.completedPoses))");
   assertStringIncludes(dashboardSource, "numberFrom(row.failed_poses, numberFrom(data.failedPoses))");
-  assertStringIncludes(dashboardSource, "totalPoses: Math.max(6, poseCount)");
   assertEquals(dashboardSource.includes("numberFrom(data.totalPoses, 5)"), false);
+});
+
+Deno.test("learning rows preserve positive pose counts and default only missing or zero counts to six", () => {
+  assertStringIncludes(dashboardSource, "const poseCount = numberFrom(row.pose_count)");
+  assertStringIncludes(dashboardSource, "totalPoses: poseCount > 0 ? poseCount : 6");
+  assertEquals(dashboardSource.includes("totalPoses: Math.max(6, poseCount)"), false);
 });
 
 Deno.test("all failed poses never appear as stored images", () => {

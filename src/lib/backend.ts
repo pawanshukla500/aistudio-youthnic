@@ -5,6 +5,7 @@ import { visibleGenerationDetailedStatus } from "./generationStatus";
 import { functionInvokeErrorMessage, appApiInvokeTimeoutMs, isGatewayCutFailure, isRetryableInvokeOperation } from "./errors";
 import { scopePoseRowsToJob } from "./generationRuns";
 import { buildPoseVersions, summarizeRegenerations } from "./poseVersions";
+import { isQueueCompatiblePosePlan } from "./posePlanCompatibility";
 import { ANALYSIS_RUN_KINDS, GENERATION_RUN_KIND, QA_RUN_KIND, attributeJobCostRuns, rollupSessionCost, type CostRun } from "./sessionCost";
 
 export type Id<_Table extends string> = string;
@@ -586,7 +587,7 @@ async function listCatalogs(args: Record<string, any>) {
       scheduledAt: batch.scheduled_at ? milliseconds(batch.scheduled_at) : undefined,
       preferredGenerationAt: batch.scheduled_at ? milliseconds(batch.scheduled_at) : undefined,
       variantCount: variants.length,
-      readyCount: variants.filter((variant) => variant.front_image_url && variant.back_image_url && variant.analysis_status === "ready" && Array.isArray(variant.pose_plan) && variant.pose_plan.length >= 5).length,
+      readyCount: variants.filter((variant) => variant.front_image_url && variant.back_image_url && variant.analysis_status === "ready" && isQueueCompatiblePosePlan(variant.pose_plan)).length,
       completedCount: variants.filter((variant) => variant.generation_status === "completed").length,
       failedCount: variants.filter((variant) => variant.generation_status === "failed").length,
       eventName: events.find((event) => event.id === (batch.event_id || batch.source_event_id))?.name || null,
@@ -633,7 +634,7 @@ async function getCatalog(catalogId: string) {
       variant.front_image_url && variant.back_image_url && ["pending", "stale"].includes(String(variant.analysis_status || "pending")) ? "Gemini analysis and pose plan must be rebuilt." : "",
       variant.analysis_status === "analyzing" ? "Gemini analysis is running." : "",
       variant.analysis_status === "failed" ? (variant.error_message || "Gemini analysis failed.") : "",
-      variant.analysis_status === "ready" && (!Array.isArray(variant.pose_plan) || variant.pose_plan.length < 5) ? "The pose plan is incomplete." : "",
+      variant.analysis_status === "ready" && !isQueueCompatiblePosePlan(variant.pose_plan) ? "The pose plan is incomplete." : "",
     ].filter(Boolean);
     const readinessStatus = variant.generation_status === "completed" ? "completed"
       : variant.generation_status === "failed" ? "needs_review"

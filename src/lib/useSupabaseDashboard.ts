@@ -111,7 +111,7 @@ function mapLearning(row: LearningRow): DashboardJob {
     skuName: row.sku_name,
     completedPoses: failed ? 0 : poseCount,
     failedPoses: failed ? Math.max(1, poseCount) : 0,
-    totalPoses: Math.max(6, poseCount),
+    totalPoses: poseCount > 0 ? poseCount : 6,
     createdAt: Date.parse(row.created_at),
   };
 }
