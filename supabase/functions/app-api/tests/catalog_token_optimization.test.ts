@@ -5,6 +5,7 @@ import {
   mergeVariantColorways,
   normalizeAnalysis,
 } from "../lib/profiles.ts";
+import { composeGenerationPrompt } from "../lib/generationPrompt.ts";
 
 Deno.test("buildColorwayAnalysisPrompt generates lightweight targeted prompt", () => {
   const prompt = buildColorwayAnalysisPrompt({
@@ -219,4 +220,119 @@ Deno.test("mergeVariantColorways refreshes multiword color in every showcase and
   assertEquals(plan?.evidenceReference, "fabric_pattern");
   assertEquals(showcase.id, "showcase");
   assertEquals(showcase.primaryReference, "fabric_pattern");
+});
+
+Deno.test("F-15 colorway merge removes stale product and pose color from the actual generation prompt", () => {
+  const baseAnalysis = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "royal blue",
+      fabric: "silk",
+      pattern: "royal blue floral butti repeat",
+      print: "royal blue and gold block print",
+      frontConstruction: "royal blue silk with a gathered yoke",
+      bottomWearDetails: "Royal blue Farshi Pajama with wide flared legs, three waist pleats and a 6-inch joined gold hem",
+      invariantDetails: ["royal blue base with gold butti work"],
+      detailPlacementMap: ["front yoke: royal blue and gold embroidery"],
+      patternGeometry: {
+        type: "floral",
+        placementByPanel: ["royal blue butti field on the front"],
+        accentColors: ["royal blue", "gold"],
+      },
+      embroideryGeometry: { colorsAndMaterial: "royal blue thread with gold zari" },
+      garmentEvidence: [{
+        region: "front yoke",
+        sourceRole: "front",
+        state: "confirmed",
+        visibleConstruction: "royal blue silk with gathered seams",
+        visibleDecoration: "royal blue thread and gold zari embroidery",
+      }],
+    },
+    creativeDirection: {
+      closeupMode: "product_detail",
+      closeupHeroDetail: "royal blue and gold yoke embroidery",
+      showcasePlan: {
+        heroFeature: "royal blue and gold yoke embroidery",
+        featureRegion: "embroidery",
+        shotType: "macro_detail",
+        visibilityRules: ["royal blue thread remains visible"],
+      },
+    },
+  }, "kurta set");
+
+  const merged = mergeVariantColorways(baseAnalysis, {
+    mainColor: "emerald green",
+    secondaryColors: ["gold"],
+    accentColors: ["gold"],
+    bottomWearColor: "emerald green",
+  });
+
+  assertEquals(merged.productIdentity.pattern, "emerald green floral butti repeat");
+  assertEquals(merged.productIdentity.invariantDetails, ["emerald green base with gold butti work"]);
+  assertEquals(merged.productIdentity.detailPlacementMap, ["front yoke: emerald green and gold embroidery"]);
+  assertEquals(merged.productIdentity.garmentEvidence[0]?.visibleConstruction, "emerald green silk with gathered seams");
+  assertEquals(merged.creativeDirection.closeupHeroDetail, "emerald green and gold yoke embroidery");
+  assertEquals(
+    merged.productIdentity.bottomWearDetails,
+    "emerald green Farshi Pajama with wide flared legs, three waist pleats and a 6-inch joined gold hem",
+  );
+  assertEquals(merged.productIdentity.bottomWearDetails.includes("Variant Colorway"), false);
+
+  const prompt = composeGenerationPrompt({
+    skuName: "SKU-GREEN-01",
+    productDetails: "",
+    pose: { ...merged.posePlan[5], poseNumber: 6 },
+    session: { ...merged, category: "kurta set" },
+    references: [{ role: "front" }, { role: "bottom" }, { role: "fabric_pattern" }],
+  });
+  assertEquals(/royal blue/i.test(prompt), false);
+  assertStringIncludes(prompt, "emerald green floral butti repeat");
+  assertStringIncludes(prompt, "front yoke: emerald green and gold embroidery");
+  assertStringIncludes(prompt, "emerald green Farshi Pajama with wide flared legs");
+  assertStringIncludes(prompt, "6-inch joined gold hem");
+  assertStringIncludes(prompt, "emerald green and gold yoke embroidery");
+});
+
+Deno.test("F-15 colorway recoloring protects identity, scene, canonical fields and reference roles", () => {
+  const baseAnalysis = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      category: "royal blue canonical category",
+      mainColor: "royal blue",
+      pattern: "royal blue butti",
+      patternGeometry: { type: "royal blue" },
+      garmentEvidence: [{
+        region: "front yoke",
+        sourceRole: "front",
+        state: "confirmed",
+        visibleDecoration: "royal blue embroidery",
+      }],
+    },
+    modelIdentity: { face: "Model with royal blue eyes" },
+    creativeDirection: {
+      backgroundStyle: "royal blue studio wall",
+      closeupHeroDetail: "royal blue yoke",
+      showcasePlan: {
+        heroFeature: "royal blue yoke",
+        featureRegion: "neckline",
+        shotType: "macro_detail",
+        evidenceReference: "fabric_pattern",
+      },
+    },
+  }, "kurta set");
+
+  const merged = mergeVariantColorways(baseAnalysis, { mainColor: "emerald green" });
+  assertEquals(merged.modelIdentity.face, "Model with royal blue eyes");
+  assertEquals(merged.creativeDirection.backgroundStyle, "royal blue studio wall");
+  assertEquals(merged.productIdentity.category, "royal blue canonical category");
+  assertEquals(merged.productIdentity.patternGeometry.type, "royal blue");
+  assertEquals(merged.productIdentity.garmentEvidence[0]?.sourceRole, "front");
+  assertEquals(merged.productIdentity.garmentEvidence[0]?.state, "confirmed");
+  assertEquals(merged.productIdentity.garmentEvidence[0]?.visibleDecoration, "emerald green embroidery");
+  assertEquals(merged.creativeDirection.showcasePlan?.featureRegion, "neckline");
+  assertEquals(merged.creativeDirection.showcasePlan?.shotType, "macro_detail");
+  assertEquals(merged.creativeDirection.showcasePlan?.evidenceReference, "fabric_pattern");
+  assertEquals(merged.posePlan[5].id, "showcase");
+  assertEquals(merged.posePlan[5].primaryReference, "fabric_pattern");
+  assertEquals(merged.creativeDirection.closeupHeroDetail, "emerald green yoke");
 });

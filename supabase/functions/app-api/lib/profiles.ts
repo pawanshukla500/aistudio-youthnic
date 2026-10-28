@@ -1944,24 +1944,64 @@ export function mergeVariantColorways(
     ? accents.map((c) => String(c || "").trim()).filter(Boolean)
     : [];
   const bottomWearColor = String(colorResult.bottomWearColor || colorResult.bottom_wear_color || "").trim();
+  const baseMainColor = String(baseAnalysis.productIdentity?.mainColor || "").trim();
+  const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const colorTokenPattern = (color: string, flags = "iu") => {
+    const normalized = color.trim();
+    if (!normalized) return null;
+    return new RegExp(
+      `(?<![\\p{L}\\p{N}_])${escapeRegExp(normalized)}(?![\\p{L}\\p{N}_])`,
+      flags,
+    );
+  };
+  const replaceColor = (input: string, oldColor: string, newColor: string) => {
+    if (!input || !newColor || oldColor.toLowerCase() === newColor.toLowerCase()) return input;
+    // Match the complete colour token/phrase, not the same letters inside a
+    // construction word (for example the "red" in embroidered or gathered).
+    return input.replace(colorTokenPattern(oldColor, "giu") ?? /$^/g, newColor);
+  };
+  const replaceBaseColor = (input: string) => replaceColor(input, baseMainColor, mainColor);
+  const hasColor = (input: string, color: string) => colorTokenPattern(color)?.test(input) ?? false;
 
   const cloned = structuredClone(baseAnalysis);
+  const currentBottom = cloned.productIdentity.bottomWearDetails;
+  // Product identity is generation-visible garment truth, but provenance and
+  // canonical classifiers are not prose to repaint. Bottom wear needs its own
+  // colour below because it may differ from the upper garment's colourway.
+  const protectedProductFields = new Set([
+    "garmentFamily", "category", "type", "state", "sourceRole", "source_role",
+    "evidenceRole", "evidence_role", "referenceRole", "reference_role",
+    "evidenceReferences", "evidence_references", "bottomWearDetails",
+  ]);
+  const recolorProductValue = (value: unknown): unknown => {
+    if (typeof value === "string") return replaceBaseColor(value);
+    if (Array.isArray(value)) return value.map(recolorProductValue);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+      key,
+      protectedProductFields.has(key) ? child : recolorProductValue(child),
+    ]));
+  };
+  cloned.productIdentity = recolorProductValue(cloned.productIdentity) as typeof cloned.productIdentity;
 
-  if (mainColor) {
-    cloned.productIdentity.mainColor = mainColor;
-  }
-  if (secondaryColors.length) {
-    cloned.productIdentity.secondaryColors = secondaryColors;
-  }
-
+  if (mainColor) cloned.productIdentity.mainColor = mainColor;
+  if (secondaryColors.length) cloned.productIdentity.secondaryColors = secondaryColors;
   if (cloned.productIdentity.patternGeometry && accentColors.length) {
     cloned.productIdentity.patternGeometry.accentColors = accentColors;
   }
 
-  if (bottomWearColor && cloned.productIdentity.bottomWearDetails) {
-    const currentBottom = cloned.productIdentity.bottomWearDetails;
-    if (!currentBottom.toLowerCase().includes(bottomWearColor.toLowerCase())) {
-      cloned.productIdentity.bottomWearDetails = `${currentBottom} (Variant Colorway: ${bottomWearColor})`;
+  if (currentBottom) {
+    if (bottomWearColor) {
+      // Replace the previous colour instruction instead of retaining it beside
+      // a conflicting variant suffix. Cut, pleats, print and hem prose survive.
+      const withoutOldVariantSuffix = currentBottom.replace(/\s*\(Variant Colorway:\s*[^)]*\)/gi, "").trim();
+      let updatedBottom = replaceColor(withoutOldVariantSuffix, baseMainColor, bottomWearColor);
+      if (!hasColor(updatedBottom, bottomWearColor)) {
+        updatedBottom = `${updatedBottom}${updatedBottom ? " " : ""}(Variant Colorway: ${bottomWearColor})`;
+      }
+      cloned.productIdentity.bottomWearDetails = updatedBottom;
+    } else {
+      cloned.productIdentity.bottomWearDetails = replaceBaseColor(currentBottom);
     }
   }
 
@@ -1971,26 +2011,12 @@ export function mergeVariantColorways(
       cloned.productIdentity.sareeTruth.borders.borderColors = secondaryColors.length ? secondaryColors.join(", ") : mainColor;
       cloned.productIdentity.sareeTruth.pallu.baseColor = mainColor;
     }
-    if (secondaryColors.length) {
-      cloned.productIdentity.sareeTruth.body.secondaryColors = secondaryColors;
-    }
+    if (secondaryColors.length) cloned.productIdentity.sareeTruth.body.secondaryColors = secondaryColors;
   }
 
-  const baseMainColor = String(baseAnalysis.productIdentity?.mainColor || "").trim();
-  const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const replaceBaseColor = (input: string) => {
-    if (!input || !mainColor || !baseMainColor || baseMainColor.toLowerCase() === mainColor.toLowerCase()) {
-      return input;
-    }
-    // Match the complete colour token/phrase, not the same letters inside a
-    // construction word (for example the "red" in embroidered or gathered).
-    const colorToken = new RegExp(
-      `(?<![\\p{L}\\p{N}_])${escapeRegExp(baseMainColor)}(?![\\p{L}\\p{N}_])`,
-      "giu",
-    );
-    return input.replace(colorToken, mainColor);
-  };
-
+  if (cloned.creativeDirection && mainColor) {
+    cloned.creativeDirection.closeupHeroDetail = replaceBaseColor(cloned.creativeDirection.closeupHeroDetail);
+  }
   if (cloned.creativeDirection?.showcasePlan && mainColor) {
     cloned.creativeDirection.showcasePlan = {
       ...cloned.creativeDirection.showcasePlan,
