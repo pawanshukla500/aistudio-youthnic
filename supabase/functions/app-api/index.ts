@@ -2001,7 +2001,7 @@ async function validatePose(args: {
 }) {
   const garmentFamily = String((args.session.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
   const qaRefs = await withInlineBase64(
-    selectReferences(args.references, args.approved, args.pose.id, garmentFamily, MAX_REFERENCES),
+    selectReferences(args.references, args.approved, args.pose.id, garmentFamily, MAX_REFERENCES, args.pose.primaryReference),
   );
   const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
   const prompt = buildPoseQaPrompt({
@@ -2047,7 +2047,7 @@ async function validatePose(args: {
       ? [...baseParts, { text: "INDEPENDENT RECHECK: disregard prior numeric scores, re-inspect each critical region separately, and return newly reasoned evidence-based scores." }]
       : baseParts;
     const result = await visionJson(policy, parts);
-    return { result, qa: parseQaResponse(result.text, { garmentFamily, poseType: args.pose.id, productIdentity: args.session.productIdentity, bottomWearMode: args.session.bottomWearMode }) };
+    return { result, qa: parseQaResponse(result.text, { garmentFamily, poseType: args.pose.id, productIdentity: args.session.productIdentity, bottomWearMode: args.session.bottomWearMode, creativeDirection: args.session.creativeDirection }) };
   };
 
   const complex = ["saree", "lehenga", "suit", "multi-piece"].some((family) => garmentFamily.toLowerCase().includes(family));
@@ -3017,7 +3017,7 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
     loaded.filename = `approved-pose-1.${extensionForMimeType(loaded.mimeType)}`;
     approved.push(loaded);
   }
-  const selected = selectReferences(loadedReferences, approved, poseData.id, garmentFamily, MAX_REFERENCES);
+  const selected = selectReferences(loadedReferences, approved, poseData.id, garmentFamily, MAX_REFERENCES, poseData.primaryReference);
   const authoritativeBackReference = poseData.id === "back"
     ? selected.find((reference) => isDirectBackProductRole(reference.role)) || null
     : null;
@@ -5489,7 +5489,20 @@ async function catalogAnalysisFingerprint(batch: JsonRecord, variant: JsonRecord
 function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof normalizeAnalysis>) {
   const memory = (batch.catalog_memory || {}) as JsonRecord;
   if (memory.modelIdentity) normalized.modelIdentity = memory.modelIdentity as typeof normalized.modelIdentity;
-  if (memory.creativeDirection) normalized.creativeDirection = memory.creativeDirection as typeof normalized.creativeDirection;
+  if (memory.creativeDirection) {
+    const skuShowcasePlan = normalized.creativeDirection.showcasePlan;
+    const skuCloseupHeroDetail = normalized.creativeDirection.closeupHeroDetail;
+    const skuCloseupMode = normalized.creativeDirection.closeupMode;
+    const skuShowcaseIntent = normalized.creativeDirection.showcaseIntent;
+    const memCreative = memory.creativeDirection as typeof normalized.creativeDirection;
+    normalized.creativeDirection = {
+      ...memCreative,
+      closeupMode: skuCloseupMode || memCreative.closeupMode,
+      closeupHeroDetail: skuCloseupHeroDetail || memCreative.closeupHeroDetail,
+      showcaseIntent: skuShowcaseIntent || memCreative.showcaseIntent,
+      showcasePlan: skuShowcasePlan ?? memCreative.showcasePlan ?? null,
+    };
+  }
   // The catalogue's approved styling plan outranks whatever this SKU's own
   // analysis proposed: one catalogue is one stylist's set of decisions, and a
   // per-SKU proposal is exactly the drift the plan exists to prevent.

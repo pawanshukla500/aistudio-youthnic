@@ -203,3 +203,26 @@ Deno.test("Studio and Bulk/Catalog share the same region-aware readiness policy"
     [],
   );
 });
+
+Deno.test("showcase reference selection promotes preferred evidenceReference and protects fabric_pattern from overflow", () => {
+  const references = [
+    { role: "front", hash: "front" },
+    ...Array.from({ length: 14 }, (_, index) => ({ role: "bottom", hash: `bottom-${index}` })),
+    { role: "fabric_pattern", hash: "fabric" },
+    { role: "back", hash: "back" },
+    { role: "mannequin", hash: "mannequin" },
+  ];
+  const selected = selectReferences(
+    references,
+    [],
+    "showcase",
+    "kurta_or_kurti_set",
+    MAX_IMAGE_REFERENCES,
+    "fabric_pattern",
+  );
+  const roles = selected.map((reference) => reference.role);
+  assertEquals(roles[0], "fabric_pattern");
+  assert(roles.includes("front"));
+  assert(roles.includes("bottom"));
+  assert(roles.includes("back"));
+});

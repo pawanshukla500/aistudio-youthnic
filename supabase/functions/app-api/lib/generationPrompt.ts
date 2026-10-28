@@ -12,6 +12,7 @@ import {
 } from "./profiles.ts";
 import {
   effectiveShowcaseShot,
+  showcaseAestheticDirection,
   type ShowcasePlan,
   showcaseShotDirection,
   type ShowcaseShotType,
@@ -538,11 +539,13 @@ function showcasePlanHardRule(args: {
   widenedFromCloseup: boolean;
   closeupHeroDetail: string;
 }) {
+  const aesthetic = showcaseAestheticDirection(args.shotType, args.plan.featureRegion);
   const lines = [
     `- SHOWCASE FRAME SUBJECT: ${args.plan.heroFeature}. This frame exists to sell that one feature${
       args.plan.whyItSells ? ` - ${args.plan.whyItSells}` : ""
     }. It must be large, sharp, unobstructed, and unmistakably what the frame is about.`,
     `- SHOWCASE FRAME DISTANCE: ${showcaseShotDirection(args.shotType)}`,
+    `- SHOWCASE AESTHETIC PHOTOSHOOT & DETAIL FIDELITY: ${aesthetic} Render every stitch, motif, border edge, and fabric fold of ${args.plan.heroFeature} at true physical scale and material sheen.`,
     "- SHOWCASE FRAME MUST NOT DUPLICATE: this is not a second hero shot. Do not reproduce Pose 1's straight-on, full-length, whole-outfit composition. If this frame is full length, the angle, distance, stance and composition must read as a different photograph whose subject is the named feature, not the outfit as a whole.",
   ];
   if (args.closeupHeroDetail) {
@@ -567,15 +570,34 @@ function showcasePlanHardRule(args: {
 function showcaseHardRule(intent: ShowcaseIntent, family: GarmentPoseFamily) {
   if (intent === "saree_drape") {
     const bengali = family === "saree_bengali";
-    return `- SHOWCASE FRAME HARD RULE (DRAPE-LED): this frame sells the drape. The pallu${bengali ? " (aanchal)" : ""} is the subject - place it exactly as the drape plan states (same shoulder, same fall direction, same visible length) and open it low and flat so its artwork, motif scale, end treatment and border are completely readable. Front pleats stay flat, evenly stacked and vertical; upper and lower borders stay continuous and identical in width; the hem border stays level. No hand, arm, hair or prop crosses the pallu artwork.${bengali ? " Hold the upright, serene Bengali posture - level shoulders, tall spine, small deliberate movement." : ""} Never a repeat of the hero framing.`;
+    return `- SHOWCASE FRAME HARD RULE (DRAPE-LED): this frame sells the drape. The pallu${bengali ? " (aanchal)" : ""} is the subject - place it exactly as the drape plan states (same shoulder, same fall direction, same visible length) and open it low and flat so its artwork, motif scale, end treatment and border are completely readable. Front pleats stay flat, evenly stacked and vertical; upper and lower borders stay continuous and identical in width; the hem border stays level. No hand, arm, hair or prop crosses the pallu artwork.${bengali ? " Hold the upright, serene Bengali posture - level shoulders, tall spine, small deliberate movement." : ""} ${showcaseAestheticDirection("drape_feature", "pallu")} Never a repeat of the hero framing.`;
   }
   if (intent === "set_full_length") {
-    return "- SHOWCASE FRAME HARD RULE (COMPLETE SET): one head-to-toe frame that proves the top and the bottom wear are a single coordinated set. The top must read from shoulder seam to hem at its true length and fit, AND the bottom wear must read from waistband to hem with its exact cut, leg volume, pleat architecture, hem finish, colour and print. Footwear is grounded and fully visible. Nothing may crop the hem or the footwear.";
+    return `- SHOWCASE FRAME HARD RULE (COMPLETE SET): one head-to-toe frame that proves the top and the bottom wear are a single coordinated set. The top must read from shoulder seam to hem at its true length and fit, AND the bottom wear must read from waistband to hem with its exact cut, leg volume, pleat architecture, hem finish, colour and print. Footwear is grounded and fully visible. Nothing may crop the hem or the footwear. ${showcaseAestheticDirection("full_body_feature", "bottom_wear")}`;
   }
   if (intent === "playful_backdrop") {
-    return "- SHOWCASE FRAME HARD RULE (PLAYFUL, SET-MATCHED): natural, candid, lively body language that interacts with the backdrop and props ALREADY established in this shoot - a light step, a turn, a shoulder tilt, a relaxed lean on an element already present, a genuine mid-laugh. Introduce no new prop, furniture, plant or architecture. However playful the pose, the neckline, sleeve shape, hem line, fit and print stay unobstructed, uncrumpled and in frame.";
+    return `- SHOWCASE FRAME HARD RULE (PLAYFUL, SET-MATCHED): natural, candid, lively body language that interacts with the backdrop and props ALREADY established in this shoot - a light step, a turn, a shoulder tilt, a relaxed lean on an element already present, a genuine mid-laugh. Introduce no new prop, furniture, plant or architecture. However playful the pose, the neckline, sleeve shape, hem line, fit and print stay unobstructed, uncrumpled and in frame. ${showcaseAestheticDirection("movement_feature", "upper_garment")}`;
   }
-  return "- SHOWCASE FRAME HARD RULE (TRUE FALL AND LENGTH): a full-length frame proving the garment's real fall, fit and length. Side seams hang straight, the hem stays level and complete inside the frame, and the garment is never hitched, tucked, gathered or shortened. Footwear grounded and visible.";
+  return `- SHOWCASE FRAME HARD RULE (TRUE FALL AND LENGTH): a full-length frame proving the garment's real fall, fit and length. Side seams hang straight, the hem stays level and complete inside the frame, and the garment is never hitched, tucked, gathered or shortened. Footwear grounded and visible. ${showcaseAestheticDirection("full_body_feature", "silhouette")}`;
+}
+
+function pose6HardRule(args: {
+  showcaseShot: { plan: ShowcasePlan; shotType: ShowcaseShotType; widenedFromCloseup: boolean } | null;
+  showcaseIntent: ShowcaseIntent;
+  poseFamily: GarmentPoseFamily;
+  closeupHeroDetail: string;
+}) {
+  const coreRule = args.showcaseShot
+    ? showcasePlanHardRule({
+      plan: args.showcaseShot.plan,
+      shotType: args.showcaseShot.shotType,
+      widenedFromCloseup: args.showcaseShot.widenedFromCloseup,
+      closeupHeroDetail: args.closeupHeroDetail,
+    })
+    : showcaseHardRule(args.showcaseIntent, args.poseFamily);
+  return `POSE 6 HARD RULE (AESTHETIC FEATURE SHOWCASE & DETAIL LOCK):
+${coreRule}
+- EDITORIAL PHOTOSHOOT EXECUTION: Deliver magazine-grade fashion photography with intentional camera framing, directional studio lighting that sculpts fabric texture and embroidery relief, natural posture diverging from Pose 1, strictly two anatomically natural arms and hands clear of the featured detail, and 100% locked model, set, styling, and garment fidelity.`;
 }
 
 function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSittingDemanded: boolean): string {
@@ -759,9 +781,10 @@ export function composeGenerationPrompt(args: {
   // only for a cached analysis made before showcasePlan existed. Resolved by the
   // shared helper so the pose brief, this rule, the shoot memory and the feedback
   // row all describe the same frame.
-  const showcaseShot = effectiveShowcaseShot(creative);
+  const showcaseShot = effectiveShowcaseShot(creative, { includesBottomWear: bottomWear.includesBottomWear });
   const sceneLock = sceneLockBlock({ creativeDirection: creative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference });
-  const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL);
+  const isMacroShowcase = isShowcase && showcaseShot?.shotType === "macro_detail";
+  const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL) && !isMacroShowcase;
   const faceQualityInstruction = faceRequired
     ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct and naturally shaped eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
     : isTrueBack
@@ -1037,6 +1060,7 @@ ${(args.pose.id === "back" || isTrueBack) ? `- DUPATTA REAR VISIBILITY LOCK: If 
 
 Product accuracy is more important than style matching.
 ${isCloseup ? `${pose5HardRule({ closeupMode, heroDetail: closeupHeroDetail })}
+` : ""}${isShowcase ? `${pose6HardRule({ showcaseShot, showcaseIntent, poseFamily, closeupHeroDetail: recordedCloseupHeroDetail })}
 ` : ""}Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
 
   return assertGenerationPromptWithinLimit(

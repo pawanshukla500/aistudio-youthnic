@@ -3,6 +3,7 @@ export type JsonRecord = Record<string, unknown>;
 import {
   effectiveShowcaseShot,
   normalizeShowcasePlan,
+  showcaseAestheticDirection,
   type ShowcasePlan,
   showcaseShotDirection,
   type ShowcaseShotType,
@@ -444,12 +445,97 @@ export function poseFamilyFor(input: string | PoseSlotContext): GarmentPoseFamil
  * cached or legacy analysis that predates the plan, and a fixed template is what
  * turned this frame into a second hero shot in the first place.
  */
+function knownProductField(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (/^(not visible in the supplied references|unknown|none|none - standalone garment|n\/a|-)$/i.test(trimmed)) {
+    return "";
+  }
+  return trimmed;
+}
+
+function buildShowcaseGarmentDetailSummary(
+  productIdentity: unknown,
+  family: GarmentPoseFamily,
+  hasBottoms: boolean,
+): { summary: string; highlights: string[] } {
+  const product = objectValue(productIdentity);
+  const mainColor = knownProductField(product.mainColor ?? product.main_color);
+  const fabric = knownProductField(product.fabric);
+  const pattern = knownProductField(product.pattern ?? product.print);
+  const embroidery = knownProductField(product.embroidery);
+  const neckline = knownProductField(product.neckline);
+  const sleeveType = knownProductField(product.sleeveType ?? product.sleeve_type);
+  const silhouette = knownProductField(product.silhouette);
+  const bottomDetails = hasBottoms ? knownProductField(product.bottomWearDetails ?? product.bottom_wear_details) : "";
+
+  const parts: string[] = [];
+  const highlights: string[] = [];
+
+  if (mainColor && fabric) {
+    parts.push(`${mainColor} ${fabric}`);
+    highlights.push(`${mainColor} ${fabric}`);
+  } else if (mainColor) {
+    parts.push(mainColor);
+  } else if (fabric) {
+    parts.push(fabric);
+  }
+
+  if (isSareePoseFamily(family)) {
+    const sareeTruth = objectValue(product.sareeTruth);
+    const body = objectValue(sareeTruth.body);
+    const pallu = objectValue(sareeTruth.pallu);
+    const borders = objectValue(sareeTruth.borders);
+    const palluArtwork = knownProductField(pallu.artwork);
+    const lowerBorder = knownProductField(borders.lowerBorder);
+    const baseColor = knownProductField(body.baseColor);
+    const mainFabric = knownProductField(body.mainFabric);
+    if (!parts.length && (baseColor || mainFabric)) {
+      parts.push([baseColor, mainFabric].filter(Boolean).join(" "));
+    }
+    if (palluArtwork) {
+      parts.push(`pallu artwork: ${palluArtwork}`);
+      highlights.push(palluArtwork);
+    }
+    if (lowerBorder) {
+      parts.push(`border: ${lowerBorder}`);
+      highlights.push(lowerBorder);
+    }
+  } else {
+    if (embroidery) {
+      parts.push(`embroidery: ${embroidery}`);
+      highlights.push(embroidery);
+    }
+    if (pattern && pattern.toLowerCase() !== embroidery.toLowerCase()) {
+      parts.push(`pattern: ${pattern}`);
+      highlights.push(pattern);
+    }
+    if (neckline) parts.push(`neckline: ${neckline}`);
+    if (sleeveType) parts.push(`sleeves: ${sleeveType}`);
+    if (silhouette) parts.push(`silhouette: ${silhouette}`);
+    if (bottomDetails) {
+      parts.push(`bottom wear: ${bottomDetails}`);
+      highlights.push(bottomDetails);
+    }
+  }
+
+  return {
+    summary: parts.slice(0, 5).join("; "),
+    highlights: highlights.slice(0, 4),
+  };
+}
+
 function showcaseSlotFromPlan(
   plan: ShowcasePlan,
   family: GarmentPoseFamily,
   shot: { shotType: ShowcaseShotType; widenedFromCloseup: boolean },
+  productIdentity?: unknown,
+  hasBottoms = false,
 ): StudioPose {
   const shotDirection = showcaseShotDirection(shot.shotType);
+  const aestheticDirection = showcaseAestheticDirection(shot.shotType, plan.featureRegion);
+  const garmentDetails = buildShowcaseGarmentDetailSummary(productIdentity, family, hasBottoms);
   // The plan's own framing/posture text describes its original distance, so it
   // is dropped once a close-up collision has widened the frame.
   const plannedFraming = shot.widenedFromCloseup ? "" : plan.framing;
@@ -457,27 +543,35 @@ function showcaseSlotFromPlan(
   const plannedCameraAngle = shot.widenedFromCloseup ? "" : plan.cameraAngle;
   const feature = plan.heroFeature;
   const subjectRule = `${feature} is the subject of this frame and must be large, sharp and completely unobstructed`;
+  const detailRules = [
+    subjectRule,
+    ...(garmentDetails.summary ? [`preserve exact garment specifications: ${garmentDetails.summary}`] : []),
+    ...plan.visibilityRules,
+    "strictly two arms and two hands in natural editorial coordination - never covering the featured detail",
+    "this frame must add coverage the other five do not: never a repeat of the hero framing or of the close-up's subject",
+  ];
   return {
     id: "showcase",
     title: `Feature Focus: ${feature.length > 48 ? `${feature.slice(0, 45).trimEnd()}...` : feature}`,
-    framing: plannedFraming || `3:4 portrait framed for ${feature}. ${shotDirection}`,
-    cameraAngle: plannedCameraAngle || "Eye-level, angled and distanced so the named feature reads at its best",
+    framing: plannedFraming || `3:4 portrait framed for ${feature}. ${shotDirection} ${aestheticDirection}`,
+    cameraAngle: plannedCameraAngle ||
+      `Eye-level to sculpted editorial angle and distance so ${feature} reads with magazine-grade clarity`,
     bodyPosition: plannedBodyPosition ||
-      `Posture and angle chosen so ${feature} is presented at its best, natural and unforced, with the garment uncrumpled`,
-    handPlacement: plan.handPlacement || `Hands clear of ${feature}; they may frame or hold it open, never cover it`,
+      `Poised editorial posture and natural angle chosen so ${feature} is presented at its best, natural and unforced, with the garment uncrumpled and strictly two anatomically natural arms and hands`,
+    handPlacement: plan.handPlacement || `Hands clear of ${feature}; they may frame or hold it open with graceful two-hand coordination, never cover it`,
     expression: plan.expression ||
       "Warm, natural Gen-Z energy with the same face and hairstyle as every other frame, or no face at all when the crop is tight on the feature",
-    productVisibilityRules: [
-      subjectRule,
-      ...plan.visibilityRules,
-      "this frame must add coverage the other five do not: never a repeat of the hero framing or of the close-up's subject",
-    ].slice(0, 8),
+    productVisibilityRules: detailRules.slice(0, 8),
     consistencyNotes: "Same model identity, styling, footwear, set, backdrop and lighting as Pose 1; only the framing and posture change to sell this feature",
-    description: `A frame built around ${feature}${plan.whyItSells ? ` - ${plan.whyItSells}` : ""}.`,
-    highlightedDetails: [feature, plan.featureRegion.replace(/_/g, " ")],
+    description: `A frame built around ${feature}${plan.whyItSells ? ` - ${plan.whyItSells}` : ""}${
+      garmentDetails.summary ? ` (${garmentDetails.summary})` : ""
+    }. ${aestheticDirection}`,
+    highlightedDetails: [feature, plan.featureRegion.replace(/_/g, " "), ...garmentDetails.highlights].slice(0, 6),
     primaryReference: plan.evidenceReference || (isSareePoseFamily(family) ? "saree_front_drape" : "front"),
     purpose: plan.whyItSells || "Sell the detail that makes this product worth buying",
-    prompt: `Create a catalog frame built entirely around ${feature}. ${shotDirection} ${
+    prompt: `Create a catalog frame built entirely around ${feature}. ${shotDirection} ${aestheticDirection} ${
+      garmentDetails.summary ? `Verified garment details to render with 100% fidelity: ${garmentDetails.summary}. ` : ""
+    }${
       shot.widenedFromCloseup
         ? "Shoot it at this wider distance so it reads on the worn garment rather than as a repeat of the detail crop. "
         : ""
@@ -489,111 +583,121 @@ function showcaseSlotFromPlan(
 }
 
 /** The sixth frame's fallback brief, chosen by garment family. */
-function showcaseSlot(family: GarmentPoseFamily, hasBottoms: boolean): StudioPose {
+function showcaseSlot(family: GarmentPoseFamily, hasBottoms: boolean, productIdentity?: unknown): StudioPose {
+  const garmentDetails = buildShowcaseGarmentDetailSummary(productIdentity, family, hasBottoms);
+  const specClause = garmentDetails.summary ? ` Verified garment specifications: ${garmentDetails.summary}.` : "";
   if (family === "saree_bengali" || family === "saree_ethnic") {
     const bengali = family === "saree_bengali";
+    const aesthetic = showcaseAestheticDirection("drape_feature", "pallu");
     return {
       id: "showcase",
       title: bengali ? "Pallu (Aanchal) & Drape Showcase" : "Pallu & Drape Showcase",
-      framing: "3:4 portrait, full or three-quarter body framed so the complete pallu panel and the hem border stay inside the frame",
+      framing: `3:4 portrait, full or three-quarter body framed so the complete pallu panel and the hem border stay inside the frame. ${aesthetic}`,
       bodyPosition: bengali
         ? "Standing tall and serene with shoulders open and level, body angled a few degrees off camera, weight settled on one leg, so the aanchal falls clear of the body and reads as one continuous placed panel"
         : "Standing poised with a gentle turn of the torso so the pallu opens away from the body and its full length and artwork read clearly",
-      handPlacement: "One hand may hold the pallu edge low, flat and open so its artwork stays fully visible; the other stays relaxed and clear of the border and pleats",
+      handPlacement: "One hand may hold the pallu edge low, flat and open so its artwork stays fully visible; the other stays relaxed and clear of the border and pleats (strictly two natural arms and hands)",
       expression: "Calm, warm, self-assured - the same face, hair and styling as every other frame",
       productVisibilityRules: [
         "the pallu artwork, its border and its end treatment are the subject of this frame and must be fully visible and uncreased",
+        ...(garmentDetails.summary ? [`preserve exact saree specifications: ${garmentDetails.summary}`] : []),
         "upper and lower borders stay continuous, identical in width, and the hem border stays level",
         "front pleats stay flat, evenly stacked and vertical",
         "the drape plan's shoulder side, fall direction and visible pallu length are unchanged",
         "no hand, arm, hair or prop crosses the pallu artwork",
-      ],
+      ].slice(0, 8),
       consistencyNotes: "Same model identity, styling, set, backdrop and lighting as Pose 1; only the drape presentation opens up",
-      description: "A drape-led frame that presents the pallu exactly as the drape plan specifies, with its artwork, border and fall fully readable.",
-      cameraAngle: "Eye-level, slightly wider than the hero frame so the pallu's full length fits",
-      highlightedDetails: bengali
-        ? ["pallu/aanchal artwork", "border continuity", "pleat structure", "weave"]
-        : ["pallu artwork", "border geometry", "drape fall", "pleat structure"],
+      description: `A drape-led frame that presents the pallu exactly as the drape plan specifies, with its artwork, border and fall fully readable.${specClause} ${aesthetic}`,
+      cameraAngle: "Eye-level, slightly wider than the hero frame so the pallu's full length fits with editorial lighting depth",
+      highlightedDetails: (bengali
+        ? ["pallu/aanchal artwork", "border continuity", "pleat structure", "weave", ...garmentDetails.highlights]
+        : ["pallu artwork", "border geometry", "drape fall", "pleat structure", ...garmentDetails.highlights]).slice(0, 6),
       primaryReference: "saree_pallu_spread",
       purpose: "Show the drape and pallu a saree buyer actually judges",
       prompt: bengali
-        ? "Create an elegant Bengali-saree drape frame. The model stands tall and serene in the same studio set, body a few degrees off camera, with the aanchal/pallu placed exactly as the drape plan specifies - over its recorded shoulder, falling in its recorded direction and length, opened low and flat so its artwork, end-piece and border are completely readable. Front pleats stay flat, even and vertical; upper and lower borders stay continuous and identical in width; the hem border stays level. Keep the exact same model identity, hair, makeup, jewellery, footwear, backdrop wall, flooring and lighting established in Pose 1."
-        : "Create a graceful saree drape frame. The model stands poised in the same studio set with a gentle torso turn so the pallu opens away from the body and its artwork, motif scale, border and fall are completely readable, exactly as the drape plan specifies. Front pleats stay flat, even and vertical; upper and lower borders stay continuous and identical in width. Keep the exact same model identity, hair, makeup, jewellery, footwear, backdrop wall, flooring and lighting established in Pose 1.",
+        ? `Create an elegant Bengali-saree drape frame. ${aesthetic}${specClause} The model stands tall and serene in the studio set, body a few degrees off camera, with the aanchal/pallu placed exactly as the drape plan specifies - over its recorded shoulder, falling in its recorded direction and length, opened low and flat so its artwork, end-piece and border are completely readable. Front pleats stay flat, even and vertical; upper and lower borders stay continuous and identical in width; the hem border stays level. Render the exact model face, hair, makeup, jewellery and footwear described in the locked model identity and styling plan, and the exact studio set, backdrop wall, flooring and lighting described in the locked creative direction.`
+        : `Create a graceful saree drape frame. ${aesthetic}${specClause} The model stands poised in the studio set with a gentle torso turn so the pallu opens away from the body and its artwork, motif scale, border and fall are completely readable, exactly as the drape plan specifies. Front pleats stay flat, even and vertical; upper and lower borders stay continuous and identical in width. Render the exact model face, hair, makeup, jewellery and footwear described in the locked model identity and styling plan, and the exact studio set, backdrop wall, flooring and lighting described in the locked creative direction.`,
       enabled: true,
     };
   }
 
   if (hasBottoms) {
+    const aesthetic = showcaseAestheticDirection("full_body_feature", "bottom_wear");
     return {
       id: "showcase",
       title: "Signature Top & Bottom Showcase",
-      framing: "3:4 portrait, head-to-toe with the complete top hem and the complete bottom-wear hem plus footwear inside the frame - never cropped at the knee or ankle",
+      framing: `3:4 portrait, head-to-toe with the complete top hem and the complete bottom-wear hem plus footwear inside the frame - never cropped at the knee or ankle. ${aesthetic}`,
       bodyPosition: "Dynamic stance with legs separated and one foot stepped forward or angled to showcase the bottom-wear flare, pleat volume, cut and two distinct legs in motion while top hangs at its true length; distinctly varied in physical stance from Pose 1's static frontal stance",
-      handPlacement: "Hands held clear of the torso and hips so the top's hem line, the waistband and the bottom-wear silhouette are all unobstructed",
+      handPlacement: "Hands held clear of the torso and hips so the top's hem line, the waistband and the bottom-wear silhouette are all unobstructed (strictly two natural arms and hands)",
       expression: "Natural, relaxed, authentic Gen-Z expression with the same face and hairstyle as every other frame; subtle genuine warmth, never a forced artificial smile",
       productVisibilityRules: [
         "the complete outfit reads as a set: top from shoulder to hem AND bottom wear from waistband to hem in one frame",
+        ...(garmentDetails.summary ? [`preserve exact garment specifications: ${garmentDetails.summary}`] : []),
         "exact bottom-wear cut, leg volume, pleat architecture, hem finish and print strictly preserved",
         "the join between top hem and bottom waistband is visible, not hidden by hands, hair or a dupatta",
         "footwear grounded and fully visible with natural contact shadows",
         "sleeve length and cuff remain readable",
-      ],
+      ].slice(0, 8),
       consistencyNotes: "Same model identity, styling, footwear, set, backdrop and lighting as Pose 1; only the stance and framing open up to sell the complete set",
-      description: "A full-length frame whose job is to prove the top and the bottom wear are one coordinated set, both fully visible.",
+      description: `A full-length frame whose job is to prove the top and the bottom wear are one coordinated set, both fully visible.${specClause} ${aesthetic}`,
       cameraAngle: "Eye-level to slightly low dynamic editorial angle framed for the complete set",
-      highlightedDetails: ["complete set", "bottom-wear silhouette and print", "top length and fit", "footwear"],
+      highlightedDetails: ["complete set", "bottom-wear silhouette and print", "top length and fit", "footwear", ...garmentDetails.highlights].slice(0, 6),
       primaryReference: "front",
       purpose: "Sell the complete two-piece set in a single catalog frame",
-      prompt: "Create a full-length catalog frame that dynamically sells the complete set. The model takes a dynamic stance with one foot angled forward or feet comfortably separated so both legs of the bottom wear, their true volume, and authentic print read with maximum clarity. Show the top from shoulder seam to hem at its true length, and bottom wear from waistband to hem with its exact cut, leg volume, pleating, hem finish, colour and print preserved. Footwear is grounded and visible. Distinct in angle and stance from Pose 1. Model maintains a natural, realistic expression with the same locked face, hair, footwear, jewellery, and backdrop.",
+      prompt: `Create a full-length catalog frame that dynamically sells the complete set. ${aesthetic}${specClause} The model takes a dynamic stance with one foot angled forward or feet comfortably separated so both legs of the bottom wear, their true volume, and authentic print read with maximum clarity. Show the top from shoulder seam to hem at its true length, and bottom wear from waistband to hem with its exact cut, leg volume, pleating, hem finish, colour and print preserved. Footwear is grounded and visible. Distinct in angle and stance from Pose 1. Render the exact model face, hair, skin tone, makeup, jewellery and footwear described in the locked model identity and styling plan, and the exact studio set, backdrop wall, flooring and lighting described in the locked creative direction.`,
       enabled: true,
     };
   }
 
   if (family === "short_kurti_top" || family === "western_casual") {
+    const aesthetic = showcaseAestheticDirection("movement_feature", "upper_garment");
     return {
       id: "showcase",
       title: "Playful Backdrop Moment",
-      framing: "3:4 portrait, three-quarter or full body with the garment's hem line and neckline inside the frame and the established backdrop clearly readable behind the model",
-      bodyPosition: "Lively, candid, natural movement that belongs to this set - a light step, a turn, a shoulder tilt, a relaxed lean against the backdrop element already established in Pose 1; never a static standing pose",
-      handPlacement: "Expressive and natural - a hand in the hair, at the waist, or swinging with the movement - never crossing the print, neckline or hem",
+      framing: `3:4 portrait, three-quarter or full body with the garment's hem line and neckline inside the frame and the established backdrop clearly readable behind the model. ${aesthetic}`,
+      bodyPosition: "Lively, candid, natural movement that belongs to this set - a light step, a turn, a shoulder tilt, a relaxed lean against the backdrop element already present in the studio set; never a static standing pose",
+      handPlacement: "Expressive and natural - a hand in the hair, at the waist, or swinging with the movement - never crossing the print, neckline or hem (strictly two natural arms and hands)",
       expression: "Genuine, realistic warmth: an authentic subtle smile, a candid mid-laugh, or an easy confident glance — never a forced or artificial toothy grimace",
       productVisibilityRules: [
         "the garment stays the subject: neckline, sleeve shape, hem line, fit and print all unobstructed",
+        ...(garmentDetails.summary ? [`preserve exact garment specifications: ${garmentDetails.summary}`] : []),
         "movement must not crumple, twist, or ride the garment up",
         "the pose interacts only with the backdrop and props already established in Pose 1 - never new furniture, props or architecture",
         "the established backdrop is clearly readable behind the model",
-      ],
+      ].slice(0, 8),
       consistencyNotes: "Same model identity, styling, footwear, set, backdrop and lighting as Pose 1; only the body language becomes playful",
-      description: "A lively, natural, scroll-stopping moment that plays against the established backdrop while keeping the garment fully readable.",
+      description: `A lively, natural, scroll-stopping moment that plays against the established backdrop while keeping the garment fully readable.${specClause} ${aesthetic}`,
       cameraAngle: "Eye-level candid editorial angle",
-      highlightedDetails: ["playful energy", "garment fit and hem", "interaction with the established set"],
+      highlightedDetails: ["playful energy", "garment fit and hem", "interaction with the established set", ...garmentDetails.highlights].slice(0, 6),
       primaryReference: "front",
       purpose: "Social-first lifestyle frame that makes the product feel wearable",
-      prompt: "Create a playful, natural, lively fashion frame inside the exact same studio set established in Pose 1. Use candid movement that belongs to that set - a light step, a turn, a relaxed lean on the backdrop element already present, a genuine mid-laugh - while keeping the garment's neckline, sleeve shape, hem line, fit, colour and print completely readable and uncrumpled. Do not introduce any new prop, furniture, or architecture. Keep the exact same model identity, hair, makeup, jewellery, footwear, backdrop wall, flooring and lighting established in Pose 1.",
+      prompt: `Create a playful, natural, lively fashion frame inside the locked studio set. ${aesthetic}${specClause} Use candid movement that belongs to that set - a light step, a turn, a relaxed lean on the backdrop element already present, a genuine mid-laugh - while keeping the garment's neckline, sleeve shape, hem line, fit, colour and print completely readable and uncrumpled. Do not introduce any new prop, furniture, or architecture. Render the exact model face, hair, skin tone, makeup, jewellery and footwear described in the locked model identity and styling plan, and the exact studio set, backdrop wall, flooring and lighting described in the locked creative direction.`,
       enabled: true,
     };
   }
 
+  const aesthetic = showcaseAestheticDirection("full_body_feature", "silhouette");
   return {
     id: "showcase",
     title: "Full-Length Silhouette Showcase",
-    framing: "3:4 portrait, head-to-toe with the complete hemline and footwear inside the frame",
+    framing: `3:4 portrait, head-to-toe with the complete hemline and footwear inside the frame. ${aesthetic}`,
     bodyPosition: "Dynamic silhouette stance with weight shifted onto one leg, hips angled naturally, so the side seams hang straight, the hem stays level, and the garment shows its true fall and length from a fresh perspective; not a static copy of Pose 1",
-    handPlacement: "Hands clear of the body so the silhouette, hem line, any slit and the waist treatment stay unobstructed",
+    handPlacement: "Hands clear of the body so the silhouette, hem line, any slit and the waist treatment stay unobstructed (strictly two natural arms and hands)",
     expression: "Warm, natural, confident Gen-Z energy with an authentic, effortless expression (never an artificial smile), with the same face and hairstyle as every other frame",
     productVisibilityRules: [
       "the complete silhouette from shoulder to hem is readable and the hem stays level",
+      ...(garmentDetails.summary ? [`preserve exact garment specifications: ${garmentDetails.summary}`] : []),
       "true length and fit preserved - never hitched, tucked, gathered or shortened",
       "sleeve length, cuff, neckline and any side slit remain readable",
       "footwear grounded and fully visible",
-    ],
+    ].slice(0, 8),
     consistencyNotes: "Same model identity, styling, footwear, set, backdrop and lighting as Pose 1; only the stance and framing change",
-    description: "A full-length frame that shows the garment's true fall, fit and length on the body.",
+    description: `A full-length frame that shows the garment's true fall, fit and length on the body.${specClause} ${aesthetic}`,
     cameraAngle: "Eye-level, slight three-quarter dynamic angle, full body",
-    highlightedDetails: ["silhouette", "true length and fall", "fit", "hem finish"],
+    highlightedDetails: ["silhouette", "true length and fall", "fit", "hem finish", ...garmentDetails.highlights].slice(0, 6),
     primaryReference: "front",
     purpose: "Prove fit, fall and length for the listing",
-    prompt: "Create a full-length catalog frame inside the exact same studio set established in Pose 1. The model stands with a natural weight shift and angled hips so the side seams hang straight, the hem stays level, and the garment shows its true length, fall and fit from an active perspective distinct from Pose 1. Keep the neckline, sleeves, cuffs, any side slit and the hem finish completely readable, and keep the footwear grounded and visible. Model has a realistic, natural expression with the exact same model identity, hair, makeup, jewellery, backdrop wall, flooring and lighting established in Pose 1.",
+    prompt: `Create a full-length catalog frame inside the locked studio set. ${aesthetic}${specClause} The model stands with a natural weight shift and angled hips so the side seams hang straight, the hem stays level, and the garment shows its true length, fall and fit from an active perspective distinct from Pose 1. Keep the neckline, sleeves, cuffs, any side slit and the hem finish completely readable, and keep the footwear grounded and visible. Render the exact model face, hair, skin tone, makeup, jewellery and footwear described in the locked model identity and styling plan, and the exact studio set, backdrop wall, flooring and lighting described in the locked creative direction.`,
     enabled: true,
   };
 }
@@ -602,12 +706,6 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
   const context = poseSlotContext(input);
   const family = poseFamilyFor(context);
   const isSaree = isSareePoseFamily(family);
-  // Resolved once here so the stored brief and the generation hard rule describe
-  // the same frame even when a close-up collision widens it.
-  const showcaseShot = effectiveShowcaseShot({
-    showcasePlan: context.showcasePlan,
-    closeupHeroDetail: context.closeupHeroDetail,
-  });
   // The sixth frame's brief must agree with how the shoot will actually be
   // rendered, so a top-only shoot never stores a "show the bottom wear" brief.
   const bottomPresentation = resolveBottomWearPresentation({
@@ -617,6 +715,15 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
   const hasBottoms = bottomPresentation.includesBottomWear || (
     normalizeBottomWearMode(context.bottomWearMode) !== "top_only" &&
     (family === "kurta_set" || family === "lehenga")
+  );
+  // Resolved once here so the stored brief and the generation hard rule describe
+  // the same frame even when a close-up collision widens it.
+  const showcaseShot = effectiveShowcaseShot(
+    {
+      showcasePlan: context.showcasePlan,
+      closeupHeroDetail: context.closeupHeroDetail,
+    },
+    { includesBottomWear: hasBottoms },
   );
   const farshiBottom = bottomPresentation.cutClass === "farshi";
   const frontBottomRule = farshiBottom
@@ -750,8 +857,8 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       enabled: true,
     },
     showcaseShot
-      ? showcaseSlotFromPlan(showcaseShot.plan, family, showcaseShot)
-      : showcaseSlot(family, hasBottoms),
+      ? showcaseSlotFromPlan(showcaseShot.plan, family, showcaseShot, context.productIdentity, hasBottoms)
+      : showcaseSlot(family, hasBottoms, context.productIdentity),
   ];
 }
 
@@ -1438,16 +1545,54 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     };
   }).map((pose) => {
     // The model writes the prose for all six frames, but the sixth frame's
-    // guarantees come from showcasePlan. Its own pose entry may elaborate; it
-    // may not quietly drop the chosen subject, the non-duplication rule, or the
-    // frame itself, which is how it became a hero repeat before.
-    if (pose.id !== "showcase" || !creativeDirection.showcasePlan) return pose;
-    const planRules = poseSlots[poseSlots.length - 1].productVisibilityRules;
-    const merged = [...planRules];
+    // guarantees come from showcasePlan and the garment's verified details.
+    // Its own pose entry may elaborate; it may not quietly drop the chosen
+    // subject, the non-duplication rule, the widened framing, or the aesthetic
+    // photoshoot direction, which is how it became a hero repeat before.
+    if (pose.id !== "showcase") return pose;
+    const fallbackShowcase = poseSlots[poseSlots.length - 1];
+    const planRules = fallbackShowcase.productVisibilityRules;
+    const mergedRules = [...planRules];
     for (const rule of pose.productVisibilityRules) {
-      if (!merged.some((existing) => existing.toLowerCase() === rule.toLowerCase())) merged.push(rule);
+      if (!mergedRules.some((existing) => existing.toLowerCase() === rule.toLowerCase())) mergedRules.push(rule);
     }
-    return { ...pose, productVisibilityRules: merged.slice(0, 12), enabled: true };
+    const mergedHighlights = [...fallbackShowcase.highlightedDetails];
+    for (const item of pose.highlightedDetails) {
+      if (!mergedHighlights.some((existing) => existing.toLowerCase() === item.toLowerCase())) mergedHighlights.push(item);
+    }
+    if (!creativeDirection.showcasePlan) {
+      return {
+        ...pose,
+        highlightedDetails: mergedHighlights.slice(0, 8),
+        productVisibilityRules: mergedRules.slice(0, 12),
+        enabled: true,
+      };
+    }
+    const showcaseShot = effectiveShowcaseShot(creativeDirection);
+    const widened = Boolean(showcaseShot?.widenedFromCloseup);
+    const heroFeatureLower = creativeDirection.showcasePlan.heroFeature.toLowerCase();
+    const nextFraming = widened ? fallbackShowcase.framing : pose.framing;
+    const nextCameraAngle = widened ? fallbackShowcase.cameraAngle : pose.cameraAngle;
+    const nextBodyPosition = widened ? fallbackShowcase.bodyPosition : pose.bodyPosition;
+    const nextDescription = pose.description.toLowerCase().includes(heroFeatureLower)
+      ? pose.description
+      : `${fallbackShowcase.description} ${pose.description}`.trim();
+    const nextPrompt = widened
+      ? fallbackShowcase.prompt
+      : pose.prompt.toLowerCase().includes(heroFeatureLower)
+        ? pose.prompt
+        : `${pose.prompt.replace(/\.?\s*$/, ".")} ${fallbackShowcase.prompt}`.trim();
+    return {
+      ...pose,
+      framing: nextFraming,
+      cameraAngle: nextCameraAngle,
+      bodyPosition: nextBodyPosition,
+      description: nextDescription,
+      highlightedDetails: mergedHighlights.slice(0, 8),
+      productVisibilityRules: mergedRules.slice(0, 12),
+      prompt: nextPrompt,
+      enabled: true,
+    };
   });
   const stylingPlan = normalizeStylingPlan(raw.stylingPlan ?? raw.styling_plan);
   return { productIdentity, creativeDirection, modelIdentity, stylingPlan, posePlan };
@@ -1615,9 +1760,9 @@ Create exactly six product-specific camera setups in one coherent commercial cov
   - shotType: one of macro_detail (fill the frame with the feature), half_body_detail (crop to the body section it sits on), full_body_feature (needs the whole garment - flare, length, fall), drape_feature (a held or spread panel), movement_feature (fall/flare shown in motion).
   - whyItSells: one line on why this is the feature a buyer judges this product by.
   - evidenceReference: the manifest role that proves it.
-  - framing, cameraAngle, bodyPosition, handPlacement, expression: concrete direction for that shot.
+  - framing, cameraAngle, bodyPosition, handPlacement, expression: concrete aesthetic editorial photoshoot direction for that shot (include camera perspective, directional studio lighting interplay on fabric texture/embroidery, graceful posture, and strictly two-hand coordination clear of the hero feature).
   - distinctFrom: one line stating how this frame differs from BOTH pose 1 and pose 5.
-  - visibilityRules: what must stay unobstructed for this feature to read.
+  - visibilityRules: what must stay unobstructed for this feature and its exact garment specifications (colour, fabric, motif/embroidery geometry, cut/hem) to read.
   MANDATORY NON-DUPLICATION. This frame is wasted if it repeats another:
   * It must NOT be a second full-body hero. If your chosen shotType is full_body_feature, the angle, distance, stance and composition must be visibly different from pose 1, and the named feature must be unmistakably the subject rather than the whole outfit.
   * It must NOT re-shoot pose 5's subject. You have already recorded creativeDirection.closeupHeroDetail for pose 5; if the strongest feature is that same detail, either pick the next strongest feature for this frame, or keep the feature and change the distance (for example pose 5 macro on the yoke, pose 6 showing the same embroidery running across the full garment in a drape or movement frame). Say which you did in distinctFrom.
@@ -1808,6 +1953,35 @@ export function mergeVariantColorways(
     if (secondaryColors.length) {
       cloned.productIdentity.sareeTruth.body.secondaryColors = secondaryColors;
     }
+  }
+
+  const baseMainColor = String(baseAnalysis.productIdentity?.mainColor || "").trim();
+  const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const replaceBaseColor = (input: string) => {
+    if (!input || !mainColor || !baseMainColor || baseMainColor.toLowerCase() === mainColor.toLowerCase()) {
+      return input;
+    }
+    return input.replace(new RegExp(escapeRegExp(baseMainColor), "gi"), mainColor);
+  };
+
+  if (cloned.creativeDirection?.showcasePlan && mainColor) {
+    cloned.creativeDirection.showcasePlan = {
+      ...cloned.creativeDirection.showcasePlan,
+      heroFeature: replaceBaseColor(cloned.creativeDirection.showcasePlan.heroFeature),
+      whyItSells: replaceBaseColor(cloned.creativeDirection.showcasePlan.whyItSells),
+      visibilityRules: cloned.creativeDirection.showcasePlan.visibilityRules.map(replaceBaseColor),
+    };
+  }
+
+  if (Array.isArray(cloned.posePlan) && mainColor) {
+    cloned.posePlan = cloned.posePlan.map((pose) => ({
+      ...pose,
+      title: replaceBaseColor(pose.title),
+      description: replaceBaseColor(pose.description),
+      prompt: replaceBaseColor(pose.prompt),
+      highlightedDetails: pose.highlightedDetails.map(replaceBaseColor),
+      productVisibilityRules: pose.productVisibilityRules.map(replaceBaseColor),
+    }));
   }
 
   return cloned;

@@ -351,3 +351,66 @@ Deno.test("the outcome write is compare-and-set against the row it read", () => 
   assertEquals(update.expected.rejectedCount, 1);
   assertEquals(update.next.rejectedCount, 2);
 });
+
+Deno.test("Pose 6 weaves concrete garment details, aesthetic photoshoot direction, and collision-widened framing through normalizeAnalysis", () => {
+  const normalized = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "emerald green",
+      fabric: "organza silk",
+      embroidery: "gold zari gota patti",
+      bottomWearDetails: "Farshi pajama with 6-inch joined hem",
+    },
+    creativeDirection: {
+      closeupMode: "product_detail",
+      closeupHeroDetail: "sequinned square neckline yoke",
+      showcasePlan: {
+        heroFeature: "sequinned square neckline yoke",
+        featureRegion: "yoke",
+        shotType: "macro_detail",
+        framing: "Tight macro crop on the yoke",
+        cameraAngle: "Macro straight-on",
+        bodyPosition: "Chest crop only",
+      },
+    },
+    posePlan: [
+      {
+        id: "showcase",
+        title: "Custom Yoke Showcase",
+        framing: "Tight macro crop on the yoke",
+        cameraAngle: "Macro straight-on",
+        bodyPosition: "Chest crop only",
+        prompt: "Tight macro shot of yoke.",
+      },
+    ],
+  }, "kurta set");
+
+  // Synonym "yoke" normalizes to "neckline"
+  assertEquals(normalized.creativeDirection.showcasePlan?.featureRegion, "neckline");
+  const showcase = normalized.posePlan[5];
+  assertEquals(showcase.id, "showcase");
+  // Colliding macro crop is widened even when candidate posePlan[5] had tight framing
+  assertEquals(showcase.framing.includes("Tight macro crop"), false);
+  assertStringIncludes(showcase.framing, "Frame head-to-toe");
+  // Concrete garment specs and aesthetic photoshoot direction are woven in
+  assertStringIncludes(showcase.prompt, "emerald green organza silk");
+  assertStringIncludes(showcase.prompt, "gold zari gota patti");
+  assertStringIncludes(showcase.prompt, "Editorial full-length fashion photoshoot aesthetics");
+  assert(showcase.productVisibilityRules.some((rule) => rule.includes("emerald green organza silk")));
+});
+
+Deno.test("top_only mode suppresses a bottom_wear showcasePlan and falls back to top-only showcase framing", () => {
+  const slots = getPoseSlots({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "ivory",
+      fabric: "chanderi",
+      bottomWearDetails: "Palazzo, wide flare",
+    },
+    showcasePlan: bottomPlan,
+    bottomWearMode: "top_only",
+  });
+  assertEquals(slots[5].title.includes("palazzo"), false);
+  assertStringIncludes(slots[5].title, "Full-Length Silhouette Showcase");
+  assertEquals(/established in Pose 1|same as full_front|consistent with previous poses/i.test(slots[5].prompt), false);
+});

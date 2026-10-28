@@ -122,3 +122,30 @@ Deno.test("the colorway prompt asks the model to check the structure first", () 
   // A recolour is the case the shortcut exists for and must still be allowed.
   assertStringIncludes(prompt, "Report colour differences as a match");
 });
+
+Deno.test("mergeVariantColorways updates base color references in showcasePlan and posePlan prompts", () => {
+  const baseAnalysis = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "royal blue",
+      fabric: "silk",
+      bottomWearDetails: "Palazzo, wide straight legs",
+    },
+    showcasePlan: {
+      heroFeature: "royal blue silk flared palazzo border",
+      featureRegion: "bottom_wear",
+      shotType: "full_body_feature",
+      whyItSells: "royal blue palazzo flare",
+    },
+  }, "kurta_or_kurti_set");
+
+  const merged = mergeVariantColorways(baseAnalysis, {
+    mainColor: "emerald green",
+    secondaryColors: ["gold"],
+    bottomWearColor: "emerald green",
+  }, "SKU-GRN-02");
+
+  assertStringIncludes(merged.creativeDirection.showcasePlan?.heroFeature || "", "emerald green");
+  assertStringIncludes(merged.posePlan[5].prompt, "emerald green");
+  assertEquals(merged.posePlan[5].prompt.toLowerCase().includes("royal blue"), false);
+});

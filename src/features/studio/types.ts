@@ -224,6 +224,21 @@ export type ProductIdentityProfile = {
   sareeDrapePlan?: SareeDrapePlan;
 };
 
+export type ShowcasePlanProfile = {
+  heroFeature: string;
+  featureRegion: string;
+  shotType: string;
+  whyItSells: string;
+  evidenceReference: string;
+  framing: string;
+  cameraAngle: string;
+  bodyPosition: string;
+  handPlacement: string;
+  expression: string;
+  distinctFrom: string;
+  visibilityRules: string[];
+};
+
 export type CreativeDirectionProfile = {
   backgroundStyle: string;
   studioEnvironment: string;
@@ -247,6 +262,7 @@ export type CreativeDirectionProfile = {
   closeupMode?: string;
   closeupHeroDetail?: string;
   showcaseIntent?: string;
+  showcasePlan?: ShowcasePlanProfile | null;
 };
 
 export type StudioAnalysis = {

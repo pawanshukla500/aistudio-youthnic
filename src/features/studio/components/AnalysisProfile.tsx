@@ -287,7 +287,23 @@ export function AnalysisProfile({
                     <h3 className="mb-2.5 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-secondary">
                       <Aperture className="h-4 w-4 text-primary" /> Creative Direction Profile
                     </h3>
-                    <ProfileGrid items={creativeFields.map(([key, label]) => [label, analysis.creativeDirection[key]])} />
+                    <ProfileGrid
+                      items={[
+                        ...creativeFields.map(([key, label]): [string, unknown] => [label, analysis.creativeDirection[key]]),
+                        ...(analysis.creativeDirection.showcasePlan?.heroFeature
+                          ? ([
+                            ["Pose 6 showcase feature", analysis.creativeDirection.showcasePlan.heroFeature],
+                            [
+                              "Pose 6 region & shot type",
+                              `${analysis.creativeDirection.showcasePlan.featureRegion} · ${analysis.creativeDirection.showcasePlan.shotType}`,
+                            ],
+                            ...(analysis.creativeDirection.showcasePlan.whyItSells
+                              ? [["Pose 6 why it sells", analysis.creativeDirection.showcasePlan.whyItSells] as [string, unknown]]
+                              : []),
+                          ] as Array<[string, unknown]>)
+                          : []),
+                      ]}
+                    />
                   </div>
                 </div>
               )}

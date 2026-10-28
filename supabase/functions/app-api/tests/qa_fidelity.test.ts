@@ -241,3 +241,50 @@ Deno.test("QA applies the Farshi hem structure only when the bottom is Farshi", 
   assertEquals(palazzo.includes("Do not fail the joined 6-inch hem panel"), false);
 });
 
+Deno.test("Pose 6 showcase QA enforces heroFeature non-duplication and exempts bottom_wear and full face on upper macro_detail crops", () => {
+  const creativeDirection = {
+    closeupHeroDetail: "neckline zari yoke",
+    showcasePlan: {
+      heroFeature: "mirror-work bell sleeve cuff",
+      featureRegion: "sleeve",
+      shotType: "macro_detail",
+    },
+  };
+  const prompt = buildPoseQaPrompt({
+    poseNumber: 6,
+    poseType: "showcase",
+    poseTitle: "Sleeve Cuff Showcase",
+    poseDirection: { id: "showcase", title: "Sleeve Cuff Showcase" },
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      bottomWearDetails: "Palazzo, wide straight legs",
+    },
+    creativeDirection,
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: true,
+    hasModelReference: true,
+    referenceManifest: ["IMAGE 1: Fabric / pattern detail", "IMAGE 2: Front product"],
+  });
+
+  assertStringIncludes(prompt, "For pose 6 (garment-led feature showcase: mirror-work bell sleeve cuff [sleeve / macro_detail])");
+  assertStringIncludes(prompt, "This pose 6 macro_detail showcase crop may omit the face.");
+
+  const result = normalizePoseQaResult({
+    pass: true,
+    score: 98,
+    checks: Object.fromEntries(genericCritical.map((key) => [key, "pass"])),
+    scores: Object.fromEntries(genericCritical.map((key) => [key, 98])),
+    failed: [],
+    reason: "Sleeve cuff macro showcase matches product reference.",
+    correction: "",
+  }, {
+    garmentFamily: "kurta_or_kurti_set",
+    poseType: "showcase",
+    hasBottomWear: true,
+    creativeDirection,
+  });
+  assertEquals(result.pass, true);
+  assertEquals(result.automaticallyVerified, true);
+});

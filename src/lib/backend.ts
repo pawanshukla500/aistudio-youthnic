@@ -165,7 +165,7 @@ function jobSummary(row: Record<string, any>, members: Record<string, any>[] = [
     // and appear to run forever.
     detailedStatus: visibleGenerationDetailedStatus(status, jobData.detailedStatus),
     createdAt: milliseconds(row.created_at),
-    totalPoses: Number(row.total_poses || 5),
+    totalPoses: Number(row.total_poses || 6),
     completedPoses: Number(row.completed_poses || 0),
     failedPoses: Number(row.failed_poses || 0),
     currentPose: Number(row.current_pose || 0),
@@ -304,6 +304,7 @@ async function getJob(jobId: string) {
     "Full Back View",
     "Creative Gen-Z Fashion Pose",
     "Zoomed-In Product Detail Highlight",
+    "Garment-Led Showcase",
   ];
   const mappedPoses = poseRows.map((pose) => {
     const assetsForPose = generatedAssets.filter((entry) => Number(record(entry.metadata).poseIndex) === Number(pose.pose_index));
@@ -585,7 +586,7 @@ async function listCatalogs(args: Record<string, any>) {
       scheduledAt: batch.scheduled_at ? milliseconds(batch.scheduled_at) : undefined,
       preferredGenerationAt: batch.scheduled_at ? milliseconds(batch.scheduled_at) : undefined,
       variantCount: variants.length,
-      readyCount: variants.filter((variant) => variant.front_image_url && variant.back_image_url && variant.analysis_status === "ready" && Array.isArray(variant.pose_plan) && variant.pose_plan.length === 5).length,
+      readyCount: variants.filter((variant) => variant.front_image_url && variant.back_image_url && variant.analysis_status === "ready" && Array.isArray(variant.pose_plan) && variant.pose_plan.length >= 5).length,
       completedCount: variants.filter((variant) => variant.generation_status === "completed").length,
       failedCount: variants.filter((variant) => variant.generation_status === "failed").length,
       eventName: events.find((event) => event.id === (batch.event_id || batch.source_event_id))?.name || null,
@@ -667,7 +668,7 @@ async function getCatalog(catalogId: string) {
       jobStatus: job?.status || null,
       jobCurrentPose: Number(job?.current_pose || 0),
       jobCompletedPoses: Number(job?.completed_poses || 0),
-      jobTotalPoses: Number(job?.total_poses || 5),
+      jobTotalPoses: Number(job?.total_poses || 6),
       jobError: job?.error_message || null,
       retryAvailableAt: job?.available_at ? milliseconds(job.available_at) : null,
       outputs,

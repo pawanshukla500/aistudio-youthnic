@@ -1186,5 +1186,62 @@ Deno.test("composeGenerationPrompt ensures Pose 5 highlights primary garment but
   assertStringIncludes(prompt, "must NEVER focus on a secondary accessory like a dupatta or stole");
 });
 
+Deno.test("Pose 6 hard rule and aesthetic photoshoot direction survive prompt compaction and macro_detail omits mandatory full-face lock", () => {
+  const showcasePrompt = composeGenerationPrompt({
+    skuName: "EMERALD-KURTA-SET",
+    productDetails: "Emerald green silk kurta set with mirror-work bell sleeves",
+    pose: {
+      id: "showcase",
+      title: "Feature Focus: mirror-work bell sleeve cuff",
+      poseNumber: 6,
+      description: "Editorial macro showcase of mirror-work bell sleeve cuff",
+      cameraAngle: "grazing macro angle",
+      framing: "tight cuff detail",
+      bodyPosition: "arm poised cleanly",
+      handPlacement: "two hands relaxed, cuff unobstructed",
+      expression: "optional",
+      highlightedDetails: ["mirror-work bell sleeve cuff"],
+      productVisibilityRules: ["cuff must fill frame"],
+      primaryReference: "fabric_pattern",
+      purpose: "sell sleeve craftsmanship",
+      consistencyNotes: "locked set",
+      prompt: "Create a catalog frame built around mirror-work bell sleeve cuff.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "emerald green",
+      },
+      creativeDirection: {
+        closeupMode: "face_and_detail",
+        closeupHeroDetail: "neckline zari yoke",
+        showcasePlan: {
+          heroFeature: "mirror-work bell sleeve cuff",
+          featureRegion: "sleeve",
+          shotType: "macro_detail",
+          whyItSells: "signature handwork on cuff",
+          evidenceReference: "fabric_pattern",
+          distinctFrom: "Pose 1 is full hero and Pose 5 is neckline yoke",
+          visibilityRules: ["cuff mirror work unbroken"],
+        },
+      },
+    },
+    references: [{ role: "front" }, { role: "fabric_pattern" }],
+  });
 
+  assertStringIncludes(showcasePrompt, "POSE 6 HARD RULE (AESTHETIC FEATURE SHOWCASE & DETAIL LOCK):");
+  assertStringIncludes(showcasePrompt, "SHOWCASE AESTHETIC PHOTOSHOOT & DETAIL FIDELITY:");
+  assertStringIncludes(showcasePrompt, "EDITORIAL PHOTOSHOOT EXECUTION:");
+  assertEquals(showcasePrompt.includes("Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\"."), false);
 
+  const padded = showcasePrompt.replace(
+    "Create ONE real-camera fashion e-commerce photograph",
+    `${"OVERFLOW ".repeat(4_000)}Create ONE real-camera fashion e-commerce photograph`,
+  );
+  assertEquals(padded.length > IMAGE_PROMPT_SAFE_CHARS, true);
+  const compacted = compactFullPromptSafely(padded);
+  assertEquals(compacted.length <= IMAGE_PROMPT_SAFE_CHARS, true);
+  assertStringIncludes(compacted, "POSE 6 HARD RULE (AESTHETIC FEATURE SHOWCASE & DETAIL LOCK):");
+  assertStringIncludes(compacted, "SHOWCASE FRAME SUBJECT: mirror-work bell sleeve cuff");
+});

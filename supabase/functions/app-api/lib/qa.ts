@@ -1,6 +1,7 @@
 import { parseJsonResponse, resolveCloseupMode, CLOSEUP_PRODUCT_DETAIL, type JsonRecord } from "./profiles.ts";
 import { effectiveBottomCutClass, FARSHI_SILHOUETTE_STRUCTURE, resolveBottomWearPresentation } from "./garmentPoses.ts";
 import { isDirectBackProductRole } from "./referencePolicy.ts";
+import { effectiveShowcaseShot } from "./showcaseFeature.ts";
 
 const GENERIC_CHECK_KEYS = [
   "model_face", "face_realism", "garment_identity", "colors", "fabric_texture", "print_pattern",
@@ -68,7 +69,7 @@ function rearOnlyQaProductIdentity(value: unknown) {
   };
 }
 
-function qaKeys(garmentFamily = "", poseType = "", hasBottomWear = false) {
+function qaKeys(garmentFamily = "", poseType = "", hasBottomWear = false, showcaseTightCrop = false) {
   const isSaree = garmentFamily.toLowerCase() === "saree";
   // A front/back score matters for every pose, but it becomes an SKU-critical
   // gate only when the output claims to be the true rear. This avoids making
@@ -78,9 +79,10 @@ function qaKeys(garmentFamily = "", poseType = "", hasBottomWear = false) {
     ? [...GENERIC_CRITICAL_CHECKS, "front_back_design"]
     : [...GENERIC_CRITICAL_CHECKS];
   // Only head-to-toe catalog frames must fail when recorded bottoms lose print
-  // or cut. Creative is a "full or three-quarter editorial crop" and closeup is
-  // face-to-chest/waist, so both routinely omit trousers.
-  if (hasBottomWear && QA_BOTTOM_WEAR_CRITICAL_POSES.has(poseType)) {
+  // or cut. Creative is a "full or three-quarter editorial crop", closeup is
+  // face-to-chest/waist, and a tight showcase detail crop on an upper region
+  // also omits trousers.
+  if (hasBottomWear && QA_BOTTOM_WEAR_CRITICAL_POSES.has(poseType) && !showcaseTightCrop) {
     genericCriticalChecks.push("bottom_wear");
   }
   return {
@@ -136,7 +138,14 @@ export function buildPoseQaPrompt(args: {
   const farshiStructureCheck = farshiBottom
     ? ` When the bottom is Farshi/Farsi, also fail bottom_wear unless the worn trousers match this structure: ${FARSHI_SILHOUETTE_STRUCTURE} Fail a wide-open palazzo hem and fail a gathered salwar poncha. Do not fail the joined 6-inch hem panel itself.`
     : "";
-  const { checkKeys, isSaree } = qaKeys(args.garmentFamily, args.poseType, hasBottomWear);
+  const showcaseShot = effectiveShowcaseShot(record(args.creativeDirection), { includesBottomWear: hasBottomWear });
+  const showcaseTightCrop = args.poseType === "showcase" && Boolean(
+    showcaseShot &&
+      (showcaseShot.shotType === "macro_detail" || showcaseShot.shotType === "half_body_detail") &&
+      showcaseShot.plan.featureRegion !== "bottom_wear",
+  );
+  const macroShowcase = args.poseType === "showcase" && showcaseShot?.shotType === "macro_detail";
+  const { checkKeys, isSaree } = qaKeys(args.garmentFamily, args.poseType, hasBottomWear, showcaseTightCrop);
   const qaProductIdentity = args.poseType === "back" ? rearOnlyQaProductIdentity(args.productIdentity) : args.productIdentity;
   const exampleChecks = Object.fromEntries(checkKeys.map((key) => [key, "pass"]));
   const exampleScores = Object.fromEntries(checkKeys.map((key) => [key, 100]));
@@ -152,6 +161,11 @@ export function buildPoseQaPrompt(args: {
     ? productDetailCloseup
       ? `For pose 5 (product-detail-first close-up${closeupHeroDetail ? `: ${closeupHeroDetail}` : ""}), fail pose_requirement if it is a full-body or wide shot that repeats the hero framing, if it is a face-only beauty crop that hides the selling detail, or if the named/key product detail is not large, sharp, and catalog-readable. Crucially, verify that the highlighted detail belongs to the PRIMARY UPLOADED PRODUCT GARMENT (e.g. kurti butti work, yoke embroidery, neckline craft); fail pose_requirement if the crop focuses on a secondary accessory like a dupatta when the primary garment has butti work or craftsmanship to showcase. Do NOT fail pose_requirement merely because the face is cropped out or only partially visible. If no recognizable face is in frame, pass face_realism. If a full or clearly readable face is in frame, apply the face quality bar. A cropped forehead/cheek at the edge of a detail crop is not a face_realism failure.`
       : `For pose 5 (face-and-product-detail close-up${closeupHeroDetail ? `: ${closeupHeroDetail}` : ""}), fail pose_requirement if it is a full-body or wide shot that just repeats the hero framing instead of a genuine zoomed-in face-to-chest/face-to-waist crop, if the face is not sharp and clearly visible, if the product detail is not LARGE and sharply highlighted in the same frame (a tiny sliver of embroidery under a beauty close-up is a fail), if the crop focuses on a secondary accessory like a dupatta instead of the primary garment's signature craftsmanship (e.g. kurti butti work or yoke embroidery), or if the expression looks stiff or unnatural instead of a beautiful, cute, genuine Gen-Z smile or expression.`
+    : "";
+  const pose6Rule = args.poseType === "showcase"
+    ? showcaseShot
+      ? `For pose 6 (garment-led feature showcase: ${showcaseShot.plan.heroFeature} [${showcaseShot.plan.featureRegion} / ${showcaseShot.shotType}]), fail pose_requirement if the named hero feature (${showcaseShot.plan.heroFeature}) is not prominently, sharply, and aesthetically showcased, if the frame merely repeats Pose 1's static flat-frontal hero stance without angle/stance/framing divergence, or if it duplicates Pose 5's tight close-up crop${closeupHeroDetail ? ` on ${closeupHeroDetail}` : ""}.${macroShowcase ? " Do NOT fail pose_requirement, model_face, or face_realism merely because the face is cropped out or only partially visible in this macro_detail showcase crop." : ""}`
+      : "For pose 6 (garment-led showcase), fail pose_requirement if it merely repeats Pose 1's static flat-frontal hero stance instead of presenting a distinct, aesthetic editorial angle/stance that highlights the garment's signature drape, silhouette, or set coordination."
     : "";
   return `You are a strict fashion e-commerce consistency validator.
 
@@ -176,7 +190,7 @@ ${args.hasModelReference
       ? "Compare IMAGE A against the APPROVED POSE 1 reference on visual appearance attributes - face shape, eye shape and colour, eyebrow shape, nose shape, lip shape, jawline, skin tone and texture, and hairstyle must look consistent across the set. Also confirm body proportions, styling, backdrop, lighting, and colour treatment match."
       : "This is Pose 1. It must establish one specific, photorealistic, naturally attractive adult face with real individual character and a realistic, coherent shoot anchor."}
 ${args.hasApprovedAnchor ? "SET CONTINUITY: styling_continuity also covers the set. Fail it when the part of the set IMAGE A actually shows - backdrop wall colour or finish, floor, props, light direction or colour grade - contradicts APPROVED POSE 1. A back view, close-up or seated frame is the same room from another camera position, never a different wall, backdrop or location. Judge only what the framing shows: a tight crop that hides the floor or props is not a failure." : ""}
-${productDetailCloseup ? "This pose 5 crop may omit the face. Pass model_face when no recognizable face is in frame rather than failing for a missing beauty close-up. If a readable face is present, still compare it to the identity lock." : ""}
+${productDetailCloseup ? "This pose 5 crop may omit the face. Pass model_face when no recognizable face is in frame rather than failing for a missing beauty close-up. If a readable face is present, still compare it to the identity lock." : ""}${macroShowcase ? "This pose 6 macro_detail showcase crop may omit the face. Pass model_face and face_realism when no recognizable face is in frame rather than failing for a missing beauty close-up. If a readable face is present, still compare it to the identity lock." : ""}
 
 PRODUCT FIDELITY - the failure mode that matters most here is a garment that reads as the same style but is not the same SKU. Judge it against the product references, not against your sense of what such a garment usually looks like:
 - garment_identity: compare strictly with uploaded product references. Fail if the model is dressed in the outfit/clothing shown in the STYLE REFERENCE image instead of our uploaded product references, or if the style reference garment was blended or copied onto the model. The uploaded product's design, cut, prints, and colors must stay exactly as uploaded.
@@ -214,7 +228,7 @@ SCORING SCALE - anchor every number to these meanings, and never hand several at
 - 40: a different product in the same category.
 Only 95-100 is eligible for automatic verification. A critical score of 90-94 requires human review. A critical score below 90 fails automatic QA and requires a specific correction. A named critical failure always fails even when the average is high. Do not hand many critical fields nearly identical hedged scores; inspect each region independently.
 
-Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face when a recognizable face is in frame. Fail any invented or moved button, tassel/latkan, closure, trim, pocket, logo, embroidery, jewelry, or hardware. For a back pose, fail unless it is a true back view matching the uploaded BACK; face_realism automatically passes for a back pose since the face is not visible. ${pose5Rule} Judge styling_addition against the approved styling plan in the session rules above: fail it when a listed piece is missing, when a piece appears that the plan does not list (an invented necklace, bangle, belt, bag or hair ornament), when the metal or family differs from the plan (gold where the plan says oxidised silver), when it changes between poses, or when it hides or replaces a garment detail, bottom wear or footwear from the product references. Pass it when the frame matches the plan exactly, or when no plan and no suggestion were provided and nothing was invented.
+Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face when a recognizable face is in frame. Fail any invented or moved button, tassel/latkan, closure, trim, pocket, logo, embroidery, jewelry, or hardware. For a back pose, fail unless it is a true back view matching the uploaded BACK; face_realism automatically passes for a back pose since the face is not visible. ${pose5Rule}${pose6Rule ? `${pose5Rule ? " " : ""}${pose6Rule}` : ""} Judge styling_addition against the approved styling plan in the session rules above: fail it when a listed piece is missing, when a piece appears that the plan does not list (an invented necklace, bangle, belt, bag or hair ornament), when the metal or family differs from the plan (gold where the plan says oxidised silver), when it changes between poses, or when it hides or replaces a garment detail, bottom wear or footwear from the product references. Pass it when the frame matches the plan exactly, or when no plan and no suggestion were provided and nothing was invented.
 
 Face quality bar - apply only when a recognizable face is in frame. For a true back pose or a product-detail-first close-up with no recognizable face, pass face_realism and model_face; do not fail for a missing face. When a face is visible (including a clearly readable partial face or a back-pose over-shoulder glance), fail face_realism for any of these even if everything else matches: plastic, waxy, airbrushed, or over-smoothed "beauty filter" skin instead of natural texture with visible pores; crossed, misaligned, asymmetric, glassy, or otherwise distorted/malformed eyes; unnaturally uniform, fused, extra, missing, or warped teeth; any blurring, warping, melting, or duplicated/misplaced facial features; or a mirror-symmetric "AI face" that does not read as a real photographed person. Also fail face_realism when the frame as a whole reads as generated rather than photographed: THREE HANDS, EXTRA HANDS, EXTRA ARMS, DUPLICATE OR PHANTOM LIMBS, floating hands resting on waist/hip/drape without anatomical forearm connection, malformed or extra fingers, a glossy CGI or 3D-render finish, HDR glow, or a pasted-on subject with halo edges. Give a specific, actionable correction for any face_realism or model_face failure (name the exact feature that is wrong).
 
@@ -222,10 +236,16 @@ Return STRICT JSON only:
 ${JSON.stringify({ pass: true, score: 100, checks: exampleChecks, scores: exampleScores, failed: [], reason: "short evidence-based verdict", correction: "specific correction for every failed field" })}`;
 }
 
-export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown; bottomWearMode?: unknown } = {}) {
+export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown; bottomWearMode?: unknown; creativeDirection?: unknown } = {}) {
   const hasBottomWear = options.hasBottomWear ??
     resolveBottomWearPresentation({ mode: options.bottomWearMode, productIdentity: options.productIdentity }).includesBottomWear;
-  const { checkKeys, criticalChecks } = qaKeys(options.garmentFamily, options.poseType, hasBottomWear);
+  const showcaseShot = effectiveShowcaseShot(record(options.creativeDirection), { includesBottomWear: hasBottomWear });
+  const showcaseTightCrop = options.poseType === "showcase" && Boolean(
+    showcaseShot &&
+      (showcaseShot.shotType === "macro_detail" || showcaseShot.shotType === "half_body_detail") &&
+      showcaseShot.plan.featureRegion !== "bottom_wear",
+  );
+  const { checkKeys, criticalChecks } = qaKeys(options.garmentFamily, options.poseType, hasBottomWear, showcaseTightCrop);
   const checks = raw.checks && typeof raw.checks === "object" ? raw.checks as JsonRecord : {};
   const rawScores = raw.scores && typeof raw.scores === "object" ? raw.scores as JsonRecord : {};
   const failed = new Set<string>();
@@ -322,7 +342,7 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
   };
 }
 
-export function parseQaResponse(text: string, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown; bottomWearMode?: unknown } = {}) {
+export function parseQaResponse(text: string, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown; bottomWearMode?: unknown; creativeDirection?: unknown } = {}) {
   return normalizePoseQaResult(parseJsonResponse(text), options);
 }
 

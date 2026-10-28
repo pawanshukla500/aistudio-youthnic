@@ -855,7 +855,7 @@ export function Planning() {
                       {focusVariant.outputs.length > 0 && (
                         <div className="mt-3">
                           <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-secondary">Generated</p>
-                          <div className="grid grid-cols-5 gap-1">
+                          <div className="grid grid-cols-6 gap-1">
                             {focusVariant.outputs.map((output) => (
                               <div key={output.poseNumber} className="aspect-[3/4] overflow-hidden rounded bg-surface-container-lowest" title={`${output.title} — ${output.status}`}>
                                 {output.url ? <img src={output.url} alt={output.title} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center">{output.status === "failed" ? <X className="h-3 w-3 text-danger" /> : output.status === "completed" ? <CheckCircle2 className="h-3 w-3 text-success" /> : <Loader2 className="h-3 w-3 animate-spin text-secondary" />}</div>}
@@ -914,8 +914,8 @@ export function Planning() {
                         <p className="mt-3 text-sm font-bold text-on-surface">Catalog generation is running</p>
                         {activeVariant ? (
                           <div className="mt-2 rounded-lg bg-white px-3 py-2 text-left text-xs leading-5 text-secondary">
-                            <p><span className="font-bold text-on-surface">{activeVariant.sku}</span> · {activeVariant.jobStatus === "queued" ? "waiting for worker" : activeVariant.jobStatus === "cancelling" ? "cancelling" : `pose ${Math.max(1, activeVariant.jobCurrentPose || 1)} of ${activeVariant.jobTotalPoses || 5}`}</p>
-                            <p>{activeVariant.jobCompletedPoses || 0}/{activeVariant.jobTotalPoses || 5} poses stored</p>
+                            <p><span className="font-bold text-on-surface">{activeVariant.sku}</span> · {activeVariant.jobStatus === "queued" ? "waiting for worker" : activeVariant.jobStatus === "cancelling" ? "cancelling" : `pose ${Math.max(1, activeVariant.jobCurrentPose || 1)} of ${activeVariant.jobTotalPoses || 6}`}</p>
+                            <p>{activeVariant.jobCompletedPoses || 0}/{activeVariant.jobTotalPoses || 6} poses stored</p>
                             {activeVariant.jobStatus === "queued" && activeVariant.jobError && <p className="mt-1 text-info">Automatic retry{activeVariant.retryAvailableAt && activeVariant.retryAvailableAt > Date.now() ? ` at ${new Date(activeVariant.retryAvailableAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}: {activeVariant.jobError}</p>}
                           </div>
                         ) : null}
