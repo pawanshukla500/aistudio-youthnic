@@ -67,7 +67,7 @@ import {
   type VisionHopAttempt,
   type VisionProviderFailure,
 } from "./lib/aiModelPolicy.ts";
-import { coarseGarmentFamilyForCategory, normalizeBottomWearMode } from "./lib/garmentPoses.ts";
+import { coarseGarmentFamilyForCategory, normalizeBottomWearMode, resolveBottomWearPresentation } from "./lib/garmentPoses.ts";
 import { selectReusableLearningRules } from "./lib/learningRules.ts";
 import { selectFashionKnowledgeGuidance } from "./lib/fashionKnowledge.ts";
 import { selectPromptPatterns } from "./lib/promptPatterns.ts";
@@ -82,6 +82,7 @@ import {
   resetGenerationMemoryForClone,
 } from "./lib/generationMemory.ts";
 import { firebaseCatalogPath, supabaseCatalogPath } from "./lib/catalogStoragePaths.ts";
+import { isCompleteCatalogHandoffPackage } from "./lib/catalogHandoffPackage.ts";
 import {
   MAX_IMAGE_REFERENCES,
   colorwayCheckReferences,
@@ -2329,6 +2330,10 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   // generation_learnings is now an observation/audit ledger only. It is never
   // read by prompt compilation; reusable guidance must be explicitly curated
   // in generation_learning_rules with an organization and reference scope.
+  const bottomWear = resolveBottomWearPresentation({
+    mode: sessionData.bottomWearMode ?? sessionData.bottom_wear_mode,
+    productIdentity: sessionData.productIdentity,
+  });
   const learnedPatterns = extractLearnedPromptPatterns({
     category: String(sessionData.category || ""),
     hasStyleReference: (Array.isArray(sessionData.references) ? sessionData.references : []).some((entry) => String((entry as JsonRecord)?.role || "") === "style_reference"),
@@ -2337,7 +2342,9 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     // The frame that was actually generated, not the one originally planned: a
     // close-up collision widens it, and learning a framing that never shipped is
     // worse than learning nothing.
-    showcaseShotType: effectiveShowcaseShot(sessionData.creativeDirection)?.shotType || "",
+    showcaseShotType: effectiveShowcaseShot(sessionData.creativeDirection, {
+      includesBottomWear: bottomWear.includesBottomWear,
+    })?.shotType || "",
     poses: poses.map((entry) => ({
       poseIndex: Number(entry.pose_index || 0),
       poseType: String(entry.pose_type || ((entry.generation_data || {}) as JsonRecord).id || ""),
@@ -5500,7 +5507,9 @@ function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof nor
       closeupMode: skuCloseupMode || memCreative.closeupMode,
       closeupHeroDetail: skuCloseupHeroDetail || memCreative.closeupHeroDetail,
       showcaseIntent: skuShowcaseIntent || memCreative.showcaseIntent,
-      showcasePlan: skuShowcasePlan ?? memCreative.showcasePlan ?? null,
+      // Showcase features are SKU-specific product truth. Never borrow another
+      // SKU's plan when the current analysis has no validated plan.
+      showcasePlan: skuShowcasePlan ?? null,
     };
   }
   // The catalogue's approved styling plan outranks whatever this SKU's own
@@ -5510,6 +5519,9 @@ function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof nor
   if (Array.isArray(memory.posePlan) && memory.posePlan.length > 0) {
     const memoryPoses = memory.posePlan as StudioPose[];
     normalized.posePlan = normalized.posePlan.map(skuPose => {
+      // Pose 6 framing is derived from this SKU's hero feature. Sharing another
+      // SKU's direction would contradict the preserved showcasePlan above.
+      if (skuPose.id === "showcase") return skuPose;
       const catPose = memoryPoses.find(p => p.id === skuPose.id);
       if (!catPose) return skuPose;
       // Lock shared shoot identity but preserve SKU-specific facts (visibility, reference, details)
@@ -7381,7 +7393,7 @@ async function catalogDigestRows(orgId: string, settings: JsonRecord, handoffIds
       deadlineAt: item.deadline_at,
       remarks: item.remarks || item.special_instructions || handoff.remarks || "",
     };
-  }).filter((row) => row.poses.length === 5);
+  }).filter((row) => isCompleteCatalogHandoffPackage(row.poses));
 }
 
 function catalogRecipients(settings: JsonRecord, listingRecipients: string[]) {
@@ -7604,7 +7616,7 @@ async function runCatalogProductionAutomationOperation(request: Request) {
               next_retry_at: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
               updated_at: new Date().toISOString(),
             }).eq("id", failedDelivery.id).eq("organization_id", orgId);
-            results.push({ orgId, reportDate: String(failedDelivery.report_date), sent: false, retry: true, reason: "incomplete_five_pose_package" });
+            results.push({ orgId, reportDate: String(failedDelivery.report_date), sent: false, retry: true, reason: "incomplete_pose_package" });
             continue;
           }
           const retryReportDate = String(failedDelivery.report_date);
