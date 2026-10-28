@@ -11,6 +11,7 @@ import {
 } from "../lib/showcaseFeature.ts";
 import { ANALYSIS_VERSION, buildCombinedAnalysisPrompt, getPoseSlots, normalizeAnalysis } from "../lib/profiles.ts";
 import { composeGenerationPrompt } from "../lib/generationPrompt.ts";
+import { MAX_IMAGE_REFERENCES, roleLabel, selectReferences } from "../lib/referencePolicy.ts";
 
 function pose(id: string, poseNumber: number) {
   return {
@@ -122,6 +123,38 @@ Deno.test("normalizeAnalysis carries the plan into creative direction and the po
   }, "kurta set");
   assertEquals(normalized.creativeDirection.showcasePlan?.featureRegion, "bottom_wear");
   assertStringIncludes(normalized.posePlan[5].prompt, "wide gold tissue flared palazzo");
+});
+
+Deno.test("F-17 verbose manifest evidence canonicalizes before pose reference selection", () => {
+  const evidenceReference = roleLabel("fabric_pattern");
+  assert(evidenceReference.length > 120);
+  const normalized = normalizeAnalysis({
+    productIdentity: { garmentFamily: "kurta_or_kurti_set", bottomWearDetails: "Palazzo, wide flare" },
+    showcasePlan: {
+      heroFeature: "gold thread yoke embroidery",
+      featureRegion: "embroidery",
+      shotType: "macro_detail",
+      evidenceReference,
+    },
+  }, "kurta set");
+
+  assertEquals(normalized.creativeDirection.showcasePlan?.evidenceReference, "fabric_pattern");
+  const primaryReference = normalized.posePlan[5].primaryReference;
+  assertEquals(primaryReference, "fabric_pattern");
+  const selected = selectReferences(
+    [
+      { role: "front", hash: "front" },
+      { role: "bottom", hash: "bottom" },
+      { role: "fabric_pattern", hash: "fabric" },
+      { role: "back", hash: "back" },
+    ],
+    [],
+    "showcase",
+    "kurta_or_kurti_set",
+    MAX_IMAGE_REFERENCES,
+    primaryReference,
+  );
+  assertEquals(selected[0]?.role, "fabric_pattern");
 });
 
 Deno.test("the generation prompt names the feature and forbids both duplications", () => {

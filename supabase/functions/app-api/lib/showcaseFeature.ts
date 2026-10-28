@@ -11,6 +11,8 @@
  * Imports nothing from profiles.ts or generationPrompt.ts: both depend on it.
  */
 
+import { canonicalProductReferenceRole } from "./referencePolicy.ts";
+
 type JsonRecord = Record<string, unknown>;
 
 /** The garment component the sixth frame is built around. */
@@ -210,7 +212,7 @@ export function normalizeShowcasePlan(value: unknown): ShowcasePlan | null {
     featureRegion,
     shotType,
     whyItSells: bounded(raw.whyItSells ?? raw.why_it_sells, 220),
-    evidenceReference: bounded(raw.evidenceReference ?? raw.evidence_reference, 120),
+    evidenceReference: bounded(canonicalProductReferenceRole(raw.evidenceReference ?? raw.evidence_reference), 120),
     framing: bounded(raw.framing, 320),
     cameraAngle: bounded(raw.cameraAngle ?? raw.camera_angle, 220),
     bodyPosition: bounded(raw.bodyPosition ?? raw.body_position, 320),

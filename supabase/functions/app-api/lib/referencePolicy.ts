@@ -175,6 +175,13 @@ export function roleLabel(role: string) {
   return labels[role] || role.toUpperCase();
 }
 
+/** Canonicalize a role or an exact verbose manifest label before storage bounds. */
+export function canonicalProductReferenceRole(value: unknown) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if ((PRODUCT_REFERENCE_ROLES as readonly string[]).includes(normalized)) return normalized;
+  return PRODUCT_REFERENCE_ROLES.find((role) => roleLabel(role).toLowerCase() === normalized) ?? normalized;
+}
+
 const canonicalOrder = [
   "model_identity",
   "saree_front_drape",
@@ -222,13 +229,10 @@ function preferredProductOrder(poseType: string, garmentFamily: string, preferre
       baseOrder = ["front", "bottom", "back", "mannequin", "fabric_pattern", "additional_product"];
     }
   }
-  const normalizedPreferred = String(preferredRole || "").trim().toLowerCase();
   // Analysis receives roleLabel(...) in its image manifest, so its chosen
   // evidenceReference can be that full label rather than the canonical role.
   // Accept only an exact known label; never fuzzy-match prose into evidence.
-  const canonicalPreferred = baseOrder.includes(normalizedPreferred)
-    ? normalizedPreferred
-    : PRODUCT_REFERENCE_ROLES.find((role) => roleLabel(role).toLowerCase() === normalizedPreferred) ?? normalizedPreferred;
+  const canonicalPreferred = canonicalProductReferenceRole(preferredRole);
   if (canonicalPreferred && baseOrder.includes(canonicalPreferred)) {
     return [canonicalPreferred, ...baseOrder.filter((role) => role !== canonicalPreferred)];
   }
