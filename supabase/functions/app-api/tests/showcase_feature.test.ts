@@ -414,3 +414,36 @@ Deno.test("top_only mode suppresses a bottom_wear showcasePlan and falls back to
   assertStringIncludes(slots[5].title, "Full-Length Silhouette Showcase");
   assertEquals(/established in Pose 1|same as full_front|consistent with previous poses/i.test(slots[5].prompt), false);
 });
+
+Deno.test("normalizeAnalysis top_only removes model-supplied bottom showcase prose", () => {
+  const normalized = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "ivory",
+      fabric: "chanderi",
+      bottomWearDetails: "Palazzo, wide flare",
+    },
+    showcasePlan: bottomPlan,
+    posePlan: [{
+      id: "showcase",
+      title: "Palazzo flare hero",
+      description: "Show the palazzo hem and wide flare",
+      cameraAngle: "Low angle on the palazzo",
+      framing: "Head-to-toe palazzo frame",
+      bodyPosition: "Turn to open the palazzo legs",
+      handPlacement: "Hands beside the palazzo",
+      expression: "Calm",
+      highlightedDetails: ["palazzo flare"],
+      productVisibilityRules: ["palazzo border stays visible"],
+      primaryReference: "bottom",
+      purpose: "Sell the palazzo",
+      consistencyNotes: "Keep the palazzo consistent",
+      prompt: "Generate a full-body palazzo showcase.",
+    }],
+  }, "kurta set", { bottomWearMode: "top_only" });
+
+  const showcase = normalized.posePlan[5];
+  assertEquals(showcase.title, "Full-Length Silhouette Showcase");
+  assertEquals(showcase.primaryReference, "front");
+  assertEquals(JSON.stringify(showcase).toLowerCase().includes("palazzo"), false);
+});

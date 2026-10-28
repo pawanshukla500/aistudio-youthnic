@@ -1518,14 +1518,24 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     stylingLock: stringValue(model.stylingLock ?? model.styling_lock, "Keep footwear and accessories identical across every pose"),
   };
   const poses = Array.isArray(rawPoses) ? rawPoses : [];
-  const poseSlots = getPoseSlots({
+  const poseContext = {
     productIdentity,
     garmentFamily: productIdentity.garmentFamily,
     category: productIdentity.category || categoryFallback,
     bottomWearMode: options.bottomWearMode,
     showcasePlan: creativeDirection.showcasePlan,
     closeupHeroDetail: creativeDirection.closeupHeroDetail,
+  };
+  const poseSlots = getPoseSlots(poseContext);
+  const showcaseFamily = poseFamilyFor(poseContext);
+  const showcaseBottomPresentation = resolveBottomWearPresentation({
+    mode: options.bottomWearMode,
+    productIdentity,
   });
+  const showcaseIncludesBottomWear = showcaseBottomPresentation.includesBottomWear || (
+    normalizeBottomWearMode(options.bottomWearMode) !== "top_only" &&
+    (showcaseFamily === "kurta_set" || showcaseFamily === "lehenga")
+  );
   const posePlan: StudioPose[] = poseSlots.map((fallback, index) => {
     const candidate = objectValue(poses.find((pose) => objectValue(pose).id === fallback.id) ?? poses[index]);
     return {
@@ -1551,6 +1561,11 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     // photoshoot direction, which is how it became a hero repeat before.
     if (pose.id !== "showcase") return pose;
     const fallbackShowcase = poseSlots[poseSlots.length - 1];
+    const showcaseShot = effectiveShowcaseShot(creativeDirection, { includesBottomWear: showcaseIncludesBottomWear });
+    // A bottom-led plan is not valid for this shoot. Discard its pose prose as
+    // well as the plan-derived brief so model-supplied palazzo/bottom direction
+    // cannot leak back into an explicitly top-only normalization.
+    if (creativeDirection.showcasePlan && !showcaseShot) return fallbackShowcase;
     const planRules = fallbackShowcase.productVisibilityRules;
     const mergedRules = [...planRules];
     for (const rule of pose.productVisibilityRules) {
@@ -1568,7 +1583,6 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
         enabled: true,
       };
     }
-    const showcaseShot = effectiveShowcaseShot(creativeDirection);
     const widened = Boolean(showcaseShot?.widenedFromCloseup);
     const heroFeatureLower = creativeDirection.showcasePlan.heroFeature.toLowerCase();
     const nextFraming = widened ? fallbackShowcase.framing : pose.framing;
