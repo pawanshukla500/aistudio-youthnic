@@ -204,7 +204,7 @@ export function AssetViewerModal({ item, onClose }: { item: CatalogWorkItem; onC
             <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-primary">Generated asset package</p>
             <h2 className="mt-1 truncate text-xl font-bold text-on-surface">{item.sku_name}</h2>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-secondary">
-              <span>{completed.length} of {poses.length || 5} poses complete</span>
+              <span>{completed.length} of {poses.length} poses complete</span>
               <span>Generation time: <strong className="text-on-surface">{formatDuration(item.generation_started_at, item.generation_completed_at)}</strong></span>
               {item.generation_completed_at && <span>Completed {new Date(item.generation_completed_at).toLocaleString()}</span>}
             </div>
@@ -225,7 +225,7 @@ export function AssetViewerModal({ item, onClose }: { item: CatalogWorkItem; onC
           ) : (
             <div className="space-y-6">
               <section>
-                <div className="mb-3 flex items-center gap-2"><Images className="h-4 w-4 text-primary" /><h3 className="text-sm font-bold text-on-surface">Pose 1–5 outputs</h3></div>
+                <div className="mb-3 flex items-center gap-2"><Images className="h-4 w-4 text-primary" /><h3 className="text-sm font-bold text-on-surface">Pose outputs{poses.length ? ` (${poses.length})` : ""}</h3></div>
                 {poses.length ? (
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                     {poses.map((pose) => (
