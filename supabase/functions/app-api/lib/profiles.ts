@@ -1975,7 +1975,13 @@ export function mergeVariantColorways(
     if (!input || !mainColor || !baseMainColor || baseMainColor.toLowerCase() === mainColor.toLowerCase()) {
       return input;
     }
-    return input.replace(new RegExp(escapeRegExp(baseMainColor), "gi"), mainColor);
+    // Match the complete colour token/phrase, not the same letters inside a
+    // construction word (for example the "red" in embroidered or gathered).
+    const colorToken = new RegExp(
+      `(?<![\\p{L}\\p{N}_])${escapeRegExp(baseMainColor)}(?![\\p{L}\\p{N}_])`,
+      "giu",
+    );
+    return input.replace(colorToken, mainColor);
   };
 
   if (cloned.creativeDirection?.showcasePlan && mainColor) {
@@ -1983,6 +1989,12 @@ export function mergeVariantColorways(
       ...cloned.creativeDirection.showcasePlan,
       heroFeature: replaceBaseColor(cloned.creativeDirection.showcasePlan.heroFeature),
       whyItSells: replaceBaseColor(cloned.creativeDirection.showcasePlan.whyItSells),
+      framing: replaceBaseColor(cloned.creativeDirection.showcasePlan.framing),
+      cameraAngle: replaceBaseColor(cloned.creativeDirection.showcasePlan.cameraAngle),
+      bodyPosition: replaceBaseColor(cloned.creativeDirection.showcasePlan.bodyPosition),
+      handPlacement: replaceBaseColor(cloned.creativeDirection.showcasePlan.handPlacement),
+      expression: replaceBaseColor(cloned.creativeDirection.showcasePlan.expression),
+      distinctFrom: replaceBaseColor(cloned.creativeDirection.showcasePlan.distinctFrom),
       visibilityRules: cloned.creativeDirection.showcasePlan.visibilityRules.map(replaceBaseColor),
     };
   }
@@ -1992,6 +2004,13 @@ export function mergeVariantColorways(
       ...pose,
       title: replaceBaseColor(pose.title),
       description: replaceBaseColor(pose.description),
+      cameraAngle: replaceBaseColor(pose.cameraAngle),
+      framing: replaceBaseColor(pose.framing),
+      bodyPosition: replaceBaseColor(pose.bodyPosition),
+      handPlacement: replaceBaseColor(pose.handPlacement),
+      expression: replaceBaseColor(pose.expression),
+      purpose: replaceBaseColor(pose.purpose),
+      consistencyNotes: replaceBaseColor(pose.consistencyNotes),
       prompt: replaceBaseColor(pose.prompt),
       highlightedDetails: pose.highlightedDetails.map(replaceBaseColor),
       productVisibilityRules: pose.productVisibilityRules.map(replaceBaseColor),

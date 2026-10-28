@@ -149,3 +149,74 @@ Deno.test("mergeVariantColorways updates base color references in showcasePlan a
   assertStringIncludes(merged.posePlan[5].prompt, "emerald green");
   assertEquals(merged.posePlan[5].prompt.toLowerCase().includes("royal blue"), false);
 });
+
+Deno.test("mergeVariantColorways replaces red as a token without corrupting embroidered or gathered", () => {
+  const baseAnalysis = normalizeAnalysis({
+    productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "red" },
+    showcasePlan: {
+      heroFeature: "red embroidered yoke with gathered red cuffs",
+      featureRegion: "embroidery",
+      shotType: "macro_detail",
+    },
+  }, "kurta set");
+
+  const merged = mergeVariantColorways(baseAnalysis, { mainColor: "emerald" });
+
+  assertEquals(
+    merged.creativeDirection.showcasePlan?.heroFeature,
+    "emerald embroidered yoke with gathered emerald cuffs",
+  );
+  assertStringIncludes(merged.posePlan[5].prompt, "embroidered");
+  assertStringIncludes(merged.posePlan[5].prompt, "gathered");
+});
+
+Deno.test("mergeVariantColorways refreshes multiword color in every showcase and pose direction field", () => {
+  const baseAnalysis = normalizeAnalysis({
+    productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "royal blue", fabric: "silk" },
+    showcasePlan: {
+      heroFeature: "royal blue silk yoke",
+      featureRegion: "neckline",
+      shotType: "macro_detail",
+      whyItSells: "royal blue craft",
+      evidenceReference: "fabric_pattern",
+      framing: "royal blue framing",
+      cameraAngle: "royal blue angle",
+      bodyPosition: "royal blue posture",
+      handPlacement: "royal blue hand direction",
+      expression: "royal blue expression",
+      distinctFrom: "royal blue distinction",
+      visibilityRules: ["royal blue visibility"],
+    },
+    posePlan: [{
+      id: "showcase",
+      title: "royal blue title",
+      description: "royal blue silk yoke description",
+      cameraAngle: "royal blue pose angle",
+      framing: "royal blue pose framing",
+      bodyPosition: "royal blue pose posture",
+      handPlacement: "royal blue pose hands",
+      expression: "royal blue pose expression",
+      highlightedDetails: ["royal blue highlight"],
+      productVisibilityRules: ["royal blue rule"],
+      primaryReference: "fabric_pattern",
+      purpose: "royal blue purpose",
+      consistencyNotes: "royal blue continuity",
+      prompt: "royal blue silk yoke prompt",
+    }],
+  }, "kurta set");
+
+  const merged = mergeVariantColorways(baseAnalysis, { mainColor: "emerald green" });
+  const plan = merged.creativeDirection.showcasePlan;
+  const showcase = merged.posePlan[5];
+
+  assertEquals(JSON.stringify(plan).toLowerCase().includes("royal blue"), false);
+  assertEquals(JSON.stringify(showcase).toLowerCase().includes("royal blue"), false);
+  assertStringIncludes(plan?.framing || "", "emerald green");
+  assertStringIncludes(showcase.cameraAngle, "emerald green");
+  assertStringIncludes(showcase.consistencyNotes, "emerald green");
+  assertEquals(plan?.featureRegion, "neckline");
+  assertEquals(plan?.shotType, "macro_detail");
+  assertEquals(plan?.evidenceReference, "fabric_pattern");
+  assertEquals(showcase.id, "showcase");
+  assertEquals(showcase.primaryReference, "fabric_pattern");
+});
