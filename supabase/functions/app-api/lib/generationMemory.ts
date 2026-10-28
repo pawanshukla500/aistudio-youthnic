@@ -176,7 +176,7 @@ function mergeCorrections(existing: MemoryCorrection[], incoming: MemoryCorrecti
   return merged.slice(-MAX_MEMORY_CORRECTIONS);
 }
 
-function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirection: JsonRecord) {
+function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirection: JsonRecord, bottomWearMode?: unknown) {
   const details: string[] = [];
   const invariant = boundedText(productIdentity.invariantDetails, 180);
   if (invariant) details.push(`Product invariants: ${invariant}`);
@@ -197,7 +197,7 @@ function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirect
   if (closeupMode) {
     details.push(`Pose 5 close-up mode: ${closeupMode}${hero ? ` (${hero})` : ""}`);
   }
-  const includesBottomWear = resolveBottomWearPresentation({ productIdentity }).includesBottomWear;
+  const includesBottomWear = resolveBottomWearPresentation({ mode: bottomWearMode, productIdentity }).includesBottomWear;
   const showcaseShot = effectiveShowcaseShot(creativeDirection, { includesBottomWear });
   if (showcaseShot) {
     details.push(`Pose 6 sells: ${boundedText(showcaseShot.plan.heroFeature, 120)} (${showcaseShot.shotType})`);
@@ -256,6 +256,7 @@ export function buildGenerationMemory(args: {
   references?: Array<{ role?: string }>;
   productIdentity?: JsonRecord;
   creativeDirection?: JsonRecord;
+  bottomWearMode?: unknown;
   generatedAssets?: unknown[];
   approvedAssets?: unknown[];
   upsertApprovedAssets?: unknown[];
@@ -275,7 +276,7 @@ export function buildGenerationMemory(args: {
   const productRoles = rolesOfClass(references, "product");
   const styleRoles = rolesOfClass(references, "style");
   const modelRoles = rolesOfClass(references, "model");
-  const preservedDetails = preservedDetailsFromProduct(productIdentity, creativeDirection);
+  const preservedDetails = preservedDetailsFromProduct(productIdentity, creativeDirection, args.bottomWearMode);
   let generatedAssets = Array.isArray(args.generatedAssets)
     ? snapshotAssets(args.generatedAssets)
     : existing.generatedAssets;

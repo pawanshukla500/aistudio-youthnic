@@ -812,6 +812,7 @@ function sessionGenerationMemory(sessionData: JsonRecord, extras: {
   referenceFingerprint?: string;
   productIdentity?: JsonRecord;
   creativeDirection?: JsonRecord;
+  bottomWearMode?: unknown;
 } = {}) {
   return buildGenerationMemory({
     existing: sessionData.generationMemory,
@@ -819,6 +820,7 @@ function sessionGenerationMemory(sessionData: JsonRecord, extras: {
       ?? (Array.isArray(sessionData.references) ? sessionData.references as Array<{ role?: string }> : []),
     productIdentity: extras.productIdentity ?? jsonRecord(sessionData.productIdentity),
     creativeDirection: extras.creativeDirection ?? jsonRecord(sessionData.creativeDirection),
+    bottomWearMode: extras.bottomWearMode ?? sessionData.bottomWearMode ?? sessionData.bottom_wear_mode,
     ...(extras.generatedAssets !== undefined ? { generatedAssets: extras.generatedAssets } : {}),
     ...(extras.approvedAssets !== undefined ? { approvedAssets: extras.approvedAssets } : {}),
     upsertApprovedAssets: extras.upsertApprovedAssets,
@@ -2243,6 +2245,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
       imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
       generationMemory: sessionGenerationMemory(sessionData, {
         creativeDirection: applyRequestedBackground(sessionData.creativeDirection, jobData.backgroundStyle),
+        bottomWearMode,
         referenceFingerprint: String(session.reference_hash || ""),
       }),
     }
@@ -6367,6 +6370,7 @@ async function queueCatalogVariantGeneration(
       references,
       productIdentity: normalized.productIdentity,
       creativeDirection: normalized.creativeDirection,
+      bottomWearMode,
       referenceFingerprint: analysisHashes.rHash,
     }),
   };

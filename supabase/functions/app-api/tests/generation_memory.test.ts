@@ -225,3 +225,27 @@ Deno.test("generation memory does not record a bottom-led Pose 6 for a top-only 
   });
   assertEquals(completeSet.preservedDetails.includes("Pose 6 sells: wide palazzo flare (full_body_feature)"), true);
 });
+
+Deno.test("F-14 explicit top_only overrides set-like product identity in public generation memory", () => {
+  const memory = buildGenerationMemory({
+    bottomWearMode: "top_only",
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      bottomWearDetails: "Royal blue palazzo with a wide flare",
+    },
+    creativeDirection: {
+      showcasePlan: {
+        heroFeature: "wide royal blue palazzo flare",
+        featureRegion: "bottom_wear",
+        shotType: "full_body_feature",
+      },
+      showcaseIntent: "full_length_silhouette",
+    },
+  });
+
+  assertEquals(memory.preservedDetails.some((detail) => detail.startsWith("Pose 6 sells:")), false);
+  assertEquals(memory.preservedDetails.includes("Pose 6 showcase intent: full_length_silhouette"), true);
+  const brief = formatGenerationMemoryBrief({ memory });
+  assertEquals(brief.toLowerCase().includes("palazzo"), false);
+  assertStringIncludes(brief, "Pose 6 showcase intent: full_length_silhouette");
+});
