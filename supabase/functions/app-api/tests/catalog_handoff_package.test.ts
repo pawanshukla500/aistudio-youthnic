@@ -27,3 +27,13 @@ Deno.test("catalog memory cannot replace SKU-specific Pose 6 product direction",
   assertStringIncludes(source, "isCompleteCatalogHandoffPackage(row.poses)");
   assertEquals(source.includes("incomplete_five_pose_package"), false);
 });
+
+Deno.test("F-16 catalog memory cannot fill missing SKU product truth from another SKU", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url));
+  assertStringIncludes(source, "closeupHeroDetail: skuCloseupHeroDetail,");
+  assertStringIncludes(source, "showcaseIntent: skuShowcaseIntent,");
+  assertEquals(source.includes("closeupHeroDetail: skuCloseupHeroDetail || memCreative.closeupHeroDetail"), false);
+  assertEquals(source.includes("showcaseIntent: skuShowcaseIntent || memCreative.showcaseIntent"), false);
+  assertEquals(source.includes("baseAnalysis?.productIdentity?.bottomWearDetails"), false);
+  assertEquals(source.includes("normalized.productIdentity.bottomWearDetails = baseAnalysis.productIdentity.bottomWearDetails"), false);
+});

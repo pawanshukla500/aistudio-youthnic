@@ -5508,10 +5508,11 @@ function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof nor
     normalized.creativeDirection = {
       ...memCreative,
       closeupMode: skuCloseupMode || memCreative.closeupMode,
-      closeupHeroDetail: skuCloseupHeroDetail || memCreative.closeupHeroDetail,
-      showcaseIntent: skuShowcaseIntent || memCreative.showcaseIntent,
-      // Showcase features are SKU-specific product truth. Never borrow another
-      // SKU's plan when the current analysis has no validated plan.
+      // Craftsmanship, bottom specifications and garment-led showcase intent
+      // belong to this SKU. Missing current analysis must stay missing, not be
+      // filled from another product in the catalogue.
+      closeupHeroDetail: skuCloseupHeroDetail,
+      showcaseIntent: skuShowcaseIntent,
       showcasePlan: skuShowcasePlan ?? null,
     };
   }
@@ -5538,13 +5539,6 @@ function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof nor
         purpose: catPose.purpose !== undefined ? catPose.purpose : skuPose.purpose,
       };
     });
-  }
-  const baseAnalysis = memory.baseAnalysis as ReturnType<typeof normalizeAnalysis> | undefined;
-  if (
-    baseAnalysis?.productIdentity?.bottomWearDetails &&
-    (!normalized.productIdentity.bottomWearDetails || normalized.productIdentity.bottomWearDetails.trim().toLowerCase() === "unknown")
-  ) {
-    normalized.productIdentity.bottomWearDetails = baseAnalysis.productIdentity.bottomWearDetails;
   }
   return normalized;
 }
