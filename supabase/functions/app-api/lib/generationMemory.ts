@@ -9,6 +9,7 @@
  */
 
 import { type JsonRecord } from "./profiles.ts";
+import { resolveBottomWearPresentation } from "./garmentPoses.ts";
 import { PRODUCT_REFERENCE_ROLES } from "./referencePolicy.ts";
 import { type PromptPatternKind } from "./promptPatterns.ts";
 import { effectiveShowcaseShot, normalizeShowcaseShotType } from "./showcaseFeature.ts";
@@ -196,7 +197,8 @@ function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirect
   if (closeupMode) {
     details.push(`Pose 5 close-up mode: ${closeupMode}${hero ? ` (${hero})` : ""}`);
   }
-  const showcaseShot = effectiveShowcaseShot(creativeDirection);
+  const includesBottomWear = resolveBottomWearPresentation({ productIdentity }).includesBottomWear;
+  const showcaseShot = effectiveShowcaseShot(creativeDirection, { includesBottomWear });
   if (showcaseShot) {
     details.push(`Pose 6 sells: ${boundedText(showcaseShot.plan.heroFeature, 120)} (${showcaseShot.shotType})`);
   } else {

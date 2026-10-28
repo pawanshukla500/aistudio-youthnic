@@ -195,3 +195,33 @@ Deno.test("prompt pattern writes retry against the oldest row and fold duplicate
   assertEquals(folded.keepId, "a");
   assertEquals(folded.deleteIds, ["b"]);
 });
+
+Deno.test("generation memory does not record a bottom-led Pose 6 for a top-only product", () => {
+  const creativeDirection = {
+    showcasePlan: {
+      heroFeature: "wide palazzo flare",
+      featureRegion: "bottom_wear",
+      shotType: "full_body_feature",
+    },
+    showcaseIntent: "full_length_silhouette",
+  };
+  const topOnly = buildGenerationMemory({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      bottomWearDetails: "none - standalone garment",
+    },
+    creativeDirection,
+  });
+
+  assertEquals(topOnly.preservedDetails.some((detail) => detail.startsWith("Pose 6 sells:")), false);
+  assertEquals(topOnly.preservedDetails.includes("Pose 6 showcase intent: full_length_silhouette"), true);
+
+  const completeSet = buildGenerationMemory({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      bottomWearDetails: "Palazzo with wide flare",
+    },
+    creativeDirection,
+  });
+  assertEquals(completeSet.preservedDetails.includes("Pose 6 sells: wide palazzo flare (full_body_feature)"), true);
+});

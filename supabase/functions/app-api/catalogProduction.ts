@@ -1,5 +1,6 @@
 import { type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.112.2";
 import { REQUIRED_POSE_IDS, type JsonRecord } from "./profiles.ts";
+import { resolveBottomWearPresentation } from "./lib/garmentPoses.ts";
 import {
   effectiveShowcaseShot,
   planShowcaseOutcomeWrite,
@@ -135,15 +136,22 @@ export async function recordShowcaseFeatureOutcome(
       return;
     }
     const sessionData = asRecord(session?.session_data);
+    const productIdentity = asRecord(sessionData.productIdentity);
+    const bottomWear = resolveBottomWearPresentation({
+      mode: sessionData.bottomWearMode ?? sessionData.bottom_wear_mode,
+      productIdentity,
+    });
     // The effective shot, not the planned one: a close-up collision widens the
     // frame, and scoring the tight framing that was never generated would teach
     // the next analysis the opposite of what happened.
-    const shot = effectiveShowcaseShot(sessionData.creativeDirection);
+    const shot = effectiveShowcaseShot(sessionData.creativeDirection, {
+      includesBottomWear: bottomWear.includesBottomWear,
+    });
     if (!shot) return;
     const { plan, shotType } = shot;
     const productCategory = text(sessionData.category);
     if (!productCategory) return;
-    const garmentFamily = text(asRecord(sessionData.productIdentity).garmentFamily);
+    const garmentFamily = text(productIdentity.garmentFamily);
 
     const match = () => service.from("showcase_feature_outcomes")
       .select("id,selected_count,rejected_count,regenerated_count,qa_failed_count,avg_quality,created_at")
