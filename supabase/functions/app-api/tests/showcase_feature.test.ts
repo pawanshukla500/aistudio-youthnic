@@ -447,3 +447,34 @@ Deno.test("normalizeAnalysis top_only removes model-supplied bottom showcase pro
   assertEquals(showcase.primaryReference, "front");
   assertEquals(JSON.stringify(showcase).toLowerCase().includes("palazzo"), false);
 });
+
+Deno.test("Pose 6 garment summary preserves bottom specifications within five parts", () => {
+  const slots = getPoseSlots({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "emerald green",
+      fabric: "organza silk",
+      embroidery: "gold zari yoke",
+      pattern: "woven butti repeat",
+      neckline: "square neckline",
+      sleeveType: "full sleeves",
+      silhouette: "straight kurta",
+      bottomWearDetails: "Farshi pajama with 6-inch joined hem",
+    },
+    showcasePlan: {
+      heroFeature: "gold zari yoke",
+      featureRegion: "embroidery",
+      shotType: "macro_detail",
+    },
+  });
+
+  const showcase = slots[5];
+  assertStringIncludes(showcase.prompt, "bottom wear: Farshi pajama with 6-inch joined hem");
+  const specificationRule = showcase.productVisibilityRules.find((rule) =>
+    rule.startsWith("preserve exact garment specifications: ")
+  );
+  assert(specificationRule);
+  const summary = specificationRule.replace("preserve exact garment specifications: ", "");
+  assertStringIncludes(summary, "bottom wear: Farshi pajama");
+  assertEquals(summary.split("; ").length <= 5, true);
+});

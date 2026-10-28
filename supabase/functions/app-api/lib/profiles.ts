@@ -520,8 +520,15 @@ function buildShowcaseGarmentDetailSummary(
     }
   }
 
+  const bottomSummary = bottomDetails ? `bottom wear: ${bottomDetails}` : "";
+  const summaryParts = parts.filter((part) => part !== bottomSummary);
   return {
-    summary: parts.slice(0, 5).join("; "),
+    // Reserve one of the five bounded slots for the bottom specification;
+    // otherwise upper-garment fields can silently drop it from complete sets.
+    summary: [
+      ...summaryParts.slice(0, bottomSummary ? 4 : 5),
+      ...(bottomSummary ? [bottomSummary] : []),
+    ].join("; "),
     highlights: highlights.slice(0, 4),
   };
 }
