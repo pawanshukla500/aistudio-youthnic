@@ -11,6 +11,7 @@ import {
   composeGenerationPrompt,
 } from "../lib/generationPrompt.ts";
 import { normalizeAnalysis } from "../lib/profiles.ts";
+import { buildGenerationMemory, formatGenerationMemoryBrief } from "../lib/generationMemory.ts";
 
 Deno.test("Garment Truth Contract: Legacy placement and absence locks are preserved when garmentEvidence is populated", () => {
   const sessionData = {
@@ -1330,4 +1331,120 @@ Deno.test("Pose 6 hard rule and aesthetic photoshoot direction survive prompt co
   assertEquals(compacted.length <= IMAGE_PROMPT_SAFE_CHARS, true);
   assertStringIncludes(compacted, "POSE 6 HARD RULE (AESTHETIC FEATURE SHOWCASE & DETAIL LOCK):");
   assertStringIncludes(compacted, "SHOWCASE FRAME SUBJECT: mirror-work bell sleeve cuff");
+});
+
+Deno.test("a compacted pose block keeps the current frame and seated rules, and drops a walking prompt", () => {
+  const productIdentity = {
+    garmentFamily: "kurta_or_kurti_set",
+    category: "ethnic set",
+    mainColor: "peach",
+    secondaryColors: ["maroon", "pink"],
+    fabric: "cotton silk",
+    pattern: "large maroon medallion butti",
+    print: "large maroon medallion butti scattered on a peach ground",
+    neckline: "round neck with embroidered yoke",
+    sleeveType: "three-quarter sleeves",
+    length: "knee length",
+    fit: "relaxed",
+    silhouette: "straight kurta",
+    bottomWearDetails: "pink floral farshi pajama with a 6-inch joined hem and a 4-inch taper, waist pleats and side-joint pleats",
+    footwearDetails: "jutti",
+    embroidery: "maroon medallion butti and yoke embroidery",
+    detailPlacementMap: ["large maroon medallion butti across the kurta body", "yoke embroidery at the neckline"],
+    garmentEvidence: [
+      {
+        region: "body",
+        state: "confirmed",
+        sourceRole: "front",
+        visibleConstruction: "peach kurta with large maroon medallion butti",
+        visibleDecoration: "large maroon medallion butti",
+        closures: "none",
+        explicitlyAbsent: [],
+        uncertainty: "none",
+      },
+    ],
+  };
+  const creativeDirection = {
+    backgroundStyle: "floral wall, cane bench, basket",
+    seatedPoseRequired: "yes",
+    seatedPoseReason: "style reference includes a cane bench",
+  };
+  const liveRefs = [
+    { role: "front" },
+    { role: "back" },
+    { role: "bottom" },
+    { role: "fabric_pattern" },
+    { role: "style_reference" },
+    { role: "approved_pose" },
+  ];
+  const generationMemory = formatGenerationMemoryBrief({
+    references: liveRefs,
+    memory: buildGenerationMemory({
+      references: [...liveRefs, { role: "model_identity" }],
+      productIdentity,
+      creativeDirection,
+      bottomWearMode: "farshi",
+      approvedAssets: [{ poseIndex: 1, storagePath: "pose-1.jpg", role: "approved_pose" }],
+    }),
+  });
+  const session = { productIdentity, creativeDirection };
+  const pose2 = composeGenerationPrompt({
+    skuName: "NISHI-PEACH",
+    productDetails: "Peach kurta with large maroon medallion butti and pink floral farshi pajama",
+    pose: {
+      id: "angled",
+      title: "Three-quarter turn",
+      poseNumber: 2,
+      description: "Walk forward and show the side silhouette",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "walking stride, one foot lifted",
+      handPlacement: "relaxed",
+      expression: "calm",
+      highlightedDetails: ["medallion butti", "yoke"],
+      productVisibilityRules: ["full garment visible", "joined hem closed"],
+      purpose: "catalog",
+      consistencyNotes: "locked set",
+      prompt: "Walk forward and show the side.",
+      enabled: true,
+    } as any,
+    session,
+    references: liveRefs,
+    generationMemory,
+  });
+  assertEquals(pose2.length <= IMAGE_PROMPT_SAFE_CHARS, true);
+  assertEquals(pose2.includes("[truncated]"), true);
+  assertStringIncludes(pose2, "CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN): Torso and hips MUST physically rotate 35 to 45 degrees. Both feet stay planted and close; never a walking stride or a lifted foot.");
+  assertEquals(pose2.includes("Walk forward"), false);
+  assertEquals(pose2.includes("one foot lifted"), false);
+
+  const pose4 = composeGenerationPrompt({
+    skuName: "NISHI-PEACH",
+    productDetails: "Peach kurta with large maroon medallion butti and pink floral farshi pajama",
+    pose: {
+      id: "creative",
+      title: "Editorial",
+      poseNumber: 4,
+      description: "Dynamic walking motion and swirl",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "controlled walking movement",
+      handPlacement: "relaxed",
+      expression: "calm",
+      highlightedDetails: ["medallion butti", "yoke"],
+      productVisibilityRules: ["full garment visible", "joined hem closed"],
+      purpose: "catalog",
+      consistencyNotes: "locked set",
+      prompt: "Playful walking motion and garment swirl.",
+      enabled: true,
+    } as any,
+    session,
+    references: liveRefs,
+    generationMemory,
+  });
+  assertEquals(pose4.length <= IMAGE_PROMPT_SAFE_CHARS, true);
+  assertStringIncludes(pose4, "CURRENT FRAME (POSE 4 - SEATED EDITORIAL)");
+  assertStringIncludes(pose4, "SEATED EDITORIAL POSE REQUIREMENT (POSE 4):");
+  assertStringIncludes(pose4, "POSE CATEGORY RULES (SITTING):");
+  assertEquals(pose4.includes("Playful walking motion"), false);
 });

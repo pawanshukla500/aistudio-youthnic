@@ -578,16 +578,14 @@ ${coreRule}
 - EDITORIAL PHOTOSHOOT EXECUTION: Deliver magazine-grade fashion photography with intentional camera framing, directional studio lighting that sculpts fabric texture and embroidery relief, natural posture diverging from Pose 1, strictly two anatomically natural arms and hands clear of the featured detail, and 100% locked model, set, styling, and garment fidelity.`;
 }
 
-function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSittingDemanded: boolean): string {
-  const poseNum = pose.poseNumber;
-  const isPose1 = poseNum === 1 || pose.id === "full_front";
-  const isPose2 = poseNum === 2 || pose.id === "angled";
-  const isPose3 = poseNum === 3 || pose.id === "back";
-  const isPose4 = poseNum === 4 || pose.id === "creative";
-  const isPose5 = poseNum === 5 || pose.id === "closeup";
-  const isPose6 = poseNum === 6 || pose.id === "showcase";
+const SEATED_EDITORIAL_REQUIREMENT = `SEATED EDITORIAL POSE REQUIREMENT (POSE 4):
+- The style reference or product requirements specifically demand an elegant seated pose for this frame.
+- Model must be seated gracefully on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (style reference / Pose 1). Do not bring in new furniture.
+- Both legs, bottom wear (farshi/trousers/pleats), hemline, and footwear MUST remain fully visible, untangled, and unbunched.
+- Posture must be upright, poised, and relaxed editorial - showcasing garment fit and draping without wrinkling or obscuring key details.`;
 
-  const lines = [
+function poseVariationDirective(): string {
+  return [
     "6-POSE PLAN VARIATION DIRECTIVE (MANDATORY PHYSICAL DIVERGENCE):",
     "Every shoot executes a distinct 6-pose plan where each frame has a unique physical geometry and purpose. Under NO circumstances should any frame repeat a static frontal standing pose:",
     "- Pose 1 (full_front): Natural square-on catalog hero, weight slightly on one leg, shoulders relaxed, complete silhouette readable.",
@@ -596,41 +594,32 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
     "- Pose 4 (creative): A natural editorial stance that is clearly not Pose 1 - relaxed contrapposto or a soft lean, both feet grounded and close - or an elegant seated editorial pose when the style reference is seated. Never a frozen walking stride, a spin, or a wide leg split.",
     "- Pose 5 (closeup): Genuinely zoomed-in detail crop (face-and-detail or tight product-detail); strictly prohibit full-body hero repeat.",
     "- Pose 6 (showcase): A distinct natural catalog stance and framing that sells the named feature without repeating Pose 1. Keep the feet close enough that a joined or tapered hem stays intact.",
-  ];
+  ].join("\n");
+}
 
-  if (isPose1) {
-    lines.push(
-      "CURRENT FRAME (POSE 1 - SQUARE HERO): Natural straight-on catalog hero. Weight settles slightly on one leg, shoulders and arms stay relaxed, and the full outfit reads from head to hem. A calm expression or a small genuine smile. Never a rigid mannequin stance or a wide stock-photo grin.",
-    );
-  } else if (isPose2) {
-    lines.push(
-      "CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN): Torso and hips MUST physically rotate 35 to 45 degrees. Both feet stay planted and close; never a walking stride or a lifted foot. DO NOT render a flat frontal standing pose or repeat Pose 1. Reveal side silhouette, garment depth, side seams, and sleeve shape.",
-    );
-  } else if (isPose3) {
-    lines.push(
-      "CURRENT FRAME (POSE 3 - 180° REAR VIEW): Model faces fully away from camera. Shoulders and hips square to rear. Hair swept forward, dupatta draped forward over arms/front so rear construction is 100% visible.",
-    );
-  } else if (isPose4) {
-    if (isSittingDemanded) {
-      lines.push(
-        "CURRENT FRAME (POSE 4 - SEATED EDITORIAL): Elegant seated editorial posture on a minimal studio bench or architectural step from the established set. Both legs, bottom wear volume, hemline, and footwear remain fully visible and beautifully arranged.",
-      );
-    } else {
-      lines.push(
-        "CURRENT FRAME (POSE 4 - NATURAL EDITORIAL STANCE): A relaxed catalog pose that is clearly not Pose 1: contrapposto or a soft three-quarter lean, both feet grounded and close, garment hanging with gravity. NEVER a frozen mid-step, a spin, a wide leg split, or a repeat of the flat hero stance. A joined Farshi hem stays closed.",
-      );
-    }
-  } else if (isPose5) {
-    lines.push(
-      "CURRENT FRAME (POSE 5 - ZOOMED-IN DETAIL): Genuinely zoomed in on product craftsmanship and selling details. NEVER repeat a full-body or wide hero frame. The close-up MUST highlight the primary uploaded garment's signature details (such as kurti butti work, chest/yoke embroidery, or neckline craft), and must NEVER focus on a secondary accessory like a dupatta or stole.",
-    );
-  } else if (isPose6) {
-    lines.push(
-      "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE): Framing, angle, and physical stance MUST visibly diverge from Pose 1, with a natural weight shift that keeps the named feature readable. Do not split the legs wide. Never repeat the flat frontal hero stance. Same model face, same uploaded product, and the same style-reference backdrop as the other five frames.",
-    );
+function currentFrameLine(pose: StudioPose & { poseNumber: number }, isSittingDemanded: boolean): string {
+  const poseNum = pose.poseNumber;
+  if (poseNum === 1 || pose.id === "full_front") {
+    return "CURRENT FRAME (POSE 1 - SQUARE HERO): Natural straight-on catalog hero. Weight settles slightly on one leg, shoulders and arms stay relaxed, and the full outfit reads from head to hem. A calm expression or a small genuine smile. Never a rigid mannequin stance or a wide stock-photo grin.";
   }
-
-  return lines.join("\n");
+  if (poseNum === 2 || pose.id === "angled") {
+    return "CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN): Torso and hips MUST physically rotate 35 to 45 degrees. Both feet stay planted and close; never a walking stride or a lifted foot. DO NOT render a flat frontal standing pose or repeat Pose 1. Reveal side silhouette, garment depth, side seams, and sleeve shape.";
+  }
+  if (poseNum === 3 || pose.id === "back") {
+    return "CURRENT FRAME (POSE 3 - 180° REAR VIEW): Model faces fully away from camera. Shoulders and hips square to rear. Hair swept forward, dupatta draped forward over arms/front so rear construction is 100% visible.";
+  }
+  if (poseNum === 4 || pose.id === "creative") {
+    return isSittingDemanded
+      ? "CURRENT FRAME (POSE 4 - SEATED EDITORIAL): Elegant seated editorial posture on a minimal studio bench or architectural step from the established set. Both legs, bottom wear volume, hemline, and footwear remain fully visible and beautifully arranged."
+      : "CURRENT FRAME (POSE 4 - NATURAL EDITORIAL STANCE): A relaxed catalog pose that is clearly not Pose 1: contrapposto or a soft three-quarter lean, both feet grounded and close, garment hanging with gravity. NEVER a frozen mid-step, a spin, a wide leg split, or a repeat of the flat hero stance. A joined Farshi hem stays closed.";
+  }
+  if (poseNum === 5 || pose.id === "closeup") {
+    return "CURRENT FRAME (POSE 5 - ZOOMED-IN DETAIL): Genuinely zoomed in on product craftsmanship and selling details. NEVER repeat a full-body or wide hero frame. The close-up MUST highlight the primary uploaded garment's signature details (such as kurti butti work, chest/yoke embroidery, or neckline craft), and must NEVER focus on a secondary accessory like a dupatta or stole.";
+  }
+  if (poseNum === 6 || pose.id === "showcase") {
+    return "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE): Framing, angle, and physical stance MUST visibly diverge from Pose 1, with a natural weight shift that keeps the named feature readable. Do not split the legs wide. Never repeat the flat frontal hero stance. Same model face, same uploaded product, and the same style-reference backdrop as the other five frames.";
+  }
+  return "";
 }
 
 function referenceImageScopeDirective(hasModelReference: boolean): string {
@@ -847,6 +836,15 @@ export function composeGenerationPrompt(args: {
         ? "sitting"
         : detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || "") + " " + (args.pose.bodyPosition || ""));
   const categoryRules = poseCategoryRules(poseCategory);
+  // Compaction keeps the first 1,400 characters of this block. The current
+  // frame and the seated rules have to lead, or a long six-pose summary
+  // deletes them and leaves only the raw pose prompt.
+  const poseRequirementLead = [
+    currentFrameLine(args.pose, isSittingDemanded),
+    isPose4 && isSittingDemanded ? SEATED_EDITORIAL_REQUIREMENT : "",
+    categoryRules ? `POSE CATEGORY RULES (${poseCategory.toUpperCase()}):\n${categoryRules}` : "",
+    poseVariationDirective(),
+  ].filter(Boolean).join("\n");
   const evidenceLines = promptEvidence.slice(0, 16).map((entry) => {
     const row = objectValue(entry);
     const lines = [
@@ -1008,13 +1006,12 @@ ${allowedDelta.map((value) => `- ${value}`).join("\n")}
 - Everything not named here stays locked.
 
 POSE REQUIREMENT:
-${poseVariationDirective(args.pose, isSittingDemanded)}
+${poseRequirementLead}
 Description: ${poseDescription}
 Details to highlight: ${highlightedDetails}
 Visibility rules: ${visibilityRules}
 Purpose: ${boundedText(args.pose.purpose, 420)}
 Consistency notes: ${boundedText(args.pose.consistencyNotes, 600)}
-${categoryRules ? `POSE CATEGORY RULES (${poseCategory.toUpperCase()}):\n${categoryRules}` : ""}
 GARMENT POSE GRAMMAR (${garmentPoseFamilyHeading(poseFamily)}) - body language and framing only; it never changes the garment's design, print, colour, fit or construction:
 ${garmentPoseDirection(poseFamily)}
 ${isShowcase
@@ -1031,13 +1028,6 @@ ${isPose4 && hasStyleReference ? `
 STYLE REFERENCE SITTING OVERRIDE (POSE 4):
 - Look at the STYLE REFERENCE image in the manifest. If that image, or any uploaded reference that shows a model pose, depicts a sitting/seated person, this 4th pose MUST be a seated editorial pose even if the written pose plan still describes walking or movement.
 - Keep garment, bottom wear, hemline, and footwear fully visible. Use only seating furniture/props that already belong to the style-reference set.
-` : ""}
-${isPose4 && isSittingDemanded ? `
-SEATED EDITORIAL POSE REQUIREMENT (POSE 4):
-- The style reference or product requirements specifically demand an elegant seated pose for this frame.
-- Model must be seated gracefully on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (style reference / Pose 1). Do not bring in new furniture.
-- Both legs, bottom wear (farshi/trousers/pleats), hemline, and footwear MUST remain fully visible, untangled, and unbunched.
-- Posture must be upright, poised, and relaxed editorial - showcasing garment fit and draping without wrinkling or obscuring key details.
 ` : ""}
 ${correction ? `
 CORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:
