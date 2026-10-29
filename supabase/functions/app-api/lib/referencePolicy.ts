@@ -274,6 +274,9 @@ export function selectReferences<T extends ReferenceLike>(
   // silently drop the only back or mannequin. Protect one image from each
   // required evidence region first, then spend remaining slots on duplicates.
   // Saree aliases share a region so legacy sessions keep the same guarantee.
+  // Every non-back pose protects one image per product region (saree aliases
+  // share a region so legacy sessions keep the same guarantee), so no region
+  // is silently dropped when duplicates exhaust the provider limit.
   // Back-pose sole-rear authority is handled by the early return above.
   const protectedRoleGroups = normalizedFamily === "saree"
     ? [
@@ -285,21 +288,13 @@ export function selectReferences<T extends ReferenceLike>(
       ["saree_blouse_front"],
       ["saree_blouse_back_piece"],
     ]
-    : (poseType === "closeup" || poseType === "showcase")
-      ? [
-        ["front"],
-        ["bottom"],
-        ["fabric_pattern"],
-        ["back"],
-        ["mannequin"],
-      ]
-      : [
-        ["front"],
-        ["bottom"],
-        ["fabric_pattern"],
-        ["back"],
-        ["mannequin"],
-      ];
+    : [
+      ["front"],
+      ["bottom"],
+      ["fabric_pattern"],
+      ["back"],
+      ["mannequin"],
+    ];
   const protectedProduct: T[] = [];
   for (const roles of protectedRoleGroups) {
     const match = order.flatMap((role) => roles.includes(role)

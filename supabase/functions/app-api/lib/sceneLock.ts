@@ -5,12 +5,14 @@
  * grade; only the pose, camera angle and framing move. The scene used to reach
  * the image model three ways - Gemini's creativeDirection JSON, a free-text
  * backdrop inside every pose prompt, and the reference images - and whichever
- * one a frame leaned on won. A back view, which never gets the style reference,
- * could land on a different wall.
+ * one a frame leaned on won. A back view used to go without the style
+ * reference, which could land it on a different wall.
  *
  * The scene lock is a single short block, built from the shared creative
  * direction, that every pose receives verbatim and near the top of the prompt,
- * where prompt compaction does not reach.
+ * where prompt compaction does not reach. Back views receive the style
+ * reference and the approved Pose 1 anchor like every other frame, so no
+ * frame has reason to land on a different wall.
  */
 
 type JsonRecord = Record<string, unknown>;
