@@ -991,7 +991,7 @@ ${hasModelReference
     ? `The image labeled MODEL FACE REFERENCE in the reference manifest above is the exact, non-negotiable face and identity for this model in EVERY pose, including this one - it outranks every other face source, including the approved-pose anchor. Reproduce it as close to pixel-identical as photographically possible: identical facial bone structure, eyes (shape, color, spacing), eyebrows, nose, lips, jawline, skin tone and texture, and hairstyle. Do not idealize, beautify, average, restyle, or blend it with any other face - this must read as the same real person from that reference photo, not merely a similar-looking model.${hasApprovedAnchor ? (hasStyleReference ? " Use the APPROVED POSE 1 image only for person, lighting, and styling continuity - never as a face or set source." : " Use the APPROVED POSE 1 image only for scene, lighting, and styling continuity - never as a face source.") : ""}`
     : hasApprovedAnchor
       ? "The image labeled APPROVED POSE 1 in the reference manifest above is the exact, non-negotiable ground truth for this model's identity. Reproduce the identical facial bone structure, eye shape and color, eyebrow shape, nose, lips, jawline, skin tone and texture, and hairstyle seen in that image - do not idealize, beautify, average, or drift toward a different face."
-      : "This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally attractive adult face with real individual character (not an idealized, airbrushed, symmetric stock face) exactly as described in modelIdentity above - every later pose in this set must reproduce this same face."}
+      : "This is the living full-front portrait and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally attractive adult face with real individual character (not an idealized, airbrushed, symmetric stock face) exactly as described in modelIdentity above - every later pose in this set must reproduce this same face."}
 ${faceQualityInstruction}
 
 LOCKED PRODUCT - MUST NOT CHANGE:
@@ -1047,11 +1047,6 @@ Embroidery geometry: ${embroideryGeometryJson}
 ${bottomWearSection({ bottomWear, isSaree: isSareeShoot, hasBottomReference, evidenceText: farshiEvidence })}
 
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
-${lockedDetailsDirective()}
-${creativeJson}
-- Build the set described above, and where a STYLE REFERENCE image is supplied, rebuild that room. APPROVED POSE 1 may confirm the person and lighting but never replaces the STYLE REFERENCE. Where only APPROVED POSE 1 is supplied, rebuild the scene that image shows. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
-- ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS: Never reproduce the background, wall, arches, urns, pots, plants, steps, or environment visible behind the garment in the product reference photos (front, back, bottom, mannequin). The photoshoot set must come exclusively from the STYLE REFERENCE (or Pose 1 / studio specification when no style reference is present).
-- BACKDROP AND SET CONTINUITY ACROSS ALL POSES: The exact same photoshoot set (wall color, wall finish, floor, lighting, and any props established by the ${hasStyleReference ? "STYLE REFERENCE" : "Pose 1 set"}) must remain identical across every pose in this set without drift or forgetting context.
 ${hasApprovedAnchor
   ? (hasStyleReference
     ? `- SET & BACKDROP HARD LOCK TO STYLE REFERENCE:
@@ -1065,6 +1060,11 @@ ${hasApprovedAnchor
   * LIGHTING & SHADOW CONTINUITY: Keep the exact same light direction, shadow density, and warm/cool color temperature established in Pose 1.
   * The camera and model remain in the exact same photoshoot location - only the pose and framing change.`)
   : "- Maintain a single, consistent studio set, wall finish, flooring, and lighting setup across all poses."}
+${lockedDetailsDirective()}
+${creativeJson}
+- Build the set described above, and where a STYLE REFERENCE image is supplied, rebuild that room. APPROVED POSE 1 may confirm the person and lighting but never replaces the STYLE REFERENCE. Where only APPROVED POSE 1 is supplied, rebuild the scene that image shows. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
+- ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS: Never reproduce the background, wall, arches, urns, pots, plants, steps, or environment visible behind the garment in the product reference photos (front, back, bottom, mannequin). The photoshoot set must come exclusively from the STYLE REFERENCE (or Pose 1 / studio specification when no style reference is present).
+- BACKDROP AND SET CONTINUITY ACROSS ALL POSES: The exact same photoshoot set (wall color, wall finish, floor, lighting, and any props established by the ${hasStyleReference ? "STYLE REFERENCE" : "Pose 1 set"}) must remain identical across every pose in this set without drift or forgetting context.
 
 ${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in every frame:
 - Footwear: ${boundedText(styling.footwear, 360)}

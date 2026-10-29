@@ -218,6 +218,11 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   assertStringIncludes(prompt, "DUPATTA REAR VISIBILITY LOCK");
   assertStringIncludes(prompt, "HAIR REAR VISIBILITY LOCK");
   assertStringIncludes(prompt, "SET & BACKDROP HARD LOCK TO STYLE REFERENCE");
+  assertEquals(
+    prompt.indexOf("SET & BACKDROP HARD LOCK TO STYLE REFERENCE")
+      < prompt.indexOf("LOCKED DETAILS ACROSS ALL SIX IMAGES"),
+    true,
+  );
   assertStringIncludes(prompt, "If Pose 1 copied a product-photo studio, courtyard, arch, urn, or pot, discard it");
   assertStringIncludes(prompt, "ZERO NEW PROPS");
   assertEquals(prompt.includes("SET & BACKDROP HARD LOCK TO APPROVED POSE 1"), false);
@@ -302,6 +307,31 @@ Deno.test("Pose 1 copy is a living portrait, never a catalog-hero freeze", () =>
   assertEquals(prompt.includes("Square-on full-length hero"), false);
   assertEquals(prompt.includes("front hero image"), false);
   assertEquals(prompt.includes("full-body hero view"), false);
+  const pose1WithoutFace = composeGenerationPrompt({
+    skuName: "LIVING-POSE-1",
+    productDetails: "",
+    pose: {
+      id: "full_front",
+      title: "Full Front Product View",
+      poseNumber: 1,
+      description: "Straight-on full-body living portrait",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "Square to camera with weight in one hip",
+      handPlacement: "relaxed",
+      expression: "natural",
+      highlightedDetails: ["front construction"],
+      productVisibilityRules: [],
+      purpose: "listing",
+      consistencyNotes: "",
+      prompt: "Create a straight-on full-body front photograph of a living photographed person.",
+      enabled: true,
+    } as any,
+    session: { productIdentity: { garmentFamily: "kurta_or_kurti_set" } },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertEquals(pose1WithoutFace.includes("This is the hero pose"), false);
+  assertStringIncludes(pose1WithoutFace, "living full-front portrait and establishes the model identity anchor");
 });
 
 Deno.test("style-set generation memory cannot tell later frames to reuse Pose 1's physical set", () => {
