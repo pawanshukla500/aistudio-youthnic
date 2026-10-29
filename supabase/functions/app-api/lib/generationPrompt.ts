@@ -694,6 +694,73 @@ function withoutUnplantedPose(value: unknown, replacement: string): string {
 
 const RELAXED_HANDS = "Both hands relaxed and clear of the garment, holding nothing copied from the style or model photo.";
 const CALM_EXPRESSION = "Calm natural expression.";
+const SET_PROPS_ONLY = "Set props only. Do not copy objects held in the style or model photo.";
+const PLANTED_DISTINCTION = "Distinct from the other frames. Both feet stay planted and close.";
+const PLANTED_VISIBILITY = "The named feature stays readable. Both feet stay planted and close.";
+
+const CREATIVE_BODY_KEYS = new Set(["bodyposition", "body_position", "prompt", "description"]);
+const CREATIVE_HAND_KEYS = new Set(["handplacement", "hand_placement"]);
+const CREATIVE_HELD_KEYS = new Set(["propusage", "prop_usage"]);
+const CREATIVE_DISTINCTION_KEYS = new Set(["distinctfrom", "distinct_from"]);
+const CREATIVE_VISIBILITY_KEYS = new Set(["visibilityrules", "visibility_rules"]);
+
+function creativeDirectionKey(key: string) {
+  return key.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function poseOrPropText(value: string, replacement: string) {
+  return UNPLANTED_POSE_PATTERN.test(value) || HELD_OBJECT_PATTERN.test(value) ? replacement : value;
+}
+
+// Locked art direction is serialized in full. A cached showcase plan can still
+// name a walking stride or a sparkler inside body, hand, expression, or prop
+// fields. Backdrop strings stay untouched: "walk" inside a room description
+// is the set, not a pose.
+function sanitizeCreativeDirection(
+  value: JsonRecord,
+  pose: { id: string; poseNumber: number },
+  sitting: boolean,
+): JsonRecord {
+  const planted = plantedPoseReplacement(pose, sitting);
+  const visit = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map((entry) => visit(entry));
+    if (!input || typeof input !== "object") return input;
+    const output: JsonRecord = {};
+    for (const [key, entry] of Object.entries(input as JsonRecord)) {
+      const normalized = creativeDirectionKey(key);
+      if (typeof entry === "string") {
+        if (CREATIVE_BODY_KEYS.has(normalized)) {
+          output[key] = poseOrPropText(entry, planted);
+          continue;
+        }
+        if (CREATIVE_HAND_KEYS.has(normalized)) {
+          output[key] = poseOrPropText(entry, RELAXED_HANDS);
+          continue;
+        }
+        if (normalized === "expression") {
+          output[key] = poseOrPropText(entry, CALM_EXPRESSION);
+          continue;
+        }
+        if (CREATIVE_DISTINCTION_KEYS.has(normalized)) {
+          output[key] = poseOrPropText(entry, PLANTED_DISTINCTION);
+          continue;
+        }
+        if (CREATIVE_HELD_KEYS.has(normalized)) {
+          output[key] = HELD_OBJECT_PATTERN.test(entry) ? SET_PROPS_ONLY : entry;
+          continue;
+        }
+      }
+      if (CREATIVE_VISIBILITY_KEYS.has(normalized) && Array.isArray(entry)) {
+        output[key] = entry.map((item) => typeof item === "string" ? poseOrPropText(item, PLANTED_VISIBILITY) : visit(item));
+        continue;
+      }
+      output[key] = visit(entry);
+    }
+    return output;
+  };
+  const sanitized = visit(value);
+  return sanitized && typeof sanitized === "object" && !Array.isArray(sanitized) ? sanitized as JsonRecord : {};
+}
 
 export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
@@ -750,6 +817,14 @@ export function composeGenerationPrompt(args: {
     }
     : product;
   const isShowcase = args.pose.id === "showcase";
+  const isPose4 = args.pose.id === "creative" || args.pose.poseNumber === 4;
+  const isSittingDemanded = isSeatedEditorialPoseDemanded({
+    pose: args.pose,
+    productDetails: String(args.productDetails || ""),
+    creative,
+    stylingNotes: styling?.stylingNotes,
+  });
+  const directedCreative = sanitizeCreativeDirection(creative, args.pose, isSittingDemanded);
   // Exact garmentFamily drives the saree truth blocks; the pose taxonomy is
   // broader, and a shoot either taxonomy calls a saree has no bottom wear.
   const isSareeShoot = isSaree || isSareePoseFamily(poseFamily);
@@ -760,9 +835,9 @@ export function composeGenerationPrompt(args: {
     { maxString: 360, maxItems: 16, maxKeys: 32 },
   );
   const modelJson = compactJson(model, { maxString: 500, maxItems: 16, maxKeys: 32 });
-  const showcaseIntent = effectiveShowcaseIntent({ creative, family: poseFamily, includesBottomWear: bottomWear.includesBottomWear });
-  const showcaseShot = effectiveShowcaseShot(creative, { includesBottomWear: bottomWear.includesBottomWear });
-  const creativeForPrompt: JsonRecord = { ...creative, showcaseIntent };
+  const showcaseIntent = effectiveShowcaseIntent({ creative: directedCreative, family: poseFamily, includesBottomWear: bottomWear.includesBottomWear });
+  const showcaseShot = effectiveShowcaseShot(directedCreative, { includesBottomWear: bottomWear.includesBottomWear });
+  const creativeForPrompt: JsonRecord = { ...directedCreative, showcaseIntent };
   // A legacy snake_case alias must not survive beside the corrected camelCase
   // value and reintroduce the raw complete-set direction in the serialized JSON.
   delete creativeForPrompt.showcase_intent;
@@ -792,17 +867,17 @@ export function composeGenerationPrompt(args: {
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
   const isCloseup = args.pose.id === "closeup";
   const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).join(", ");
-  const closeupMode = isCloseup ? resolveCloseupMode({ pose: args.pose, creative }) : "face_and_detail";
-  const closeupHeroDetail = boundedText(creative.closeupHeroDetail || creative.closeup_hero_detail || highlightedDetails, 260);
+  const closeupMode = isCloseup ? resolveCloseupMode({ pose: args.pose, creative: directedCreative }) : "face_and_detail";
+  const closeupHeroDetail = boundedText(directedCreative.closeupHeroDetail || directedCreative.closeup_hero_detail || highlightedDetails, 260);
   // Pose 5's own recorded subject, without the current pose's highlights as a
   // fallback: on pose 6 that fallback is this frame's details, which would make
   // every showcase look like a collision with the close-up.
-  const recordedCloseupHeroDetail = boundedText(creative.closeupHeroDetail ?? creative.closeup_hero_detail, 260);
+  const recordedCloseupHeroDetail = boundedText(directedCreative.closeupHeroDetail ?? directedCreative.closeup_hero_detail, 260);
   // The analysis chooses this frame's subject per SKU. The fixed intents remain
   // only for a cached analysis made before showcasePlan existed. Resolved by the
   // shared helper so the pose brief, this rule, the shoot memory and the feedback
   // row all describe the same frame.
-  const sceneLock = sceneLockBlock({ creativeDirection: creative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference });
+  const sceneLock = sceneLockBlock({ creativeDirection: directedCreative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference });
   const isMacroShowcase = isShowcase && showcaseShot?.shotType === "macro_detail";
   const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL) && !isMacroShowcase;
   const faceQualityInstruction = faceRequired
@@ -810,13 +885,6 @@ export function composeGenerationPrompt(args: {
     : isTrueBack
       ? "The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face and profile MUST be 100% identical to the MODEL FACE REFERENCE / APPROVED POSE 1 identity - same jawline, nose profile, skin texture with visible pores, eye shape, and makeup. Never substitute a different person or face."
       : "This frame is a PRODUCT-DETAIL close-up. Do not force a full beauty-face crop. If any portion of the face appears it MUST match the identity lock - same jawline, eyes, skin texture with visible pores, and makeup. Prefer filling the frame with the named product selling detail; omit or crop the face when a full face would make that detail too small to read.";
-  const isPose4 = args.pose.id === "creative" || args.pose.poseNumber === 4;
-  const isSittingDemanded = isSeatedEditorialPoseDemanded({
-    pose: args.pose,
-    productDetails: String(args.productDetails || ""),
-    creative,
-    stylingNotes: styling?.stylingNotes,
-  });
   const plantedStance = plantedPoseReplacement(args.pose, isSittingDemanded);
   const poseDescription = boundedText(withoutUnplantedPose(args.pose.description, plantedStance), 600);
   const posePrompt = boundedText(withoutUnplantedPose(args.pose.prompt, plantedStance), 1_200);
@@ -1011,9 +1079,9 @@ ${styling.themeInterpretation ? `- Theme being served: ${boundedText(styling.the
 - Style the model with exactly these pieces - the same metal, the same count, the same placement in every frame. Do not add a necklace, bangle, ring, belt, bag, hair ornament or any other accessory this plan does not list, and do not drop one it does.
 - JEWELLERY & ORNAMENT LOCK: Wear exactly the jewellery and ornaments in this plan. If the plan copied style-reference ornaments, keep those pieces identical. Do not invent competing necklaces, maang tikkas, extra bangles, or hair jewellery. Product-included jewellery from the product references outranks style-reference jewellery when both exist, and nothing in this plan may hide neckline or embroidery.
 - This is styling only. It never becomes part of the garment, never hides or replaces a garment detail, bottom wear or footwear shown in the product references, and never contradicts the placement or absence locks above.
-${creative?.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${boundedText(creative.suggestedAccessories, 420)}` : ""}`
+${directedCreative.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${boundedText(directedCreative.suggestedAccessories, 420)}` : ""}`
   : `STYLING ADDITION (optional, locked once chosen):
-${creative?.suggestedAccessories ? `The stylist has proposed adding: ${boundedText(creative.suggestedAccessories, 420)}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}
+${directedCreative.suggestedAccessories ? `The stylist has proposed adding: ${boundedText(directedCreative.suggestedAccessories, 420)}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}
 - JEWELLERY & ORNAMENT LOCK: ${hasStyleReference
     ? "If the STYLE REFERENCE image in this manifest shows jewellery or ornaments that complement this product and the product itself does not already include competing pieces, keep those exact style-reference pieces identical across the set. Never invent a second jewellery story."
     : "No STYLE REFERENCE image is in this manifest. Use only jewellery/ornaments that ship with the product or were named in the approved styling plan. Do not invent jewellery from a missing style reference."}`}

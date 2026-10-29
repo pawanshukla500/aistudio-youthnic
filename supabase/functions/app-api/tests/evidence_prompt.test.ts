@@ -1231,6 +1231,58 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   assertEquals(propPose.includes("sparkler"), false);
   assertStringIncludes(propPose, "holding nothing copied from the style or model photo");
   assertStringIncludes(propPose, "Calm natural expression.");
+
+  const creativeLeak = composeGenerationPrompt({
+    skuName: "MANGO-MEHENDI",
+    productDetails: "Olive embroidered kurta",
+    pose: {
+      id: "showcase",
+      title: "Hem feature",
+      poseNumber: 6,
+      description: "Feature showcase",
+      cameraAngle: "low angle",
+      framing: "full body",
+      bodyPosition: "soft weight shift",
+      handPlacement: "hands relaxed",
+      expression: "calm poise",
+      highlightedDetails: ["gold hem"],
+      productVisibilityRules: ["hem visible"],
+      purpose: "showcase",
+      consistencyNotes: "locked",
+      prompt: "Show the gold hem.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "olive" },
+      creativeDirection: {
+        backgroundStyle: "Green festive wall, red patchwork chair, and a walking-distance rug",
+        propUsage: "Two handheld sparklers",
+        showcasePlan: {
+          heroFeature: "gold hem embroidery",
+          featureRegion: "hem_border",
+          shotType: "full_body_feature",
+          whyItSells: "the hem craft is the signature",
+          bodyPosition: "frozen walking stride with feet separated",
+          handPlacement: "one hand holding a sparkler",
+          expression: "wink while holding a sparkler",
+          distinctFrom: "not the style photo walking pose",
+          visibilityRules: ["hem fully visible", "sparkler stays in frame"],
+        },
+      },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertEquals(creativeLeak.includes("sparkler"), false);
+  assertEquals(creativeLeak.includes("feet separated"), false);
+  assertEquals(creativeLeak.includes("style photo walking pose"), false);
+  assertEquals(creativeLeak.includes("frozen walking stride with feet separated"), false);
+  assertStringIncludes(creativeLeak, "walking-distance rug");
+  assertStringIncludes(creativeLeak, "Set props only. Do not copy objects held in the style or model photo.");
+  assertStringIncludes(creativeLeak, "Planted weight shift. Both feet stay close.");
+  assertStringIncludes(creativeLeak, "holding nothing copied from the style or model photo");
+  assertStringIncludes(creativeLeak, "Calm natural expression.");
+  assertStringIncludes(creativeLeak, "gold hem embroidery");
+  assertStringIncludes(creativeLeak, "hem fully visible");
 });
 
 Deno.test("composeGenerationPrompt enforces anatomical integrity and eliminates extra hands", () => {
