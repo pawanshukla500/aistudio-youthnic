@@ -466,7 +466,7 @@ export function extractLearnedPromptPatterns(args: {
     drape_feature:
       "A drape showcase frame holds or spreads the panel clear of the body so its artwork, border and full length read end to end.",
     movement_feature:
-      "A movement showcase frame uses controlled motion so the feature's fall, flare or fluidity is visible while the garment stays readable.",
+      "A movement showcase frame uses a planted weight shift with both feet close so the feature's fall or flare stays readable. Do not freeze a walking stride or lift a foot.",
   };
   if (showcaseOutcome && shotType && shotText[shotType]) {
     extracted.push(pattern("pose", `showcase-${shotType.replace(/_/g, "-")}-lock`, shotText[shotType], showcaseOutcome));
@@ -478,7 +478,7 @@ export function extractLearnedPromptPatterns(args: {
     extracted.push(pattern(
       "pose",
       "pose1-continuity-lock",
-      "Later poses reuse Pose 1 model identity and physical set. Pose 1 never overrides original product references for garment geometry.",
+      "Later poses reuse the reference face (MODEL FACE REFERENCE, or the STYLE REFERENCE face when no separate model photo was uploaded) and Pose 1's physical set. Pose 1 never overrides the product photos, and it is never a different person.",
       "success",
     ));
   }

@@ -850,7 +850,7 @@ ${manifest}
 ${generationMemory ? `
 GENERATION MEMORY (DO NOT FORGET):
 ${generationMemory}
-- Product images remain garment/SKU truth. Style reference remains set/backdrop authority. Approved Pose 1 is identity and set continuity only.
+- Product images remain garment/SKU truth. Style reference remains set/backdrop authority. Approved Pose 1 is set continuity only, never a different face or a different garment.
 ` : ""}
 
 EDIT GOAL:
@@ -873,7 +873,7 @@ LOCKED SUBJECT - MUST NOT CHANGE:
 ${modelJson}
 - Same recognizable face, skin tone, body proportions, hairstyle, hair length/color, makeup, accessories and footwear across the complete set.
 - Model expressions: authentic, relaxed warmth and natural composure; never a stiff, forced, or frozen smile.
-- Pose 1 is only the subject/scene anchor for later poses. It never overrides original product references.
+- Pose 1 anchors the set for later poses. It never overrides the reference face or the product photos.
 
 FACE & IDENTITY LOCK - HIGHEST PRIORITY:
 ${hasModelReference
