@@ -412,6 +412,10 @@ function poseCategoryRules(category: string) {
   * The upper garment silhouette, neckline, embroidery, and sleeve details must remain fully displayed and untangled.
   * Posture should be poised, relaxed, and editorial (e.g. slight angle to camera, back straight or gentle lean, legs gracefully placed to showcase garment volume and footwear).
 - Ensure the seating furniture/plinth strictly matches the studio aesthetic and does NOT introduce cluttered pre-shoot props.`,
+    angled: `
+- THREE-QUARTER TURN: Rotate the torso and hips 35 to 45 degrees. This is not a flat front and not a 90-degree profile.
+- Both feet stay planted and close. Never a staggered stride, a lifted foot, or a stance that opens a joined hem.
+- Show the side seam and sleeve from that angle. Keep the same face and the same backdrop.`,
     dynamic: `
 - NATURAL EDITORIAL POSE: A relaxed catalog stance that is clearly not the hero pose.
 - Use a small weight shift, a gentle shoulder angle, or a soft lean that already belongs to the set. Both feet stay grounded and close enough that trouser hems, pleats, and a joined Farshi hem remain closed.
@@ -834,7 +838,11 @@ export function composeGenerationPrompt(args: {
       ? "showcase"
       : (isPose4 && isSittingDemanded)
         ? "sitting"
-        : detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || "") + " " + (args.pose.bodyPosition || ""));
+        // Pose 2 is a planted 35-to-45 turn. "side" and "three-quarter" in the
+        // planner text must not select the 90-degree profile with a staggered stance.
+        : (args.pose.poseNumber === 2 || args.pose.id === "angled")
+          ? "angled"
+          : detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || "") + " " + (args.pose.bodyPosition || ""));
   const categoryRules = poseCategoryRules(poseCategory);
   // Compaction keeps the first 1,400 characters of this block. The current
   // frame and the seated rules have to lead, or a long six-pose summary

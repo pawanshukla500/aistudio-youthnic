@@ -1097,11 +1097,45 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
     },
     references: [{ role: "front" }, { role: "style_reference" }],
   });
-  assertStringIncludes(walkingPose2, "POSE CATEGORY RULES (SIDE):");
+  assertStringIncludes(walkingPose2, "POSE CATEGORY RULES (ANGLED):");
+  assertStringIncludes(walkingPose2, "not a 90-degree profile");
+  assertEquals(walkingPose2.includes("exactly 90 degrees"), false);
+  assertEquals(walkingPose2.includes("staggered stance"), false);
   assertStringIncludes(walkingPose2, "Torso and hips turn 35 to 45 degrees. Both feet stay planted and close.");
   assertEquals(walkingPose2.includes("Walk forward"), false);
   assertEquals(walkingPose2.includes("one foot lifted"), false);
   assertEquals(walkingPose2.includes("Mid-step walk toward camera"), false);
+
+  const plannerPose2 = composeGenerationPrompt({
+    skuName: "KURTA-SET-01",
+    productDetails: "Purple floral printed kurta with patiala salwar",
+    pose: {
+      id: "angled",
+      title: "Professional Side / 3/4 View",
+      poseNumber: 2,
+      description: "A professional three-quarter or side view that reveals depth, drape, fit, and side construction.",
+      cameraAngle: "Eye-level 35-50 degree three-quarter view",
+      framing: "full body",
+      bodyPosition: "Rotate torso and hips together 35 to 45 degrees into an intentional three-quarter angle, both feet planted and close",
+      handPlacement: "away from the side seam",
+      expression: "natural glance",
+      highlightedDetails: ["side silhouette"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "depth",
+      consistencyNotes: "locked",
+      prompt: "Create an intentional 35-to-45 degree three-quarter fashion pose with both feet planted and close so a joined hem stays closed. Reveal side silhouette.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "purple", bottomWearDetails: "farshi pajama" },
+      creativeDirection: { seatedPoseRequired: "no" },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(plannerPose2, "POSE CATEGORY RULES (ANGLED):");
+  assertStringIncludes(plannerPose2, "Both feet stay planted and close");
+  assertEquals(plannerPose2.includes("exactly 90 degrees"), false);
+  assertEquals(plannerPose2.includes("staggered stance"), false);
 
   // Test Pose 6: Feature showcase
   const pose6Prompt = composeGenerationPrompt({
