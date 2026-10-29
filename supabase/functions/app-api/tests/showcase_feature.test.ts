@@ -231,7 +231,7 @@ Deno.test("the analysis prompt asks for a chosen feature and forbids a hero repe
   assertStringIncludes(prompt, "SIXTH-FRAME FEEDBACK");
   assertStringIncludes(prompt, "bottom_wear as full_body_feature");
   assertStringIncludes(prompt, '"showcasePlan":{"heroFeature":""');
-  assertEquals(ANALYSIS_VERSION, "generation-session-v30-listing-identity-living-pose1");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v31-listing-identity-style-set-room");
 });
 
 Deno.test("a widened frame is what the slot, the prompt and the feedback key all use", () => {

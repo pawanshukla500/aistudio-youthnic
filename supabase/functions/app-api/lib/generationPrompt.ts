@@ -50,7 +50,12 @@ export function styleSetOwnsListingRoom(text: string): string {
     .replace(/\bthe identical studio set, wall color, and lighting established in Pose 1\b/gi, "the STYLE REFERENCE room (Pose 1 is person and lighting only)")
     .replace(/\bbackdrop and props already established in Pose 1\b/gi, "STYLE REFERENCE backdrop and props")
     .replace(/\bexact same backdrop wall, floor, and lighting from Pose 1\b/gi, "exact same STYLE REFERENCE backdrop wall, floor, and lighting")
-    .replace(/\bSame model identity, styling, footwear, set, backdrop and lighting as Pose 1\b/gi, "Same model identity, styling, and footwear as Pose 1; STYLE REFERENCE room");
+    .replace(/\bSame model identity, styling, footwear, set, backdrop and lighting as Pose 1\b/gi, "Same model identity, styling, and footwear as Pose 1; STYLE REFERENCE room")
+    .replace(/\bSame model identity, styling, set, backdrop and lighting as Pose 1\b/gi, "Same model identity and styling as Pose 1; STYLE REFERENCE room")
+    .replace(/\bscene, lighting, and product truth from Pose 1\b/gi, "product truth from Pose 1; STYLE REFERENCE room")
+    .replace(/\bUse Pose 1 only as the model and shoot anchor\b/gi, "Use Pose 1 only as the model and lighting anchor; STYLE REFERENCE is the set")
+    .replace(/\bPose 1 model identity and physical set\b/gi, "Pose 1 model identity; STYLE REFERENCE is the set")
+    .replace(/\bidentity and set continuity only\b/gi, "person and lighting continuity only");
 }
 
 /** Cached Pose 1 plans still ask for a catalog “hero”. GPT Image 2 reads that as a stiff freeze. */
@@ -64,7 +69,8 @@ export function softenPose1HeroCopy(text: string): string {
     .replace(/\bfront hero image\b/gi, "front living portrait")
     .replace(/\bhero image of a living photographed person\b/gi, "photograph of a living photographed person")
     .replace(/\bhead-to-toe hero\b/gi, "head-to-toe living portrait")
-    .replace(/\bfull-length hero\b/gi, "full-length living portrait");
+    .replace(/\bfull-length hero\b/gi, "full-length living portrait")
+    .replace(/\bPose 1 hero\b/gi, "Pose 1 living portrait");
 }
 
 /** Face and style-set precede product photos so GPT Image 2 and product-truth analysis do not copy a pre-shoot studio. Same-rank items keep upload order. */
@@ -889,9 +895,17 @@ export function composeGenerationPrompt(args: {
     `expression: ${boundedText(args.pose.expression, 360)}`,
   ];
   const correction = boundedText(args.correction, 1_200);
-  const learnings = boundedText(args.learnings, 900);
+  const learnings = boundedText(
+    hasStyleReference ? styleSetOwnsListingRoom(String(args.learnings || "")) : String(args.learnings || ""),
+    900,
+  );
   const fashionKnowledge = boundedText(args.fashionKnowledge, 700);
-  const generationMemory = boundedText(args.generationMemory, 900);
+  const generationMemory = boundedText(
+    softenPose1HeroCopy(
+      hasStyleReference ? styleSetOwnsListingRoom(String(args.generationMemory || "")) : String(args.generationMemory || ""),
+    ),
+    900,
+  );
   const recordedVisibility = poseVisibility.join("; ");
   const visibilityRules = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, farshiEvidence) === "farshi"
     ? reconcileFarshiVisibilityRules(recordedVisibility)
@@ -939,7 +953,7 @@ ${manifest}
 ${generationMemory ? `
 GENERATION MEMORY (DO NOT FORGET):
 ${generationMemory}
-- Product images remain garment/SKU truth. Style reference remains set/backdrop authority. Approved Pose 1 is identity and set continuity only.
+- Product images remain garment/SKU truth. Style reference remains set/backdrop authority. Approved Pose 1 is ${hasStyleReference ? "the same person and lighting only" : "identity and set continuity only"}.
 ` : ""}
 
 EDIT GOAL:
@@ -1035,7 +1049,7 @@ ${lockedDetailsDirective()}
 ${creativeJson}
 - Build the set described above, and where a STYLE REFERENCE image is supplied, rebuild that room. APPROVED POSE 1 may confirm the person and lighting but never replaces the STYLE REFERENCE. Where only APPROVED POSE 1 is supplied, rebuild the scene that image shows. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
 - ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS: Never reproduce the background, wall, arches, urns, pots, plants, steps, or environment visible behind the garment in the product reference photos (front, back, bottom, mannequin). The photoshoot set must come exclusively from the STYLE REFERENCE (or Pose 1 / studio specification when no style reference is present).
-- BACKDROP AND SET CONTINUITY ACROSS ALL POSES: The exact same photoshoot set (wall color, wall finish, floor, lighting, and any props established by the style reference / Pose 1) must remain identical across every pose in this set without drift or forgetting context.
+- BACKDROP AND SET CONTINUITY ACROSS ALL POSES: The exact same photoshoot set (wall color, wall finish, floor, lighting, and any props established by the ${hasStyleReference ? "STYLE REFERENCE" : "Pose 1 set"}) must remain identical across every pose in this set without drift or forgetting context.
 ${hasApprovedAnchor
   ? (hasStyleReference
     ? `- SET & BACKDROP HARD LOCK TO STYLE REFERENCE:

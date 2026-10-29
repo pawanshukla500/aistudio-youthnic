@@ -478,7 +478,9 @@ export function extractLearnedPromptPatterns(args: {
     extracted.push(pattern(
       "pose",
       "pose1-continuity-lock",
-      "Later poses reuse Pose 1 model identity and physical set. Pose 1 never overrides original product references for garment geometry.",
+      args.hasStyleReference
+        ? "Later poses reuse Pose 1 model identity. STYLE REFERENCE is the set. Pose 1 never overrides original product references for garment geometry."
+        : "Later poses reuse Pose 1 model identity and physical set. Pose 1 never overrides original product references for garment geometry.",
       "success",
     ));
   }
@@ -488,7 +490,7 @@ export function extractLearnedPromptPatterns(args: {
     extracted.push(pattern(
       "pose",
       "pose-plan-6-variation-lock",
-      "Every shoot executes a 6-pose plan with physical variation: Pose 1 hero, Pose 2 35-to-45 degree turn, Pose 3 true rear view, Pose 4 active movement or seated, Pose 5 close-up detail, Pose 6 unique feature showcase. Never duplicate frontal standing.",
+      "Every shoot executes a 6-pose plan with physical variation: Pose 1 living portrait, Pose 2 35-to-45 degree turn, Pose 3 true rear view, Pose 4 active movement or seated, Pose 5 close-up detail, Pose 6 unique feature showcase. Never duplicate frontal standing.",
       overallOutcome,
     ));
     extracted.push(pattern(

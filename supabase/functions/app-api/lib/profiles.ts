@@ -810,7 +810,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       highlightedDetails: isSaree ? ["drape depth", "pallu fall", "pleats"] : ["side silhouette", "fit", "drape and construction"],
       primaryReference: "front",
       purpose: "Show garment depth and fit",
-      prompt: "Create an intentional 35-to-45 degree three-quarter fashion pose that is visibly and physically turned from the hero pose, with one foot stepped forward to reveal side silhouette, drape depth, and sleeve shape while keeping the full outfit readable and preserving authentic bottom wear. Model has a relaxed, natural glance and realistic, effortless expression — never a stiff stance or artificial smile.",
+      prompt: "Create an intentional 35-to-45 degree three-quarter fashion pose that is visibly and physically turned from the full-front living portrait, with one foot stepped forward to reveal side silhouette, drape depth, and sleeve shape while keeping the full outfit readable and preserving authentic bottom wear. Model has a relaxed, natural glance and realistic, effortless expression — never a stiff stance or artificial smile.",
       enabled: true,
     },
     {
@@ -877,7 +877,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
         "include a sharp face-to-chest or face-to-waist pairing only when that crop still makes the detail readable",
         "if embroidery, neckline craft, print scale, pallu/border, or fabric texture would be too small beside a full face, crop to the product detail instead of the face",
       ],
-      consistencyNotes: "Keep the same identity, hair, makeup, jewellery, footwear, scene, lighting, and product truth from Pose 1; only the crop tightens around the selling detail",
+      consistencyNotes: "Keep the same identity, hair, makeup, jewellery, footwear, and product truth as Pose 1; STYLE REFERENCE room; only the crop tightens around the selling detail",
       description: "A zoomed-in shot that sells the product's most important real detail, with the face included only when it does not shrink that detail.",
       cameraAngle: "Eye-level, zoomed in to a product-detail crop or a face-to-chest/face-to-waist crop that still leaves the detail large",
       highlightedDetails: ["key product detail", "craftsmanship", "optional face"],
@@ -1827,7 +1827,7 @@ SCENE IS SHARED, NOT PER POSE: do NOT describe the background, set, walls, floor
 Across all six, ONLY pose, angle, framing, and expression may change.
 LOCKED DETAILS ACROSS ALL SIX IMAGES:
 Lock and remember all important details across all 6 images to avoid consistency mistakes:
-- Photoshoot backdrop: Exact same room architecture, wall finish, flooring, lighting, shadows, and set props from the style reference / Pose 1.
+- Photoshoot backdrop: Exact same room architecture, wall finish, flooring, lighting, shadows, and set props from the STYLE REFERENCE when one is supplied; otherwise from Pose 1. When a style-set is present, Pose 1 is person and lighting only — do not record Pose 1 as the room.
 - Footwear: Exact same pair, style, heel, finish, and color across all 6 frames.
 - Ornaments & jewellery: Exact same pieces, metal type, count, and placement across all 6 frames.
 - Accessories & styling: Exact same bag, belt, dupatta drape treatment, hair, and makeup across all 6 frames.
@@ -1891,7 +1891,8 @@ export const CONSISTENCY_RULES = [
 // v29 stops cached pose-plan copy from telling later frames to rebuild Pose 1's
 // room when a style-set is present.
 // v30 stops Pose 1 analysis/default copy from asking for a catalog-hero freeze.
-export const ANALYSIS_VERSION = "generation-session-v30-listing-identity-living-pose1";
+// v31 stops analysis LOCKED DETAILS from co-authorizing Pose 1 as the room.
+export const ANALYSIS_VERSION = "generation-session-v31-listing-identity-style-set-room";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

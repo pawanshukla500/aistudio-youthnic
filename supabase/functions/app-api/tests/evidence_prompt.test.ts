@@ -304,6 +304,49 @@ Deno.test("Pose 1 copy is a living portrait, never a catalog-hero freeze", () =>
   assertEquals(prompt.includes("full-body hero view"), false);
 });
 
+Deno.test("style-set generation memory cannot tell later frames to reuse Pose 1's physical set", () => {
+  assertEquals(
+    styleSetOwnsListingRoom("Later poses reuse Pose 1 model identity and physical set. Pose 1 never overrides original product references for garment geometry."),
+    "Later poses reuse Pose 1 model identity; STYLE REFERENCE is the set. Pose 1 never overrides original product references for garment geometry.",
+  );
+  const prompt = composeGenerationPrompt({
+    skuName: "MEMORY-SET",
+    productDetails: "",
+    pose: {
+      id: "angled",
+      title: "Angled",
+      poseNumber: 2,
+      description: "angle",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "turn",
+      handPlacement: "relaxed",
+      expression: "calm",
+      highlightedDetails: [],
+      productVisibilityRules: ["Keep the same identity, hair, makeup, jewellery, footwear, scene, lighting, and product truth from Pose 1"],
+      purpose: "angle",
+      consistencyNotes: "Use Pose 1 only as the model and shoot anchor; preserve the original product references as garment truth",
+      prompt: "Angled coverage.",
+      enabled: true,
+    } as any,
+    session: { productIdentity: { garmentFamily: "kurta_or_kurti_set" } },
+    references: [{ role: "front" }, { role: "style_reference" }, { role: "model_identity" }, { role: "approved_pose" }],
+    generationMemory: "Later poses reuse Pose 1 model identity and physical set. Pose 1 hero, Pose 2 35-to-45 degree turn.",
+    learnings: "Approved Pose 1 is identity and set continuity only.",
+  });
+  assertStringIncludes(prompt, "Pose 1 model identity; STYLE REFERENCE is the set");
+  assertStringIncludes(prompt, "Pose 1 living portrait");
+  assertStringIncludes(prompt, "the same person and lighting only");
+  assertStringIncludes(prompt, "established by the STYLE REFERENCE");
+  assertStringIncludes(prompt, "product truth from Pose 1; STYLE REFERENCE room");
+  assertStringIncludes(prompt, "Use Pose 1 only as the model and lighting anchor; STYLE REFERENCE is the set");
+  assertEquals(prompt.includes("identity and set continuity only"), false);
+  assertEquals(prompt.includes("physical set"), false);
+  assertEquals(prompt.includes("Pose 1 hero"), false);
+  assertEquals(prompt.includes("style reference / Pose 1"), false);
+  assertEquals(prompt.includes("established by the Pose 1 set"), false);
+});
+
 Deno.test("stored Pose 1 set-continuity rules cannot override a style-set later frame", () => {
   const prompt = composeGenerationPrompt({
     skuName: "DRIFTED-POSE-1",

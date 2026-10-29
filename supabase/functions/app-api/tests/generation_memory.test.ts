@@ -90,6 +90,22 @@ Deno.test("learned prompt patterns stay generic and fail closed without a catego
   assertEquals(titles.includes("style-reference-backdrop-lock"), true);
   assertEquals(titles.includes("seated-pose-4-lock"), true);
   assertEquals(titles.includes("pose1-continuity-lock"), true);
+  assertEquals(
+    learned.find((pattern) => pattern.title === "pose1-continuity-lock")?.patternText.includes("STYLE REFERENCE is the set"),
+    true,
+  );
+  assertEquals(
+    learned.find((pattern) => pattern.title === "pose1-continuity-lock")?.patternText.includes("physical set"),
+    false,
+  );
+  assertEquals(
+    learned.find((pattern) => pattern.title === "pose-plan-6-variation-lock")?.patternText.includes("Pose 1 living portrait"),
+    true,
+  );
+  assertEquals(
+    learned.find((pattern) => pattern.title === "pose-plan-6-variation-lock")?.patternText.includes("Pose 1 hero"),
+    false,
+  );
   assertEquals(titles.includes("pose-plan-6-variation-lock"), true);
   assertEquals(titles.includes("locked-styling-and-accessories"), true);
   assertEquals(titles.includes("natural-realistic-expression"), true);
