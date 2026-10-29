@@ -57,7 +57,10 @@ export function styleSetOwnsListingRoom(text: string): string {
     .replace(/\bPose 1 model identity and physical set\b/gi, "Pose 1 model identity; STYLE REFERENCE is the set")
     .replace(/\bUse it for identity and set continuity, never as garment geometry\b/gi, "Use it for the same person and lighting only, never as the room or garment geometry")
     .replace(/\bidentity and set continuity only\b/gi, "person and lighting continuity only")
-    .replace(/\bidentity and set continuity\b/gi, "identity and lighting continuity");
+    .replace(/\bidentity and set continuity\b/gi, "identity and lighting continuity")
+    .replace(/\bphysical room and backdrop set from Pose 1\b/gi, "STYLE REFERENCE room")
+    .replace(/\bfrom what was established in Pose 1\b/gi, "from the STYLE REFERENCE")
+    .replace(/\bestablished by the Pose 1 set\b/gi, "established by the STYLE REFERENCE");
 }
 
 /** Cached Pose 1 plans still ask for a catalog “hero”. GPT Image 2 reads that as a stiff freeze. */
@@ -830,7 +833,7 @@ export function composeGenerationPrompt(args: {
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
   const isPose1 = args.pose.id === "full_front" || args.pose.poseNumber === 1;
   let posePrompt = hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.prompt || "")) : String(args.pose.prompt || "");
-  let poseDescription = String(args.pose.description || "");
+  let poseDescription = hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.description || "")) : String(args.pose.description || "");
   const poseConsistency = hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.consistencyNotes || "")) : String(args.pose.consistencyNotes || "");
   const poseVisibility = hasStyleReference
     ? boundedStrings(args.pose.productVisibilityRules, 12, 260).map(styleSetOwnsListingRoom)
@@ -858,7 +861,9 @@ export function composeGenerationPrompt(args: {
   // only for a cached analysis made before showcasePlan existed. Resolved by the
   // shared helper so the pose brief, this rule, the shoot memory and the feedback
   // row all describe the same frame.
-  const sceneLock = sceneLockBlock({ creativeDirection: creative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference });
+  const sceneLock = hasStyleReference
+    ? styleSetOwnsListingRoom(sceneLockBlock({ creativeDirection: creative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference }))
+    : sceneLockBlock({ creativeDirection: creative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference });
   const isMacroShowcase = isShowcase && showcaseShot?.shotType === "macro_detail";
   const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL) && !isMacroShowcase;
   const faceQualityInstruction = faceRequired
@@ -1078,7 +1083,7 @@ ${poseVariationDirective(args.pose, isSittingDemanded)}
 Description: ${boundedText(poseDescription, 600)}
 Details to highlight: ${highlightedDetails}
 Visibility rules: ${visibilityRules}
-Purpose: ${boundedText(args.pose.purpose, 420)}
+Purpose: ${boundedText(hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.purpose || "")) : String(args.pose.purpose || ""), 420)}
 Consistency notes: ${boundedText(poseConsistency, 600)}
 ${categoryRules ? `POSE CATEGORY RULES (${poseCategory.toUpperCase()}):\n${categoryRules}` : ""}
 GARMENT POSE GRAMMAR (${garmentPoseFamilyHeading(poseFamily)}) - body language and framing only; it never changes the garment's design, print, colour, fit or construction:

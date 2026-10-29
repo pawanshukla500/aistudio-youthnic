@@ -121,6 +121,27 @@ Deno.test("a style-set shoot discards stored product-studio scene prose", () => 
   assertEquals(block.indexOf("sole set") < block.indexOf("Terracotta urn courtyard"), true);
 });
 
+Deno.test("cached setContinuity cannot tell a style-set SCENE LOCK to rebuild Pose 1's room", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "CACHED-SET-CONTINUITY",
+    productDetails: "",
+    pose: pose("angled", 2),
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set" },
+      creativeDirection: {
+        ...PALACE_SET,
+        setContinuity: "Keep the identical studio set, wall color, and lighting established in Pose 1",
+      },
+    },
+    references: [{ role: "model_identity" }, { role: "style_reference" }, { role: "front" }, { role: "approved_pose" }],
+  });
+  const lock = lockOf(prompt);
+  assertStringIncludes(lock, "STYLE REFERENCE photos are the sole set");
+  assertStringIncludes(lock, "the STYLE REFERENCE room (Pose 1 is person and lighting only)");
+  assertEquals(lock.includes("identical studio set, wall color, and lighting established in Pose 1"), false);
+  assertStringIncludes(lock, "APPROVED POSE 1 is the same person and lighting");
+});
+
 Deno.test("repeated scene values are stated once and long ones stay bounded", () => {
   const block = sceneLockBlock({
     creativeDirection: { backgroundStyle: "Warm grey studio", studioEnvironment: "warm grey studio", lighting: "x".repeat(2_000) },

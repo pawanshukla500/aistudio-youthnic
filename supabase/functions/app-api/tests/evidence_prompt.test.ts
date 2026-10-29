@@ -246,7 +246,7 @@ Deno.test("cached pose-plan copy cannot tell a style-set later frame to rebuild 
       id: "back",
       title: "True back",
       poseNumber: 3,
-      description: "rear",
+      description: "True back in the identical studio set, wall color, and lighting established in Pose 1.",
       cameraAngle: "back",
       framing: "full body",
       bodyPosition: "away",
@@ -254,7 +254,7 @@ Deno.test("cached pose-plan copy cannot tell a style-set later frame to rebuild 
       expression: "not visible",
       highlightedDetails: [],
       productVisibilityRules: ["exact same backdrop wall, floor, and lighting from Pose 1 - zero new props"],
-      purpose: "rear",
+      purpose: "Show the back in the identical studio set, wall color, and lighting established in Pose 1.",
       consistencyNotes: "Keep the exact same model identity, hair, accessories, footwear, exact bottom wear, and identical studio set/backdrop wall from Pose 1 while showcasing the authoritative back",
       prompt: "Preserve the exact model identity, styling, and the identical studio set, wall color, and lighting established in Pose 1.",
       enabled: true,
@@ -265,6 +265,8 @@ Deno.test("cached pose-plan copy cannot tell a style-set later frame to rebuild 
   assertStringIncludes(prompt, "STYLE REFERENCE room (Pose 1 is person and lighting only)");
   assertStringIncludes(prompt, "exact same STYLE REFERENCE backdrop wall, floor, and lighting");
   assertStringIncludes(prompt, "STYLE REFERENCE room while showcasing the authoritative back");
+  assertStringIncludes(prompt, "Description: True back in the STYLE REFERENCE room (Pose 1 is person and lighting only).");
+  assertStringIncludes(prompt, "Purpose: Show the back in the STYLE REFERENCE room (Pose 1 is person and lighting only).");
   assertEquals(prompt.includes("identical studio set, wall color, and lighting established in Pose 1"), false);
   assertEquals(prompt.includes("identical studio set/backdrop wall from Pose 1"), false);
   assertStringIncludes(prompt, "never as a face or set source");
