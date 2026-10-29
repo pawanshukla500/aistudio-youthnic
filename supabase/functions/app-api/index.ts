@@ -95,6 +95,7 @@ import {
   roleLabel,
   selectCurrentCatalogProductReferences,
   selectReferences,
+  selectTrueBackReferences,
 } from "./lib/referencePolicy.ts";
 export { composeGenerationPrompt };
 import {
@@ -1032,7 +1033,7 @@ function assertRequiredProductReferences(references: ReferenceInput[], garmentFa
 }
 
 function assertTrueBackReferenceAvailable(references: ReferenceInput[], garmentFamily = "") {
-  const directRear = selectReferences(references, [], "back", garmentFamily, 1);
+  const directRear = selectTrueBackReferences(references, garmentFamily);
   if (directRear.length !== 1 || !isDirectBackProductRole(directRear[0].role)) {
     throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
   }

@@ -257,10 +257,10 @@ export function selectReferences<T extends ReferenceLike>(
     const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
     const style = references.filter((reference) => reference.role === "style_reference").slice(0, 1);
     const anchor = approved.slice(0, 1);
-    // Rear product stays first. Model face, style-set backdrop, and Pose 1
-    // continuity follow so every listing pose rebuilds the same person and room.
-    // Style clothing is quarantined by the prompt; it must not replace the rear SKU.
-    const priority = [...rearProduct, ...model, ...style, ...anchor];
+    // GPT Image 2 attends hardest to the earliest uploads. Face and style-set
+    // go first so the back frame does not inherit the rear product's pre-shoot
+    // studio. Rear SKU still follows immediately; style clothing is quarantined.
+    const priority = [...model, ...style, ...rearProduct, ...anchor];
     return priority.slice(0, maxReferences);
   }
   const order = preferredProductOrder(poseType, normalizedFamily, preferredRole);

@@ -64,7 +64,7 @@ Deno.test("true back poses use exactly one direct rear product image while prese
     "back",
     "dress",
   );
-  assertEquals(generic.map((reference) => reference.role), ["back", "model_identity", "style_reference", "approved_pose"]);
+  assertEquals(generic.map((reference) => reference.role), ["model_identity", "style_reference", "back", "approved_pose"]);
   assertEquals(generic.some((r) => r.role === "front"), false);
   assertEquals(generic.some((r) => r.role === "fabric_pattern"), false);
 
@@ -83,7 +83,7 @@ Deno.test("true back poses use exactly one direct rear product image while prese
     "back",
     "saree",
   );
-  assertEquals(saree.map((reference) => reference.role), ["saree_back_drape", "model_identity", "style_reference", "approved_pose"]);
+  assertEquals(saree.map((reference) => reference.role), ["model_identity", "style_reference", "saree_back_drape", "approved_pose"]);
   assertEquals(saree.some((r) => r.role === "saree_front_drape"), false);
   assertEquals(saree.some((r) => r.role === "saree_body_detail"), false);
   assertEquals(saree.some((r) => r.role === "saree_pallu_spread"), false);
