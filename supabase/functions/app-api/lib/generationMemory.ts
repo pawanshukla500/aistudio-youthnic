@@ -416,7 +416,7 @@ export function extractLearnedPromptPatterns(args: {
       extracted.push(pattern(
         "scene",
         "style-reference-backdrop-lock",
-        "When a style reference is supplied, rebuild wall, floor, lighting, and props from that image only. Discard product-photo backgrounds. Never copy garment identity from the style frame.",
+        "When a style reference is supplied, rebuild the wall, floor, furniture, and lighting from that image only. Discard product-photo backgrounds. Do not copy its pose, objects in the hands, or garment.",
         sceneOutcome,
       ));
     }

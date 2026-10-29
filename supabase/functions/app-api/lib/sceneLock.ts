@@ -5,8 +5,9 @@
  * grade; only the pose, camera angle and framing move. The scene used to reach
  * the image model three ways - Gemini's creativeDirection JSON, a free-text
  * backdrop inside every pose prompt, and the reference images - and whichever
- * one a frame leaned on won. A back view, which never gets the style reference,
- * could land on a different wall.
+ * one a frame leaned on won. A back view that was not shown the style reference
+ * could land on a different wall. Furniture in the room is the set. Objects
+ * in the hands are not.
  *
  * The scene lock is a single short block, built from the shared creative
  * direction, that every pose receives verbatim and near the top of the prompt,
@@ -75,13 +76,13 @@ export function sceneLockBlock(args: {
   const continuity = distinct(creative.setContinuity);
   const lines = [
     set.length ? `- Set and backdrop: ${set.join("; ")}` : "",
-    props.length ? `- Props and furniture: ${props.join("; ")}. Nothing is added or removed between frames.` : "- Props and furniture: exactly those of the established set. Nothing is added or removed between frames.",
+    props.length ? `- Furniture in the room: ${props.join("; ")}. Nothing is added or removed between frames.` : "- Furniture in the room: exactly that of the established set. Nothing is added or removed between frames.",
     light.length ? `- Light: ${light.join("; ")}` : "",
     grade.length ? `- Colour grade: ${grade.join("; ")}` : "",
     continuity.length ? `- Continuity: ${continuity.join("; ")}` : "",
   ].filter(Boolean);
   const anchor = args.hasApprovedAnchor
-    ? "- APPROVED POSE 1 in the manifest is this set as photographed. Match its wall colour and finish, floor, props, light direction and colour grade exactly."
+    ? "- APPROVED POSE 1 in the manifest is this set as photographed. Match its wall colour and finish, floor, and furniture, plus light direction and colour grade. Objects in the hands are not the set."
     : args.poseNumber === 1
       ? `- This frame establishes the set for all six frames: build exactly the set above${args.hasStyleReference ? " as the STYLE REFERENCE shows it" : ""}.`
       : `- Build exactly the set above${args.hasStyleReference ? " as the STYLE REFERENCE shows it" : ""}; every other frame of this shoot uses the same one.`;

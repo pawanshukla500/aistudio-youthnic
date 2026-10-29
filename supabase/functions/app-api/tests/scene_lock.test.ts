@@ -55,6 +55,9 @@ Deno.test("every frame of a shoot gets the same set lines", () => {
   assertEquals(new Set(locks).size, 1);
   assertStringIncludes(locks[0], PALACE_SET.backgroundStyle);
   assertStringIncludes(locks[0], "APPROVED POSE 1 in the manifest is this set as photographed");
+  assertStringIncludes(locks[0], "Objects in the hands are not the set.");
+  assertStringIncludes(locks[0], "Furniture in the room:");
+  assertEquals(locks[0].includes("floor, props"), false);
 });
 
 Deno.test("the back view is pointed at Pose 1's set, not at a clean studio", () => {
