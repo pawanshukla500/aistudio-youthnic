@@ -1019,6 +1019,7 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   assertStringIncludes(pose2Prompt, "SET ONLY: the direction below is backdrop, light, and camera. It does not set the pose, the garment, or handheld props.");
   assertStringIncludes(pose2Prompt, "the STYLE REFERENCE face, hair, skin tone, and body proportions are the model identity for all six poses");
   assertStringIncludes(pose2Prompt, "The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows");
+  assertStringIncludes(pose2Prompt, "If this written profile disagrees with the product photos on motif, neckline, sleeves, or hem, the photos win.");
 
   // 3. Locked Details Across All Six Images
   assertStringIncludes(pose2Prompt, "LOCKED DETAILS ACROSS ALL SIX IMAGES (AVOID CONSISTENCY MISTAKES):");
