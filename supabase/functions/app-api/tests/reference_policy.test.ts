@@ -39,6 +39,34 @@ Deno.test("critical saree regions survive provider-limit truncation before dupli
   assertEquals(selected.filter((reference) => reference.role === "saree_front_drape").length < 12, true);
 });
 
+Deno.test("an identical model-face and style upload is sent once, as the style reference", () => {
+  const selected = selectReferences(
+    [
+      { role: "model_identity", hash: "same-photo" },
+      { role: "style_reference", hash: "same-photo" },
+      { role: "front", hash: "front" },
+      { role: "fabric_pattern", hash: "same-flat" },
+      { role: "mannequin", hash: "same-flat" },
+    ],
+    [],
+    "full_front",
+    "kurta_or_kurti_set",
+  );
+  assertEquals(selected.map((reference) => reference.role), ["front", "mannequin", "style_reference"]);
+  const back = selectReferences(
+    [
+      { role: "model_identity", hash: "same-photo" },
+      { role: "style_reference", hash: "same-photo" },
+      { role: "back", hash: "rear" },
+      { role: "front", hash: "front" },
+    ],
+    [],
+    "back",
+    "kurta_or_kurti_set",
+  );
+  assertEquals(back.map((reference) => reference.role), ["back", "style_reference"]);
+});
+
 Deno.test("legacy saree aliases remain valid and pallu has a distinct authority label", () => {
   const selected = selectReferences([
     { role: "front" },

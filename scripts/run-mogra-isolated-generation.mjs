@@ -117,14 +117,14 @@ async function main() {
     {
       id: "angled",
       title: "Three-quarter Turn",
-      prompt: "photorealistic full-body three-quarter view of same adult South Asian female model, oval face warm medium skin dark almond eyes full lips, dark hair low bun with gajra, dewy makeup, turned 40 degrees with left foot forward. Wearing same mustard yellow V-neck short kurta with white marigold floral print, 3/4 bell sleeves with chevron cuff and gold lace, dark-brown and beige bold chevron zigzag Farshi pants with two distinct wide flared legs ankle-length showing gold mojari juttis and gold sequin lace above hem, two-tone striped dupatta over shoulder, gold jhumkas and bangles. Right hand holding dupatta, left relaxed, soft natural smile. Wrinkle-free fabric, natural skin texture, exactly two arms two hands.",
+      prompt: "photorealistic full-body three-quarter view of same adult South Asian female model, oval face warm medium skin dark almond eyes full lips, dark hair low bun with gajra, dewy makeup, turned 40 degrees with both feet planted and close. Wearing same mustard yellow V-neck short kurta with white marigold floral print, 3/4 bell sleeves with chevron cuff and gold lace, dark-brown and beige bold chevron zigzag Farshi pants with two distinct wide flared legs ankle-length showing gold mojari juttis and gold sequin lace above hem, two-tone striped dupatta over shoulder, gold jhumkas and bangles. Right hand holding dupatta, left relaxed, soft natural smile. Wrinkle-free fabric, natural skin texture, exactly two arms two hands.",
       enabled: true,
       framing: "full body head-to-toe",
       purpose: "prove fit, depth, side drape",
       expression: "soft glance following angle, authentic soft smile",
       cameraAngle: "eye-level, model turned 40 degrees to camera right",
       description: "35-45 degree turned view showing side depth",
-      bodyPosition: "torso and hips turned 40 deg, left foot stepped forward, weight on back leg",
+      bodyPosition: "torso and hips turned 40 deg, both feet planted and close, weight on one leg",
       handPlacement: "right hand holding dupatta fold, left arm relaxed",
       consistencyNotes: "same model, styling, footwear, set as hero",
       primaryReference: "front",
@@ -219,7 +219,7 @@ async function main() {
     modelIdentity: verifiedAnalysis.modelIdentity,
     stylingPlan: verifiedAnalysis.stylingPlan,
     posePlan,
-    productDnaVersion: "generation-session-v25-natural-catalog-identity",
+    productDnaVersion: "generation-session-v26-planted-three-quarter",
   };
 
   const analysisFingerprint = crypto.createHash("sha256").update(JSON.stringify(sessionData)).digest("hex").slice(0, 8);

@@ -793,7 +793,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       id: "angled",
       title: isSaree ? "Professional Drape & Fall View" : "Professional Side / 3/4 View",
       framing: "3:4 portrait, full-body with clear side silhouette and no crop at hem or footwear",
-      bodyPosition: "Rotate torso and hips together 35 to 45 degrees into an intentional three-quarter angle with one foot angled forward, clearly displaying the side silhouette, garment depth, side seam, and sleeve drape without twisting or deforming the product; do not stand flat-on to the camera",
+      bodyPosition: "Rotate torso and hips together 35 to 45 degrees into an intentional three-quarter angle, both feet planted and close, clearly displaying the side silhouette, garment depth, side seam, and sleeve drape without a walking stride or a lifted foot; do not stand flat-on to the camera",
       handPlacement: "Keep hands away from the side seam, sleeve shape, pockets, waist treatment, and drape being demonstrated",
       expression: "Same recognizable face and styling, with a relaxed, natural, and effortless glance following the three-quarter angle; authentic soft smile or composed editorial look, never an exaggerated or frozen stock smile",
       productVisibilityRules: isSaree
@@ -810,7 +810,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       highlightedDetails: isSaree ? ["drape depth", "pallu fall", "pleats"] : ["side silhouette", "fit", "drape and construction"],
       primaryReference: "front",
       purpose: "Show garment depth and fit",
-      prompt: "Create an intentional 35-to-45 degree three-quarter fashion pose that is visibly and physically turned from the hero pose, with one foot stepped forward to reveal side silhouette, drape depth, and sleeve shape while keeping the full outfit readable and preserving authentic bottom wear. Model has a relaxed, natural glance and realistic, effortless expression — never a stiff stance or artificial smile.",
+      prompt: "Create an intentional 35-to-45 degree three-quarter fashion pose that is visibly and physically turned from the hero pose, with both feet planted and close so a joined hem stays closed. Reveal side silhouette, drape depth, and sleeve shape while keeping the full outfit readable and preserving authentic bottom wear. Never a walking stride or a lifted foot. Model has a relaxed, natural glance and realistic, effortless expression — never a stiff stance or artificial smile.",
       enabled: true,
     },
     {
@@ -1790,7 +1790,7 @@ In every family the pose may only change body position, angle, framing and expre
 Create exactly six product-specific camera setups in one coherent commercial coverage sequence with MANDATORY PHYSICAL VARIATION across all 6 slots, in this order and with these ids: full_front, angled, back, creative, closeup, showcase. They are NOT repeats of each other. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints. Every individual prompt must (1) describe THIS product's exact colour, fabric, construction and selling details from the product references, and (2) direct the model's stance, angle, action, and expression, while creativeDirection must rebuild the photoshoot backdrop, wall, floor, lighting and props from the STYLE REFERENCE only.
 
 - full_front: square, unobstructed head-to-toe hero; establishes face/hair/styling/footwear/scene/lighting anchor with balanced weight, natural catalog composure, and an authentic gentle smile or relaxed glance (never a stiff stance or artificial smile).
-- angled: mandatory 35 to 45 degree intentional turn of torso and hips with one foot stepped forward, clearly revealing side construction, garment depth, side seam, and sleeve silhouette. Must be visibly turned away from flat frontal — NEVER a static frontal standing repeat! Natural, effortless glance following the angle with an authentic soft smile or composed editorial look (never an exaggerated or frozen stock smile).
+- angled: mandatory 35 to 45 degree intentional turn of torso and hips with both feet planted and close, clearly revealing side construction, garment depth, side seam, and sleeve silhouette. Never a walking stride or a lifted foot, and never open a joined Farshi hem. Must be visibly turned away from flat frontal — NEVER a static frontal standing repeat! Natural, effortless glance following the angle with an authentic soft smile or composed editorial look (never an exaggerated or frozen stock smile). Do not copy the pose or the handheld props from the style or model-face photo.
 - back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees. For outfits with a dupatta or shawl, the dupatta must be draped forward over arms or front so the rear garment (neckline, back panel, embroidery, hem) is 100% unobstructed and visible. Hair swept forward or in an updo. The studio set, backdrop wall, lighting, and model identity must strictly match the other poses.
 - creative:
   * SEATED POSE LOCK: Inspect the STYLE REFERENCE image first. Also inspect any other uploaded image that shows a model pose, plus the user product notes. If ANY of those show a sitting/seated person, or the notes demand sitting, set creativeDirection.seatedPoseRequired to "yes" and seatedPoseReason to a one-line evidence note (for example "style reference model is seated on a stone plinth"). Then this 4th pose MUST be an elegant seated editorial pose (minimal studio bench, architectural plinth/step, or a clean prop that already belongs to the style-reference set). Keep the garment, bottom wear, hemline, and footwear completely visible and beautifully arranged, never crumpled or hidden. Do not seat poses 1-3 or 5 just because pose 4 sits.
@@ -1889,7 +1889,9 @@ export const CONSISTENCY_RULES = [
 // from the model-face reference (or the style-reference face when none was
 // uploaded), backdrop from the style reference on all six poses, garment DNA
 // only from the product photos. Cached v24 plans still ask for a mid-step walk.
-export const ANALYSIS_VERSION = "generation-session-v25-natural-catalog-identity";
+// v26 keeps the three-quarter turn with both feet planted, so a cached v25
+// plan cannot still ask for a stepped-forward walk that opens a joined hem.
+export const ANALYSIS_VERSION = "generation-session-v26-planted-three-quarter";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

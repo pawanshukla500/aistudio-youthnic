@@ -293,7 +293,7 @@ export function showcaseShotDirection(shotType: ShowcaseShotType) {
     drape_feature:
       "Frame so the draped panel is the subject: held, spread or falling clear of the body and opened flat enough that its artwork, border and full length read end to end, with no arm, hair or prop crossing it.",
     movement_feature:
-      "Use controlled movement - a turn, a step, a swing - so the feature's fall, flare, weight or fluidity is visible in motion. The garment must stay readable and uncrumpled throughout.",
+      "Show the feature's fall and weight with a gentle turn or a small weight shift, both feet planted and close. The garment stays readable and uncrumpled. Do not freeze a walking stride or lift a foot.",
   }[shotType];
 }
 
@@ -314,10 +314,10 @@ export function showcaseAestheticDirection(
     case "drape_feature":
       return `Editorial drape-showcase photoshoot aesthetics: soft directional studio lighting that illuminates the ${regionLabel} artwork, border continuity, and weave translucency end-to-end, paired with a serene, graceful torso turn and coordinated two-hand placement clear of the motif field.`;
     case "movement_feature":
-      return `Editorial kinetic fashion photoshoot aesthetics: crisp high-shutter capture of controlled mid-turn or mid-stride fabric swing, directional studio rim-and-key lighting that highlights ${regionLabel} flare weight and fluid hemline motion, while keeping prints and construction razor-sharp.`;
+      return `Editorial catalog photoshoot aesthetics: a gentle turn or small weight shift so ${regionLabel} fall and weight read clearly, both feet planted and close enough that a joined or tapered hem stays closed, directional studio lighting, prints and construction razor-sharp. No frozen mid-stride and no lifted foot.`;
     case "full_body_feature":
     default:
-      return `Editorial full-length fashion photoshoot aesthetics: slightly low leg-lengthening camera perspective, architectural stance with feet separated or stepped into an angled turn so ${regionLabel} volume, pleat geometry, and hem border open cleanly to the lens, directional side-key lighting that carves fabric drape, and grounded contact shadows.`;
+      return `Editorial full-length fashion photoshoot aesthetics: slightly low leg-lengthening camera perspective, a natural stance with both feet planted and close and a soft angle so ${regionLabel} volume, pleat geometry, and hem border read clearly without opening a joined hem, directional side-key lighting that carves fabric drape, and grounded contact shadows.`;
   }
 }
 

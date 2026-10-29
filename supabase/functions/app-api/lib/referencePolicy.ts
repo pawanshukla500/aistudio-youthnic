@@ -262,7 +262,7 @@ export function selectReferences<T extends ReferenceLike>(
     const style = references.filter((reference) => reference.role === "style_reference").slice(0, 1);
     const anchor = approved.slice(0, 1);
     const priority = [...rearProduct, ...model, ...style, ...anchor];
-    return priority.slice(0, maxReferences);
+    return collapseDuplicateUploads(priority).slice(0, maxReferences);
   }
   const order = preferredProductOrder(poseType, normalizedFamily, preferredRole);
 
@@ -317,7 +317,37 @@ export function selectReferences<T extends ReferenceLike>(
   const priority = poseType === "back"
     ? [...productPriority, ...model, ...anchor]
     : [...model, ...protectedProduct, ...style, ...anchor, ...remainingProduct];
-  return priority.slice(0, maxReferences);
+  return collapseDuplicateUploads(priority).slice(0, maxReferences);
+}
+
+/**
+ * The same file is often uploaded as both the model face and the style
+ * reference. Sending it twice makes that outfit outvote the product photos.
+ * Keep the style copy, which still supplies the face when no separate model
+ * photo remains, and drop any later image with the same content hash.
+ */
+function collapseDuplicateUploads<T extends ReferenceLike>(selected: T[]): T[] {
+  const model = selected.find((reference) => reference.role === "model_identity");
+  const style = selected.find((reference) => reference.role === "style_reference");
+  const modelMatchesStyle = Boolean(model && style && sameUploadedImage(model, style));
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const reference of selected) {
+    if (modelMatchesStyle && reference.role === "model_identity") continue;
+    const hash = String(reference.hash || "").trim();
+    if (hash) {
+      if (seen.has(hash)) continue;
+      seen.add(hash);
+    }
+    unique.push(reference);
+  }
+  return unique;
+}
+
+function sameUploadedImage(left: ReferenceLike, right: ReferenceLike) {
+  const leftHash = String(left.hash || "").trim();
+  const rightHash = String(right.hash || "").trim();
+  return Boolean(leftHash) && leftHash === rightHash;
 }
 
 export function canUsePoseOneAnchor(garmentFamily: string, qaStatus: unknown, qaEnabled?: boolean) {

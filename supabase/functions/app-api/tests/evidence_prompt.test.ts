@@ -965,6 +965,8 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   assertStringIncludes(pose2Prompt, "6-POSE PLAN VARIATION DIRECTIVE");
   assertStringIncludes(pose2Prompt, "CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN)");
   assertStringIncludes(pose2Prompt, "Torso and hips MUST physically rotate 35 to 45 degrees");
+  assertStringIncludes(pose2Prompt, "Both feet stay planted and close");
+  assertStringIncludes(pose2Prompt, "never a walking stride or a lifted foot");
   assertStringIncludes(pose2Prompt, "DO NOT render a flat frontal standing pose or repeat Pose 1");
 
   // 2. Reference Image Scope & Product Integrity
