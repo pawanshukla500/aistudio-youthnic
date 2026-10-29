@@ -812,6 +812,13 @@ export function composeGenerationPrompt(args: {
   const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
+  const promptRules = hasStyleReference
+    ? rules.map((rule) =>
+      /identical studio backdrop wall color.*established in Pose 1/i.test(rule)
+        ? "Keep the STYLE REFERENCE room across all poses. Pose 1 is person and lighting only; if it copied a product-photo studio, discard that room."
+        : rule
+    )
+    : rules;
   const isCloseup = args.pose.id === "closeup";
   const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).join(", ");
   const closeupMode = isCloseup ? resolveCloseupMode({ pose: args.pose, creative }) : "face_and_detail";
@@ -1084,7 +1091,11 @@ PROMPT:
 ${boundedText(args.pose.prompt, 1_200)}
 
 REALISTIC INTEGRATION:
-- Treat this as frame ${args.pose.poseNumber} from one photographed contact sheet, not a new image concept. Reuse the same physical set coordinates, time of day, camera family, exposure, white balance, light direction, shadow density, and color grade established by Pose 1.
+- Treat this as frame ${args.pose.poseNumber} from one photographed contact sheet, not a new image concept. ${
+  hasStyleReference
+    ? "Rebuild the STYLE REFERENCE room. Pose 1 is the same person and lighting; if it copied a product-photo studio, discard that room."
+    : "Reuse the same physical set coordinates, time of day, camera family, exposure, white balance, light direction, shadow density, and color grade established by Pose 1."
+}
 - Preserve natural fabric drape, folds, gravity, occlusion, thickness and construction for this exact material and fit.
 - Match locked lighting direction, color temperature, shadows, contact shadows, perspective, lens feel, depth and scene geometry.
 - Keep anatomy realistic and keep hands away from product details.
@@ -1094,7 +1105,7 @@ ${faceRequired ? `- Render the eyes with correct anatomy: two naturally shaped, 
 - Skin must show real photographic micro-detail (pores, faint texture variation) rather than an airbrushed, plastic, or over-smoothed "beauty filter" look.` : ""}
 
 PROHIBITED UNRELATED CHANGES:
-${rules.map((rule) => `- ${rule}`).join("\n")}
+${promptRules.map((rule) => `- ${rule}`).join("\n")}
 - STRICT ANATOMICAL RULE: NEVER render three hands, extra arms, duplicate hands, floating hands, phantom limbs, or extra body parts. The model must have strictly and exactly two arms and two hands with five natural fingers each.
 - STRICT PRODUCT ISOLATION RULE: Never copy, transfer, or borrow the clothing, saree, dress, colors, prints, or embroidery from the STYLE REFERENCE image. Dress the model ONLY in the uploaded product.
 - Never render duplicate or identical frontal standing poses across different pose slots (Poses 2, 4, and 6 must visibly physically diverge from Pose 1).
@@ -1108,8 +1119,11 @@ ${bottomWear.includesBottomWear
       ? "- Never substitute or restyle the saree drape, pallu placement, pleat stack or border geometry."
       : "- ABSOLUTE PROHIBITION ON INVENTING A MATCHING SET: it is strictly forbidden to render coordinated bottom wear that repeats this product's print, motif, embroidery, border, colour blocking or fabric. The bottom stays plain, neutral and clearly styling, never a second product piece."}
 - STRICT PROHIBITION ON COPYING PRE-SHOOT BACKGROUNDS: Never copy or reproduce pre-shoot background walls, terracotta arches, urns, clay pots, plants, courtyard structures, or outdoor scenery from the product reference images into the generated image.
-- Never change the backdrop wall color, texture, floor, or lighting from what was established in Pose 1.
-- Never add random background props (brass urlis, urns, flower petals, pedestals) not present in Pose 1.
+${hasStyleReference
+    ? `- Never change the backdrop from the STYLE REFERENCE room. If Pose 1 copied a product-photo studio, do not copy that room.
+- Never add random background props not shown in the STYLE REFERENCE.`
+    : `- Never change the backdrop wall color, texture, floor, or lighting from what was established in Pose 1.
+- Never add random background props (brass urlis, urns, flower petals, pedestals) not present in Pose 1.`}
 ${(args.pose.id === "back" || isTrueBack) ? `- DUPATTA REAR VISIBILITY LOCK: If wearing a dupatta, scarf, stole, or shawl, it MUST be draped forward over both arms or held in front. The entire back of the kurti/dress (neckline, back panel, embroidery, seams, darts, and hem) must be 100% visible and NEVER covered or obstructed by the dupatta.
 - HAIR REAR VISIBILITY LOCK: Hair MUST be swept forward over the shoulders or styled in an updo/bun so the back neckline, rear embroidery, closures, and rear garment panel are completely unobstructed and fully visible.
 - TRUE BACK HARD RULE: shoulders and hips fully face away. Reproduce uploaded BACK exactly; never infer the rear from FRONT.` : ""}

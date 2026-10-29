@@ -219,7 +219,45 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   assertStringIncludes(prompt, "If Pose 1 copied a product-photo studio, courtyard, arch, urn, or pot, discard it");
   assertStringIncludes(prompt, "ZERO NEW PROPS");
   assertEquals(prompt.includes("SET & BACKDROP HARD LOCK TO APPROVED POSE 1"), false);
+  assertStringIncludes(prompt, "STYLE REFERENCE remains the set when present");
+  assertStringIncludes(prompt, "Rebuild the STYLE REFERENCE room. Pose 1 is the same person and lighting");
+  assertStringIncludes(prompt, "Never change the backdrop from the STYLE REFERENCE room");
+  assertEquals(prompt.includes("color grade established by Pose 1"), false);
+  assertEquals(prompt.includes("not present in Pose 1"), false);
   assertStringIncludes(prompt, "glances back over her shoulder");
+});
+
+Deno.test("stored Pose 1 set-continuity rules cannot override a style-set later frame", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "DRIFTED-POSE-1",
+    productDetails: "",
+    pose: {
+      id: "angled",
+      title: "Angled",
+      poseNumber: 2,
+      description: "angle",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "turn",
+      handPlacement: "relaxed",
+      expression: "calm",
+      highlightedDetails: [],
+      productVisibilityRules: [],
+      purpose: "angle",
+      consistencyNotes: "",
+      prompt: "Angled coverage.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set" },
+      consistencyRules: [
+        "Keep the identical studio backdrop wall color, texture, flooring, and lighting established in Pose 1 across all poses 2-6 without adding new props (no brass urlis, urns, flower petals, or altered staircases).",
+      ],
+    },
+    references: [{ role: "front" }, { role: "style_reference" }, { role: "approved_pose" }],
+  });
+  assertStringIncludes(prompt, "Keep the STYLE REFERENCE room across all poses");
+  assertEquals(prompt.includes("identical studio backdrop wall color, texture, flooring, and lighting established in Pose 1"), false);
 });
 
 Deno.test("a saree true-back prompt cannot carry a hallucinated front-derived blouse or border into the rear", () => {

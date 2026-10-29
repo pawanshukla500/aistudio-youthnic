@@ -1856,7 +1856,7 @@ export const CONSISTENCY_RULES = [
   "Pose 5 must be a tight product-detail close-up, never a full-body hero repeat. Include a sharp face only when that crop still leaves the selling detail large and readable; otherwise crop to the product detail.",
   "Never add text, random logos, extra layers, duplicate people, or unreferenced garment elements.",
   "Treat detailPlacementMap and absenceConstraints as hard locks: never relocate, mirror, extend, add, or remove a garment detail.",
-  "Keep the identical studio backdrop wall color, texture, flooring, and lighting established in Pose 1 across all poses 2-6 without adding new props (no brass urlis, urns, flower petals, or altered staircases).",
+  "Keep the STYLE REFERENCE room across all poses when a style reference is present; otherwise keep the Pose 1 set. Never add brass urlis, urns, flower petals, or altered staircases that are not in that set.",
   "In back poses, dupattas or shawls must be draped over the arms or in front so the entire back of the garment is 100% visible and unobstructed.",
   "The optional stylist accessory suggestion (creativeDirection.suggestedAccessories) may be added only when present, and must stay identical and product-appropriate across every pose - never invent a second, different accessory and never let it hide or replace any garment detail, bottom wear, or footwear shown in the product references.",
 ];

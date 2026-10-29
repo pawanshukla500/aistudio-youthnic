@@ -49,6 +49,8 @@ Deno.test("legacy saree aliases remain valid and pallu has a distinct authority 
 
   assertEquals(selected.map((reference) => reference.role), ["back"]);
   assertStringIncludes(roleLabel("saree_pallu_spread"), "FULLY SPREAD PALLU");
+  assertStringIncludes(roleLabel("approved_pose"), "STYLE REFERENCE remains the set when present");
+  assertEquals(roleLabel("approved_pose").includes("room, backdrop wall, flooring, lighting, and shoot-continuity anchor"), false);
 });
 
 Deno.test("true back poses use exactly one direct rear product image while preserving model identity, style set, and pose 1 scene anchor", () => {

@@ -171,7 +171,7 @@ export function roleLabel(role: string) {
     saree_border_tassels: "SAREE BORDER / TASSELS DETAIL - authoritative upper/lower border widths, construction, colours, motif geometry, tassel colour, construction and spacing; background ignored",
     saree_blouse_front: "SAREE BLOUSE FRONT - authoritative blouse colour, fabric, front construction, neckline and sleeves; background ignored",
     saree_blouse_back_piece: "SAREE BLOUSE BACK OR UNSTITCHED PIECE - authoritative back construction, ties, closures, or proof that only an unstitched blouse piece exists; background ignored",
-    approved_pose: "APPROVED POSE 1 - model, styling, room, backdrop wall, flooring, lighting, and shoot-continuity anchor; original product references always outrank its garment",
+    approved_pose: "APPROVED POSE 1 - same person, styling, and lighting continuity. STYLE REFERENCE remains the set when present; discard a product-photo studio in this frame. Original product references always outrank its garment",
     style_reference: "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, props, composition, mood, and lighting; never product identity or garment. The clothing/outfit in this image must be 100% DISCARDED; dress model ONLY in uploaded product",
   };
   return labels[role] || role.toUpperCase();
