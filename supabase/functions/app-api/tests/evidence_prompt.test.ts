@@ -147,7 +147,8 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   });
 
   assertStringIncludes(prompt, "IMAGE 1: BACK PRODUCT");
-  assertStringIncludes(prompt, "IMAGE 2: APPROVED POSE 1");
+  assertStringIncludes(prompt, "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop");
+  assertStringIncludes(prompt, "APPROVED POSE 1");
   assertStringIncludes(prompt, "rear-plain-marker");
   assertEquals(prompt.includes("front-only-lace-marker"), false);
   assertEquals(prompt.includes("front-lace-construction-marker"), false);

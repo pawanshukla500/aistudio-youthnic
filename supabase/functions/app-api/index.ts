@@ -1083,8 +1083,9 @@ async function loadAvailableReferences(
 
 /**
  * The references a single pose can actually use. `selectReferences` already caps
- * the manifest at MAX_REFERENCES and a true-back frame legitimately uses three
- * images, so downloading and base64-encoding every uploaded asset for every pose
+ * the manifest at MAX_REFERENCES and a true-back frame legitimately uses four
+ * images (rear product, model identity, style set authority, pose 1 anchor),
+ * so downloading and base64-encoding every uploaded asset for every pose
  * was paid latency for bytes the prompt never saw. Required-evidence roles stay
  * in the set so the availability gate still runs against real bytes.
  */

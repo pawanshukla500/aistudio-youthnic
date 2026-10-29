@@ -82,7 +82,7 @@ Deno.test("true back poses use exactly one direct rear product image while prese
     "back",
     "saree",
   );
-  assertEquals(saree.map((reference) => reference.role), ["saree_back_drape", "model_identity", "approved_pose"]);
+  assertEquals(saree.map((reference) => reference.role), ["saree_back_drape", "model_identity", "style_reference", "approved_pose"]);
   assertEquals(saree.some((r) => r.role === "saree_front_drape"), false);
   assertEquals(saree.some((r) => r.role === "saree_body_detail"), false);
   assertEquals(saree.some((r) => r.role === "saree_pallu_spread"), false);
@@ -152,22 +152,45 @@ Deno.test("full-body selection ranks dedicated bottom-wear evidence ahead of upp
   assertStringIncludes(roleLabel("fabric_pattern"), "UPPER-garment");
 });
 
-Deno.test("non-saree selection reserves front, bottom, back, and mannequin before duplicate bottoms fill the cap", () => {
+Deno.test("non-saree selection reserves front, bottom, fabric, back, and mannequin before duplicate bottoms fill the cap", () => {
   const references = [
     { role: "model_identity", hash: "model" },
     { role: "front", hash: "front" },
     ...Array.from({ length: 16 }, (_, index) => ({ role: "bottom", hash: `bottom-${index}` })),
     { role: "back", hash: "back" },
+    { role: "fabric_pattern", hash: "fabric" },
     { role: "mannequin", hash: "mannequin" },
   ];
   const selected = selectReferences(references, [], "full_front", "kurta_or_kurti_set");
   const roles = selected.map((reference) => reference.role);
 
   assertEquals(selected.length, MAX_IMAGE_REFERENCES);
-  for (const required of ["front", "bottom", "back", "mannequin"]) {
+  for (const required of ["front", "bottom", "fabric_pattern", "back", "mannequin"]) {
     assert(roles.includes(required), `${required} must be protected from truncation.`);
   }
   assertEquals(selected.some((reference) => reference.hash === "back"), true);
+  assertEquals(selected.some((reference) => reference.hash === "fabric"), true);
+});
+
+Deno.test("true back pose keeps style set authority alongside rear product, model identity, and pose 1 anchor", () => {
+  const selected = selectReferences(
+    [
+      { role: "model_identity", hash: "model" },
+      { role: "front", hash: "front" },
+      { role: "back", hash: "back" },
+      { role: "fabric_pattern", hash: "fabric" },
+      { role: "style_reference", hash: "style" },
+    ],
+    [{ role: "approved_pose", hash: "front-anchor" }],
+    "back",
+    "kurta_or_kurti_set",
+  );
+  assertEquals(
+    selected.map((reference) => reference.role),
+    ["back", "model_identity", "style_reference", "approved_pose"],
+  );
+  assertEquals(selected.some((r) => r.role === "front"), false);
+  assertEquals(selected.some((r) => r.role === "fabric_pattern"), false);
 });
 
 Deno.test("style reference and Pose 1 anchor survive duplicate product overflow before extra fronts", () => {
