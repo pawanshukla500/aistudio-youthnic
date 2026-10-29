@@ -23,7 +23,8 @@ loses nothing: the next call resumes from the database.
 
 - `lib/sceneLock.ts` builds one SCENE LOCK block from the analysed creative direction. Every
   pose gets the same block, high in the prompt where compaction never trims it. Only the pose,
-  camera angle and framing differ between frames.
+  camera angle and framing differ between frames. When style-set photos are present, those
+  images are the sole set; stored room prose is a hint and must not copy a product-photo studio.
 - Pose 1 is the visual anchor for poses 2–6, including the back view. The back view sends
   model identity and the style-set before the rear product so GPT Image 2 rebuilds the same
   room instead of the product-photo studio; style clothing stays quarantined. The prompt also
