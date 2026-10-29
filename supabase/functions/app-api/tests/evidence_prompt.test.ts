@@ -9,6 +9,7 @@ import {
   assertGenerationPromptWithinLimit,
   compactFullPromptSafely,
   composeGenerationPrompt,
+  listingIdentityPromptOrder,
 } from "../lib/generationPrompt.ts";
 import { normalizeAnalysis } from "../lib/profiles.ts";
 
@@ -111,6 +112,32 @@ Deno.test("Garment Truth Contract: Generic placement and absence safeguards are 
   );
 });
 
+Deno.test("listing identity prompt order puts face and style-set before product photos", () => {
+  const ordered = listingIdentityPromptOrder([
+    { role: "front" },
+    { role: "approved_pose" },
+    { role: "back" },
+    { role: "style_reference" },
+    { role: "model_identity" },
+  ], false);
+  assertEquals(ordered.map((reference) => reference.role), [
+    "model_identity",
+    "style_reference",
+    "front",
+    "back",
+    "approved_pose",
+  ]);
+  assertEquals(
+    listingIdentityPromptOrder([
+      { role: "back" },
+      { role: "style_reference" },
+      { role: "model_identity" },
+      { role: "approved_pose" },
+    ], true).map((reference) => reference.role),
+    ["model_identity", "style_reference", "back", "approved_pose"],
+  );
+});
+
 Deno.test("a true-back prompt uses only the direct rear image and never leaks a front-only lace claim", () => {
   const prompt = composeGenerationPrompt({
     skuName: "BACK-EVIDENCE-SKU",
@@ -146,8 +173,8 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
     references: [{ role: "front" }, { role: "back" }, { role: "fabric_pattern" }, { role: "style_reference" }, { role: "approved_pose" }],
   });
 
-  assertStringIncludes(prompt, "IMAGE 1: BACK PRODUCT");
-  assertStringIncludes(prompt, "IMAGE 2: STYLE REFERENCE");
+  assertStringIncludes(prompt, "IMAGE 1: STYLE REFERENCE");
+  assertStringIncludes(prompt, "IMAGE 2: BACK PRODUCT");
   assertStringIncludes(prompt, "IMAGE 3: APPROVED POSE 1");
   assertStringIncludes(prompt, "LISTING AUTHORITY - SAME PERSON, SAME SET, EXACT PRODUCT DNA IN ALL SIX POSES:");
   assertStringIncludes(prompt, "rear-plain-marker");
@@ -627,8 +654,8 @@ Deno.test("true-back still applies Farshi lock from session bottom evidence even
   });
 
   assertStringIncludes(prompt, "FARSHI / FARSI HARD LOCK:");
-  assertStringIncludes(prompt, "IMAGE 1: BACK PRODUCT");
-  assertStringIncludes(prompt, "IMAGE 2: STYLE REFERENCE");
+  assertStringIncludes(prompt, "IMAGE 1: STYLE REFERENCE");
+  assertStringIncludes(prompt, "IMAGE 2: BACK PRODUCT");
   assertEquals(prompt.includes("PALAZZO HARD LOCK:"), false);
 });
 

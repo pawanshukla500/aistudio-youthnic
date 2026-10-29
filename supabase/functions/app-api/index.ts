@@ -25,7 +25,7 @@ import {
   type StylingPlanProfile,
 } from "./profiles.ts";
 import { appendRejectedAttemptHistory, buildPoseQaPrompt, parseQaResponse, qaStorageDisposition, sessionHasBottomReference, unavailableQaResult } from "./qa.ts";
-import { assertGenerationPromptWithinLimit, composeGenerationPrompt } from "./lib/generationPrompt.ts";
+import { assertGenerationPromptWithinLimit, composeGenerationPrompt, listingIdentityPromptOrder } from "./lib/generationPrompt.ts";
 import {
   AI_MODEL_REGISTRY,
   AI_PROVIDERS,
@@ -2011,7 +2011,10 @@ async function validatePose(args: {
 }) {
   const garmentFamily = String((args.session.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
   const qaRefs = await withInlineBase64(
-    selectReferences(args.references, args.approved, args.pose.id, garmentFamily, MAX_REFERENCES, args.pose.primaryReference),
+    listingIdentityPromptOrder(
+      selectReferences(args.references, args.approved, args.pose.id, garmentFamily, MAX_REFERENCES, args.pose.primaryReference),
+      args.pose.id === "back",
+    ),
   );
   const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
   const prompt = buildPoseQaPrompt({
@@ -3035,7 +3038,10 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
     loaded.filename = `approved-pose-1.${extensionForMimeType(loaded.mimeType)}`;
     approved.push(loaded);
   }
-  const selected = selectReferences(loadedReferences, approved, poseData.id, garmentFamily, MAX_REFERENCES, poseData.primaryReference);
+  const selected = listingIdentityPromptOrder(
+    selectReferences(loadedReferences, approved, poseData.id, garmentFamily, MAX_REFERENCES, poseData.primaryReference),
+    poseData.id === "back",
+  );
   const authoritativeBackReference = poseData.id === "back"
     ? selected.find((reference) => isDirectBackProductRole(reference.role)) || null
     : null;

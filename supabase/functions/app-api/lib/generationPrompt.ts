@@ -35,6 +35,21 @@ import { sceneLockBlock } from "./sceneLock.ts";
 
 export type PromptReference = { role: string };
 
+function listingIdentityPromptRank(role: string, isTrueBack: boolean) {
+  if (role === "model_identity") return 0;
+  if (role === "style_reference") return 1;
+  if (isTrueBack && isDirectBackProductRole(role)) return 2;
+  if (role === "approved_pose") return 90;
+  return 10;
+}
+
+/** Face and style-set precede product photos so GPT Image 2 does not copy a pre-shoot studio. */
+export function listingIdentityPromptOrder<T extends PromptReference>(references: T[], isTrueBack = false): T[] {
+  return [...references].sort((left, right) =>
+    listingIdentityPromptRank(left.role, isTrueBack) - listingIdentityPromptRank(right.role, isTrueBack)
+  );
+}
+
 // OpenAI rejects image-edit prompts at 32,000 characters. Keep a meaningful
 // UTF-16-safe margin because PostgreSQL character counts and the provider's
 // request validation can differ for non-BMP characters.
@@ -771,15 +786,20 @@ export function composeGenerationPrompt(args: {
   const patternGeometryJson = compactJson(patternGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
   const embroideryGeometryJson = compactJson(embroideryGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
   // Allow model face, style-set, and approved pose so the back pose recreates
-  // the identical person and studio. Defense in depth: strip stray front product.
-  const promptReferences = isTrueBack
-    ? args.references.filter((ref) =>
-      isDirectBackProductRole(ref.role)
-      || ref.role === "model_identity"
-      || ref.role === "style_reference"
-      || ref.role === "approved_pose"
-    )
-    : args.references;
+  // the identical person and studio. Defense in depth: strip stray front product,
+  // then put face and style-set before the rear SKU so GPT Image 2 does not copy
+  // the product-photo studio.
+  const promptReferences = listingIdentityPromptOrder(
+    isTrueBack
+      ? args.references.filter((ref) =>
+        isDirectBackProductRole(ref.role)
+        || ref.role === "model_identity"
+        || ref.role === "style_reference"
+        || ref.role === "approved_pose"
+      )
+      : args.references,
+    isTrueBack,
+  );
   if (isTrueBack && !promptReferences.some((ref) => isDirectBackProductRole(ref.role))) {
     throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
   }
