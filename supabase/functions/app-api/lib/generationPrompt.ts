@@ -401,9 +401,9 @@ function poseCategoryRules(category: string) {
 - Feet visible, same footwear as front poses.
 - DO NOT show front-facing garment features.`,
     front: `
-- FRONT HERO POSE: Model squarely facing the camera.
-- Ensure the front construction and neckline are perfectly symmetrical and visible.
-- Stance should be grounded and confident.`,
+- FRONT HERO POSE: Model facing the camera with a natural catalog stance.
+- Shoulders relaxed, weight settled slightly on one leg, arms hanging with a small natural bend. The garment front stays fully readable and untwisted.
+- Do not lock the body into a rigid, perfectly symmetrical mannequin pose.`,
     sitting: `
 - SEATED / SITTING EDITORIAL POSE:
 - The model is gracefully and elegantly seated on seating that already belongs to the established set (e.g. its bench, plinth/cube, chair or step). Never bring new furniture into the set for this frame.
@@ -413,10 +413,9 @@ function poseCategoryRules(category: string) {
   * Posture should be poised, relaxed, and editorial (e.g. slight angle to camera, back straight or gentle lean, legs gracefully placed to showcase garment volume and footwear).
 - Ensure the seating furniture/plinth strictly matches the studio aesthetic and does NOT introduce cluttered pre-shoot props.`,
     dynamic: `
-- DYNAMIC POSE: Show active movement (walking, stepping, spinning).
-- Fabric must show realistic motion lines, flare, and weight shift.
-- Model's posture must lean naturally into the movement.
-- Hair and accessories should react to the motion.`,
+- NATURAL EDITORIAL POSE: A relaxed catalog stance that is clearly not the hero pose.
+- Use a small weight shift, a gentle shoulder angle, or a soft lean that already belongs to the set. Both feet stay grounded and close enough that trouser hems, pleats, and a joined Farshi hem remain closed.
+- Do not freeze a walking stride, a spin, or a wide leg split. Fabric hangs with gravity, not with motion blur.`,
     playful: `
 - PLAYFUL / DETAIL POSE: Focus on charm, product interaction, or detail showcase.
 - Expression should be warm, joyful, or confident.
@@ -433,7 +432,7 @@ function pose5HardRule(args: { closeupMode: string; heroDetail: string }) {
   if (args.closeupMode === CLOSEUP_PRODUCT_DETAIL) {
     return `- POSE 5 HARD RULE (PRODUCT DETAIL PRIMARY): this frame sells craftsmanship, not a beauty headshot. Fill the frame with ${detail} so construction, embroidery, butti work, print scale, or texture is catalog-readable. Never a full-body or wide hero repeat. Never a face-only crop that shrinks the selling detail. The face may be partial at the edge or omitted entirely when a full face would make that detail too small. If any face is visible it must match the identity lock.\n${primaryGarmentNote}`;
   }
-  return `- POSE 5 HARD RULE (FACE + PRODUCT DETAIL): genuine ZOOMED-IN face-to-chest or face-to-waist shot - tighter than the hero pose, never a full-body repeat. The face is sharp with a natural Gen-Z expression, AND ${detail} must occupy a LARGE, sharp, catalog-readable portion of the same frame - not a tiny hint of embroidery under a beauty close-up.\n${primaryGarmentNote}`;
+  return `- POSE 5 HARD RULE (FACE + PRODUCT DETAIL): genuine ZOOMED-IN face-to-chest or face-to-waist shot - tighter than the hero pose, never a full-body repeat. Any visible face is the locked identity with a calm, natural expression, AND ${detail} must occupy a LARGE, sharp, catalog-readable portion of the same frame - not a tiny hint of embroidery under a beauty close-up.\n${primaryGarmentNote}`;
 }
 
 /**
@@ -444,7 +443,7 @@ function pose5HardRule(args: { closeupMode: string; heroDetail: string }) {
 function bottomWearSubstitutionGuard(cutClass: BottomCutClass) {
   const guards: Record<BottomCutClass, string> = {
     farshi:
-      `- FARSHI / FARSI HARD LOCK: ${FARSHI_SILHOUETTE_STRUCTURE} Length follows the references (ankle-length clearing the floor to display footwear/juttis, or floor-length). You are STRICTLY FORBIDDEN from rendering palazzo, plain wide-leg pants, a lehenga/skirt (one circular flare with no leg split), dhoti pants, tulip pants, harem pants, Afghani salwars, sharara, gharara, or a gathered ankle cuff. Never drop the three waist pleats on each side, the one large pleat at each side joint, or the 6-inch joined hem and its 4-inch taper. Never flatten the volume into tubular straight trousers, and keep the exact recorded print/motif field (chevron/zigzag, geometric, or floral) at its recorded physical scale, alignment, and density. A wide-open hem or a missing joined hem panel is a failed generation even if the top and the model face are perfect. This structure outranks any note that says the Farshi is not tapered, must not have a hem band, or names a different hem width. Lace, print, or a plain finish on that panel still follows the references.`,
+      `- FARSHI / FARSI HARD LOCK: ${FARSHI_SILHOUETTE_STRUCTURE} Length follows the references (ankle-length clearing the floor to display footwear/juttis, or floor-length). You are STRICTLY FORBIDDEN from rendering palazzo, plain wide-leg pants, a lehenga/skirt (one circular flare with no leg split), dhoti pants, tulip pants, harem pants, Afghani salwars, sharara, gharara, or a gathered ankle cuff. Never drop the three waist pleats on each side, the one large pleat at each side joint, or the 6-inch joined hem and its 4-inch taper. Never flatten the volume into tubular straight trousers, and keep the exact recorded print/motif field (chevron/zigzag, geometric, or floral) at its recorded physical scale, alignment, and density. A wide-open hem or a missing joined hem panel is a failed generation even if the top and the model face are perfect. Keep the feet close: a wide stride, a frozen mid-step, or legs spread apart opens this joined hem into a palazzo and is a failed frame. A small weight shift is allowed only while the 6-inch joined hem stays closed and tapered. This structure outranks any note that says the Farshi is not tapered, must not have a hem band, or names a different hem width. Lace, print, or a plain finish on that panel still follows the references.`,
     palazzo:
       "- PALAZZO HARD LOCK: the legs fall wide and straight or softly flared, with two distinct legs and no skirt merge. Do NOT substitute lehenga/skirt, dhoti, tulip, harem, churidar, or an ankle-cuffed salwar.",
     sharara_gharara:
@@ -555,7 +554,7 @@ function showcaseHardRule(intent: ShowcaseIntent, family: GarmentPoseFamily) {
     return `- SHOWCASE FRAME HARD RULE (COMPLETE SET): one head-to-toe frame that proves the top and the bottom wear are a single coordinated set. The top must read from shoulder seam to hem at its true length and fit, AND the bottom wear must read from waistband to hem with its exact cut, leg volume, pleat architecture, hem finish, colour and print. Footwear is grounded and fully visible. Nothing may crop the hem or the footwear. ${showcaseAestheticDirection("full_body_feature", "bottom_wear")}`;
   }
   if (intent === "playful_backdrop") {
-    return `- SHOWCASE FRAME HARD RULE (PLAYFUL, SET-MATCHED): natural, candid, lively body language that interacts with the backdrop and props ALREADY established in this shoot - a light step, a turn, a shoulder tilt, a relaxed lean on an element already present, a genuine mid-laugh. Introduce no new prop, furniture, plant or architecture. However playful the pose, the neckline, sleeve shape, hem line, fit and print stay unobstructed, uncrumpled and in frame. ${showcaseAestheticDirection("movement_feature", "upper_garment")}`;
+    return `- SHOWCASE FRAME HARD RULE (PLAYFUL, SET-MATCHED): a natural, relaxed catalog pose that interacts with the backdrop and props ALREADY established in this shoot - a small weight shift, a gentle turn, a shoulder tilt, or a relaxed lean on an element already present. Keep the expression calm and genuine. Do not freeze a mid-laugh, a walking stride, or a wide leg split. Introduce no new prop, furniture, plant or architecture. The neckline, sleeve shape, hem line, fit and print stay unobstructed, uncrumpled and in frame. ${showcaseAestheticDirection("movement_feature", "upper_garment")}`;
   }
   return `- SHOWCASE FRAME HARD RULE (TRUE FALL AND LENGTH): a full-length frame proving the garment's real fall, fit and length. Side seams hang straight, the hem stays level and complete inside the frame, and the garment is never hitched, tucked, gathered or shortened. Footwear grounded and visible. ${showcaseAestheticDirection("full_body_feature", "silhouette")}`;
 }
@@ -591,17 +590,17 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
   const lines = [
     "6-POSE PLAN VARIATION DIRECTIVE (MANDATORY PHYSICAL DIVERGENCE):",
     "Every shoot executes a distinct 6-pose plan where each frame has a unique physical geometry and purpose. Under NO circumstances should any frame repeat a static frontal standing pose:",
-    "- Pose 1 (full_front): Square-on catalog hero stance with balanced weight, showing complete silhouette.",
-    "- Pose 2 (angled): Mandatory 35-to-45 degree physical turn of torso and hips with one foot forward; strictly prohibit flat frontal standing or repeating Pose 1.",
-    "- Pose 3 (back): 180° true full rear view, shoulders and hips facing fully away; hair and dupatta swept forward for 100% unobstructed rear view.",
-    "- Pose 4 (creative): Active dynamic walking stride across the room with natural fabric flutter or elegant seated editorial pose on a studio bench/step (if demanded); strictly prohibit static standing in place.",
+    "- Pose 1 (full_front): Natural square-on catalog hero, weight slightly on one leg, shoulders relaxed, complete silhouette readable.",
+    "- Pose 2 (angled): Mandatory 35-to-45 degree physical turn of torso and hips with a small step; strictly prohibit flat frontal standing or repeating Pose 1. Keep a joined hem closed.",
+    "- Pose 3 (back): 180° true full rear view, shoulders and hips facing fully away; hair and dupatta swept forward for 100% unobstructed rear view. Same face identity and the same style-reference backdrop.",
+    "- Pose 4 (creative): A natural editorial stance that is clearly not Pose 1 - relaxed contrapposto or a soft lean, both feet grounded and close - or an elegant seated editorial pose when the style reference is seated. Never a frozen walking stride, a spin, or a wide leg split.",
     "- Pose 5 (closeup): Genuinely zoomed-in detail crop (face-and-detail or tight product-detail); strictly prohibit full-body hero repeat.",
-    "- Pose 6 (showcase): Dynamic feature-specific composition with stance, framing, and angle visibly diverging from Pose 1 (e.g. feet separated or angled to showcase trouser/Patiala/farshi volume and pleats, or drape spread).",
+    "- Pose 6 (showcase): A distinct natural catalog stance and framing that sells the named feature without repeating Pose 1. Keep the feet close enough that a joined or tapered hem stays intact.",
   ];
 
   if (isPose1) {
     lines.push(
-      "CURRENT FRAME (POSE 1 - SQUARE HERO): Grounded, balanced, straight-on catalog hero stance establishing the full outfit silhouette from head to hem. Relaxed, effortless poise with a natural gentle smile or calm composure.",
+      "CURRENT FRAME (POSE 1 - SQUARE HERO): Natural straight-on catalog hero. Weight settles slightly on one leg, shoulders and arms stay relaxed, and the full outfit reads from head to hem. A calm expression or a small genuine smile. Never a rigid mannequin stance or a wide stock-photo grin.",
     );
   } else if (isPose2) {
     lines.push(
@@ -618,7 +617,7 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
       );
     } else {
       lines.push(
-        "CURRENT FRAME (POSE 4 - DYNAMIC WALKING STRIDE): Active dynamic walking movement captured mid-step across the studio floor with natural fabric flutter and movement. NEVER render a static standing hero repeat!",
+        "CURRENT FRAME (POSE 4 - NATURAL EDITORIAL STANCE): A relaxed catalog pose that is clearly not Pose 1: contrapposto or a soft three-quarter lean, both feet grounded and close, garment hanging with gravity. NEVER a frozen mid-step, a spin, a wide leg split, or a repeat of the flat hero stance. A joined Farshi hem stays closed.",
       );
     }
   } else if (isPose5) {
@@ -627,19 +626,22 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
     );
   } else if (isPose6) {
     lines.push(
-      "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE): Framing, angle, and physical stance MUST visibly diverge from Pose 1. Feet separated or angled to showcase feature volume/flare. Never repeat the flat frontal hero stance. It must complement the other five images while showing a distinctly different pose, maintaining complete consistency of model, uploaded product, background set, and overall styling.",
+      "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE): Framing, angle, and physical stance MUST visibly diverge from Pose 1, with a natural weight shift that keeps the named feature readable. Do not split the legs wide. Never repeat the flat frontal hero stance. Same model face, same uploaded product, and the same style-reference backdrop as the other five frames.",
     );
   }
 
   return lines.join("\n");
 }
 
-function referenceImageScopeDirective(): string {
+function referenceImageScopeDirective(hasModelReference: boolean): string {
   return [
     "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:",
-    "- STYLE / REFERENCE IMAGE SCOPE: from the reference image (style reference / model reference), take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction.",
+    hasModelReference
+      ? "- MODEL FACE: the MODEL FACE REFERENCE is the only face, hair, skin tone, and body-proportion source for all six poses. Discard the face, hair, and body in the STYLE REFERENCE and in every product photo. Do not average those faces together."
+      : "- MODEL FACE: no separate MODEL FACE REFERENCE is attached, so the STYLE REFERENCE face, hair, skin tone, and body proportions are the model identity for all six poses. Still discard that image's clothing.",
+    "- STYLE REFERENCE BACKDROP: the STYLE REFERENCE is the only source for the photoshoot backdrop, wall, floor, props, lighting, and camera mood on all six poses, including the back view and any crop. Discard its clothing completely.",
     "- ABSOLUTE PROHIBITION ON COPYING THE STYLE REFERENCE GARMENT: The clothing, outfit, saree, dress, fabric, color, embroidery, or prints shown on the person in the STYLE REFERENCE image MUST BE 100% DISCARDED. Absolutely DO NOT copy, borrow, blend, or reproduce the style reference's clothing onto the model.",
-    "- PRODUCT INTEGRITY (SOLE TRUTH FROM UPLOADED PRODUCT IMAGES): the product itself (fabric, colors, prints, pattern geometry, neckline, sleeves, hem, embroidery, trims, closures, and complete bottom wear) MUST come exclusively from uploaded product references. The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows. Our product and its design must stay exactly as uploaded in the product photos.",
+    "- PRODUCT INTEGRITY (SOLE TRUTH FROM UPLOADED PRODUCT IMAGES): the product itself (fabric, colors, prints, pattern geometry, neckline, sleeves, hem, embroidery, trims, closures, and complete bottom wear) MUST come exclusively from uploaded product references. The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows. Our product and its design must stay exactly as uploaded in the product photos. Discard every face and every background inside those product photos.",
   ].join("\n");
 }
 
@@ -746,11 +748,11 @@ export function composeGenerationPrompt(args: {
   const sareeDrapePlanJson = isSaree && !isTrueBack ? requiredJsonSection("Canonical saree drape plan", sareeDrapePlan, 4_000) : "";
   const patternGeometryJson = compactJson(patternGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
   const embroideryGeometryJson = compactJson(embroideryGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
-  // Allow model face and approved pose anchor so the AI can recreate
-  // the identical model and studio background for the back pose.
-  // Defense in depth: strip out any stray front product references if mistakenly passed.
+  // The back frame keeps one rear product image, plus the model face, the
+  // style-reference backdrop, and the Pose 1 continuity anchor. Front product
+  // photos stay out so their construction cannot leak onto the rear.
   const promptReferences = isTrueBack
-    ? args.references.filter((ref) => isDirectBackProductRole(ref.role) || ref.role === "model_identity" || ref.role === "approved_pose")
+    ? args.references.filter((ref) => isDirectBackProductRole(ref.role) || ref.role === "model_identity" || ref.role === "style_reference" || ref.role === "approved_pose")
     : args.references;
   if (isTrueBack && !promptReferences.some((ref) => isDirectBackProductRole(ref.role))) {
     throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
@@ -837,6 +839,11 @@ export function composeGenerationPrompt(args: {
 
   const prompt = `Create ONE real-camera fashion e-commerce photograph for ${boundedText(args.skuName, 160) || "this product"} that is indistinguishable from an unretouched frame of a professional catalog shoot.
 
+SHOOT AUTHORITY - APPLY BEFORE ANYTHING ELSE:
+- Model face and body: ${hasModelReference ? "IMAGE labeled MODEL FACE REFERENCE only. Ignore every other face, including the style reference and the product photos." : hasStyleReference ? "the STYLE REFERENCE face, hair, and body proportions, because no separate model-face photo was uploaded." : "the locked model identity described below, held identical in every frame."}
+- Backdrop and background: ${hasStyleReference ? "the STYLE REFERENCE only, on all six poses, including this one. Same wall, floor, props, and light. Never a product-photo background and never a generic white sweep." : "the locked creative direction, identical in all six poses."}
+- Product DNA: uploaded product photos only. Copy garment design, print, colour, embroidery, and construction exactly. A detail crop may omit the face, but any visible face is still this same person and any visible set is still this same backdrop.
+
 REFERENCE MANIFEST IN UPLOAD ORDER:
 ${manifest}
 ${generationMemory ? `
@@ -876,7 +883,7 @@ ${hasModelReference
 ${faceQualityInstruction}
 
 LOCKED PRODUCT - MUST NOT CHANGE:
-${referenceImageScopeDirective()}
+${referenceImageScopeDirective(hasModelReference)}
 ${productCoreJson}
 ${isSaree ? (isTrueBack ? `SAREE REAR TRUTH - DIRECT EVIDENCE ONLY:
 ${sareeTruthJson}
@@ -1031,6 +1038,7 @@ ${rules.map((rule) => `- ${rule}`).join("\n")}
 - STRICT ANATOMICAL RULE: NEVER render three hands, extra arms, duplicate hands, floating hands, phantom limbs, or extra body parts. The model must have strictly and exactly two arms and two hands with five natural fingers each.
 - STRICT PRODUCT ISOLATION RULE: Never copy, transfer, or borrow the clothing, saree, dress, colors, prints, or embroidery from the STYLE REFERENCE image. Dress the model ONLY in the uploaded product.
 - Never render duplicate or identical frontal standing poses across different pose slots (Poses 2, 4, and 6 must visibly physically diverge from Pose 1).
+- Never freeze a walking stride, a spin, a mid-laugh, or a wide leg split. Use a natural catalog stance with both feet grounded. A joined or tapered hem stays closed.
 - Never render artificial, forced, stiff, or frozen stock catalog smiles.
 - Never redesign the product or copy garment details from the style reference.
 - Never complete, mirror, continue, relocate, add or remove decoration for symmetry.

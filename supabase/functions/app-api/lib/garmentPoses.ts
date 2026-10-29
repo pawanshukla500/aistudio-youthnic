@@ -368,10 +368,10 @@ export function garmentPoseDirection(family: GarmentPoseFamily): string {
 - FIT AND LENGTH: stance is relaxed and grounded so the side seams hang straight and the hem stays level. Never hitch, tuck, gather, or hold the hem in a way that shortens the garment.
 - SLEEVES AND DETAIL: keep both sleeves, the neckline, the placket and any side slit readable; arms stay clear of the yoke, print and slit.`,
     short_kurti_top:
-      `- SHORT KURTI / TOP POSE GRAMMAR: this is the playful, lively half of the catalog. Use natural, candid, in-motion body language - a light step, a turn, a laugh, a hand in the hair, a shoulder tilt, a lean into the set - so the frame feels alive rather than posed.
-- MATCH THE POSE TO THE SET: read the backdrop and props actually established for this shoot and let the pose interact with them naturally (leaning on the established wall, seated on the established step, walking through the established space). Never invent new props, furniture or architecture to pose against.
-- KEEP THE PRODUCT READABLE: however playful the pose, the top's hem line, neckline, sleeve shape, fit and print must all stay unobstructed and in frame. Movement must not crumple, twist or hide the garment.
-- EXPRESSION: genuine, warm, Gen-Z energy - a real smile, a candid glance, natural mid-laugh - never stiff or corporate.`,
+      `- SHORT KURTI / TOP POSE GRAMMAR: keep the pose natural and wearable. Use a small weight shift, a gentle turn, a shoulder tilt, or a lean into the set that is already there. Do not freeze a laugh, a walking stride, or a wide leg split.
+- MATCH THE POSE TO THE SET: read the backdrop and props actually established for this shoot and let the pose interact with them naturally (leaning on the established wall, seated on the established step). Never invent new props, furniture or architecture to pose against.
+- KEEP THE PRODUCT READABLE: the top's hem line, neckline, sleeve shape, fit and print must all stay unobstructed and in frame. The pose must not crumple, twist or hide the garment.
+- EXPRESSION: calm and genuine - a small smile or an easy glance - never a frozen mid-laugh or a stiff corporate stare.`,
     lehenga:
       `- LEHENGA SET POSE GRAMMAR: show the full silhouette - choli, dupatta and the complete skirt flare from waist to hem - with the hem inside the frame.
 - SKIRT VOLUME: the skirt keeps its true flare, panel structure and hem weight. Never flatten the volume, and never let a hand or dupatta collapse the silhouette.

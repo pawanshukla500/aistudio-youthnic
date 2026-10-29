@@ -156,7 +156,7 @@ export function missingRequiredReferenceLabels(references: ReferenceLike[], garm
 export function roleLabel(role: string) {
   const labels: Record<string, string> = {
     model_identity: "MODEL FACE REFERENCE - exact face, hair, skin tone and body-proportion truth; any garment or background in this image is unrelated and must not influence the SKU or set",
-    front: "FRONT PRODUCT - authoritative front garment design and construction ONLY. Pre-shoot background, walls, arches, urns, pots, plants, floor, and location in this image MUST BE 100% DISCARDED; never reproduce them",
+    front: "FRONT PRODUCT - authoritative front garment design and construction ONLY. Pre-shoot background, walls, arches, urns, pots, plants, floor, and location in this image MUST BE 100% DISCARDED; never reproduce them. Any face or body in this photo is not the model",
     back: "BACK PRODUCT - authoritative rear garment construction and design ONLY. Pre-shoot background, walls, and setting MUST BE 100% DISCARDED",
     fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority UPPER-garment texture, weave, print and embroidery truth; not bottom-wear print unless this image itself shows the trousers/skirt; background must be ignored",
     bottom: "BOTTOM WEAR / FARSHI - pixel-level authority for the trousers/skirt cut, volume, hem, fabric color and print; never copy upper-garment embroidery onto this panel; pre-shoot floor and background must be ignored",
@@ -169,8 +169,8 @@ export function roleLabel(role: string) {
     saree_border_tassels: "SAREE BORDER / TASSELS DETAIL - authoritative upper/lower border widths, construction, colours, motif geometry, tassel colour, construction and spacing; background ignored",
     saree_blouse_front: "SAREE BLOUSE FRONT - authoritative blouse colour, fabric, front construction, neckline and sleeves; background ignored",
     saree_blouse_back_piece: "SAREE BLOUSE BACK OR UNSTITCHED PIECE - authoritative back construction, ties, closures, or proof that only an unstitched blouse piece exists; background ignored",
-    approved_pose: "APPROVED POSE 1 - model, styling, room, backdrop wall, flooring, lighting, and shoot-continuity anchor; original product references always outrank its garment",
-    style_reference: "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, props, composition, mood, and lighting; never product identity or garment. The clothing/outfit in this image must be 100% DISCARDED; dress model ONLY in uploaded product",
+    approved_pose: "APPROVED POSE 1 - scene, lighting, styling, and shoot-continuity anchor only. Original product references always outrank its garment. When a MODEL FACE REFERENCE is also attached, that image outranks this one for the face",
+    style_reference: "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, props, composition, mood, and lighting on every pose, including the back view; never product identity or garment. The clothing/outfit in this image must be 100% DISCARDED; dress the model ONLY in the uploaded product. When a MODEL FACE REFERENCE is also attached, discard the face, hair, and body in this image too. When no MODEL FACE REFERENCE is attached, this image's face, hair, and body proportions are the model identity for all six poses",
   };
   return labels[role] || role.toUpperCase();
 }
@@ -254,10 +254,14 @@ export function selectReferences<T extends ReferenceLike>(
   // the approved Pose 1 anchor MUST be included so the generator preserves the
   // exact model identity and identical photoshoot studio environment/backdrop.
   if (poseType === "back") {
+    // Rear construction stays the only product image. The model face and the
+    // style-reference backdrop still have to travel with this frame, or the
+    // back view invents a different person and a different room.
     const rearProduct = selectTrueBackReferences(references, normalizedFamily);
     const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
+    const style = references.filter((reference) => reference.role === "style_reference").slice(0, 1);
     const anchor = approved.slice(0, 1);
-    const priority = [...rearProduct, ...model, ...anchor];
+    const priority = [...rearProduct, ...model, ...style, ...anchor];
     return priority.slice(0, maxReferences);
   }
   const order = preferredProductOrder(poseType, normalizedFamily, preferredRole);

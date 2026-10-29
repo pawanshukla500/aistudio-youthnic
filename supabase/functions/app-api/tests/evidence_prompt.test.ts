@@ -147,7 +147,8 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   });
 
   assertStringIncludes(prompt, "IMAGE 1: BACK PRODUCT");
-  assertStringIncludes(prompt, "IMAGE 2: APPROVED POSE 1");
+  assertStringIncludes(prompt, "IMAGE 2: STYLE REFERENCE");
+  assertStringIncludes(prompt, "IMAGE 3: APPROVED POSE 1");
   assertStringIncludes(prompt, "rear-plain-marker");
   assertEquals(prompt.includes("front-only-lace-marker"), false);
   assertEquals(prompt.includes("front-lace-construction-marker"), false);
@@ -716,7 +717,8 @@ Deno.test("composeGenerationPrompt enforces seated editorial pose for Pose 4 whe
   });
 
   assertStringIncludes(promptWithoutSitting, "POSE CATEGORY RULES (DYNAMIC):");
-  assertStringIncludes(promptWithoutSitting, "DYNAMIC POSE: Show active movement");
+  assertStringIncludes(promptWithoutSitting, "NATURAL EDITORIAL POSE: A relaxed catalog stance");
+  assertStringIncludes(promptWithoutSitting, "Do not freeze a walking stride");
   assertStringIncludes(promptWithoutSitting, "STYLE REFERENCE SITTING OVERRIDE (POSE 4):");
   assertEquals(promptWithoutSitting.includes("SEATED EDITORIAL POSE REQUIREMENT (POSE 4):"), false);
 });
@@ -967,7 +969,8 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
 
   // 2. Reference Image Scope & Product Integrity
   assertStringIncludes(pose2Prompt, "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:");
-  assertStringIncludes(pose2Prompt, "from the reference image (style reference / model reference), take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction");
+  assertStringIncludes(pose2Prompt, "the STYLE REFERENCE is the only source for the photoshoot backdrop, wall, floor, props, lighting, and camera mood on all six poses");
+  assertStringIncludes(pose2Prompt, "the STYLE REFERENCE face, hair, skin tone, and body proportions are the model identity for all six poses");
   assertStringIncludes(pose2Prompt, "The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows");
 
   // 3. Locked Details Across All Six Images
@@ -1013,8 +1016,8 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
     },
     references: [{ role: "front" }],
   });
-  assertStringIncludes(pose4Prompt, "CURRENT FRAME (POSE 4 - DYNAMIC WALKING STRIDE)");
-  assertStringIncludes(pose4Prompt, "Active dynamic walking movement captured mid-step across the studio floor");
+  assertStringIncludes(pose4Prompt, "CURRENT FRAME (POSE 4 - NATURAL EDITORIAL STANCE)");
+  assertStringIncludes(pose4Prompt, "NEVER a frozen mid-step, a spin, a wide leg split");
 
   // Test Pose 6: Feature showcase
   const pose6Prompt = composeGenerationPrompt({
@@ -1045,7 +1048,7 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   });
   assertStringIncludes(pose6Prompt, "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE)");
   assertStringIncludes(pose6Prompt, "Framing, angle, and physical stance MUST visibly diverge from Pose 1");
-  assertStringIncludes(pose6Prompt, "It must complement the other five images while showing a distinctly different pose");
+  assertStringIncludes(pose6Prompt, "Same model face, same uploaded product, and the same style-reference backdrop as the other five frames.");
 });
 
 Deno.test("composeGenerationPrompt enforces anatomical integrity and eliminates extra hands", () => {

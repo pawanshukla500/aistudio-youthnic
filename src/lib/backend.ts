@@ -303,7 +303,7 @@ async function getJob(jobId: string) {
     "Full Front Product View",
     "Professional Side / 3/4 View",
     "Full Back View",
-    "Creative Gen-Z Fashion Pose",
+    "Natural Editorial Pose",
     "Zoomed-In Product Detail Highlight",
     "Garment-Led Showcase",
   ];
