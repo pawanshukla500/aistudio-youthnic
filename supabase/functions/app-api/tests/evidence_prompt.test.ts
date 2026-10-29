@@ -187,6 +187,7 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   assertStringIncludes(prompt, "IMAGE 1: STYLE REFERENCE");
   assertStringIncludes(prompt, "IMAGE 2: BACK PRODUCT");
   assertStringIncludes(prompt, "IMAGE 3: APPROVED POSE 1");
+  assertStringIncludes(prompt, "Rebuild the STYLE REFERENCE room, not the rear product's pre-shoot studio");
   assertStringIncludes(prompt, "LISTING AUTHORITY - SAME PERSON, SAME SET, EXACT PRODUCT DNA IN ALL SIX POSES:");
   assertStringIncludes(prompt, "rear-plain-marker");
   assertEquals(prompt.includes("front-only-lace-marker"), false);
@@ -1045,6 +1046,7 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   assertStringIncludes(pose2Prompt, "CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN)");
   assertStringIncludes(pose2Prompt, "Torso and hips MUST physically rotate 35 to 45 degrees");
   assertStringIncludes(pose2Prompt, "DO NOT render a flat frontal standing pose or repeat Pose 1");
+  assertStringIncludes(pose2Prompt, "Same living photographed person, same style-set room, and exact uploaded product DNA");
 
   // 2. Reference Image Scope & Product Integrity
   assertStringIncludes(pose2Prompt, "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:");
