@@ -55,7 +55,9 @@ export function styleSetOwnsListingRoom(text: string): string {
     .replace(/\bscene, lighting, and product truth from Pose 1\b/gi, "product truth from Pose 1; STYLE REFERENCE room")
     .replace(/\bUse Pose 1 only as the model and shoot anchor\b/gi, "Use Pose 1 only as the model and lighting anchor; STYLE REFERENCE is the set")
     .replace(/\bPose 1 model identity and physical set\b/gi, "Pose 1 model identity; STYLE REFERENCE is the set")
-    .replace(/\bidentity and set continuity only\b/gi, "person and lighting continuity only");
+    .replace(/\bUse it for identity and set continuity, never as garment geometry\b/gi, "Use it for the same person and lighting only, never as the room or garment geometry")
+    .replace(/\bidentity and set continuity only\b/gi, "person and lighting continuity only")
+    .replace(/\bidentity and set continuity\b/gi, "identity and lighting continuity");
 }
 
 /** Cached Pose 1 plans still ask for a catalog “hero”. GPT Image 2 reads that as a stiff freeze. */
@@ -1115,7 +1117,7 @@ STYLE REFERENCE SITTING OVERRIDE (POSE 4):
 ${isPose4 && isSittingDemanded ? `
 SEATED EDITORIAL POSE REQUIREMENT (POSE 4):
 - The style reference or product requirements specifically demand an elegant seated pose for this frame.
-- Model must be seated gracefully on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (style reference / Pose 1). Do not bring in new furniture.
+- Model must be seated gracefully on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the ${hasStyleReference ? "STYLE REFERENCE" : "Pose 1"} set. Do not bring in new furniture.
 - Both legs, bottom wear (farshi/trousers/pleats), hemline, and footwear MUST remain fully visible, untangled, and unbunched.
 - Posture must be upright, poised, and relaxed editorial - showcasing garment fit and draping without wrinkling or obscuring key details.
 ` : ""}

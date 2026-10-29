@@ -53,6 +53,13 @@ Deno.test("generation memory labels product vs style and keeps approved outputs 
   assertStringIncludes(brief, "Style reference");
   assertStringIncludes(brief, "style_reference");
   assertStringIncludes(brief, "Previous approved output");
+  assertStringIncludes(brief, "Use it for the same person and lighting only, never as the room or garment geometry");
+  assertEquals(brief.includes("identity and set continuity"), false);
+  const noStyle = formatGenerationMemoryBrief({
+    references: [{ role: "front" }, { role: "approved_pose" }],
+    memory: { ...memory, styleRoles: [] },
+  });
+  assertStringIncludes(noStyle, "Use it for identity and set continuity, never as garment geometry");
   assertStringIncludes(brief, "Do not copy the product-photo courtyard.");
   assertEquals(brief.includes("gold yoke embroidery"), true);
 });

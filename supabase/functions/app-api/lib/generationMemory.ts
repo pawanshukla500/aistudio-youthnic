@@ -343,7 +343,14 @@ export function formatGenerationMemoryBrief(args: {
   }
   if (approved.length || memory.approvedAssets.length) {
     const poses = memory.approvedAssets.map((asset) => `pose ${asset.poseIndex}`).join(", ");
-    lines.push(`Previous approved output in this shoot: ${approved.join(", ") || "approved_pose"}${poses ? ` (${poses})` : ""}. Use it for identity and set continuity, never as garment geometry.`);
+    const hasStyleSet = style.length > 0 || memory.styleRoles.length > 0;
+    lines.push(
+      `Previous approved output in this shoot: ${approved.join(", ") || "approved_pose"}${poses ? ` (${poses})` : ""}. ${
+        hasStyleSet
+          ? "Use it for the same person and lighting only, never as the room or garment geometry."
+          : "Use it for identity and set continuity, never as garment geometry."
+      }`,
+    );
   }
   for (const detail of memory.preservedDetails.slice(0, 6)) {
     lines.push(detail);

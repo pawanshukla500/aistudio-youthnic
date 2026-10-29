@@ -331,10 +331,11 @@ Deno.test("style-set generation memory cannot tell later frames to reuse Pose 1'
     } as any,
     session: { productIdentity: { garmentFamily: "kurta_or_kurti_set" } },
     references: [{ role: "front" }, { role: "style_reference" }, { role: "model_identity" }, { role: "approved_pose" }],
-    generationMemory: "Later poses reuse Pose 1 model identity and physical set. Pose 1 hero, Pose 2 35-to-45 degree turn.",
+    generationMemory: "Later poses reuse Pose 1 model identity and physical set. Previous approved output in this shoot: approved_pose (pose 1). Use it for identity and set continuity, never as garment geometry. Pose 1 hero, Pose 2 35-to-45 degree turn.",
     learnings: "Approved Pose 1 is identity and set continuity only.",
   });
   assertStringIncludes(prompt, "Pose 1 model identity; STYLE REFERENCE is the set");
+  assertStringIncludes(prompt, "Use it for the same person and lighting only, never as the room or garment geometry");
   assertStringIncludes(prompt, "Pose 1 living portrait");
   assertStringIncludes(prompt, "the same person and lighting only");
   assertStringIncludes(prompt, "established by the STYLE REFERENCE");
