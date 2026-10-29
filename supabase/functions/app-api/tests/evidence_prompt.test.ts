@@ -1201,6 +1201,36 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   assertStringIncludes(pose6Prompt, "Same model face, same uploaded product, and the same style-reference backdrop as the other five frames.");
   assertStringIncludes(pose6Prompt, "Planted weight shift. Both feet stay close.");
   assertEquals(pose6Prompt.includes("feet separated"), false);
+
+  const propPose = composeGenerationPrompt({
+    skuName: "KURTA-SET-01",
+    productDetails: "Purple floral printed kurta with patiala salwar",
+    pose: {
+      id: "full_front",
+      title: "Front Hero View",
+      poseNumber: 1,
+      description: "Square front hero",
+      cameraAngle: "eye level",
+      framing: "full",
+      bodyPosition: "standing",
+      handPlacement: "One hand holding a sparkler",
+      expression: "Playful wink with a sparkler",
+      highlightedDetails: ["neckline"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "hero",
+      consistencyNotes: "locked",
+      prompt: "Full front hero pose.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "purple" },
+      creativeDirection: { seatedPoseRequired: "no" },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertEquals(propPose.includes("sparkler"), false);
+  assertStringIncludes(propPose, "holding nothing copied from the style or model photo");
+  assertStringIncludes(propPose, "Calm natural expression.");
 });
 
 Deno.test("composeGenerationPrompt enforces anatomical integrity and eliminates extra hands", () => {

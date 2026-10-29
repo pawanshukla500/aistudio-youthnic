@@ -667,6 +667,7 @@ function lockedDetailsDirective(): string {
 // the first section compacted, so that corrective line disappears while the raw
 // prompt and body position survive. Rewrite only those pose fields.
 const UNPLANTED_POSE_PATTERN = /\b(?:walk(?:ing|s)?|strides?|mid-step|stepped|lifted foot|foot lifted|step(?:s|ping)? forward|feet (?:naturally )?spaced|feet separated|feet apart|shoulder-width|shoulder width|legs spread|wide stance)\b/i;
+const HELD_OBJECT_PATTERN = /\b(?:sparklers?|fireworks?|handheld props?)\b/i;
 
 function plantedPoseReplacement(pose: { id: string; poseNumber: number }, sitting: boolean): string {
   const poseNumber = pose.poseNumber;
@@ -688,8 +689,11 @@ function plantedPoseReplacement(pose: { id: string; poseNumber: number }, sittin
 
 function withoutUnplantedPose(value: unknown, replacement: string): string {
   const text = String(value ?? "");
-  return UNPLANTED_POSE_PATTERN.test(text) ? replacement : text;
+  return UNPLANTED_POSE_PATTERN.test(text) || HELD_OBJECT_PATTERN.test(text) ? replacement : text;
 }
+
+const RELAXED_HANDS = "Both hands relaxed and clear of the garment, holding nothing copied from the style or model photo.";
+const CALM_EXPRESSION = "Calm natural expression.";
 
 export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
@@ -821,7 +825,7 @@ export function composeGenerationPrompt(args: {
     `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(withoutUnplantedPose(args.pose.bodyPosition, plantedStance), 360)}`,
     `camera angle: ${boundedText(args.pose.cameraAngle, 360)}`,
     `framing: ${boundedText(args.pose.framing, 360)}`,
-    `expression: ${boundedText(args.pose.expression, 360)}`,
+    `expression: ${boundedText(withoutUnplantedPose(args.pose.expression, CALM_EXPRESSION), 360)}`,
   ];
   const correction = boundedText(args.correction, 1_200);
   const learnings = boundedText(args.learnings, 900);
@@ -1016,7 +1020,7 @@ ${creative?.suggestedAccessories ? `The stylist has proposed adding: ${boundedTe
 
 ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
 ${allowedDelta.map((value) => `- ${value}`).join("\n")}
-- Hand placement: ${boundedText(args.pose.handPlacement, 360)}
+- Hand placement: ${boundedText(withoutUnplantedPose(args.pose.handPlacement, RELAXED_HANDS), 360)}
 - Everything not named here stays locked.
 
 POSE REQUIREMENT:
