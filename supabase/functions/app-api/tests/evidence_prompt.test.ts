@@ -1305,8 +1305,13 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
         hair: "side braid",
         stylingNotes: "keep the yoke clear",
       },
+      modelIdentity: {
+        face: "Side braid and sunglasses. Render realistic catchlights.",
+      },
       creativeDirection: {
         backgroundStyle: "Green festive wall, red patchwork chair, and a walking-distance rug",
+        composition: "Mid-stride walk toward the camera. Floral wall stays.",
+        cameraPerspective: "Low angle with a sparkler in frame",
         propUsage: "Two handheld sparklers",
         suggestedAccessories: "A small potli. Also two sparklers.",
         showcasePlan: {
@@ -1325,6 +1330,11 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
     references: [{ role: "front" }, { role: "style_reference" }],
   });
   assertEquals(creativeLeak.includes("sparkler"), false);
+  assertEquals(creativeLeak.includes("Mid-stride walk"), false);
+  assertEquals(creativeLeak.includes("catchlights"), false);
+  assertStringIncludes(creativeLeak, "Floral wall stays.");
+  assertStringIncludes(creativeLeak, "Side braid and sunglasses.");
+  assertStringIncludes(creativeLeak, "Room and camera only.");
   assertEquals(creativeLeak.includes("feet separated"), false);
   assertEquals(creativeLeak.includes("style photo walking pose"), false);
   assertEquals(creativeLeak.includes("frozen walking stride with feet separated"), false);

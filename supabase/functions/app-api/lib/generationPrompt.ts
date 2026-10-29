@@ -703,6 +703,17 @@ const CREATIVE_HAND_KEYS = new Set(["handplacement", "hand_placement"]);
 const CREATIVE_HELD_KEYS = new Set(["propusage", "prop_usage"]);
 const CREATIVE_DISTINCTION_KEYS = new Set(["distinctfrom", "distinct_from"]);
 const CREATIVE_VISIBILITY_KEYS = new Set(["visibilityrules", "visibility_rules"]);
+const CREATIVE_CAMERA_KEYS = new Set([
+  "composition",
+  "cameraperspective",
+  "camera_perspective",
+  "modelstyling",
+  "model_styling",
+  "photographystyle",
+  "photography_style",
+  "framing",
+]);
+const ROOM_CAMERA_ONLY = "Room and camera only.";
 
 function creativeDirectionKey(key: string) {
   return key.trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -725,8 +736,29 @@ const INVENTED_CATCHLIGHT_PATTERNS: Array<[string, string]> = [
   ["anatomically correct eyes with realistic catchlights and correctly aligned gaze", "eyes as the identity photo shows them, including a cover"],
 ];
 
+const CATCHLIGHT_PATTERN = /\bcatch-?lights?\b/i;
+
 function withoutInventedCatchlights(value: string) {
-  return INVENTED_CATCHLIGHT_PATTERNS.reduce((text, [from, to]) => text.replaceAll(from, to), value);
+  const replaced = INVENTED_CATCHLIGHT_PATTERNS.reduce((text, [from, to]) => text.replaceAll(from, to), value);
+  if (!CATCHLIGHT_PATTERN.test(replaced)) return replaced;
+  const kept = replaced.split(/(?<=[.!;])\s+/).map((part) => part.trim()).filter((part) => part && !CATCHLIGHT_PATTERN.test(part));
+  return kept.join(" ").trim() || "Eyes stay as the identity photo shows them, including a cover.";
+}
+
+function withoutPoseOrHeldClauses(value: string, emptyFallback: string) {
+  if (!UNPLANTED_POSE_PATTERN.test(value) && !HELD_OBJECT_PATTERN.test(value)) return value;
+  const kept = value.split(/(?<=[.!;])\s+/).map((part) => part.trim()).filter((part) => (
+    part && !UNPLANTED_POSE_PATTERN.test(part) && !HELD_OBJECT_PATTERN.test(part)
+  ));
+  return kept.join(" ").trim() || emptyFallback;
+}
+
+function sanitizeIdentityText(model: JsonRecord): JsonRecord {
+  const output: JsonRecord = {};
+  for (const [key, value] of Object.entries(model)) {
+    output[key] = typeof value === "string" ? withoutInventedCatchlights(value) : value;
+  }
+  return output;
 }
 
 // Locked art direction is serialized in full. A cached showcase plan can still
@@ -768,6 +800,10 @@ function sanitizeCreativeDirection(
         }
         if (normalized === "suggestedaccessories" || normalized === "suggested_accessories") {
           output[key] = withoutHeldObjectClauses(entry);
+          continue;
+        }
+        if (CREATIVE_CAMERA_KEYS.has(normalized)) {
+          output[key] = withoutPoseOrHeldClauses(entry, ROOM_CAMERA_ONLY);
           continue;
         }
       }
@@ -856,7 +892,7 @@ export function composeGenerationPrompt(args: {
       : productCore(productForPrompt, bottomWear.includesBottomWear),
     { maxString: 360, maxItems: 16, maxKeys: 32 },
   );
-  const modelJson = compactJson(model, { maxString: 500, maxItems: 16, maxKeys: 32 });
+  const modelJson = compactJson(sanitizeIdentityText(model), { maxString: 500, maxItems: 16, maxKeys: 32 });
   const showcaseIntent = effectiveShowcaseIntent({ creative: directedCreative, family: poseFamily, includesBottomWear: bottomWear.includesBottomWear });
   const showcaseShot = effectiveShowcaseShot(directedCreative, { includesBottomWear: bottomWear.includesBottomWear });
   const creativeForPrompt: JsonRecord = { ...directedCreative, showcaseIntent };
