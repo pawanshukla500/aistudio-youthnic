@@ -1681,7 +1681,7 @@ REFERENCE AUTHORITY (highest to lowest):
 6. MANNEQUIN / FLAT-LAY SHOT - on a mannequin or dress form, authoritative for worn shape, fit, proportion and drape; laid flat, authoritative for outline, construction, panel layout and length only, since flat cloth shows no worn drape.
 7. BOTTOM WEAR / FARSHI - when supplied, pixel-level authority for the trousers/skirt cut, volume, hem, color and print. Never copy upper-garment embroidery onto this panel.
 8. ADDITIONAL PRODUCT - another source of product truth, including supporting bottom-wear evidence.
-9. STYLE REFERENCE - creative direction only. From the style reference, take the photoshoot background/backdrop, framing, and lighting for all six poses. Do not copy that photo's pose, stance, or handheld props into any pose. Take the model face from that image only when no MODEL FACE REFERENCE is supplied; when a MODEL FACE REFERENCE is supplied, discard the style-reference face, hair, and body. ABSOLUTE PROHIBITION ON COPYING THE PRODUCT FROM THE STYLE REFERENCE: The clothing, outfit, saree, dress, fabric, color, prints, or embroidery worn by the person in the style reference MUST BE 100% DISCARDED. Absolutely DO NOT copy, reproduce, or borrow the style reference's clothing. The product itself must stay based exclusively on uploaded product images and must not be redesigned. Never copy its garment, product color, bottoms, logos, or accessories.
+9. STYLE REFERENCE - creative direction only. From the style reference, take the photoshoot backdrop, wall, floor, and lighting for all six poses. Do not copy that photo's pose, stance, framing, or handheld props into any pose. Take the model face from that image only when no MODEL FACE REFERENCE is supplied; when a MODEL FACE REFERENCE is supplied, discard the style-reference face, hair, and body. ABSOLUTE PROHIBITION ON COPYING THE PRODUCT FROM THE STYLE REFERENCE: The clothing, outfit, saree, dress, fabric, color, prints, or embroidery worn by the person in the style reference MUST BE 100% DISCARDED. Absolutely DO NOT copy, reproduce, or borrow the style reference's clothing. The product itself must stay based exclusively on uploaded product images and must not be redesigned. Never copy its garment, product color, bottoms, logos, or accessories.
 
 Product references are frequently flat-lay, folded, pinned, or shot on a mannequin or dress form. Read the garment through that presentation: infer how each panel, hem, sleeve and closure behaves once it is worn on a live human body, and record that in the profile. The mannequin, dress form, hanger, clips, pins and the flat surface are photography apparatus, never part of the product - never describe them as garment features and never let them appear in the pose plan.
 
@@ -1915,7 +1915,8 @@ export const CONSISTENCY_RULES = [
 // covers the eyes. Cached v28 plans can still name those objects as props.
 // v30 stops treating a seated style photo as a request for pose 4 to sit.
 // Cached v29 plans can still set seatedPoseRequired because the style model is sitting.
-export const ANALYSIS_VERSION = "generation-session-v30-pose4-stands";
+// v31 stops copying the style photo's framing into the six poses.
+export const ANALYSIS_VERSION = "generation-session-v31-room-not-framing";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

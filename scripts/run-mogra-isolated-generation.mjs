@@ -219,7 +219,7 @@ async function main() {
     modelIdentity: verifiedAnalysis.modelIdentity,
     stylingPlan: verifiedAnalysis.stylingPlan,
     posePlan,
-    productDnaVersion: "generation-session-v30-pose4-stands",
+    productDnaVersion: "generation-session-v31-room-not-framing",
   };
 
   const analysisFingerprint = crypto.createHash("sha256").update(JSON.stringify(sessionData)).digest("hex").slice(0, 8);

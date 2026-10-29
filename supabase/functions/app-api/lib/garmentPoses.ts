@@ -369,7 +369,7 @@ export function garmentPoseDirection(family: GarmentPoseFamily): string {
 - SLEEVES AND DETAIL: keep both sleeves, the neckline, the placket and any side slit readable; arms stay clear of the yoke, print and slit.`,
     short_kurti_top:
       `- SHORT KURTI / TOP POSE GRAMMAR: keep the pose natural and wearable. Use a small weight shift, a gentle turn, a shoulder tilt, or a lean into the set that is already there. Do not freeze a laugh, a walking stride, or a wide leg split.
-- MATCH THE POSE TO THE SET: read the backdrop and props actually established for this shoot and let the pose interact with them naturally (leaning on the established wall, seated on the established step). Never invent new props, furniture or architecture to pose against.
+- MATCH THE POSE TO THE SET: both feet stay planted and close. A lean may use a wall already in the room. Do not sit because the style photo sits, and do not invent furniture.
 - KEEP THE PRODUCT READABLE: the top's hem line, neckline, sleeve shape, fit and print must all stay unobstructed and in frame. The pose must not crumple, twist or hide the garment.
 - EXPRESSION: calm and genuine - a small smile or an easy glance - never a frozen mid-laugh or a stiff corporate stare.`,
     lehenga:
