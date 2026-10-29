@@ -1016,6 +1016,7 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   // 2. Reference Image Scope & Product Integrity
   assertStringIncludes(pose2Prompt, "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:");
   assertStringIncludes(pose2Prompt, "the STYLE REFERENCE is the only source for the photoshoot backdrop, wall, floor, props, lighting, and camera mood on all six poses");
+  assertStringIncludes(pose2Prompt, "SET ONLY: the direction below is backdrop, light, and camera. It does not set the pose, the garment, or handheld props.");
   assertStringIncludes(pose2Prompt, "the STYLE REFERENCE face, hair, skin tone, and body proportions are the model identity for all six poses");
   assertStringIncludes(pose2Prompt, "The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows");
 

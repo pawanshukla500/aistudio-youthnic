@@ -940,8 +940,9 @@ ${bottomWearSection({ bottomWear, isSaree: isSareeShoot, hasBottomReference })}
 
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
 ${lockedDetailsDirective()}
+- SET ONLY: the direction below is backdrop, light, and camera. It does not set the pose, the garment, or handheld props.
 ${creativeJson}
-- Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, and colour grade. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
+- Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, and colour grade. Do not substitute a different backdrop.
 - ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS: Never reproduce the background, wall, arches, urns, pots, plants, steps, or environment visible behind the garment in the product reference photos (front, back, bottom, mannequin). The photoshoot set must come exclusively from the STYLE REFERENCE (or Pose 1 anchor / studio specification).
 - BACKDROP AND SET CONTINUITY ACROSS ALL POSES: The exact same photoshoot set (wall color, wall finish, floor, lighting, and any props established by the style reference / Pose 1) must remain identical across every pose in this set without drift or forgetting context.
 ${hasApprovedAnchor
