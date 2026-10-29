@@ -9,7 +9,7 @@ This document establishes operational requirements, architectural constraints, a
 1. **Adhere to `MEMORY.md`:** `MEMORY.md` is the canonical source of truth for architectural contracts, model routing, and generation quality standards. Never violate any contract defined in `MEMORY.md`.
 2. **Product Truth is Absolute:**
    - Generated outfits must be derived **EXCLUSIVELY** from uploaded product images (FRONT, BACK, BOTTOM, FABRIC, MANNEQUIN).
-   - Style reference images provide ONLY the studio backdrop, architecture, flooring, props, lighting, and camera mood.
+   - Style reference images provide ONLY the studio backdrop, architecture, flooring, set dressing, lighting, and camera mood. Copy the room only: do not copy the pose, the outfit, or objects in the hands.
    - **Quarantine the Style Reference Outfit:** Clothing worn by models in style reference images must be 100% ignored and discarded. Never borrow, blend, or transfer style reference clothing onto the model.
    - **Never Compromise Quality for Reference Matching:** The uploaded product's design, cut, prints, butti work, embroidery, and colors must remain identical to the uploaded references.
 3. **Strict Anatomical Realism:**

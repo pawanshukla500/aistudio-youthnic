@@ -22,7 +22,7 @@ async function main() {
     { role: "back", label: "BACK PRODUCT - authoritative rear garment construction and design ONLY. Pre-shoot background, walls, and setting MUST BE 100% DISCARDED", fileMatch: "ref_back" },
     { role: "fabric_pattern", label: "FABRIC / PATTERN DETAIL - high-priority UPPER-garment texture, weave, print and embroidery truth; not bottom-wear print unless this image itself shows the trousers/skirt; background must be ignored", fileMatch: "ref_fabric_pattern" },
     { role: "additional_product", label: "ADDITIONAL PRODUCT PHOTO - supporting product truth; background must be ignored", fileMatch: "ref_additional_product" },
-    { role: "style_reference", label: "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, props, composition, mood, and lighting; never product identity or garment. The clothing/outfit in this image must be 100% DISCARDED; dress model ONLY in uploaded product", fileMatch: "ref_style_reference" },
+    { role: "style_reference", label: "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, mood, and lighting; never product identity or garment. Copy the room only: do not copy the pose or objects in the hands. The clothing/outfit in this image must be 100% DISCARDED; dress model ONLY in uploaded product", fileMatch: "ref_style_reference" },
   ];
 
   const manifest = [];

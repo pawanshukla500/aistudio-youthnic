@@ -1541,7 +1541,7 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     face: stringValue(model.face, "Keep the exact same recognizable face across the complete set - identical face shape, eyes, eyebrows, nose, lips, and jawline as established in Pose 1"),
     faceRealism: stringValue(
       model.faceRealism ?? model.face_realism,
-      "Photorealistic human face: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry (not mirror-symmetric), anatomically correct eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never plastic, waxy, airbrushed, doll-like, or synthetic-looking.",
+      "Photorealistic human face: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry (not mirror-symmetric), eyes as the identity photo shows them, including a cover, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never plastic, waxy, airbrushed, doll-like, or synthetic-looking.",
     ),
     hair: stringValue(model.hair, "Keep one hairstyle across the complete set"),
     makeup: stringValue(model.makeup, "Keep makeup consistent and natural"),
@@ -1743,7 +1743,7 @@ Crucial Evidence Rules:
   - A rear/back entry in detailPlacementMap is allowed only when the matching rear region is "confirmed" and the named decoration/construction is explicitly visible in a direct BACK PRODUCT, REAR/BACK DRAPE, or matching BLOUSE BACK reference. Do not copy front lace, trim, borders, closures, or motifs into a rear placement lock.
   Fill detailPlacementMap with only source-supported region-specific hard locks and absenceConstraints with negative product facts as well for backward compatibility.
 
-SCENE AUTHORITY: when a STYLE REFERENCE image is supplied, that image defines the shoot. Describe what it actually shows - wall colour and finish, floor or ground surface, every prop and its placement, plant or furniture presence, light direction and quality, camera height and distance, depth of field, colour grade - concretely enough to rebuild that set from the description alone. Never replace it with a generic "clean premium studio backdrop": a plain seamless-paper description when the reference shows a styled set is a failure of this analysis. A requested scene direction refines mood, styling and props on top of the referenced set; it does not replace the referenced backdrop. Only when no style reference is supplied does the requested scene direction define the scene by itself.
+SCENE AUTHORITY: when a STYLE REFERENCE image is supplied, that image defines the shoot. Describe what it actually shows - wall colour and finish, floor or ground surface, set dressing that stays in the room, plant or furniture presence, light direction and quality, camera height and distance, depth of field, colour grade - concretely enough to rebuild that set from the description alone. Do not record the pose or objects in the hands as set dressing. Never replace it with a generic "clean premium studio backdrop": a plain seamless-paper description when the reference shows a styled set is a failure of this analysis. A requested scene direction refines mood, styling and props on top of the referenced set; it does not replace the referenced backdrop. Only when no style reference is supplied does the requested scene direction define the scene by itself.
 PRODUCT vs STYLE DIVISION: Product references are garment/SKU truth only (cut, colour, print, embroidery, construction). The STYLE REFERENCE is the sole authority for photoshoot backdrop, room architecture, flooring, lighting, camera, mood, AND jewellery/ornament taste when those pieces are not already part of the product. THE CLOTHING WORN IN THE STYLE REFERENCE MUST BE 100% DISCARDED; NEVER DRESS THE MODEL IN THE STYLE REFERENCE'S CLOTHING OR BORROW ITS PRINTS/COLORS. Never mix a product-photo wall, arch, urn, pot, plant, or courtyard into creativeDirection.
 CRITICAL NEGATIVE RULE FOR SCENE & BACKGROUND: Product reference images (FRONT, BACK, BOTTOM, FABRIC, MANNEQUIN) frequently show the garment in an existing pre-shoot studio, outdoor location, archway, courtyard, terracotta pots/urns, plants, or furniture. You are STRICTLY FORBIDDEN from describing, extracting, or incorporating ANY background elements, walls, arches, urns, pots, plants, or furniture from the PRODUCT reference images into creativeDirection or backgroundStyle! The photoshoot scene MUST BE DERIVED 100% FROM THE STYLE REFERENCE (if supplied), or from the requested scene direction (if no style reference is supplied), or designed as a fresh, clean, elegant, neutral fashion studio.
 
@@ -1847,7 +1847,7 @@ export const CONSISTENCY_RULES = [
   "Model expressions and smiles must look natural, relaxed, and realistic with soft lips and calm warmth — strictly avoid artificial, forced, stiff, or frozen stock catalog smiles.",
   "If a MODEL FACE REFERENCE image was supplied, it is the exact, non-negotiable face and identity for the model in every pose, including pose 1 - reproduce it as closely as photographically possible and never substitute, average, or beautify a different face.",
   "Keep the same model face, skin tone, hair, body proportions, makeup, accessories, and footwear across all six poses.",
-  "Every face must be photorealistic and anatomically correct: natural skin texture with visible pores, correctly shaped and aligned eyes with realistic catchlights, and naturally aligned teeth. Never render a distorted, warped, blurred, or plastic/waxy/mirror-symmetric \"AI face\".",
+  "Every face must be photorealistic and anatomically correct: natural skin texture with visible pores, eyes as the identity photo shows them, including a cover, and naturally aligned teeth. Never render a distorted, warped, blurred, or plastic/waxy/mirror-symmetric \"AI face\".",
   "Keep exact garment colors, fabric, texture, pattern scale and placement, print, embroidery, logos, stitching, trims, buttons, zippers, pockets, fit, silhouette, and length.",
   "Keep the exact bottom wear cut, silhouette, volume, pleats, hem, fabric, color, and print shown in product references across all poses. Never substitute farshi/farsi pajama with palazzo, lehenga/skirt, dhoti, or salwar, and never drop or miniaturize the bottom-wear motifs.",
   "Use the back product image as the sole authority for the back pose.",
@@ -1898,7 +1898,10 @@ export const CONSISTENCY_RULES = [
 // an approved pose.
 // v28 keeps the identity photo's face when the eyes are covered, and uses the
 // style-reference face when no separate model photo was uploaded.
-export const ANALYSIS_VERSION = "generation-session-v28-identity-photo-face";
+// v29 stops treating the style photo's composition and handheld objects as
+// part of the set, and stops demanding catchlights when the identity photo
+// covers the eyes. Cached v28 plans can still name those objects as props.
+export const ANALYSIS_VERSION = "generation-session-v29-room-not-composition";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

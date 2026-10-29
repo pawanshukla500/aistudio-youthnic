@@ -718,6 +718,17 @@ function withoutHeldObjectClauses(value: string) {
   return kept.join(" ").trim() || SET_PROPS_ONLY;
 }
 
+// Stored sessions can still carry the older rule that demanded catchlights.
+// That sentence invents an uncovered face when the identity photo hides the eyes.
+const INVENTED_CATCHLIGHT_PATTERNS: Array<[string, string]> = [
+  ["correctly shaped and aligned eyes with realistic catchlights", "eyes as the identity photo shows them, including a cover"],
+  ["anatomically correct eyes with realistic catchlights and correctly aligned gaze", "eyes as the identity photo shows them, including a cover"],
+];
+
+function withoutInventedCatchlights(value: string) {
+  return INVENTED_CATCHLIGHT_PATTERNS.reduce((text, [from, to]) => text.replaceAll(from, to), value);
+}
+
 // Locked art direction is serialized in full. A cached showcase plan can still
 // name a walking stride or a sparkler inside body, hand, expression, or prop
 // fields. Backdrop strings stay untouched: "walk" inside a room description
@@ -784,7 +795,8 @@ export function composeGenerationPrompt(args: {
   // instead of being handed generated defaults dressed up as stylist decisions.
   const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
   const evidence = Array.isArray(product?.garmentEvidence) ? product.garmentEvidence as JsonRecord[] : [];
-  const rules = boundedStrings(Array.isArray(args.session.consistencyRules) ? args.session.consistencyRules : CONSISTENCY_RULES, 16, 420);
+  const storedRules = Array.isArray(args.session.consistencyRules) ? args.session.consistencyRules : CONSISTENCY_RULES;
+  const rules = boundedStrings(storedRules.map((rule) => withoutInventedCatchlights(String(rule ?? ""))), 16, 420);
   const isTrueBack = args.pose.id === "back";
   // Existing sessions can bypass normalizeAnalysis, so reapply rear-evidence
   // validation immediately before prompt construction as a final safety gate.

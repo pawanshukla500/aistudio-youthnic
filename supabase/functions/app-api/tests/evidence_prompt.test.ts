@@ -681,7 +681,9 @@ Deno.test("composeGenerationPrompt enforces style reference backdrop authority a
   });
 
   // Verify style reference authority
-  assertStringIncludes(prompt, "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, props, composition, mood, and lighting");
+  assertStringIncludes(prompt, "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, mood, and lighting");
+  assertEquals(prompt.includes("props, composition"), false);
+  assertEquals(prompt.includes("catchlights"), false);
   assertStringIncludes(prompt, "do not copy the pose or objects in the hands");
   assertStringIncludes(prompt, "If the eyes are hidden, keep that cover and the visible face.");
   assertStringIncludes(prompt, "Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE");
@@ -689,6 +691,40 @@ Deno.test("composeGenerationPrompt enforces style reference backdrop authority a
   assertStringIncludes(prompt, "STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos");
   assertStringIncludes(prompt, "ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS");
   assertStringIncludes(prompt, "STRICT PROHIBITION ON COPYING PRE-SHOOT BACKGROUNDS");
+});
+
+Deno.test("composeGenerationPrompt rewrites a stored catchlight rule so a covered face stays covered", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "COVERED-FACE",
+    productDetails: "Green kurti",
+    pose: {
+      id: "full_front",
+      title: "Front",
+      poseNumber: 1,
+      description: "Front hero",
+      cameraAngle: "front",
+      framing: "full",
+      bodyPosition: "planted",
+      handPlacement: "relaxed",
+      expression: "calm",
+      highlightedDetails: ["kurti"],
+      productVisibilityRules: ["visible"],
+      purpose: "hero",
+      consistencyNotes: "locked",
+      prompt: "Front hero with the product readable.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "green" },
+      creativeDirection: { backgroundStyle: "Green wall and a red chair" },
+      consistencyRules: [
+        "Every face must be photorealistic and anatomically correct: natural skin texture with visible pores, correctly shaped and aligned eyes with realistic catchlights, and naturally aligned teeth.",
+      ],
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertEquals(prompt.includes("catchlights"), false);
+  assertStringIncludes(prompt, "eyes as the identity photo shows them, including a cover");
 });
 
 Deno.test("composeGenerationPrompt enforces seated editorial pose for Pose 4 when demanded", () => {
