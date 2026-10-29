@@ -2033,6 +2033,7 @@ async function validatePose(args: {
     ],
     hasApprovedAnchor: args.approved.length > 0,
     hasModelReference: qaRefs.some((reference) => reference.role === "model_identity"),
+    hasStyleReference: qaRefs.some((reference) => reference.role === "style_reference"),
     hasSessionBottomReference: sessionHasBottomReference(args.references, args.session),
     referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`),
   });

@@ -383,3 +383,43 @@ Deno.test("Pose 6 macro QA applies the anatomy veto even when the face is absent
   assertEquals(result.automaticallyVerified, false);
   assertEquals(result.failed.includes("pose_requirement"), true);
 });
+
+Deno.test("Pose 1 QA fails styling_continuity when the listing set copies a product-photo studio", () => {
+  const withStyle = buildPoseQaPrompt({
+    poseNumber: 1,
+    poseType: "full_front",
+    poseTitle: "Hero",
+    poseDirection: { id: "full_front", title: "Hero" },
+    productIdentity: { garmentFamily: "kurta_or_kurti_set" },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: false,
+    hasModelReference: true,
+    hasStyleReference: true,
+    referenceManifest: ["IMAGE 1: MODEL FACE REFERENCE", "IMAGE 2: STYLE REFERENCE", "IMAGE 3: FRONT PRODUCT"],
+  });
+  assertStringIncludes(withStyle, "STYLE-SET AUTHORITY");
+  assertStringIncludes(withStyle, "establish the STYLE REFERENCE room as the listing set, never a product-photo studio");
+  assertStringIncludes(withStyle, "reproduces a product-photo background");
+  assertStringIncludes(withStyle, "Fail styling_continuity");
+
+  const withoutStyle = buildPoseQaPrompt({
+    poseNumber: 1,
+    poseType: "full_front",
+    poseTitle: "Hero",
+    poseDirection: { id: "full_front", title: "Hero" },
+    productIdentity: { garmentFamily: "kurta_or_kurti_set" },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: false,
+    hasModelReference: true,
+    hasStyleReference: false,
+    referenceManifest: ["IMAGE 1: MODEL FACE REFERENCE", "IMAGE 2: FRONT PRODUCT"],
+  });
+  assertEquals(withoutStyle.includes("STYLE-SET AUTHORITY"), false);
+  assertEquals(withoutStyle.includes("never a product-photo studio"), false);
+});

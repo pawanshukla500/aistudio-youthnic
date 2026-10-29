@@ -43,3 +43,11 @@ Deno.test("product-truth analysis IMAGE parts follow listing identity order", ()
     3,
   );
 });
+
+Deno.test("pose QA receives the style-reference flag for listing-set veto", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  assertEquals(
+    source.includes("hasStyleReference: qaRefs.some((reference) => reference.role === \"style_reference\")"),
+    true,
+  );
+});

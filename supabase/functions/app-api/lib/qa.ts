@@ -143,6 +143,7 @@ export function buildPoseQaPrompt(args: {
   garmentFamily: string; consistencyRules: string[]; hasApprovedAnchor: boolean; hasModelReference: boolean; referenceManifest: string[];
   bottomWearMode?: unknown;
   hasSessionBottomReference?: boolean;
+  hasStyleReference?: boolean;
 }) {
   // QA must judge the shoot as it was configured. A top-only shoot has no
   // coordinated bottom to match, so bottom-wear fidelity is not a gate there.
@@ -150,6 +151,8 @@ export function buildPoseQaPrompt(args: {
   const hasBottomWear = bottomWear.includesBottomWear;
   const hasBottomReference = Boolean(args.hasSessionBottomReference)
     || args.referenceManifest.some((line) => /\bbottom\b/i.test(line));
+  const hasStyleReference = Boolean(args.hasStyleReference)
+    || args.referenceManifest.some((line) => /style reference/i.test(line));
   const farshiBottom = hasBottomWear &&
     effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, bottomWear.details) === "farshi";
   const farshiStructureCheck = farshiBottom
@@ -205,8 +208,9 @@ ${args.hasModelReference
     ? `Compare IMAGE A against the MODEL FACE REFERENCE on visual appearance attributes - face shape, eye shape and colour, eyebrow shape, nose shape, lip shape, jawline, skin tone and texture, and hairstyle must look consistent with that reference rather than merely similar. Fail model_face for any noticeable visual deviation, even a subtle one.${args.hasApprovedAnchor ? " Use APPROVED POSE 1 only to confirm scene, lighting, and styling continuity - never to judge the face." : ""}`
     : args.hasApprovedAnchor
       ? "Compare IMAGE A against the APPROVED POSE 1 reference on visual appearance attributes - face shape, eye shape and colour, eyebrow shape, nose shape, lip shape, jawline, skin tone and texture, and hairstyle must look consistent across the set. Also confirm body proportions, styling, backdrop, lighting, and colour treatment match."
-      : "This is Pose 1. It must establish one specific, photorealistic, naturally attractive adult face with real individual character and a realistic, coherent shoot anchor."}
+      : "This is Pose 1. It must establish one specific, photorealistic, naturally attractive adult face with real individual character and a realistic, coherent shoot anchor."}${!args.hasApprovedAnchor && hasStyleReference ? " Pose 1 must also establish the STYLE REFERENCE room as the listing set, never a product-photo studio." : ""}
 ${args.hasApprovedAnchor ? "SET CONTINUITY: styling_continuity also covers the set. Fail it when the part of the set IMAGE A actually shows - backdrop wall colour or finish, floor, props, light direction or colour grade - contradicts APPROVED POSE 1. A back view, close-up or seated frame is the same room from another camera position, never a different wall, backdrop or location. Judge only what the framing shows: a tight crop that hides the floor or props is not a failure." : ""}
+${hasStyleReference ? "STYLE-SET AUTHORITY: Fail styling_continuity when IMAGE A's visible set (wall colour/finish, floor, props, light direction, colour grade) contradicts the STYLE REFERENCE room, or when it reproduces a product-photo background (pre-shoot studio, outdoor location, archway, courtyard, terracotta pots/urns, plants, or furniture behind the garment in FRONT/BACK/BOTTOM/MANNEQUIN photos). Product-photo backgrounds are noise and must never be the listing set. A tight crop that hides the room is not a failure." : ""}
 ${productDetailCloseup ? "This pose 5 crop may omit the face. Pass model_face when no recognizable face is in frame rather than failing for a missing beauty close-up. If a readable face is present, still compare it to the identity lock." : ""}${macroShowcase ? "This pose 6 macro_detail showcase crop may omit the face. Pass model_face and face_realism when no recognizable face is in frame rather than failing for a missing beauty close-up. If a readable face is present, still compare it to the identity lock." : ""}
 
 PRODUCT FIDELITY - the failure mode that matters most here is a garment that reads as the same style but is not the same SKU. Judge it against the product references, not against your sense of what such a garment usually looks like:
