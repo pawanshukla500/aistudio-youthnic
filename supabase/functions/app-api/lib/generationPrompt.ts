@@ -712,6 +712,12 @@ function poseOrPropText(value: string, replacement: string) {
   return UNPLANTED_POSE_PATTERN.test(value) || HELD_OBJECT_PATTERN.test(value) ? replacement : value;
 }
 
+function withoutHeldObjectClauses(value: string) {
+  if (!HELD_OBJECT_PATTERN.test(value)) return value;
+  const kept = value.split(/(?<=[.!;])\s+/).map((part) => part.trim()).filter((part) => part && !HELD_OBJECT_PATTERN.test(part));
+  return kept.join(" ").trim() || SET_PROPS_ONLY;
+}
+
 // Locked art direction is serialized in full. A cached showcase plan can still
 // name a walking stride or a sparkler inside body, hand, expression, or prop
 // fields. Backdrop strings stay untouched: "walk" inside a room description
@@ -747,6 +753,10 @@ function sanitizeCreativeDirection(
         }
         if (CREATIVE_HELD_KEYS.has(normalized)) {
           output[key] = HELD_OBJECT_PATTERN.test(entry) ? SET_PROPS_ONLY : entry;
+          continue;
+        }
+        if (normalized === "suggestedaccessories" || normalized === "suggested_accessories") {
+          output[key] = withoutHeldObjectClauses(entry);
           continue;
         }
       }
@@ -881,7 +891,7 @@ export function composeGenerationPrompt(args: {
   const isMacroShowcase = isShowcase && showcaseShot?.shotType === "macro_detail";
   const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL) && !isMacroShowcase;
   const faceQualityInstruction = faceRequired
-    ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, anatomically correct and naturally shaped eyes with realistic catchlights and correctly aligned gaze, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
+    ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, eyes kept as the identity photo shows them, including a cover that hides them, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
     : isTrueBack
       ? "The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face and profile MUST be 100% identical to the MODEL FACE REFERENCE / APPROVED POSE 1 identity - same jawline, nose profile, skin texture with visible pores, eye shape, and makeup. Never substitute a different person or face."
       : "This frame is a PRODUCT-DETAIL close-up. Do not force a full beauty-face crop. If any portion of the face appears it MUST match the identity lock - same jawline, eyes, skin texture with visible pores, and makeup. Prefer filling the frame with the named product selling detail; omit or crop the face when a full face would make that detail too small to read.";
@@ -993,9 +1003,9 @@ ${modelJson}
 
 FACE & IDENTITY LOCK - HIGHEST PRIORITY:
 ${hasModelReference
-    ? `The image labeled MODEL FACE REFERENCE in the reference manifest above is the exact, non-negotiable face and identity for this model in EVERY pose, including this one - it outranks every other face source, including the approved-pose anchor. Reproduce it as close to pixel-identical as photographically possible: identical facial bone structure, eyes (shape, color, spacing), eyebrows, nose, lips, jawline, skin tone and texture, and hairstyle. Do not idealize, beautify, average, restyle, or blend it with any other face - this must read as the same real person from that reference photo, not merely a similar-looking model. If the eyes are hidden, match the visible face and do not substitute a different person.${hasApprovedAnchor ? " Use the APPROVED POSE 1 image only for scene, lighting, and styling continuity - never as a face source." : ""}`
+    ? `The image labeled MODEL FACE REFERENCE in the reference manifest above is the exact, non-negotiable face and identity for this model in EVERY pose, including this one - it outranks every other face source, including the approved-pose anchor. Reproduce it as close to pixel-identical as photographically possible: identical facial bone structure, eyes (shape, color, spacing), eyebrows, nose, lips, jawline, skin tone and texture, and hairstyle. Do not idealize, beautify, average, restyle, or blend it with any other face - this must read as the same real person from that reference photo, not merely a similar-looking model. If the eyes are hidden, keep that cover and the visible face. Do not invent a different person.${hasApprovedAnchor ? " Use the APPROVED POSE 1 image only for scene, lighting, and styling continuity - never as a face source." : ""}`
     : hasStyleReference
-      ? `The STYLE REFERENCE image is the face for every pose, because no separate model-face photo was uploaded. Match the visible jaw, nose, lips, skin, and hair. If the eyes are hidden, do not substitute a different person. Discard that image's clothing.${hasApprovedAnchor ? " APPROVED POSE 1 is scene continuity only, never a different face." : ""}`
+      ? `The STYLE REFERENCE image is the face for every pose, because no separate model-face photo was uploaded. Match the visible jaw, nose, lips, skin, and hair. If the eyes are hidden, keep that cover and the visible face. Do not invent a different person. Discard that image's clothing.${hasApprovedAnchor ? " APPROVED POSE 1 is scene continuity only, never a different face." : ""}`
       : hasApprovedAnchor
         ? "The image labeled APPROVED POSE 1 in the reference manifest above is the exact, non-negotiable ground truth for this model's identity. Reproduce the identical facial bone structure, eye shape and color, eyebrow shape, nose, lips, jawline, skin tone and texture, and hairstyle seen in that image - do not idealize, beautify, average, or drift toward a different face."
         : "This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally attractive adult face with real individual character (not an idealized, airbrushed, symmetric stock face) exactly as described in modelIdentity above - every later pose in this set must reproduce this same face."}
@@ -1069,19 +1079,19 @@ ${hasApprovedAnchor
   : "- Maintain a single, consistent studio set, wall finish, flooring, and lighting setup across all poses."}
 
 ${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in every frame:
-- Footwear: ${boundedText(styling.footwear, 360)}
-- Jewellery: ${boundedText(styling.jewellery, 360)}
-- Ornaments and accessories: ${boundedText(styling.ornaments, 360)}
-- Makeup: ${boundedText(styling.makeup, 360)}
-- Hair: ${boundedText(styling.hair, 360)}
-${styling.stylingNotes ? `- Stylist notes: ${boundedText(styling.stylingNotes, 600)}` : ""}
-${styling.themeInterpretation ? `- Theme being served: ${boundedText(styling.themeInterpretation, 600)}` : ""}
+- Footwear: ${boundedText(withoutHeldObjectClauses(String(styling.footwear ?? "")), 360)}
+- Jewellery: ${boundedText(withoutHeldObjectClauses(String(styling.jewellery ?? "")), 360)}
+- Ornaments and accessories: ${boundedText(withoutHeldObjectClauses(String(styling.ornaments ?? "")), 360)}
+- Makeup: ${boundedText(withoutHeldObjectClauses(String(styling.makeup ?? "")), 360)}
+- Hair: ${boundedText(withoutHeldObjectClauses(String(styling.hair ?? "")), 360)}
+${styling.stylingNotes ? `- Stylist notes: ${boundedText(withoutHeldObjectClauses(String(styling.stylingNotes)), 600)}` : ""}
+${styling.themeInterpretation ? `- Theme being served: ${boundedText(withoutHeldObjectClauses(String(styling.themeInterpretation)), 600)}` : ""}
 - Style the model with exactly these pieces - the same metal, the same count, the same placement in every frame. Do not add a necklace, bangle, ring, belt, bag, hair ornament or any other accessory this plan does not list, and do not drop one it does.
 - JEWELLERY & ORNAMENT LOCK: Wear exactly the jewellery and ornaments in this plan. If the plan copied style-reference ornaments, keep those pieces identical. Do not invent competing necklaces, maang tikkas, extra bangles, or hair jewellery. Product-included jewellery from the product references outranks style-reference jewellery when both exist, and nothing in this plan may hide neckline or embroidery.
 - This is styling only. It never becomes part of the garment, never hides or replaces a garment detail, bottom wear or footwear shown in the product references, and never contradicts the placement or absence locks above.
-${directedCreative.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${boundedText(directedCreative.suggestedAccessories, 420)}` : ""}`
+${directedCreative.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${boundedText(withoutHeldObjectClauses(String(directedCreative.suggestedAccessories)), 420)}` : ""}`
   : `STYLING ADDITION (optional, locked once chosen):
-${directedCreative.suggestedAccessories ? `The stylist has proposed adding: ${boundedText(directedCreative.suggestedAccessories, 420)}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}
+${directedCreative.suggestedAccessories ? `The stylist has proposed adding: ${boundedText(withoutHeldObjectClauses(String(directedCreative.suggestedAccessories)), 420)}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}
 - JEWELLERY & ORNAMENT LOCK: ${hasStyleReference
     ? "If the STYLE REFERENCE image in this manifest shows jewellery or ornaments that complement this product and the product itself does not already include competing pieces, keep those exact style-reference pieces identical across the set. Never invent a second jewellery story."
     : "No STYLE REFERENCE image is in this manifest. Use only jewellery/ornaments that ship with the product or were named in the approved styling plan. Do not invent jewellery from a missing style reference."}`}
@@ -1141,7 +1151,7 @@ REALISTIC INTEGRATION:
 - Match locked lighting direction, color temperature, shadows, contact shadows, perspective, lens feel, depth and scene geometry.
 - Keep anatomy realistic and keep hands away from product details.
 - Preserve believable pores, flyaway hairs, fabric microtexture, seam depth, edge transitions, optical depth of field, and grounded foot/contact shadows. Avoid waxy skin, over-smoothed fabric, duplicated motifs, over-sharpening, floating garments, plastic texture, and other synthetic AI tells.
-${faceRequired ? `- Render the eyes with correct anatomy: two naturally shaped, correctly positioned eyes with realistic iris detail, natural catchlights, and a correctly aligned gaze - never crossed, misaligned, melted, or malformed.
+${faceRequired ? `- If the identity photo hides the eyes, keep that cover and the visible jaw, nose, lips, and hair. Do not invent an uncovered face. Eyes the photo shows stay naturally shaped and aligned.
 - Follow the planned expression; do not force a smile. If teeth show, render them naturally aligned in the correct count - never uniformly perfect, fused, extra, missing, or warped.
 - Skin must show real photographic micro-detail (pores, faint texture variation) rather than an airbrushed, plastic, or over-smoothed "beauty filter" look.` : ""}
 

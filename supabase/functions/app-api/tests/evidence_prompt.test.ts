@@ -681,6 +681,7 @@ Deno.test("composeGenerationPrompt enforces style reference backdrop authority a
   // Verify style reference authority
   assertStringIncludes(prompt, "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, props, composition, mood, and lighting");
   assertStringIncludes(prompt, "do not copy the pose or objects in the hands");
+  assertStringIncludes(prompt, "If the eyes are hidden, keep that cover and the visible face.");
   assertStringIncludes(prompt, "Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE");
   // Verify pre-shoot background prohibition
   assertStringIncludes(prompt, "STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos");
@@ -1254,9 +1255,18 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
     } as any,
     session: {
       productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "olive" },
+      stylingPlan: {
+        footwear: "juttis",
+        jewellery: "gold jhumkas",
+        ornaments: "gold jhumkas. One hand holds a sparkler.",
+        makeup: "natural",
+        hair: "side braid",
+        stylingNotes: "keep the yoke clear",
+      },
       creativeDirection: {
         backgroundStyle: "Green festive wall, red patchwork chair, and a walking-distance rug",
         propUsage: "Two handheld sparklers",
+        suggestedAccessories: "A small potli. Also two sparklers.",
         showcasePlan: {
           heroFeature: "gold hem embroidery",
           featureRegion: "hem_border",
@@ -1283,6 +1293,11 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   assertStringIncludes(creativeLeak, "Calm natural expression.");
   assertStringIncludes(creativeLeak, "gold hem embroidery");
   assertStringIncludes(creativeLeak, "hem fully visible");
+  assertStringIncludes(creativeLeak, "gold jhumkas");
+  assertStringIncludes(creativeLeak, "A small potli.");
+  assertStringIncludes(creativeLeak, "keep the yoke clear");
+  assertStringIncludes(creativeLeak, "If the eyes are hidden, keep that cover and the visible face.");
+  assertStringIncludes(creativeLeak, "Do not invent an uncovered face.");
 });
 
 Deno.test("composeGenerationPrompt enforces anatomical integrity and eliminates extra hands", () => {
