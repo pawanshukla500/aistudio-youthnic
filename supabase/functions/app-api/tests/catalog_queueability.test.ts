@@ -1,6 +1,6 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
 import { canQueueGeneration, type CatalogWorkItem } from "../../../../src/features/planning/catalog-production/types.ts";
-import { assertCatalogRequestEvidenceReady, humanProductLearningGuidance, poseIndexesFromRows } from "../catalogProduction.ts";
+import { assertCatalogRequestEvidenceReady, catalogApprovalMessage, humanProductLearningGuidance, poseDirectionList, poseIndexesFromRows } from "../catalogProduction.ts";
 
 function workItem(overrides: Partial<CatalogWorkItem> = {}): CatalogWorkItem {
   return {
@@ -66,4 +66,27 @@ Deno.test("a work item's own rows decide how many poses final approval requires"
   assertEquals(poseIndexesFromRows(null, undefined), [1, 2, 3, 4, 5, 6]);
   // Junk never widens or narrows the gate.
   assertEquals(poseIndexesFromRows([{ pose_index: 0 }, { pose_index: "x" }, { pose_index: 2 }], []), [2]);
+});
+
+Deno.test("CodeAnt Major: pose prose keeps internal commas without shifting six directions", () => {
+  const directions = [
+    "Front, hands relaxed",
+    "Angled, shoulders turned",
+    "Back, hair forward",
+    "Seated, feet visible",
+    "Detail, yoke in focus",
+    "Showcase, distinct stance",
+  ];
+  assertEquals(poseDirectionList(directions.join("\n")), directions);
+  assertEquals(poseDirectionList(directions.join(";")), directions);
+  assertEquals(poseDirectionList(directions.join(";\n")), directions);
+
+  const legacy = ["Front", "Angled", "Back", "Seated", "Detail", "Showcase"];
+  assertEquals(poseDirectionList(legacy.join(",")), legacy);
+  assertEquals(poseDirectionList("Front;;\nFront\n;Back"), ["Front", "Back"]);
+});
+
+Deno.test("CodeAnt nitpick: approval history uses the actual five- or six-pose count", () => {
+  assertEquals(catalogApprovalMessage(5), "5-pose set approved");
+  assertEquals(catalogApprovalMessage(6), "6-pose set approved");
 });

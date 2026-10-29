@@ -11,6 +11,7 @@ import {
 } from "../lib/showcaseFeature.ts";
 import { ANALYSIS_VERSION, buildCombinedAnalysisPrompt, getPoseSlots, normalizeAnalysis } from "../lib/profiles.ts";
 import { composeGenerationPrompt } from "../lib/generationPrompt.ts";
+import { MAX_IMAGE_REFERENCES, roleLabel, selectReferences } from "../lib/referencePolicy.ts";
 
 function pose(id: string, poseNumber: number) {
   return {
@@ -122,6 +123,38 @@ Deno.test("normalizeAnalysis carries the plan into creative direction and the po
   }, "kurta set");
   assertEquals(normalized.creativeDirection.showcasePlan?.featureRegion, "bottom_wear");
   assertStringIncludes(normalized.posePlan[5].prompt, "wide gold tissue flared palazzo");
+});
+
+Deno.test("F-17 verbose manifest evidence canonicalizes before pose reference selection", () => {
+  const evidenceReference = roleLabel("fabric_pattern");
+  assert(evidenceReference.length > 120);
+  const normalized = normalizeAnalysis({
+    productIdentity: { garmentFamily: "kurta_or_kurti_set", bottomWearDetails: "Palazzo, wide flare" },
+    showcasePlan: {
+      heroFeature: "gold thread yoke embroidery",
+      featureRegion: "embroidery",
+      shotType: "macro_detail",
+      evidenceReference,
+    },
+  }, "kurta set");
+
+  assertEquals(normalized.creativeDirection.showcasePlan?.evidenceReference, "fabric_pattern");
+  const primaryReference = normalized.posePlan[5].primaryReference;
+  assertEquals(primaryReference, "fabric_pattern");
+  const selected = selectReferences(
+    [
+      { role: "front", hash: "front" },
+      { role: "bottom", hash: "bottom" },
+      { role: "fabric_pattern", hash: "fabric" },
+      { role: "back", hash: "back" },
+    ],
+    [],
+    "showcase",
+    "kurta_or_kurti_set",
+    MAX_IMAGE_REFERENCES,
+    primaryReference,
+  );
+  assertEquals(selected[0]?.role, "fabric_pattern");
 });
 
 Deno.test("the generation prompt names the feature and forbids both duplications", () => {
@@ -350,4 +383,156 @@ Deno.test("the outcome write is compare-and-set against the row it read", () => 
   assertEquals(update.expected.selectedCount, 4);
   assertEquals(update.expected.rejectedCount, 1);
   assertEquals(update.next.rejectedCount, 2);
+});
+
+Deno.test("Pose 6 weaves concrete garment details, aesthetic photoshoot direction, and collision-widened framing through normalizeAnalysis", () => {
+  const normalized = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "emerald green",
+      fabric: "organza silk",
+      embroidery: "gold zari gota patti",
+      bottomWearDetails: "Farshi pajama with 6-inch joined hem",
+    },
+    creativeDirection: {
+      closeupMode: "product_detail",
+      closeupHeroDetail: "sequinned square neckline yoke",
+      showcasePlan: {
+        heroFeature: "sequinned square neckline yoke",
+        featureRegion: "yoke",
+        shotType: "macro_detail",
+        framing: "Tight macro crop on the yoke",
+        cameraAngle: "Macro straight-on",
+        bodyPosition: "Chest crop only",
+      },
+    },
+    posePlan: [
+      {
+        id: "showcase",
+        title: "Custom Yoke Showcase",
+        framing: "Tight macro crop on the yoke",
+        cameraAngle: "Macro straight-on",
+        bodyPosition: "Chest crop only",
+        prompt: "Tight macro shot of yoke.",
+      },
+    ],
+  }, "kurta set");
+
+  // Synonym "yoke" normalizes to "neckline"
+  assertEquals(normalized.creativeDirection.showcasePlan?.featureRegion, "neckline");
+  const showcase = normalized.posePlan[5];
+  assertEquals(showcase.id, "showcase");
+  // Colliding macro crop is widened even when candidate posePlan[5] had tight framing
+  assertEquals(showcase.framing.includes("Tight macro crop"), false);
+  assertStringIncludes(showcase.framing, "Frame head-to-toe");
+  // Concrete garment specs and aesthetic photoshoot direction are woven in
+  assertStringIncludes(showcase.prompt, "emerald green organza silk");
+  assertStringIncludes(showcase.prompt, "gold zari gota patti");
+  assertStringIncludes(showcase.prompt, "Editorial full-length fashion photoshoot aesthetics");
+  assert(showcase.productVisibilityRules.some((rule) => rule.includes("emerald green organza silk")));
+});
+
+Deno.test("top_only mode suppresses a bottom_wear showcasePlan and falls back to top-only showcase framing", () => {
+  const slots = getPoseSlots({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "ivory",
+      fabric: "chanderi",
+      bottomWearDetails: "Palazzo, wide flare",
+    },
+    showcasePlan: bottomPlan,
+    bottomWearMode: "top_only",
+  });
+  assertEquals(slots[5].title.includes("palazzo"), false);
+  assertStringIncludes(slots[5].title, "Full-Length Silhouette Showcase");
+  assertEquals(/established in Pose 1|same as full_front|consistent with previous poses/i.test(slots[5].prompt), false);
+});
+
+Deno.test("normalizeAnalysis top_only removes model-supplied bottom showcase prose", () => {
+  const normalized = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "ivory",
+      fabric: "chanderi",
+      bottomWearDetails: "Palazzo, wide flare",
+    },
+    showcasePlan: bottomPlan,
+    posePlan: [{
+      id: "showcase",
+      title: "Palazzo flare hero",
+      description: "Show the palazzo hem and wide flare",
+      cameraAngle: "Low angle on the palazzo",
+      framing: "Head-to-toe palazzo frame",
+      bodyPosition: "Turn to open the palazzo legs",
+      handPlacement: "Hands beside the palazzo",
+      expression: "Calm",
+      highlightedDetails: ["palazzo flare"],
+      productVisibilityRules: ["palazzo border stays visible"],
+      primaryReference: "bottom",
+      purpose: "Sell the palazzo",
+      consistencyNotes: "Keep the palazzo consistent",
+      prompt: "Generate a full-body palazzo showcase.",
+    }],
+  }, "kurta set", { bottomWearMode: "top_only" });
+
+  const showcase = normalized.posePlan[5];
+  assertEquals(showcase.title, "Full-Length Silhouette Showcase");
+  assertEquals(showcase.primaryReference, "front");
+  assertEquals(JSON.stringify(showcase).toLowerCase().includes("palazzo"), false);
+  assertEquals(normalized.creativeDirection.showcasePlan, null);
+});
+
+Deno.test("CodeAnt Major: prompt-time defense removes rejected top-only showcase metadata from legacy sessions", () => {
+  for (const [key, featureRegion] of [["showcasePlan", "bottom_wear"], ["showcase_plan", "complete_set"]] as const) {
+    const prompt = composeGenerationPrompt({
+      skuName: "TOP-ONLY-LEGACY",
+      productDetails: "Standalone ankle-length kurti",
+      pose: pose("showcase", 6) as never,
+      session: {
+        productIdentity: {
+          garmentFamily: "kurta_or_kurti_set",
+          length: "ankle-length",
+          bottomWearDetails: "none - standalone garment",
+        },
+        creativeDirection: { [key]: { ...bottomPlan, featureRegion } },
+        bottomWearMode: "top_only",
+      },
+      references: [{ role: "front" }],
+    });
+
+    assertEquals(prompt.includes(bottomPlan.heroFeature), false);
+    assertEquals(prompt.includes(`"${key}"`), false);
+    assertStringIncludes(prompt, '"showcaseIntent":"full_length_silhouette"');
+  }
+});
+
+Deno.test("Pose 6 garment summary preserves bottom specifications within five parts", () => {
+  const slots = getPoseSlots({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "emerald green",
+      fabric: "organza silk",
+      embroidery: "gold zari yoke",
+      pattern: "woven butti repeat",
+      neckline: "square neckline",
+      sleeveType: "full sleeves",
+      silhouette: "straight kurta",
+      bottomWearDetails: "Farshi pajama with 6-inch joined hem",
+    },
+    showcasePlan: {
+      heroFeature: "gold zari yoke",
+      featureRegion: "embroidery",
+      shotType: "macro_detail",
+    },
+  });
+
+  const showcase = slots[5];
+  assertStringIncludes(showcase.prompt, "bottom wear: Farshi pajama with 6-inch joined hem");
+  const specificationRule = showcase.productVisibilityRules.find((rule) =>
+    rule.startsWith("preserve exact garment specifications: ")
+  );
+  assert(specificationRule);
+  const summary = specificationRule.replace("preserve exact garment specifications: ", "");
+  assertStringIncludes(summary, "bottom wear: Farshi pajama");
+  assertEquals(summary.split("; ").length <= 5, true);
 });

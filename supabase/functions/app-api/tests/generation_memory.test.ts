@@ -195,3 +195,86 @@ Deno.test("prompt pattern writes retry against the oldest row and fold duplicate
   assertEquals(folded.keepId, "a");
   assertEquals(folded.deleteIds, ["b"]);
 });
+
+Deno.test("generation memory does not record a bottom-led Pose 6 for a top-only product", () => {
+  const creativeDirection = {
+    showcasePlan: {
+      heroFeature: "wide palazzo flare",
+      featureRegion: "bottom_wear",
+      shotType: "full_body_feature",
+    },
+    showcaseIntent: "full_length_silhouette",
+  };
+  const topOnly = buildGenerationMemory({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      bottomWearDetails: "none - standalone garment",
+    },
+    creativeDirection,
+  });
+
+  assertEquals(topOnly.preservedDetails.some((detail) => detail.startsWith("Pose 6 sells:")), false);
+  assertEquals(topOnly.preservedDetails.includes("Pose 6 showcase intent: full_length_silhouette"), true);
+
+  const completeSet = buildGenerationMemory({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      bottomWearDetails: "Palazzo with wide flare",
+    },
+    creativeDirection,
+  });
+  assertEquals(completeSet.preservedDetails.includes("Pose 6 sells: wide palazzo flare (full_body_feature)"), true);
+});
+
+Deno.test("F-14 explicit top_only overrides set-like product identity in public generation memory", () => {
+  const memory = buildGenerationMemory({
+    bottomWearMode: "top_only",
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      bottomWearDetails: "Royal blue palazzo with a wide flare",
+    },
+    creativeDirection: {
+      showcasePlan: {
+        heroFeature: "wide royal blue palazzo flare",
+        featureRegion: "bottom_wear",
+        shotType: "full_body_feature",
+      },
+      showcaseIntent: "full_length_silhouette",
+    },
+  });
+
+  assertEquals(memory.preservedDetails.some((detail) => detail.startsWith("Pose 6 sells:")), false);
+  assertEquals(memory.preservedDetails.includes("Pose 6 showcase intent: full_length_silhouette"), true);
+  const brief = formatGenerationMemoryBrief({ memory });
+  assertEquals(brief.toLowerCase().includes("palazzo"), false);
+  assertStringIncludes(brief, "Pose 6 showcase intent: full_length_silhouette");
+});
+
+Deno.test("F-20 explicit top_only stores the corrected intent after suppressing a bottom-led plan", () => {
+  const productIdentity = {
+    garmentFamily: "kurta_or_kurti_set",
+    bottomWearDetails: "Royal blue palazzo with a wide flare",
+  };
+  const memory = buildGenerationMemory({
+    bottomWearMode: "top_only",
+    productIdentity,
+    creativeDirection: {
+      showcasePlan: {
+        heroFeature: "wide royal blue palazzo flare",
+        featureRegion: "bottom_wear",
+        shotType: "full_body_feature",
+      },
+      showcaseIntent: "set_full_length",
+    },
+  });
+
+  assertEquals(memory.preservedDetails.some((detail) => detail.startsWith("Pose 6 sells:")), false);
+  assertEquals(memory.preservedDetails.includes("Pose 6 showcase intent: full_length_silhouette"), true);
+  assertEquals(JSON.stringify(memory).includes("set_full_length"), false);
+
+  const legacyIntent = buildGenerationMemory({
+    productIdentity,
+    creativeDirection: { showcase_intent: "playful_backdrop" },
+  });
+  assertEquals(legacyIntent.preservedDetails.includes("Pose 6 showcase intent: playful_backdrop"), true);
+});

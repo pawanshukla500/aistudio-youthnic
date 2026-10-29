@@ -175,6 +175,13 @@ export function roleLabel(role: string) {
   return labels[role] || role.toUpperCase();
 }
 
+/** Canonicalize a role or an exact verbose manifest label before storage bounds. */
+export function canonicalProductReferenceRole(value: unknown) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if ((PRODUCT_REFERENCE_ROLES as readonly string[]).includes(normalized)) return normalized;
+  return PRODUCT_REFERENCE_ROLES.find((role) => roleLabel(role).toLowerCase() === normalized) ?? normalized;
+}
+
 const canonicalOrder = [
   "model_identity",
   "saree_front_drape",
@@ -201,15 +208,35 @@ export function canonicalReferences<T extends ReferenceLike>(references: T[]): T
   );
 }
 
-function preferredProductOrder(poseType: string, garmentFamily: string) {
+function preferredProductOrder(poseType: string, garmentFamily: string, preferredRole = "") {
+  let baseOrder: string[];
   if (garmentFamily === "saree") {
     if (poseType === "back") return ["saree_back_drape", "back"];
-    if (poseType === "closeup") return ["saree_body_detail", "fabric_pattern", "saree_border_tassels", "saree_blouse_front", "saree_pallu_spread", "saree_front_drape", "front", "saree_back_drape", "back", "saree_blouse_back_piece", "mannequin", "additional_product"];
-    return ["saree_front_drape", "front", "saree_body_detail", "fabric_pattern", "saree_pallu_spread", "saree_border_tassels", "saree_back_drape", "back", "saree_blouse_front", "saree_blouse_back_piece", "mannequin", "additional_product"];
+    if (poseType === "closeup") {
+      baseOrder = ["saree_body_detail", "fabric_pattern", "saree_border_tassels", "saree_blouse_front", "saree_pallu_spread", "saree_front_drape", "front", "saree_back_drape", "back", "saree_blouse_back_piece", "mannequin", "additional_product"];
+    } else if (poseType === "showcase") {
+      baseOrder = ["saree_pallu_spread", "saree_front_drape", "front", "saree_border_tassels", "saree_body_detail", "fabric_pattern", "saree_back_drape", "back", "saree_blouse_front", "saree_blouse_back_piece", "mannequin", "additional_product"];
+    } else {
+      baseOrder = ["saree_front_drape", "front", "saree_body_detail", "fabric_pattern", "saree_pallu_spread", "saree_border_tassels", "saree_back_drape", "back", "saree_blouse_front", "saree_blouse_back_piece", "mannequin", "additional_product"];
+    }
+  } else {
+    if (poseType === "back") return ["back"];
+    if (poseType === "closeup") {
+      baseOrder = ["fabric_pattern", "front", "bottom", "back", "mannequin", "additional_product"];
+    } else if (poseType === "showcase") {
+      baseOrder = ["front", "bottom", "fabric_pattern", "mannequin", "back", "additional_product"];
+    } else {
+      baseOrder = ["front", "bottom", "back", "mannequin", "fabric_pattern", "additional_product"];
+    }
   }
-  if (poseType === "back") return ["back"];
-  if (poseType === "closeup") return ["fabric_pattern", "front", "bottom", "back", "mannequin", "additional_product"];
-  return ["front", "bottom", "back", "mannequin", "fabric_pattern", "additional_product"];
+  // Analysis receives roleLabel(...) in its image manifest, so its chosen
+  // evidenceReference can be that full label rather than the canonical role.
+  // Accept only an exact known label; never fuzzy-match prose into evidence.
+  const canonicalPreferred = canonicalProductReferenceRole(preferredRole);
+  if (canonicalPreferred && baseOrder.includes(canonicalPreferred)) {
+    return [canonicalPreferred, ...baseOrder.filter((role) => role !== canonicalPreferred)];
+  }
+  return baseOrder;
 }
 
 export function selectReferences<T extends ReferenceLike>(
@@ -218,6 +245,7 @@ export function selectReferences<T extends ReferenceLike>(
   poseType: string,
   garmentFamily: string,
   maxReferences = MAX_IMAGE_REFERENCES,
+  preferredRole = "",
 ): T[] {
   const normalizedFamily = garmentFamily.toLowerCase();
   // For a true back pose, the DIRECT rear upload is the sole product authority
@@ -232,7 +260,7 @@ export function selectReferences<T extends ReferenceLike>(
     const priority = [...rearProduct, ...model, ...anchor];
     return priority.slice(0, maxReferences);
   }
-  const order = preferredProductOrder(poseType, normalizedFamily);
+  const order = preferredProductOrder(poseType, normalizedFamily, preferredRole);
 
   const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
   const style = references.filter((reference) => reference.role === "style_reference").slice(0, 1);
@@ -253,12 +281,20 @@ export function selectReferences<T extends ReferenceLike>(
       ["saree_blouse_front"],
       ["saree_blouse_back_piece"],
     ]
-    : [
-      ["front"],
-      ["bottom"],
-      ["back"],
-      ["mannequin"],
-    ];
+    : (poseType === "closeup" || poseType === "showcase")
+      ? [
+        ["front"],
+        ["bottom"],
+        ["fabric_pattern"],
+        ["back"],
+        ["mannequin"],
+      ]
+      : [
+        ["front"],
+        ["bottom"],
+        ["back"],
+        ["mannequin"],
+      ];
   const protectedProduct: T[] = [];
   for (const roles of protectedRoleGroups) {
     const match = order.flatMap((role) => roles.includes(role)

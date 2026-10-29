@@ -1,5 +1,6 @@
 import { type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.112.2";
 import { REQUIRED_POSE_IDS, type JsonRecord } from "./profiles.ts";
+import { resolveBottomWearPresentation } from "./lib/garmentPoses.ts";
 import {
   effectiveShowcaseShot,
   planShowcaseOutcomeWrite,
@@ -63,6 +64,17 @@ function optionalDate(value: unknown) {
 
 function delimitedList(value: unknown, limit = 20) {
   return [...new Set(text(value).split(/[,;\n]/).map((entry) => entry.trim()).filter(Boolean))].slice(0, limit);
+}
+
+/** Pose prose may contain commas; newline/semicolon separators are unambiguous. */
+export function poseDirectionList(value: unknown, limit = 6) {
+  const normalized = text(value);
+  const entries = /[;\n]/.test(normalized) ? normalized.split(/[;\n]/) : normalized.split(",");
+  return [...new Set(entries.map((entry) => entry.trim()).filter(Boolean))].slice(0, limit);
+}
+
+export function catalogApprovalMessage(poseCount: number) {
+  return `${poseCount}-pose set approved`;
 }
 
 function assertQueryResults(results: unknown[], context: string) {
@@ -135,15 +147,22 @@ export async function recordShowcaseFeatureOutcome(
       return;
     }
     const sessionData = asRecord(session?.session_data);
+    const productIdentity = asRecord(sessionData.productIdentity);
+    const bottomWear = resolveBottomWearPresentation({
+      mode: sessionData.bottomWearMode ?? sessionData.bottom_wear_mode,
+      productIdentity,
+    });
     // The effective shot, not the planned one: a close-up collision widens the
     // frame, and scoring the tight framing that was never generated would teach
     // the next analysis the opposite of what happened.
-    const shot = effectiveShowcaseShot(sessionData.creativeDirection);
+    const shot = effectiveShowcaseShot(sessionData.creativeDirection, {
+      includesBottomWear: bottomWear.includesBottomWear,
+    });
     if (!shot) return;
     const { plan, shotType } = shot;
     const productCategory = text(sessionData.category);
     if (!productCategory) return;
-    const garmentFamily = text(asRecord(sessionData.productIdentity).garmentFamily);
+    const garmentFamily = text(productIdentity.garmentFamily);
 
     const match = () => service.from("showcase_feature_outcomes")
       .select("id,selected_count,rejected_count,regenerated_count,qa_failed_count,avg_quality,created_at")
@@ -460,7 +479,7 @@ export async function importGoogleSheet(
       look_and_mood: text(row["Desired Look and Mood"]),
       model_direction: text(row["Model Direction"]),
       styling_requirements: text(row["Styling Requirements"]),
-      pose_direction: delimitedList(row["Pose Direction"], 5),
+      pose_direction: poseDirectionList(row["Pose Direction"], 6),
       background_backdrop: text(row["Background / Backdrop"]),
       lighting: text(row["Lighting"]),
       composition: text(row["Composition"]),
@@ -672,6 +691,7 @@ export async function reviewCatalogQc(
   if ((decision === "passed" && item.qc_status === "passed") || (decision === "rejected" && item.qc_status === "rejected")) {
     throw new Error(`This pose set is already ${decision === "passed" ? "approved" : "rejected"}.`);
   }
+  let expectedPoseCount: number = POSE_IDS.length;
   if (decision === "passed") {
     const [{ data: versions, error: versionsError }, { data: plannedPoses, error: plannedPosesError }] = await Promise.all([
       service.from("catalog_pose_asset_versions")
@@ -695,6 +715,7 @@ export async function reviewCatalogQc(
       .filter(([, version]) => version.generation_status === "completed")
       .map(([poseIndex]) => poseIndex));
     const expectedPoseIndexes = poseIndexesFromRows(plannedPoses, versions);
+    expectedPoseCount = expectedPoseIndexes.length;
     if (expectedPoseIndexes.some((poseIndex) => !completedPoseIndexes.has(poseIndex))) {
       throw new Error(`All ${expectedPoseIndexes.length} pose outputs must be complete before final approval.`);
     }
@@ -736,7 +757,7 @@ export async function reviewCatalogQc(
       actor_member_id: workspace.member.id,
       source: "user",
       stage_code: decision === "passed" ? "approved" : "regeneration_required",
-      message: comments || (decision === "passed" ? "Five-pose set approved" : "Re-generation requested"),
+      message: comments || (decision === "passed" ? catalogApprovalMessage(expectedPoseCount) : "Re-generation requested"),
       metadata: { decision },
     }),
     service.from("audit_logs").insert({
@@ -1157,7 +1178,7 @@ export async function updateCatalogWorkItem(
     look_and_mood: text(direction.lookAndMood),
     model_direction: text(direction.modelDirection),
     styling_requirements: text(direction.stylingRequirements),
-    pose_direction: Array.isArray(direction.poses) ? direction.poses.slice(0, 5) : [],
+    pose_direction: Array.isArray(direction.poses) ? direction.poses.slice(0, 6) : [],
     background_backdrop: text(direction.backgroundBackdrop),
     lighting: text(direction.lighting),
     composition: text(direction.composition),

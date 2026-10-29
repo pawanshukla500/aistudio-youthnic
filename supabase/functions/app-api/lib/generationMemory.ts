@@ -8,7 +8,8 @@
  * remains an audit ledger and is not accepted here.
  */
 
-import { type JsonRecord } from "./profiles.ts";
+import { effectiveShowcaseIntent, type JsonRecord } from "./profiles.ts";
+import { detectGarmentPoseFamily, resolveBottomWearPresentation } from "./garmentPoses.ts";
 import { PRODUCT_REFERENCE_ROLES } from "./referencePolicy.ts";
 import { type PromptPatternKind } from "./promptPatterns.ts";
 import { effectiveShowcaseShot, normalizeShowcaseShotType } from "./showcaseFeature.ts";
@@ -175,7 +176,7 @@ function mergeCorrections(existing: MemoryCorrection[], incoming: MemoryCorrecti
   return merged.slice(-MAX_MEMORY_CORRECTIONS);
 }
 
-function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirection: JsonRecord) {
+function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirection: JsonRecord, bottomWearMode?: unknown) {
   const details: string[] = [];
   const invariant = boundedText(productIdentity.invariantDetails, 180);
   if (invariant) details.push(`Product invariants: ${invariant}`);
@@ -196,12 +197,20 @@ function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirect
   if (closeupMode) {
     details.push(`Pose 5 close-up mode: ${closeupMode}${hero ? ` (${hero})` : ""}`);
   }
-  const showcaseShot = effectiveShowcaseShot(creativeDirection);
+  const includesBottomWear = resolveBottomWearPresentation({ mode: bottomWearMode, productIdentity }).includesBottomWear;
+  const showcaseShot = effectiveShowcaseShot(creativeDirection, { includesBottomWear });
   if (showcaseShot) {
     details.push(`Pose 6 sells: ${boundedText(showcaseShot.plan.heroFeature, 120)} (${showcaseShot.shotType})`);
   } else {
-    const showcaseIntent = boundedText(creativeDirection.showcaseIntent ?? creativeDirection.showcase_intent, 40);
-    if (showcaseIntent) details.push(`Pose 6 showcase intent: ${showcaseIntent}`);
+    const recordedShowcaseIntent = boundedText(creativeDirection.showcaseIntent ?? creativeDirection.showcase_intent, 40);
+    if (recordedShowcaseIntent) {
+      const showcaseIntent = effectiveShowcaseIntent({
+        creative: creativeDirection,
+        family: detectGarmentPoseFamily({ productIdentity }),
+        includesBottomWear,
+      });
+      details.push(`Pose 6 showcase intent: ${showcaseIntent}`);
+    }
   }
   details.push("Product images are garment/SKU truth. Style reference is set/backdrop/jewellery taste only.");
   return details.slice(0, MAX_MEMORY_PRESERVED_DETAILS);
@@ -254,6 +263,7 @@ export function buildGenerationMemory(args: {
   references?: Array<{ role?: string }>;
   productIdentity?: JsonRecord;
   creativeDirection?: JsonRecord;
+  bottomWearMode?: unknown;
   generatedAssets?: unknown[];
   approvedAssets?: unknown[];
   upsertApprovedAssets?: unknown[];
@@ -273,7 +283,7 @@ export function buildGenerationMemory(args: {
   const productRoles = rolesOfClass(references, "product");
   const styleRoles = rolesOfClass(references, "style");
   const modelRoles = rolesOfClass(references, "model");
-  const preservedDetails = preservedDetailsFromProduct(productIdentity, creativeDirection);
+  const preservedDetails = preservedDetailsFromProduct(productIdentity, creativeDirection, args.bottomWearMode);
   let generatedAssets = Array.isArray(args.generatedAssets)
     ? snapshotAssets(args.generatedAssets)
     : existing.generatedAssets;

@@ -67,7 +67,7 @@ import {
   type VisionHopAttempt,
   type VisionProviderFailure,
 } from "./lib/aiModelPolicy.ts";
-import { coarseGarmentFamilyForCategory, normalizeBottomWearMode } from "./lib/garmentPoses.ts";
+import { coarseGarmentFamilyForCategory, normalizeBottomWearMode, resolveBottomWearPresentation } from "./lib/garmentPoses.ts";
 import { selectReusableLearningRules } from "./lib/learningRules.ts";
 import { selectFashionKnowledgeGuidance } from "./lib/fashionKnowledge.ts";
 import { selectPromptPatterns } from "./lib/promptPatterns.ts";
@@ -82,6 +82,7 @@ import {
   resetGenerationMemoryForClone,
 } from "./lib/generationMemory.ts";
 import { firebaseCatalogPath, supabaseCatalogPath } from "./lib/catalogStoragePaths.ts";
+import { isCompleteCatalogHandoffPackage } from "./lib/catalogHandoffPackage.ts";
 import {
   MAX_IMAGE_REFERENCES,
   colorwayCheckReferences,
@@ -811,6 +812,7 @@ function sessionGenerationMemory(sessionData: JsonRecord, extras: {
   referenceFingerprint?: string;
   productIdentity?: JsonRecord;
   creativeDirection?: JsonRecord;
+  bottomWearMode?: unknown;
 } = {}) {
   return buildGenerationMemory({
     existing: sessionData.generationMemory,
@@ -818,6 +820,7 @@ function sessionGenerationMemory(sessionData: JsonRecord, extras: {
       ?? (Array.isArray(sessionData.references) ? sessionData.references as Array<{ role?: string }> : []),
     productIdentity: extras.productIdentity ?? jsonRecord(sessionData.productIdentity),
     creativeDirection: extras.creativeDirection ?? jsonRecord(sessionData.creativeDirection),
+    bottomWearMode: extras.bottomWearMode ?? sessionData.bottomWearMode ?? sessionData.bottom_wear_mode,
     ...(extras.generatedAssets !== undefined ? { generatedAssets: extras.generatedAssets } : {}),
     ...(extras.approvedAssets !== undefined ? { approvedAssets: extras.approvedAssets } : {}),
     upsertApprovedAssets: extras.upsertApprovedAssets,
@@ -1085,9 +1088,9 @@ async function loadAvailableReferences(
  * was paid latency for bytes the prompt never saw. Required-evidence roles stay
  * in the set so the availability gate still runs against real bytes.
  */
-function poseReferenceCandidates(references: ReferenceInput[], poseType: string, garmentFamily: string) {
+function poseReferenceCandidates(references: ReferenceInput[], poseType: string, garmentFamily: string, preferredRole = "") {
   const required = requiredAvailabilityRoles(references, garmentFamily);
-  const selected = new Set<ReferenceInput>(selectReferences(references, [], poseType, garmentFamily, MAX_REFERENCES));
+  const selected = new Set<ReferenceInput>(selectReferences(references, [], poseType, garmentFamily, MAX_REFERENCES, preferredRole));
   return references.filter((reference) => selected.has(reference) || required.has(reference.role));
 }
 
@@ -2001,7 +2004,7 @@ async function validatePose(args: {
 }) {
   const garmentFamily = String((args.session.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
   const qaRefs = await withInlineBase64(
-    selectReferences(args.references, args.approved, args.pose.id, garmentFamily, MAX_REFERENCES),
+    selectReferences(args.references, args.approved, args.pose.id, garmentFamily, MAX_REFERENCES, args.pose.primaryReference),
   );
   const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
   const prompt = buildPoseQaPrompt({
@@ -2047,7 +2050,7 @@ async function validatePose(args: {
       ? [...baseParts, { text: "INDEPENDENT RECHECK: disregard prior numeric scores, re-inspect each critical region separately, and return newly reasoned evidence-based scores." }]
       : baseParts;
     const result = await visionJson(policy, parts);
-    return { result, qa: parseQaResponse(result.text, { garmentFamily, poseType: args.pose.id, productIdentity: args.session.productIdentity, bottomWearMode: args.session.bottomWearMode }) };
+    return { result, qa: parseQaResponse(result.text, { garmentFamily, poseType: args.pose.id, productIdentity: args.session.productIdentity, bottomWearMode: args.session.bottomWearMode, creativeDirection: args.session.creativeDirection }) };
   };
 
   const complex = ["saree", "lehenga", "suit", "multi-piece"].some((family) => garmentFamily.toLowerCase().includes(family));
@@ -2242,6 +2245,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
       imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
       generationMemory: sessionGenerationMemory(sessionData, {
         creativeDirection: applyRequestedBackground(sessionData.creativeDirection, jobData.backgroundStyle),
+        bottomWearMode,
         referenceFingerprint: String(session.reference_hash || ""),
       }),
     }
@@ -2329,6 +2333,10 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   // generation_learnings is now an observation/audit ledger only. It is never
   // read by prompt compilation; reusable guidance must be explicitly curated
   // in generation_learning_rules with an organization and reference scope.
+  const bottomWear = resolveBottomWearPresentation({
+    mode: sessionData.bottomWearMode ?? sessionData.bottom_wear_mode,
+    productIdentity: sessionData.productIdentity,
+  });
   const learnedPatterns = extractLearnedPromptPatterns({
     category: String(sessionData.category || ""),
     hasStyleReference: (Array.isArray(sessionData.references) ? sessionData.references : []).some((entry) => String((entry as JsonRecord)?.role || "") === "style_reference"),
@@ -2337,7 +2345,9 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     // The frame that was actually generated, not the one originally planned: a
     // close-up collision widens it, and learning a framing that never shipped is
     // worse than learning nothing.
-    showcaseShotType: effectiveShowcaseShot(sessionData.creativeDirection)?.shotType || "",
+    showcaseShotType: effectiveShowcaseShot(sessionData.creativeDirection, {
+      includesBottomWear: bottomWear.includesBottomWear,
+    })?.shotType || "",
     poses: poses.map((entry) => ({
       poseIndex: Number(entry.pose_index || 0),
       poseType: String(entry.pose_type || ((entry.generation_data || {}) as JsonRecord).id || ""),
@@ -2975,7 +2985,7 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
   const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
   const storedPoseData = (pose.generation_data || {}) as JsonRecord;
   const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
-  const candidates = poseReferenceCandidates(sourceInputs, poseData.id, garmentFamily);
+  const candidates = poseReferenceCandidates(sourceInputs, poseData.id, garmentFamily, poseData.primaryReference);
   // Image generation posts the blobs as multipart form data. Only Gemini QA
   // needs the inline base64 copy, so a QA-disabled shoot never pays for it.
   const referenceLoadOptions = { encodeBase64: Boolean(job.pose_qa) || storedPoseData.poseQaRequested === true };
@@ -3017,7 +3027,7 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
     loaded.filename = `approved-pose-1.${extensionForMimeType(loaded.mimeType)}`;
     approved.push(loaded);
   }
-  const selected = selectReferences(loadedReferences, approved, poseData.id, garmentFamily, MAX_REFERENCES);
+  const selected = selectReferences(loadedReferences, approved, poseData.id, garmentFamily, MAX_REFERENCES, poseData.primaryReference);
   const authoritativeBackReference = poseData.id === "back"
     ? selected.find((reference) => isDirectBackProductRole(reference.role)) || null
     : null;
@@ -5489,7 +5499,23 @@ async function catalogAnalysisFingerprint(batch: JsonRecord, variant: JsonRecord
 function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof normalizeAnalysis>) {
   const memory = (batch.catalog_memory || {}) as JsonRecord;
   if (memory.modelIdentity) normalized.modelIdentity = memory.modelIdentity as typeof normalized.modelIdentity;
-  if (memory.creativeDirection) normalized.creativeDirection = memory.creativeDirection as typeof normalized.creativeDirection;
+  if (memory.creativeDirection) {
+    const skuShowcasePlan = normalized.creativeDirection.showcasePlan;
+    const skuCloseupHeroDetail = normalized.creativeDirection.closeupHeroDetail;
+    const skuCloseupMode = normalized.creativeDirection.closeupMode;
+    const skuShowcaseIntent = normalized.creativeDirection.showcaseIntent;
+    const memCreative = memory.creativeDirection as typeof normalized.creativeDirection;
+    normalized.creativeDirection = {
+      ...memCreative,
+      closeupMode: skuCloseupMode || memCreative.closeupMode,
+      // Craftsmanship, bottom specifications and garment-led showcase intent
+      // belong to this SKU. Missing current analysis must stay missing, not be
+      // filled from another product in the catalogue.
+      closeupHeroDetail: skuCloseupHeroDetail,
+      showcaseIntent: skuShowcaseIntent,
+      showcasePlan: skuShowcasePlan ?? null,
+    };
+  }
   // The catalogue's approved styling plan outranks whatever this SKU's own
   // analysis proposed: one catalogue is one stylist's set of decisions, and a
   // per-SKU proposal is exactly the drift the plan exists to prevent.
@@ -5497,6 +5523,9 @@ function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof nor
   if (Array.isArray(memory.posePlan) && memory.posePlan.length > 0) {
     const memoryPoses = memory.posePlan as StudioPose[];
     normalized.posePlan = normalized.posePlan.map(skuPose => {
+      // Pose 6 framing is derived from this SKU's hero feature. Sharing another
+      // SKU's direction would contradict the preserved showcasePlan above.
+      if (skuPose.id === "showcase") return skuPose;
       const catPose = memoryPoses.find(p => p.id === skuPose.id);
       if (!catPose) return skuPose;
       // Lock shared shoot identity but preserve SKU-specific facts (visibility, reference, details)
@@ -5510,13 +5539,6 @@ function applyCatalogMemory(batch: JsonRecord, normalized: ReturnType<typeof nor
         purpose: catPose.purpose !== undefined ? catPose.purpose : skuPose.purpose,
       };
     });
-  }
-  const baseAnalysis = memory.baseAnalysis as ReturnType<typeof normalizeAnalysis> | undefined;
-  if (
-    baseAnalysis?.productIdentity?.bottomWearDetails &&
-    (!normalized.productIdentity.bottomWearDetails || normalized.productIdentity.bottomWearDetails.trim().toLowerCase() === "unknown")
-  ) {
-    normalized.productIdentity.bottomWearDetails = baseAnalysis.productIdentity.bottomWearDetails;
   }
   return normalized;
 }
@@ -6342,6 +6364,7 @@ async function queueCatalogVariantGeneration(
       references,
       productIdentity: normalized.productIdentity,
       creativeDirection: normalized.creativeDirection,
+      bottomWearMode,
       referenceFingerprint: analysisHashes.rHash,
     }),
   };
@@ -7368,7 +7391,7 @@ async function catalogDigestRows(orgId: string, settings: JsonRecord, handoffIds
       deadlineAt: item.deadline_at,
       remarks: item.remarks || item.special_instructions || handoff.remarks || "",
     };
-  }).filter((row) => row.poses.length === 5);
+  }).filter((row) => isCompleteCatalogHandoffPackage(row.poses));
 }
 
 function catalogRecipients(settings: JsonRecord, listingRecipients: string[]) {
@@ -7591,7 +7614,7 @@ async function runCatalogProductionAutomationOperation(request: Request) {
               next_retry_at: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
               updated_at: new Date().toISOString(),
             }).eq("id", failedDelivery.id).eq("organization_id", orgId);
-            results.push({ orgId, reportDate: String(failedDelivery.report_date), sent: false, retry: true, reason: "incomplete_five_pose_package" });
+            results.push({ orgId, reportDate: String(failedDelivery.report_date), sent: false, retry: true, reason: "incomplete_pose_package" });
             continue;
           }
           const retryReportDate = String(failedDelivery.report_date);

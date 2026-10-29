@@ -203,3 +203,71 @@ Deno.test("Studio and Bulk/Catalog share the same region-aware readiness policy"
     [],
   );
 });
+
+Deno.test("showcase reference selection promotes preferred evidenceReference and protects fabric_pattern from overflow", () => {
+  const references = [
+    { role: "front", hash: "front" },
+    ...Array.from({ length: 14 }, (_, index) => ({ role: "bottom", hash: `bottom-${index}` })),
+    { role: "fabric_pattern", hash: "fabric" },
+    { role: "back", hash: "back" },
+    { role: "mannequin", hash: "mannequin" },
+  ];
+  const selected = selectReferences(
+    references,
+    [],
+    "showcase",
+    "kurta_or_kurti_set",
+    MAX_IMAGE_REFERENCES,
+    "fabric_pattern",
+  );
+  const roles = selected.map((reference) => reference.role);
+  assertEquals(roles[0], "fabric_pattern");
+  assert(roles.includes("front"));
+  assert(roles.includes("bottom"));
+  assert(roles.includes("back"));
+});
+
+Deno.test("showcase evidenceReference promotes exact verbose analysis manifest labels", () => {
+  const references = [
+    { role: "front", hash: "front" },
+    { role: "fabric_pattern", hash: "fabric" },
+    { role: "bottom", hash: "bottom" },
+    { role: "back", hash: "back" },
+  ];
+
+  for (const role of ["fabric_pattern", "bottom", "back"]) {
+    const selected = selectReferences(
+      references,
+      [],
+      "showcase",
+      "kurta_or_kurti_set",
+      MAX_IMAGE_REFERENCES,
+      roleLabel(role),
+    );
+    assertEquals(selected[0]?.role, role);
+  }
+});
+
+Deno.test("CodeAnt Major: preferred additional product evidence survives duplicate overflow at the worker cap", () => {
+  const references = [
+    { role: "model_identity", hash: "model" },
+    ...Array.from({ length: MAX_IMAGE_REFERENCES }, (_, index) => ({ role: "front", hash: `front-${index}` })),
+    { role: "additional_product", hash: "preferred-additional" },
+    { role: "bottom", hash: "bottom" },
+    { role: "fabric_pattern", hash: "fabric" },
+    { role: "back", hash: "back" },
+    { role: "mannequin", hash: "mannequin" },
+    { role: "style_reference", hash: "style" },
+  ];
+  const selected = selectReferences(
+    references,
+    [],
+    "showcase",
+    "kurta_or_kurti_set",
+    MAX_IMAGE_REFERENCES,
+    "additional_product",
+  );
+
+  assertEquals(selected.length, MAX_IMAGE_REFERENCES);
+  assertEquals(selected.some((reference) => reference.hash === "preferred-additional"), true);
+});

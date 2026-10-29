@@ -11,6 +11,8 @@
  * Imports nothing from profiles.ts or generationPrompt.ts: both depend on it.
  */
 
+import { canonicalProductReferenceRole } from "./referencePolicy.ts";
+
 type JsonRecord = Record<string, unknown>;
 
 /** The garment component the sixth frame is built around. */
@@ -109,11 +111,73 @@ function integer(value: unknown) {
   return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
 }
 
+const SHOWCASE_REGION_SYNONYMS: Record<string, ShowcaseFeatureRegion> = {
+  neck: "neckline",
+  yoke: "neckline",
+  collar: "neckline",
+  placket: "neckline",
+  neckline_yoke: "neckline",
+  embroidered_yoke: "embroidery",
+  handwork: "embroidery",
+  zari: "embroidery",
+  butti: "embroidery",
+  mirror_work: "embroidery",
+  gota_patti: "embroidery",
+  motif: "print",
+  pattern: "print",
+  floral_print: "print",
+  block_print: "print",
+  sleeves: "sleeve",
+  cuff: "sleeve",
+  cuffs: "sleeve",
+  sleeve_cuff: "sleeve",
+  kurti: "upper_garment",
+  kurta: "upper_garment",
+  top: "upper_garment",
+  bodice: "upper_garment",
+  trousers: "bottom_wear",
+  pants: "bottom_wear",
+  bottom: "bottom_wear",
+  bottoms: "bottom_wear",
+  farshi: "bottom_wear",
+  farsi: "bottom_wear",
+  farshi_pajama: "bottom_wear",
+  palazzo: "bottom_wear",
+  sharara: "bottom_wear",
+  gharara: "bottom_wear",
+  salwar: "bottom_wear",
+  churidar: "bottom_wear",
+  patiala: "bottom_wear",
+  border: "hem_border",
+  borders: "hem_border",
+  hem: "hem_border",
+  hemline: "hem_border",
+  lace_border: "hem_border",
+  tassels: "hem_border",
+  stole: "dupatta",
+  shawl: "dupatta",
+  aanchal: "pallu",
+  pallu_spread: "pallu",
+  pallu_border: "pallu",
+  pleats: "drape",
+  pleat_drape: "drape",
+  saree_drape: "drape",
+  choli: "blouse",
+  skirt: "silhouette",
+  skirt_flare: "silhouette",
+  flare: "silhouette",
+  lehenga_skirt: "silhouette",
+  full_set: "complete_set",
+  coord_set: "complete_set",
+  two_piece_set: "complete_set",
+};
+
 export function normalizeShowcaseFeatureRegion(value: unknown): ShowcaseFeatureRegion | "" {
   const normalized = comparable(value).replace(/[\s-]+/g, "_");
-  return (SHOWCASE_FEATURE_REGIONS as readonly string[]).includes(normalized)
-    ? normalized as ShowcaseFeatureRegion
-    : "";
+  if ((SHOWCASE_FEATURE_REGIONS as readonly string[]).includes(normalized)) {
+    return normalized as ShowcaseFeatureRegion;
+  }
+  return SHOWCASE_REGION_SYNONYMS[normalized] ?? "";
 }
 
 export function normalizeShowcaseShotType(value: unknown): ShowcaseShotType | "" {
@@ -148,7 +212,7 @@ export function normalizeShowcasePlan(value: unknown): ShowcasePlan | null {
     featureRegion,
     shotType,
     whyItSells: bounded(raw.whyItSells ?? raw.why_it_sells, 220),
-    evidenceReference: bounded(raw.evidenceReference ?? raw.evidence_reference, 120),
+    evidenceReference: bounded(canonicalProductReferenceRole(raw.evidenceReference ?? raw.evidence_reference), 120),
     framing: bounded(raw.framing, 320),
     cameraAngle: bounded(raw.cameraAngle ?? raw.camera_angle, 220),
     bodyPosition: bounded(raw.bodyPosition ?? raw.body_position, 320),
@@ -196,7 +260,10 @@ export function resolveShowcaseShotType(
  * and the feedback row is keyed by it. Resolving it separately per consumer is
  * how a widened frame ends up scored as the tight one that was never generated.
  */
-export function effectiveShowcaseShot(creativeDirection: unknown): {
+export function effectiveShowcaseShot(
+  creativeDirection: unknown,
+  options?: { includesBottomWear?: boolean },
+): {
   plan: ShowcasePlan;
   shotType: ShowcaseShotType;
   widenedFromCloseup: boolean;
@@ -204,6 +271,12 @@ export function effectiveShowcaseShot(creativeDirection: unknown): {
   const creative = objectValue(creativeDirection);
   const plan = normalizeShowcasePlan(creative.showcasePlan ?? creative.showcase_plan);
   if (!plan) return null;
+  if (
+    options?.includesBottomWear === false &&
+    (plan.featureRegion === "bottom_wear" || plan.featureRegion === "complete_set")
+  ) {
+    return null;
+  }
   const heroDetail = text(creative.closeupHeroDetail ?? creative.closeup_hero_detail);
   const resolved = resolveShowcaseShotType(plan, { heroDetail });
   return { plan, shotType: resolved.shotType, widenedFromCloseup: resolved.widenedFromCloseup };
@@ -222,6 +295,30 @@ export function showcaseShotDirection(shotType: ShowcaseShotType) {
     movement_feature:
       "Use controlled movement - a turn, a step, a swing - so the feature's fall, flare, weight or fluidity is visible in motion. The garment must stay readable and uncrumpled throughout.",
   }[shotType];
+}
+
+/**
+ * Editorial photoshoot direction for Pose 6 so the frame reads as both a
+ * high-aesthetic fashion photograph and a razor-sharp product-detail showcase.
+ */
+export function showcaseAestheticDirection(
+  shotType: ShowcaseShotType,
+  featureRegion?: ShowcaseFeatureRegion,
+): string {
+  const regionLabel = featureRegion ? featureRegion.replace(/_/g, " ") : "featured detail";
+  switch (shotType) {
+    case "macro_detail":
+      return `Editorial macro photoshoot aesthetics: tack-sharp optical focus across the ${regionLabel} plane, directional grazing studio key light with soft fill to sculpt embroidery thread relief, zari sheen, and weave grain without specular blowout, and creamy shallow depth-of-field background separation.`;
+    case "half_body_detail":
+      return `Editorial waist-up fashion portrait aesthetics: sculpted studio key-and-fill lighting, intentional negative space, poised diagonal shoulder line, and tack-sharp focus across the ${regionLabel} craftsmanship and natural facial expression.`;
+    case "drape_feature":
+      return `Editorial drape-showcase photoshoot aesthetics: soft directional studio lighting that illuminates the ${regionLabel} artwork, border continuity, and weave translucency end-to-end, paired with a serene, graceful torso turn and coordinated two-hand placement clear of the motif field.`;
+    case "movement_feature":
+      return `Editorial kinetic fashion photoshoot aesthetics: crisp high-shutter capture of controlled mid-turn or mid-stride fabric swing, directional studio rim-and-key lighting that highlights ${regionLabel} flare weight and fluid hemline motion, while keeping prints and construction razor-sharp.`;
+    case "full_body_feature":
+    default:
+      return `Editorial full-length fashion photoshoot aesthetics: slightly low leg-lengthening camera perspective, architectural stance with feet separated or stepped into an angled turn so ${regionLabel} volume, pleat geometry, and hem border open cleanly to the lens, directional side-key lighting that carves fabric drape, and grounded contact shadows.`;
+  }
 }
 
 /** The key a feedback row is scored against. */

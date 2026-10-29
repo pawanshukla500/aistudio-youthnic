@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Camera, CheckCircle2, ChevronDown, ChevronUp, Crosshair, Eye, Lock, Sparkles } from "lucide-react";
-import type { StudioPose } from "../types";
+import type { ShowcasePlanProfile, StudioPose } from "../types";
 
 export function PosePlan({
   poses,
@@ -8,12 +8,14 @@ export function PosePlan({
   enabledCount,
   ready,
   stale,
+  showcasePlan,
 }: {
   poses: StudioPose[];
   onChange: (poses: StudioPose[]) => void;
   enabledCount: number;
   ready: boolean;
   stale: boolean;
+  showcasePlan?: ShowcasePlanProfile | null;
 }) {
   const [isOpen, setIsOpen] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(poses[0]?.id || null);
@@ -142,6 +144,37 @@ export function PosePlan({
               </div>
 
               <p className="mt-3 text-xs leading-relaxed text-secondary">{selected.description}</p>
+
+              {selected.id === "showcase" && showcasePlan?.heroFeature && (
+                <div className="mt-3.5 rounded-xl border border-primary/25 bg-soft-blush/35 p-3.5 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-primary">
+                      Pose 6 Feature Showcase & Aesthetic Photoshoot Plan
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="rounded-md bg-white px-2 py-0.5 text-[10px] font-bold text-primary border border-primary/20">
+                        Region: {showcasePlan.featureRegion.replace(/_/g, " ")}
+                      </span>
+                      <span className="rounded-md bg-white px-2 py-0.5 text-[10px] font-bold text-on-surface border border-outline-variant/50">
+                        Planned shot: {showcasePlan.shotType.replace(/_/g, " ")}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="mt-1.5 font-semibold text-on-surface">
+                    Hero Feature: <span className="font-normal">{showcasePlan.heroFeature}</span>
+                  </p>
+                  {showcasePlan.whyItSells && (
+                    <p className="mt-1 text-[11px] text-secondary">
+                      <b className="text-on-surface">Why it sells:</b> {showcasePlan.whyItSells}
+                    </p>
+                  )}
+                  {showcasePlan.distinctFrom && (
+                    <p className="mt-1 text-[11px] text-secondary">
+                      <b className="text-on-surface">Non-duplication lock:</b> {showcasePlan.distinctFrom}
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Viewfinder Spec Grid */}
               <div className="mt-4 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-3">

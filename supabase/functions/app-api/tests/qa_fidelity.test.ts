@@ -241,3 +241,95 @@ Deno.test("QA applies the Farshi hem structure only when the bottom is Farshi", 
   assertEquals(palazzo.includes("Do not fail the joined 6-inch hem panel"), false);
 });
 
+Deno.test("Pose 6 showcase QA enforces heroFeature non-duplication and exempts bottom_wear and full face on upper macro_detail crops", () => {
+  const creativeDirection = {
+    closeupHeroDetail: "neckline zari yoke",
+    showcasePlan: {
+      heroFeature: "mirror-work bell sleeve cuff",
+      featureRegion: "sleeve",
+      shotType: "macro_detail",
+    },
+  };
+  const prompt = buildPoseQaPrompt({
+    poseNumber: 6,
+    poseType: "showcase",
+    poseTitle: "Sleeve Cuff Showcase",
+    poseDirection: { id: "showcase", title: "Sleeve Cuff Showcase" },
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      bottomWearDetails: "Palazzo, wide straight legs",
+    },
+    creativeDirection,
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: true,
+    hasModelReference: true,
+    referenceManifest: ["IMAGE 1: Fabric / pattern detail", "IMAGE 2: Front product"],
+  });
+
+  assertStringIncludes(prompt, "For pose 6 (garment-led feature showcase: mirror-work bell sleeve cuff [sleeve / macro_detail])");
+  assertStringIncludes(prompt, "This pose 6 macro_detail showcase crop may omit the face.");
+
+  const result = normalizePoseQaResult({
+    pass: true,
+    score: 98,
+    checks: Object.fromEntries(genericCritical.map((key) => [key, "pass"])),
+    scores: Object.fromEntries(genericCritical.map((key) => [key, 98])),
+    failed: [],
+    reason: "Sleeve cuff macro showcase matches product reference.",
+    correction: "",
+  }, {
+    garmentFamily: "kurta_or_kurti_set",
+    poseType: "showcase",
+    hasBottomWear: true,
+    creativeDirection,
+  });
+  assertEquals(result.pass, true);
+  assertEquals(result.automaticallyVerified, true);
+});
+
+Deno.test("Pose 6 macro QA applies the anatomy veto even when the face is absent", () => {
+  const creativeDirection = {
+    showcasePlan: {
+      heroFeature: "mirror-work bell sleeve cuff",
+      featureRegion: "sleeve",
+      shotType: "macro_detail",
+    },
+  };
+  const prompt = buildPoseQaPrompt({
+    poseNumber: 6,
+    poseType: "showcase",
+    poseTitle: "Sleeve Cuff Showcase",
+    poseDirection: { id: "showcase", title: "Sleeve Cuff Showcase" },
+    productIdentity: { garmentFamily: "kurta_or_kurti_set" },
+    creativeDirection,
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: true,
+    hasModelReference: false,
+    referenceManifest: ["IMAGE 1: Fabric / pattern detail"],
+  });
+  assertStringIncludes(prompt, "ANATOMICAL REALISM - apply to every pose and every crop");
+  assertStringIncludes(prompt, "Fail pose_requirement for THREE HANDS, EXTRA HANDS, EXTRA ARMS");
+  assertStringIncludes(prompt, "This anatomy veto is independent of face visibility");
+
+  const result = normalizePoseQaResult({
+    pass: true,
+    score: 98,
+    checks: { pose_requirement: "fail", model_face: "pass", face_realism: "pass" },
+    scores: { pose_requirement: 40, model_face: 100, face_realism: 100 },
+    failed: ["pose_requirement"],
+    reason: "A duplicate hand is visible beside the sleeve cuff.",
+    correction: "Remove the duplicate hand and restore one continuous forearm connection.",
+  }, {
+    garmentFamily: "kurta_or_kurti_set",
+    poseType: "showcase",
+    hasBottomWear: false,
+    creativeDirection,
+  });
+  assertEquals(result.pass, false);
+  assertEquals(result.automaticallyVerified, false);
+  assertEquals(result.failed.includes("pose_requirement"), true);
+});
