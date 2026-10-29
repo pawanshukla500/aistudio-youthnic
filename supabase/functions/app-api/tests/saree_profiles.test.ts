@@ -61,7 +61,7 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v28-listing-identity-scene-first");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v29-listing-identity-pose1-subordinate");
   const prompt = buildCombinedAnalysisPrompt({
     skuName: "LISTING-IDENTITY",
     category: "kurta set",

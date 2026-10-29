@@ -43,6 +43,16 @@ function listingIdentityPromptRank(role: string, isTrueBack: boolean) {
   return 10;
 }
 
+/** Cached pose plans still say “the set Pose 1 established”. When a style-set is present, that room copy must not reach GPT Image 2. */
+export function styleSetOwnsListingRoom(text: string): string {
+  return String(text ?? "")
+    .replace(/\bidentical studio set\/backdrop wall from Pose 1\b/gi, "STYLE REFERENCE room")
+    .replace(/\bthe identical studio set, wall color, and lighting established in Pose 1\b/gi, "the STYLE REFERENCE room (Pose 1 is person and lighting only)")
+    .replace(/\bbackdrop and props already established in Pose 1\b/gi, "STYLE REFERENCE backdrop and props")
+    .replace(/\bexact same backdrop wall, floor, and lighting from Pose 1\b/gi, "exact same STYLE REFERENCE backdrop wall, floor, and lighting")
+    .replace(/\bSame model identity, styling, footwear, set, backdrop and lighting as Pose 1\b/gi, "Same model identity, styling, and footwear as Pose 1; STYLE REFERENCE room");
+}
+
 /** Face and style-set precede product photos so GPT Image 2 and product-truth analysis do not copy a pre-shoot studio. Same-rank items keep upload order. */
 export function listingIdentityPromptOrder<T extends PromptReference>(references: T[], isTrueBack = false): T[] {
   return references
@@ -812,6 +822,11 @@ export function composeGenerationPrompt(args: {
   const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
+  const posePrompt = hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.prompt || "")) : String(args.pose.prompt || "");
+  const poseConsistency = hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.consistencyNotes || "")) : String(args.pose.consistencyNotes || "");
+  const poseVisibility = hasStyleReference
+    ? boundedStrings(args.pose.productVisibilityRules, 12, 260).map(styleSetOwnsListingRoom)
+    : boundedStrings(args.pose.productVisibilityRules, 12, 260);
   const promptRules = hasStyleReference
     ? rules.map((rule) =>
       /identical studio backdrop wall color.*established in Pose 1/i.test(rule)
@@ -857,7 +872,7 @@ export function composeGenerationPrompt(args: {
   const learnings = boundedText(args.learnings, 900);
   const fashionKnowledge = boundedText(args.fashionKnowledge, 700);
   const generationMemory = boundedText(args.generationMemory, 900);
-  const recordedVisibility = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
+  const recordedVisibility = poseVisibility.join("; ");
   const visibilityRules = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, farshiEvidence) === "farshi"
     ? reconcileFarshiVisibilityRules(recordedVisibility)
     : recordedVisibility;
@@ -933,11 +948,11 @@ LOCKED SUBJECT - MUST NOT CHANGE:
 ${modelJson}
 - Same recognizable face, skin tone, body proportions, hairstyle, hair length/color, makeup, accessories and footwear across the complete set.
 - Model expressions: authentic, relaxed warmth and natural composure; never a stiff, forced, or frozen smile.
-- Pose 1 is only the subject/scene anchor for later poses. It never overrides original product references.
+- Pose 1 is the subject${hasStyleReference ? " and lighting" : "/scene"} anchor for later poses${hasStyleReference ? "; STYLE REFERENCE is the set" : ""}. It never overrides original product references.
 
 FACE & IDENTITY LOCK - HIGHEST PRIORITY:
 ${hasModelReference
-    ? `The image labeled MODEL FACE REFERENCE in the reference manifest above is the exact, non-negotiable face and identity for this model in EVERY pose, including this one - it outranks every other face source, including the approved-pose anchor. Reproduce it as close to pixel-identical as photographically possible: identical facial bone structure, eyes (shape, color, spacing), eyebrows, nose, lips, jawline, skin tone and texture, and hairstyle. Do not idealize, beautify, average, restyle, or blend it with any other face - this must read as the same real person from that reference photo, not merely a similar-looking model.${hasApprovedAnchor ? " Use the APPROVED POSE 1 image only for scene, lighting, and styling continuity - never as a face source." : ""}`
+    ? `The image labeled MODEL FACE REFERENCE in the reference manifest above is the exact, non-negotiable face and identity for this model in EVERY pose, including this one - it outranks every other face source, including the approved-pose anchor. Reproduce it as close to pixel-identical as photographically possible: identical facial bone structure, eyes (shape, color, spacing), eyebrows, nose, lips, jawline, skin tone and texture, and hairstyle. Do not idealize, beautify, average, restyle, or blend it with any other face - this must read as the same real person from that reference photo, not merely a similar-looking model.${hasApprovedAnchor ? (hasStyleReference ? " Use the APPROVED POSE 1 image only for person, lighting, and styling continuity - never as a face or set source." : " Use the APPROVED POSE 1 image only for scene, lighting, and styling continuity - never as a face source.") : ""}`
     : hasApprovedAnchor
       ? "The image labeled APPROVED POSE 1 in the reference manifest above is the exact, non-negotiable ground truth for this model's identity. Reproduce the identical facial bone structure, eye shape and color, eyebrow shape, nose, lips, jawline, skin tone and texture, and hairstyle seen in that image - do not idealize, beautify, average, or drift toward a different face."
       : "This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally attractive adult face with real individual character (not an idealized, airbrushed, symmetric stock face) exactly as described in modelIdentity above - every later pose in this set must reproduce this same face."}
@@ -1044,7 +1059,7 @@ Description: ${boundedText(args.pose.description, 600)}
 Details to highlight: ${highlightedDetails}
 Visibility rules: ${visibilityRules}
 Purpose: ${boundedText(args.pose.purpose, 420)}
-Consistency notes: ${boundedText(args.pose.consistencyNotes, 600)}
+Consistency notes: ${boundedText(poseConsistency, 600)}
 ${categoryRules ? `POSE CATEGORY RULES (${poseCategory.toUpperCase()}):\n${categoryRules}` : ""}
 GARMENT POSE GRAMMAR (${garmentPoseFamilyHeading(poseFamily)}) - body language and framing only; it never changes the garment's design, print, colour, fit or construction:
 ${garmentPoseDirection(poseFamily)}
@@ -1088,7 +1103,7 @@ ${learnings}
 
 PROMPT:
 (Pose, camera and framing only. The SCENE LOCK above decides the set.)
-${boundedText(args.pose.prompt, 1_200)}
+${boundedText(posePrompt, 1_200)}
 
 REALISTIC INTEGRATION:
 - Treat this as frame ${args.pose.poseNumber} from one photographed contact sheet, not a new image concept. ${

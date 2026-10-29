@@ -10,6 +10,7 @@ import {
   compactFullPromptSafely,
   composeGenerationPrompt,
   listingIdentityPromptOrder,
+  styleSetOwnsListingRoom,
 } from "../lib/generationPrompt.ts";
 import { normalizeAnalysis } from "../lib/profiles.ts";
 
@@ -225,6 +226,42 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   assertEquals(prompt.includes("color grade established by Pose 1"), false);
   assertEquals(prompt.includes("not present in Pose 1"), false);
   assertStringIncludes(prompt, "glances back over her shoulder");
+});
+
+Deno.test("cached pose-plan copy cannot tell a style-set later frame to rebuild Pose 1's room", () => {
+  assertEquals(
+    styleSetOwnsListingRoom("Preserve the exact model identity, styling, and the identical studio set, wall color, and lighting established in Pose 1."),
+    "Preserve the exact model identity, styling, and the STYLE REFERENCE room (Pose 1 is person and lighting only).",
+  );
+  const prompt = composeGenerationPrompt({
+    skuName: "CACHED-POSE-PLAN",
+    productDetails: "",
+    pose: {
+      id: "back",
+      title: "True back",
+      poseNumber: 3,
+      description: "rear",
+      cameraAngle: "back",
+      framing: "full body",
+      bodyPosition: "away",
+      handPlacement: "clear",
+      expression: "not visible",
+      highlightedDetails: [],
+      productVisibilityRules: ["exact same backdrop wall, floor, and lighting from Pose 1 - zero new props"],
+      purpose: "rear",
+      consistencyNotes: "Keep the exact same model identity, hair, accessories, footwear, exact bottom wear, and identical studio set/backdrop wall from Pose 1 while showcasing the authoritative back",
+      prompt: "Preserve the exact model identity, styling, and the identical studio set, wall color, and lighting established in Pose 1.",
+      enabled: true,
+    } as any,
+    session: { productIdentity: { garmentFamily: "dress" } },
+    references: [{ role: "back" }, { role: "style_reference" }, { role: "approved_pose" }, { role: "model_identity" }],
+  });
+  assertStringIncludes(prompt, "STYLE REFERENCE room (Pose 1 is person and lighting only)");
+  assertStringIncludes(prompt, "exact same STYLE REFERENCE backdrop wall, floor, and lighting");
+  assertStringIncludes(prompt, "STYLE REFERENCE room while showcasing the authoritative back");
+  assertEquals(prompt.includes("identical studio set, wall color, and lighting established in Pose 1"), false);
+  assertEquals(prompt.includes("identical studio set/backdrop wall from Pose 1"), false);
+  assertStringIncludes(prompt, "never as a face or set source");
 });
 
 Deno.test("stored Pose 1 set-continuity rules cannot override a style-set later frame", () => {

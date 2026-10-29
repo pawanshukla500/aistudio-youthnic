@@ -692,10 +692,10 @@ function showcaseSlot(family: GarmentPoseFamily, hasBottoms: boolean, productIde
         "the garment stays the subject: neckline, sleeve shape, hem line, fit and print all unobstructed",
         ...(garmentDetails.summary ? [`preserve exact garment specifications: ${garmentDetails.summary}`] : []),
         "movement must not crumple, twist, or ride the garment up",
-        "the pose interacts only with the backdrop and props already established in Pose 1 - never new furniture, props or architecture",
+        "the pose interacts only with the STYLE REFERENCE backdrop and props - never new furniture, props or architecture",
         "the established backdrop is clearly readable behind the model",
       ].slice(0, 8),
-      consistencyNotes: "Same model identity, styling, footwear, set, backdrop and lighting as Pose 1; only the body language becomes playful",
+      consistencyNotes: "Same model identity, styling, and footwear as Pose 1; STYLE REFERENCE room; only the body language becomes playful",
       description: `A lively, natural, scroll-stopping moment that plays against the established backdrop while keeping the garment fully readable.${specClause} ${aesthetic}`,
       cameraAngle: "Eye-level candid editorial angle",
       highlightedDetails: ["playful energy", "garment fit and hem", "interaction with the established set", ...garmentDetails.highlights].slice(0, 6),
@@ -821,7 +821,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       handPlacement: "Hands placed naturally where they do not cover the back neckline, closure, embroidery, waist, or rear silhouette",
       expression: "Face is not forced toward camera; preserve identity through hair, body, and styling continuity; if glancing back, face and profile must match identity anchor with a natural, effortless look",
       productVisibilityRules: isSaree
-        ? ["uploaded back image is the sole back-design authority", "rear drape and pallu fall visible", "exact same backdrop wall, floor, and lighting from Pose 1 - zero new props"]
+        ? ["uploaded back image is the sole back-design authority", "rear drape and pallu fall visible", "exact same STYLE REFERENCE backdrop wall, floor, and lighting - zero new props"]
         : [
           "uploaded back image is the sole back-design authority",
           "entire rear construction visible from neckline to hem",
@@ -829,15 +829,15 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
           "hair swept forward or in an updo - back neckline, ties, and rear details completely unobstructed",
           "never infer back details from the front",
           rearBottomRule,
-          "exact same backdrop wall, floor, and lighting from Pose 1 - zero new props",
+          "exact same STYLE REFERENCE backdrop wall, floor, and lighting - zero new props",
         ],
-      consistencyNotes: "Keep the exact same model identity, hair, accessories, footwear, exact bottom wear, and identical studio set/backdrop wall from Pose 1 while showcasing the authoritative back",
+      consistencyNotes: "Keep the exact same model identity, hair, accessories, footwear, exact bottom wear, and STYLE REFERENCE room while showcasing the authoritative back",
       description: "A true full back view sourced from the uploaded back product photograph with unobstructed rear garment construction.",
       cameraAngle: "Eye-level straight-on back view",
       highlightedDetails: isSaree ? ["rear drape", "pallu fall", "back blouse details"] : ["back construction", "back neckline", "rear pattern placement"],
       primaryReference: "back",
       purpose: "Document the real back design",
-      prompt: "Turn the model fully away from camera to capture the authentic rear garment design from the uploaded back reference. For outfits with a dupatta, shawl, or stole, drape it forward over the arms or front so the back panel, neckline, embroidery, seams, and fit remain 100% unobstructed and clearly visible. Preserve the exact model identity, styling, and the identical studio set, wall color, and lighting established in Pose 1.",
+      prompt: "Turn the model fully away from camera to capture the authentic rear garment design from the uploaded back reference. For outfits with a dupatta, shawl, or stole, drape it forward over the arms or front so the back panel, neckline, embroidery, seams, and fit remain 100% unobstructed and clearly visible. Preserve the exact model identity and styling. Rebuild the STYLE REFERENCE room (Pose 1 is person and lighting only).",
       enabled: true,
     },
     {
@@ -1888,7 +1888,9 @@ export const CONSISTENCY_RULES = [
 // parts so cached v26 scene locks that copied product-studio rooms are re-read.
 // v28 leads the analysis prompt with listing identity and scene authority so
 // the planner does not lock a product-studio room from earlier product ranks.
-export const ANALYSIS_VERSION = "generation-session-v28-listing-identity-scene-first";
+// v29 stops cached pose-plan copy from telling later frames to rebuild Pose 1's
+// room when a style-set is present.
+export const ANALYSIS_VERSION = "generation-session-v29-listing-identity-pose1-subordinate";
 
 export function smallHash(value: string) {
   let hash = 2166136261;
