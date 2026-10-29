@@ -142,6 +142,8 @@ Deno.test("the pose plan is six ordered frames and the sixth adapts to the garme
   assertEquals(saree.length, 6);
   assertEquals(saree[5].id, "showcase");
   assertStringIncludes(saree[5].title, "Pallu");
+  assertStringIncludes(saree[0].bodyPosition, "living photographed stance");
+  assertEquals(/catalog stance/i.test(`${saree[0].bodyPosition} ${saree[0].prompt}`), false);
 
   const set = getPoseSlots({
     productIdentity: { garmentFamily: "kurta_or_kurti_set", bottomWearDetails: "Palazzo, wide straight legs" },

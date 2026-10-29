@@ -771,7 +771,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       id: "full_front",
       title: "Full Front Product View",
       framing: "3:4 portrait, head-to-toe with footwear and garment hem fully inside frame",
-      bodyPosition: "Square to camera with balanced weight and a natural, relaxed catalog stance establishing full outfit silhouette from head to hem; feet naturally spaced, arms relaxed, never stiff or robotic",
+      bodyPosition: "Square to camera with weight in one hip, relaxed knees, and a living photographed stance establishing the full outfit from head to hem; feet grounded and naturally spaced, arms relaxed, never a mannequin, T-pose, or stiff freeze",
       handPlacement: "Hands relaxed beside the body without covering neckline, waist, pockets, or trims",
       expression: "Natural, warm, approachable expression with a soft, genuine smile or calm composed glance; never a forced, stiff, or artificial toothy smile",
       productVisibilityRules: [
@@ -786,7 +786,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       highlightedDetails: ["front construction", "overall silhouette", "complete outfit"],
       primaryReference: "front",
       purpose: "Primary e-commerce listing image",
-      prompt: "Create a straight-on full-body front hero image. Show the complete outfit, preserving the authentic bottom wear silhouette (exact cut, volume, two distinct legs, pleating, and hem) plus the exact bottom-wear print and footwear, with a natural, effortless, composed catalog stance and a realistic, natural expression (not a forced or artificial smile).",
+      prompt: "Create a straight-on full-body front hero image of a living photographed person. Show the complete outfit, preserving the authentic bottom wear silhouette (exact cut, volume, two distinct legs, pleating, and hem) plus the exact bottom-wear print and footwear, with weight in one hip, relaxed joints, living fabric drape, and a realistic natural expression (not a mannequin, stiff freeze, or forced smile).",
       enabled: true,
     },
     {
@@ -1788,7 +1788,7 @@ In every family the pose may only change body position, angle, framing and expre
 
 Create exactly six product-specific camera setups in one coherent commercial coverage sequence with MANDATORY PHYSICAL VARIATION across all 6 slots, in this order and with these ids: full_front, angled, back, creative, closeup, showcase. They are NOT repeats of each other. Marketplace listing contract: MODEL FACE REFERENCE locks the face; STYLE REFERENCE locks hair/makeup mood, jewellery taste, and the backdrop/room/lighting for all six poses; PRODUCT PHOTOS lock 100% garment DNA. Every pose must look like a natural photographed person — weight-bearing, relaxed joints, slight asymmetry — never a mannequin or stiff catalog freeze. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints. Every individual prompt must (1) describe THIS product's exact colour, fabric, construction and selling details from the product references, and (2) direct the model's stance, angle, action, and expression, while creativeDirection must rebuild the photoshoot backdrop, wall, floor, lighting and props from the STYLE REFERENCE only.
 
-- full_front: square, unobstructed head-to-toe hero; establishes face/hair/styling/footwear/scene/lighting anchor with balanced weight, natural catalog composure, and an authentic gentle smile or relaxed glance (never a stiff stance or artificial smile).
+- full_front: square, unobstructed head-to-toe hero of a living photographed person; establishes face/hair/styling/footwear/scene/lighting anchor with weight in one hip, relaxed knees, living fabric drape, and an authentic gentle smile or relaxed glance. Never describe a mannequin, T-pose, stiff freeze, or plastic fashion-doll body.
 - angled: mandatory 35 to 45 degree intentional turn of torso and hips with one foot stepped forward, clearly revealing side construction, garment depth, side seam, and sleeve silhouette. Must be visibly turned away from flat frontal — NEVER a static frontal standing repeat! Natural, effortless glance following the angle with an authentic soft smile or composed editorial look (never an exaggerated or frozen stock smile).
 - back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees. For outfits with a dupatta or shawl, the dupatta must be draped forward over arms or front so the rear garment (neckline, back panel, embroidery, hem) is 100% unobstructed and visible. Hair swept forward or in an updo. The studio set, backdrop wall, lighting, and model identity must strictly match the other poses.
 - creative:
@@ -1883,7 +1883,7 @@ export const CONSISTENCY_RULES = [
 // three waist pleats on each side, one large pleat at each side joint, and a
 // 6-inch hem panel joined to the leg with a 4-inch taper. Cached v23 analyses
 // still forbid that hem, so they must be re-read.
-export const ANALYSIS_VERSION = "generation-session-v25-listing-identity-lock";
+export const ANALYSIS_VERSION = "generation-session-v26-listing-identity-lock";
 
 export function smallHash(value: string) {
   let hash = 2166136261;
