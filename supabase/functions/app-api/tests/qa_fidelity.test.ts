@@ -122,6 +122,7 @@ Deno.test("missing or miniaturized bottom print fails QA even when face and kurt
   assertStringIncludes(prompt, "never against an upper-only fabric close-up");
   assertStringIncludes(prompt, "hem panel 6 inches wide is joined");
   assertStringIncludes(prompt, "Do not fail the joined 6-inch hem panel itself");
+  assertStringIncludes(prompt, "Also fail pose_requirement when the body reads as a mannequin, T-pose, stiff catalog freeze");
 
   const keys = [...genericCritical, "bottom_wear"];
   const result = normalizePoseQaResult({
@@ -160,6 +161,24 @@ Deno.test("close-up QA does not treat bottom_wear as critical when trousers are 
   });
   assertEquals(result.pass, true);
   assertEquals(result.automaticallyVerified, true);
+});
+
+Deno.test("an explicit bottom_wear fail on a close-up does not reject the crop", () => {
+  const result = normalizePoseQaResult({
+    pass: true,
+    score: 97,
+    checks: Object.fromEntries([...genericCritical, "bottom_wear"].map((key) => [key, key === "bottom_wear" ? "fail" : "pass"])),
+    scores: Object.fromEntries([...genericCritical, "bottom_wear"].map((key) => [key, key === "bottom_wear" ? 40 : 98])),
+    failed: ["bottom_wear"],
+    reason: "Trousers are out of the product-detail crop.",
+    correction: "",
+  }, {
+    garmentFamily: "kurta_or_kurti_set",
+    poseType: "closeup",
+    hasBottomWear: true,
+  });
+  assertEquals(result.pass, true);
+  assertEquals(result.failed.includes("bottom_wear"), false);
 });
 
 Deno.test("creative editorial QA does not treat bottom_wear as critical when trousers can be cropped out", () => {

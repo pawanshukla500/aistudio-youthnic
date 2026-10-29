@@ -127,14 +127,16 @@ export function buildPoseQaPrompt(args: {
   productIdentity: unknown; creativeDirection: unknown; modelIdentity: unknown;
   garmentFamily: string; consistencyRules: string[]; hasApprovedAnchor: boolean; hasModelReference: boolean; referenceManifest: string[];
   bottomWearMode?: unknown;
+  hasSessionBottomReference?: boolean;
 }) {
   // QA must judge the shoot as it was configured. A top-only shoot has no
   // coordinated bottom to match, so bottom-wear fidelity is not a gate there.
   const bottomWear = resolveBottomWearPresentation({ mode: args.bottomWearMode, productIdentity: args.productIdentity });
   const hasBottomWear = bottomWear.includesBottomWear;
-  const hasBottomReference = args.referenceManifest.some((line) => /\bbottom\b/i.test(line));
+  const hasBottomReference = Boolean(args.hasSessionBottomReference)
+    || args.referenceManifest.some((line) => /\bbottom\b/i.test(line));
   const farshiBottom = hasBottomWear &&
-    effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference) === "farshi";
+    effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, bottomWear.details) === "farshi";
   const farshiStructureCheck = farshiBottom
     ? ` When the bottom is Farshi/Farsi, also fail bottom_wear unless the worn trousers match this structure: ${FARSHI_SILHOUETTE_STRUCTURE} Fail a wide-open palazzo hem and fail a gathered salwar poncha. Do not fail the joined 6-inch hem panel itself.`
     : "";
@@ -230,7 +232,7 @@ Only 95-100 is eligible for automatic verification. A critical score of 90-94 re
 
 Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face when a recognizable face is in frame. Fail any invented or moved button, tassel/latkan, closure, trim, pocket, logo, embroidery, jewelry, or hardware. For a back pose, fail unless it is a true back view matching the uploaded BACK; face_realism automatically passes for a back pose since the face is not visible. ${pose5Rule}${pose6Rule ? `${pose5Rule ? " " : ""}${pose6Rule}` : ""} Judge styling_addition against the approved styling plan in the session rules above: fail it when a listed piece is missing, when a piece appears that the plan does not list (an invented necklace, bangle, belt, bag or hair ornament), when the metal or family differs from the plan (gold where the plan says oxidised silver), when it changes between poses, or when it hides or replaces a garment detail, bottom wear or footwear from the product references. Pass it when the frame matches the plan exactly, or when no plan and no suggestion were provided and nothing was invented.
 
-ANATOMICAL REALISM - apply to every pose and every crop, including true back views and faceless macro/detail frames. Inspect every visible arm, forearm, wrist, hand, finger, and other limb. Fail pose_requirement for THREE HANDS, EXTRA HANDS, EXTRA ARMS, DUPLICATE OR PHANTOM LIMBS, duplicate wrists, malformed or extra fingers, or floating hands resting on waist/hip/drape without a continuous anatomical forearm connection. Do not fail merely because a limb is naturally occluded or outside the crop. This anatomy veto is independent of face visibility and still applies when model_face and face_realism pass automatically.
+ANATOMICAL REALISM - apply to every pose and every crop, including true back views and faceless macro/detail frames. Inspect every visible arm, forearm, wrist, hand, finger, and other limb. Fail pose_requirement for THREE HANDS, EXTRA HANDS, EXTRA ARMS, DUPLICATE OR PHANTOM LIMBS, duplicate wrists, malformed or extra fingers, or floating hands resting on waist/hip/drape without a continuous anatomical forearm connection. Also fail pose_requirement when the body reads as a mannequin, T-pose, stiff catalog freeze, or plastic fashion-doll rather than a weight-bearing photographed person with relaxed joints and slight natural asymmetry. Do not fail merely because a limb is naturally occluded or outside the crop. This anatomy veto is independent of face visibility and still applies when model_face and face_realism pass automatically.
 
 Face quality bar - apply only when a recognizable face is in frame. For a true back pose or a product-detail-first close-up with no recognizable face, pass face_realism and model_face; do not fail for a missing face. When a face is visible (including a clearly readable partial face or a back-pose over-shoulder glance), fail face_realism for any of these even if everything else matches: plastic, waxy, airbrushed, or over-smoothed "beauty filter" skin instead of natural texture with visible pores; crossed, misaligned, asymmetric, glassy, or otherwise distorted/malformed eyes; unnaturally uniform, fused, extra, missing, or warped teeth; any blurring, warping, melting, or duplicated/misplaced facial features; or a mirror-symmetric "AI face" that does not read as a real photographed person. Also fail face_realism when the frame as a whole reads as generated rather than photographed: a glossy CGI or 3D-render finish, HDR glow, or a pasted-on subject with halo edges. Give a specific, actionable correction for any face_realism or model_face failure (name the exact feature that is wrong).
 
@@ -251,10 +253,13 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
   const checks = raw.checks && typeof raw.checks === "object" ? raw.checks as JsonRecord : {};
   const rawScores = raw.scores && typeof raw.scores === "object" ? raw.scores as JsonRecord : {};
   const failed = new Set<string>();
-  for (const key of checkKeys) if (String(checks[key] || "").toLowerCase() === "fail") failed.add(key);
+  const isBlockingFail = (key: string) => !(key === "bottom_wear" && !criticalChecks.includes("bottom_wear"));
+  for (const key of checkKeys) {
+    if (String(checks[key] || "").toLowerCase() === "fail" && isBlockingFail(key)) failed.add(key);
+  }
   for (const value of Array.isArray(raw.failed) ? raw.failed : []) {
     const key = String(value || "").toLowerCase().replace(/[^a-z_]/g, "");
-    if (checkKeys.includes(key as never)) failed.add(key);
+    if (checkKeys.includes(key as never) && isBlockingFail(key)) failed.add(key);
   }
   if (typeof raw.pass !== "boolean" && Object.keys(checks).length === 0) throw new Error("QA returned no structured verdict.");
 

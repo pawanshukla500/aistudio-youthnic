@@ -69,6 +69,15 @@ Visual product truth extraction and scene planning rely on a cost-effective, hig
   - Product fidelity, colors, prints, embroidery, and styling.
   - Photoshoot backdrop set, architecture, lighting, and camera grading.
 
+### 2.5 Marketplace Listing Identity Lock (all six poses)
+- **Model face:** Copy the MODEL FACE REFERENCE (face, bone structure, eyes, hair, skin) onto every pose that shows a face, including a back-pose over-shoulder glance. Do not beautify, average, or swap the person.
+- **Style set:** STYLE REFERENCE is the authority for hair/makeup mood, jewellery taste, pose inspiration, and the photoshoot backdrop, room, wall, floor, props, and lighting. Rebuild that same set in poses 1–6, including true-back frames. Style clothing stays quarantined (2.1).
+- **Product DNA:** FRONT, BACK, BOTTOM, FABRIC, and MANNEQUIN uploads are the exclusive 100% DNA for cut, print, embroidery, colour, neckline, sleeves, hem, and bottom wear. Marketplace listing frames must match those uploads.
+- **Natural person:** Weight-bearing stance, relaxed joints, slight natural asymmetry, grounded feet, living fabric drape. Forbidden: mannequin, T-pose, stiff catalog freeze, plastic fashion-doll body.
+- **True-back references:** Rear product first, then model identity, style-set, and Pose 1 continuity. Never drop the style-set from a back pose.
+- **Farshi vs palazzo:** A dedicated bottom photo is not by itself Farshi. Classify Farshi from construction (three waist pleats + joined tapered hem) or SKU/notes. Named sharara/salwar/straight/skirt stay. Explicit "NOT farshi" palazzo stays palazzo. Uncertain palazzo/none/other with a bottom photo still uses the Farshi silhouette lock (PR 133). Generation and QA must consult session-level bottom evidence so a back-pose manifest that only carries the rear photo still applies the lock.
+- **QA crops:** A non-critical `bottom_wear` fail on a close-up or creative crop must not reject the frame. Fail `pose_requirement` for mannequin / T-pose / stiff freeze as well as extra limbs.
+
 ---
 
 ## 3. Deployment, Testing & Verification Invariants

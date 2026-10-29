@@ -63,9 +63,10 @@ Deno.test("the back view is pointed at Pose 1's set, not at a clean studio", () 
     productDetails: "",
     pose: pose("back", 3, "Full back view on a plain sand-coloured plaster wall."),
     session: { productIdentity: { garmentFamily: "kurta_or_kurti_set" }, creativeDirection: PALACE_SET },
-    // The back pose never receives the style reference; Pose 1 carries the set.
-    references: [{ role: "back" }, { role: "model_identity" }, { role: "approved_pose" }],
+    // Rear product, model face, style-set, and Pose 1 continuity all stay on a back pose.
+    references: [{ role: "back" }, { role: "model_identity" }, { role: "style_reference" }, { role: "approved_pose" }],
   });
+  assertStringIncludes(prompt, "STYLE REFERENCE");
   assertStringIncludes(prompt, "as already photographed in APPROVED POSE 1 - rebuild exactly the set Pose 1 shows, including in a back view");
   assertEquals(prompt.includes("or the clean commercial studio direction"), false);
   assertStringIncludes(prompt, PALACE_SET.backgroundStyle);

@@ -61,7 +61,7 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v24-farshi-joined-hem");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v25-listing-identity-lock");
 });
 
 Deno.test("analysis prompt distinguishes farshi from palazzo and does not take bottom print from upper fabric close-ups", () => {
@@ -102,6 +102,25 @@ Deno.test("analysis prompt distinguishes farshi from palazzo and does not take b
   assertEquals(hasRecordedBottomWear({ bottomWearDetails: "No bottom wear recorded" }), false);
   assertEquals(isFarshiBottomWear("Farsi pajama with large gold florals"), true);
   assertEquals(isFarshiBottomWear("Palazzo pants, solid magenta; NOT farshi"), false);
+  assertStringIncludes(prompt, "Marketplace listing contract");
+  assertStringIncludes(prompt, "AUTHORITATIVELY CLASSIFIED AS");
+});
+
+Deno.test("a palazzo SKU with a bottom photo is not forced into the Farshi analysis lock", () => {
+  const prompt = buildCombinedAnalysisPrompt({
+    skuName: "PALAZZO-SET",
+    category: "kurta set",
+    productDetails: "ivory kurta with straight palazzo pants",
+    modelDirection: "",
+    sceneDirection: "",
+    referenceManifest: [
+      { number: 1, role: "front" },
+      { number: 2, role: "bottom" },
+    ],
+  });
+  assertEquals(prompt.includes("AUTHORITATIVELY CLASSIFIED AS"), false);
+  assertStringIncludes(prompt, "A dedicated bottom photo is not by itself Farshi");
+  assertStringIncludes(prompt, "Marketplace listing contract");
 });
 
 Deno.test("root-level sareeTruth and sareeDrapePlan survive canonical normalization", () => {

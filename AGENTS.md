@@ -18,8 +18,9 @@ This document establishes operational requirements, architectural constraints, a
    - No floating hands resting on waist, hips, navel, or fabric pleats during drape-holding without continuous, visible forearm anatomy.
    - Automated QA (`qa.ts`) must veto any image exhibiting anatomical duplication.
 4. **Pose Planning Integrity:**
-   - **Pose 5 (Detail Shot):** Must highlight the signature craftsmanship of the PRIMARY uploaded garment (e.g. kurti butti work, yoke embroidery, neckline craft). Never hijack Pose 5 by focusing on secondary accessories like dupattas or stoles when the primary garment has craftsmanship to showcase.
-   - **Pose 6 (Showcase Frame):** Must complement frames 1–5 while showing a distinct diverging pose, preserving 100% consistency in model identity, product truth, backdrop set, and styling.
+ - **Pose 5 (Detail Shot):** Must highlight the signature craftsmanship of the PRIMARY uploaded garment (e.g. kurti butti work, yoke embroidery, neckline craft). Never hijack Pose 5 by focusing on secondary accessories like dupattas or stoles when the primary garment has craftsmanship to showcase.
+ - **Pose 6 (Showcase Frame):** Must complement frames 1–5 while showing a distinct diverging pose, preserving 100% consistency in model identity, product truth, backdrop set, and styling.
+5. **Listing Identity Lock:** MODEL FACE REFERENCE locks the face; STYLE REFERENCE locks hair/makeup mood and the backdrop/room/lighting for all six poses (including true-back); PRODUCT PHOTOS lock 100% garment DNA. Every pose must look like a natural photographed person, never a mannequin or stiff catalog freeze.
 
 ---
 

@@ -1651,8 +1651,7 @@ export function buildCombinedAnalysisPrompt(args: {
   analysisLearning?: string; showcaseFeedback?: string;
 }) {
   const manifest = args.referenceManifest.map(({ number, role }) => `IMAGE ${number}: ${role}`).join("\n");
-  const hasBottomRef = args.referenceManifest.some((m) => m.role === "bottom" || /bottom/i.test(m.role));
-  const isFarshiSku = hasBottomRef || /farshi|farsi/i.test(`${args.skuName} ${args.productDetails}`);
+  const isFarshiSku = /farshi|farsi/i.test(`${args.skuName} ${args.productDetails}`);
   return `You are the visual merchandiser and shoot planner for a fashion e-commerce studio.
 
 Analyze EVERY supplied image before answering.
@@ -1667,7 +1666,7 @@ REFERENCE AUTHORITY (highest to lowest):
 6. MANNEQUIN / FLAT-LAY SHOT - on a mannequin or dress form, authoritative for worn shape, fit, proportion and drape; laid flat, authoritative for outline, construction, panel layout and length only, since flat cloth shows no worn drape.
 7. BOTTOM WEAR / FARSHI - when supplied, pixel-level authority for the trousers/skirt cut, volume, hem, color and print. Never copy upper-garment embroidery onto this panel.
 8. ADDITIONAL PRODUCT - another source of product truth, including supporting bottom-wear evidence.
-9. STYLE REFERENCE - creative direction only. From the reference image, take ONLY the photoshoot background/backdrop, model face/style guidance (when no separate face reference is supplied), pose inspiration, framing, and overall photography direction. ABSOLUTE PROHIBITION ON COPYING THE PRODUCT FROM THE STYLE REFERENCE: The clothing, outfit, saree, dress, fabric, color, prints, or embroidery worn by the person in the style reference MUST BE 100% DISCARDED. Absolutely DO NOT copy, reproduce, or borrow the style reference's clothing. The product itself must stay based exclusively on uploaded product images and must not be redesigned. Never copy its garment, product color, bottoms, logos, or accessories.
+9. STYLE REFERENCE - creative direction only. From the reference image, take ONLY the photoshoot background/backdrop, model face/style guidance (when no separate face reference is supplied), pose inspiration, framing, and overall photography direction. That same face/style, backdrop, wall, floor, and lighting must be planned for ALL six listing poses. ABSOLUTE PROHIBITION ON COPYING THE PRODUCT FROM THE STYLE REFERENCE: The clothing, outfit, saree, dress, fabric, color, prints, or embroidery worn by the person in the style reference MUST BE 100% DISCARDED. Absolutely DO NOT copy, reproduce, or borrow the style reference's clothing. The product itself must stay based exclusively on uploaded product images and must not be redesigned. Never copy its garment, product color, bottoms, logos, or accessories.
 
 Product references are frequently flat-lay, folded, pinned, or shot on a mannequin or dress form. Read the garment through that presentation: infer how each panel, hem, sleeve and closure behaves once it is worn on a live human body, and record that in the profile. The mannequin, dress form, hanger, clips, pins and the flat surface are photography apparatus, never part of the product - never describe them as garment features and never let them appear in the pose plan.
 
@@ -1706,7 +1705,7 @@ Do NOT write "NOT tapered" or "NOT gathered into an ankle cuff" for this Farshi.
 ` : ""}
 1. EXACT CUT & CLASSIFICATION: Explicitly classify the cut from the worn silhouette in the references, not from a generic ethnic-wear prior:
    - "Farshi / Farsi / Farshi Pajama / Farshi Pants": Two distinct trouser legs with this construction only: ${FARSHI_SILHOUETTE_STRUCTURE} Length may be ankle-length (clearing the floor to display footwear) or floor-length as the references show. Hem embellishment (lace, print band, or a plain finish) is whatever the references show on that joined hem panel — do not invent lace. Distinct from palazzo (no three-per-side waist pleats and no joined tapered hem panel) and from Sharara (where the flare begins at or below a knee join). When a dedicated BOTTOM WEAR / FARSHI reference is supplied, or the trousers show this pleated waist and joined hem, classify as Farshi / Farshi Pajama / Farshi Pants, NOT palazzo.
-   - "Palazzo": Simple standard-width straight or softly flared wide-leg trousers without farshi flared volume, gathers, or architectural flair. If a BOTTOM WEAR / FARSHI reference is attached or flared volume/lace is present, DO NOT classify as Palazzo.
+   - "Palazzo": Simple standard-width straight or softly flared wide-leg trousers without three-per-side waist pleats and without a joined tapered hem panel. A dedicated bottom photo is not by itself Farshi — only classify Farshi when the trousers show that construction, or the SKU/notes name Farshi/Farsi. Do NOT classify as Palazzo when the trousers show Farshi construction.
    - "Straight Trousers / Cigarette Pants": Narrow straight tailored cut ending at the ankle, with side slits or plain hem.
    - "Sharara": Fitted from waist to knee, flaring out dramatically from the knee down.
    - "Gharara": Ruched/gathered below the knee with decorative gote/piping, flaring out below.
@@ -1787,7 +1786,7 @@ GARMENT-SPECIFIC POSE GRAMMAR - match every pose to what this garment actually i
 - DRESS / GOWN / WESTERN-CASUAL: relaxed, current body language showing the complete silhouette from shoulder to hem, hem level and inside the frame.
 In every family the pose may only change body position, angle, framing and expression. It must never change the garment's design, print, motif scale, colour, fit, construction or bottom-wear silhouette.
 
-Create exactly six product-specific camera setups in one coherent commercial coverage sequence with MANDATORY PHYSICAL VARIATION across all 6 slots, in this order and with these ids: full_front, angled, back, creative, closeup, showcase. They are NOT repeats of each other. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints. Every individual prompt must (1) describe THIS product's exact colour, fabric, construction and selling details from the product references, and (2) direct the model's stance, angle, action, and expression, while creativeDirection must rebuild the photoshoot backdrop, wall, floor, lighting and props from the STYLE REFERENCE only.
+Create exactly six product-specific camera setups in one coherent commercial coverage sequence with MANDATORY PHYSICAL VARIATION across all 6 slots, in this order and with these ids: full_front, angled, back, creative, closeup, showcase. They are NOT repeats of each other. Marketplace listing contract: MODEL FACE REFERENCE locks the face; STYLE REFERENCE locks hair/makeup mood, jewellery taste, and the backdrop/room/lighting for all six poses; PRODUCT PHOTOS lock 100% garment DNA. Every pose must look like a natural photographed person — weight-bearing, relaxed joints, slight asymmetry — never a mannequin or stiff catalog freeze. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints. Every individual prompt must (1) describe THIS product's exact colour, fabric, construction and selling details from the product references, and (2) direct the model's stance, angle, action, and expression, while creativeDirection must rebuild the photoshoot backdrop, wall, floor, lighting and props from the STYLE REFERENCE only.
 
 - full_front: square, unobstructed head-to-toe hero; establishes face/hair/styling/footwear/scene/lighting anchor with balanced weight, natural catalog composure, and an authentic gentle smile or relaxed glance (never a stiff stance or artificial smile).
 - angled: mandatory 35 to 45 degree intentional turn of torso and hips with one foot stepped forward, clearly revealing side construction, garment depth, side seam, and sleeve silhouette. Must be visibly turned away from flat frontal — NEVER a static frontal standing repeat! Natural, effortless glance following the angle with an authentic soft smile or composed editorial look (never an exaggerated or frozen stock smile).
@@ -1884,7 +1883,7 @@ export const CONSISTENCY_RULES = [
 // three waist pleats on each side, one large pleat at each side joint, and a
 // 6-inch hem panel joined to the leg with a 4-inch taper. Cached v23 analyses
 // still forbid that hem, so they must be re-read.
-export const ANALYSIS_VERSION = "generation-session-v24-farshi-joined-hem";
+export const ANALYSIS_VERSION = "generation-session-v25-listing-identity-lock";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

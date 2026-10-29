@@ -1083,10 +1083,11 @@ async function loadAvailableReferences(
 
 /**
  * The references a single pose can actually use. `selectReferences` already caps
- * the manifest at MAX_REFERENCES and a true-back frame legitimately uses three
- * images, so downloading and base64-encoding every uploaded asset for every pose
- * was paid latency for bytes the prompt never saw. Required-evidence roles stay
- * in the set so the availability gate still runs against real bytes.
+ * the manifest at MAX_REFERENCES and a true-back frame legitimately uses the
+ * rear product plus model identity, style-set, and Pose 1 continuity (never
+ * front product), so downloading and base64-encoding every uploaded asset for
+ * every pose was paid latency for bytes the prompt never saw. Required-evidence
+ * roles stay in the set so the availability gate still runs against real bytes.
  */
 function poseReferenceCandidates(references: ReferenceInput[], poseType: string, garmentFamily: string, preferredRole = "") {
   const required = requiredAvailabilityRoles(references, garmentFamily);
@@ -2020,6 +2021,7 @@ async function validatePose(args: {
     ],
     hasApprovedAnchor: args.approved.length > 0,
     hasModelReference: qaRefs.some((reference) => reference.role === "model_identity"),
+    hasSessionBottomReference: args.references.some((reference) => reference.role === "bottom"),
     referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`),
   });
   const baseParts: JsonRecord[] = [

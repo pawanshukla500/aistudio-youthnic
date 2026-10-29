@@ -250,14 +250,17 @@ export function selectReferences<T extends ReferenceLike>(
   const normalizedFamily = garmentFamily.toLowerCase();
   // For a true back pose, the DIRECT rear upload is the sole product authority
   // (front, fabric_pattern, mannequin, etc. are strictly excluded to avoid leaking
-  // front details into the rear). However, the model_identity reference and
-  // the approved Pose 1 anchor MUST be included so the generator preserves the
-  // exact model identity and identical photoshoot studio environment/backdrop.
+  // front details into the rear). Model identity, style-set, and the approved
+  // Pose 1 anchor stay so the generator preserves the same person and room.
   if (poseType === "back") {
     const rearProduct = selectTrueBackReferences(references, normalizedFamily);
     const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
+    const style = references.filter((reference) => reference.role === "style_reference").slice(0, 1);
     const anchor = approved.slice(0, 1);
-    const priority = [...rearProduct, ...model, ...anchor];
+    // Rear product stays first. Model face, style-set backdrop, and Pose 1
+    // continuity follow so every listing pose rebuilds the same person and room.
+    // Style clothing is quarantined by the prompt; it must not replace the rear SKU.
+    const priority = [...rearProduct, ...model, ...style, ...anchor];
     return priority.slice(0, maxReferences);
   }
   const order = preferredProductOrder(poseType, normalizedFamily, preferredRole);

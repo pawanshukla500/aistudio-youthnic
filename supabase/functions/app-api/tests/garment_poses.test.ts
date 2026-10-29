@@ -178,6 +178,9 @@ Deno.test("Farshi structure is recorded on Farshi pose slots and stripped of the
   assertEquals(effectiveBottomCutClass("sharara_gharara", true), "sharara_gharara");
   assertEquals(effectiveBottomCutClass("palazzo", true), "farshi");
   assertEquals(effectiveBottomCutClass("palazzo", false), "palazzo");
+  assertEquals(effectiveBottomCutClass("palazzo", true, "Palazzo, wide straight legs; NOT farshi"), "palazzo");
+  assertEquals(effectiveBottomCutClass("palazzo", true, "Farshi pajama with three waist pleats and a joined hem"), "farshi");
+  assertEquals(effectiveBottomCutClass("none", true), "farshi");
 });
 
 Deno.test("normalizeAnalysis always returns the ordered six-pose plan", () => {

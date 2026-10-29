@@ -24,9 +24,10 @@ loses nothing: the next call resumes from the database.
 - `lib/sceneLock.ts` builds one SCENE LOCK block from the analysed creative direction. Every
   pose gets the same block, high in the prompt where compaction never trims it. Only the pose,
   camera angle and framing differ between frames.
-- Pose 1 is the visual anchor for poses 2–6, including the back view. The back view never
-  receives the style reference, because that is a product-truth risk. The prompt therefore
-  points it at the set Pose 1 shows, not at "a clean studio".
+- Pose 1 is the visual anchor for poses 2–6, including the back view. The back view still
+  receives the style reference after the rear product and model identity so the same room
+  rebuilds; style clothing stays quarantined. The prompt also points it at the set Pose 1
+  shows, not at "a clean studio".
 - The analysis describes the set once, in `creativeDirection`, not inside each pose prompt. Any
   scene wording that is left in a pose prompt is marked as subordinate to the lock.
 - Studio's "Auto from references" background keeps the analysed set. Only an explicit choice,

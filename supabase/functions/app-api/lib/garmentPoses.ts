@@ -66,11 +66,41 @@ export const FARSHI_SILHOUETTE_STRUCTURE =
   "HEM: the hem is narrower than the volume at the waist. A separate hem panel 6 inches wide is joined (seamed) onto the bottom of each leg, and that panel tapers 4 inches from its upper edge to its lower edge, so the opening at the bottom of the hem is 4 inches narrower than the seam where the hem joins the leg. " +
   "Keep two distinct trouser legs. This joined hem is not a gathered salwar poncha, not churidar rings, and not an open straight palazzo hem.";
 
+const NAMED_NON_FARSHI_CUTS: ReadonlySet<BottomCutClass> = new Set([
+  "sharara_gharara",
+  "salwar_churidar",
+  "straight_trouser",
+  "skirt_lehenga",
+]);
+
+/**
+ * True when notes/SKU/analysis describe Farshi construction, ignoring
+ * "NOT farshi" denials so a palazzo brief cannot flip the cut.
+ */
+export function looksLikeFarshi(text: unknown): boolean {
+  const stripped = String(text ?? "")
+    .replace(/\bnot\s+(?:flared\s+)?farshi(?:\s*\/\s*farsi)?(?:\s+pajama|\s+pants)?\b/gi, " ");
+  if (/\b(farshi|farsi)\b/i.test(stripped)) return true;
+  return /three waist pleats/i.test(stripped) && /joined.{0,80}hem/i.test(stripped);
+}
+
+function deniesFarshi(text: unknown): boolean {
+  return /\bnot\s+(?:flared\s+)?farshi\b/i.test(String(text ?? "")) && !looksLikeFarshi(text);
+}
+
 /**
  * A dedicated bottom-wear photo is the Farshi authority when analysis was
- * unsure or called the cut a plain palazzo. Named cuts such as sharara stay put.
+ * unsure or called the cut a plain palazzo. Named sharara, salwar, and
+ * palazzo briefs that explicitly deny Farshi keep their own cut.
  */
-export function effectiveBottomCutClass(cutClass: BottomCutClass, hasBottomReference: boolean): BottomCutClass {
+export function effectiveBottomCutClass(
+  cutClass: BottomCutClass,
+  hasBottomReference: boolean,
+  evidenceText = "",
+): BottomCutClass {
+  if (NAMED_NON_FARSHI_CUTS.has(cutClass)) return cutClass;
+  if (cutClass === "farshi" || looksLikeFarshi(evidenceText)) return "farshi";
+  if (deniesFarshi(evidenceText)) return cutClass;
   if (hasBottomReference && (cutClass === "palazzo" || cutClass === "none" || cutClass === "other")) return "farshi";
   return cutClass;
 }

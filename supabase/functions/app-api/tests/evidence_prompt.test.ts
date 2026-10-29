@@ -147,7 +147,9 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   });
 
   assertStringIncludes(prompt, "IMAGE 1: BACK PRODUCT");
-  assertStringIncludes(prompt, "IMAGE 2: APPROVED POSE 1");
+  assertStringIncludes(prompt, "IMAGE 2: STYLE REFERENCE");
+  assertStringIncludes(prompt, "IMAGE 3: APPROVED POSE 1");
+  assertStringIncludes(prompt, "LISTING AUTHORITY - SAME PERSON, SAME SET, EXACT PRODUCT DNA IN ALL SIX POSES:");
   assertStringIncludes(prompt, "rear-plain-marker");
   assertEquals(prompt.includes("front-only-lace-marker"), false);
   assertEquals(prompt.includes("front-lace-construction-marker"), false);
@@ -590,6 +592,46 @@ Deno.test("true-back pose preserves bottom wear architecture without leaking fro
   assertEquals(prompt.includes("front-lace-should-not-leak"), false);
 });
 
+Deno.test("true-back still applies Farshi lock from session bottom evidence even when the pose manifest has only the rear photo", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "NISHI-PEACH",
+    productDetails: "Kurti set",
+    pose: {
+      id: "back",
+      title: "Full Back View",
+      poseNumber: 3,
+      description: "Rear view",
+      cameraAngle: "back",
+      framing: "full",
+      bodyPosition: "away",
+      handPlacement: "sides",
+      expression: "away",
+      highlightedDetails: ["rear kurti"],
+      productVisibilityRules: ["bottom wear visible"],
+      purpose: "rear",
+      consistencyNotes: "locked",
+      prompt: "Show rear view.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        bottomWearDetails: "Palazzo, wide legs, joined silhouette",
+        garmentEvidence: [
+          { region: "back hem", sourceRole: "back", state: "confirmed", visibleDecoration: "plain hem" },
+        ],
+      },
+      references: [{ role: "front" }, { role: "bottom" }, { role: "back" }, { role: "style_reference" }],
+    },
+    references: [{ role: "back" }, { role: "style_reference" }],
+  });
+
+  assertStringIncludes(prompt, "FARSHI / FARSI HARD LOCK:");
+  assertStringIncludes(prompt, "IMAGE 1: BACK PRODUCT");
+  assertStringIncludes(prompt, "IMAGE 2: STYLE REFERENCE");
+  assertEquals(prompt.includes("PALAZZO HARD LOCK:"), false);
+});
+
 Deno.test("composeGenerationPrompt enforces style reference backdrop authority and strictly prohibits pre-shoot backgrounds", () => {
   const prompt = composeGenerationPrompt({
     skuName: "KAPOOR-KURTI-SET",
@@ -969,6 +1011,9 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   assertStringIncludes(pose2Prompt, "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:");
   assertStringIncludes(pose2Prompt, "from the reference image (style reference / model reference), take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction");
   assertStringIncludes(pose2Prompt, "The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows");
+  assertStringIncludes(pose2Prompt, "LISTING AUTHORITY - SAME PERSON, SAME SET, EXACT PRODUCT DNA IN ALL SIX POSES:");
+  assertStringIncludes(pose2Prompt, "NATURAL LIVING POSE: the body occupies the room with weight in the feet");
+  assertStringIncludes(pose2Prompt, "Apply that set and styling to every pose in this shoot");
 
   // 3. Locked Details Across All Six Images
   assertStringIncludes(pose2Prompt, "LOCKED DETAILS ACROSS ALL SIX IMAGES (AVOID CONSISTENCY MISTAKES):");

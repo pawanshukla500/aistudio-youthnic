@@ -466,6 +466,7 @@ function bottomWearSection(args: {
   bottomWear: BottomWearPresentation;
   isSaree: boolean;
   hasBottomReference: boolean;
+  evidenceText?: string;
 }) {
   // `isSaree` is the caller's exact garmentFamily match widened by the pose
   // family, so a session analysed under "ethnic/fusion" that the taxonomy
@@ -482,7 +483,11 @@ function bottomWearSection(args: {
 - Frame every pose so the upper garment - its neckline, sleeves, fit, print and hem line - remains the subject.
 - THIS SECTION OUTRANKS THE POSE BRIEF: the pose plan below was written from the product analysis and may still name bottom wear, a "complete set", or a waistband-to-hem read. Ignore every such instruction and follow this section instead.${args.bottomWear.mode === "top_only" && args.bottomWear.recordedInAnalysis ? "\n- The analysis recorded bottom-wear details for this SKU, but the shoot is configured TOP ONLY. Present the top as the product and keep the bottom neutral and non-matching." : ""}`;
   }
-  const effectiveCutClass = effectiveBottomCutClass(args.bottomWear.cutClass, args.hasBottomReference);
+  const effectiveCutClass = effectiveBottomCutClass(
+    args.bottomWear.cutClass,
+    args.hasBottomReference,
+    args.evidenceText || args.bottomWear.details,
+  );
   const guard = bottomWearSubstitutionGuard(effectiveCutClass);
   let cleanedDetails = args.bottomWear.details;
   if (args.hasBottomReference || effectiveCutClass === "farshi") {
@@ -634,10 +639,24 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
   return lines.join("\n");
 }
 
+function listingAuthorityDirective(hasModelReference: boolean, hasStyleReference: boolean): string {
+  return [
+    "LISTING AUTHORITY - SAME PERSON, SAME SET, EXACT PRODUCT DNA IN ALL SIX POSES:",
+    hasModelReference
+      ? "- MODEL FACE REFERENCE: copy this exact face, bone structure, eyes, brows, nose, lips, jawline, skin tone/texture, and hair onto every pose that shows a face, including a back-pose over-shoulder glance. Do not beautify, average, or swap the person."
+      : "- Model identity: one specific photorealistic adult face for the whole set. Pose 1 establishes it; poses 2-6 reproduce it.",
+    hasStyleReference
+      ? "- STYLE REFERENCE: take ONLY face/style guidance (when no MODEL FACE REFERENCE is present), hair/makeup mood, jewellery taste, pose inspiration, and the photoshoot backdrop, room, wall, floor, props, and lighting. Rebuild that same set in poses 1-6. The clothing in the style image is 100% discarded."
+      : "- Photoshoot set: rebuild the locked creative-direction room in every pose. Never invent a new backdrop.",
+    "- PRODUCT PHOTOS (FRONT, BACK, BOTTOM, FABRIC, MANNEQUIN): exclusive 100% DNA for garment cut, print, embroidery, colour, neckline, sleeves, hem, and bottom wear. Marketplace listing frames must match those uploads, not the style-reference outfit.",
+    "- NATURAL PERSON, NATURAL POSE: weight-bearing stance, relaxed joints, slight natural asymmetry, grounded feet, living fabric drape. Never a mannequin, T-pose, stiff catalog freeze, or plastic fashion-doll body.",
+  ].join("\n");
+}
+
 function referenceImageScopeDirective(): string {
   return [
     "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:",
-    "- STYLE / REFERENCE IMAGE SCOPE: from the reference image (style reference / model reference), take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction.",
+    "- STYLE / REFERENCE IMAGE SCOPE: from the reference image (style reference / model reference), take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction. Apply that set and styling to every pose in this shoot, including back, close-up, and showcase frames.",
     "- ABSOLUTE PROHIBITION ON COPYING THE STYLE REFERENCE GARMENT: The clothing, outfit, saree, dress, fabric, color, embroidery, or prints shown on the person in the STYLE REFERENCE image MUST BE 100% DISCARDED. Absolutely DO NOT copy, borrow, blend, or reproduce the style reference's clothing onto the model.",
     "- PRODUCT INTEGRITY (SOLE TRUTH FROM UPLOADED PRODUCT IMAGES): the product itself (fabric, colors, prints, pattern geometry, neckline, sleeves, hem, embroidery, trims, closures, and complete bottom wear) MUST come exclusively from uploaded product references. The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows. Our product and its design must stay exactly as uploaded in the product photos.",
   ].join("\n");
@@ -649,6 +668,7 @@ function anatomicalIntegrityDirective(): string {
     "- EXACTLY TWO ARMS AND TWO HANDS: The model must have strictly and exactly TWO arms and TWO hands in total. It is STRICTLY FORBIDDEN to render a third hand, extra hand, extra arm, duplicate wrist, floating hand, or phantom limb anywhere on the body, garment, waist, drape, or set.",
     "- COORDINATED HAND PLACEMENT: When one hand is holding, touching, or adjusting the garment/pallu/dupatta, the other hand must be naturally placed (e.g. resting at the side, on hip, or relaxed). NO THIRD HAND may appear resting on the waist, navel, or pleats. There must never be hands sprouting from the drape or floating disconnected from an arm.",
     "- REAL ANATOMICAL CONNECTION: Every visible hand MUST connect seamlessly to a real, visible, anatomically correct forearm and arm belonging to the model. Knuckles, wrists, and elbows must bend naturally.",
+    "- NATURAL LIVING POSE: the body occupies the room with weight in the feet, a slight hip/shoulder offset, relaxed elbows, and fabric that hangs with gravity. Forbidden: mannequin stiffness, T-pose, locked knees, frozen catalog stance, or a plastic fashion-doll body.",
     "- NATURAL FINGERS: Each hand must have exactly five natural, cleanly formed fingers with realistic nails and knuckles — never fused, melted, webbed, mangled, missing, or extra fingers.",
     "- PROHIBITED ANATOMICAL DEFECTS: Three hands, extra arms, duplicate hands, phantom hands, severed limbs, unnatural joint angles, or extra body parts under any circumstances.",
   ].join("\n");
@@ -708,8 +728,12 @@ export function composeGenerationPrompt(args: {
     mode: args.bottomWearMode ?? args.session.bottomWearMode ?? args.session.bottom_wear_mode,
     productIdentity: product,
   });
-  const hasBottomReference = args.references.some((reference) => reference.role === "bottom");
-  const farshiGeneration = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference) === "farshi";
+  const sessionReferences = Array.isArray(args.session.references)
+    ? args.session.references as PromptReference[]
+    : [];
+  const hasBottomReference = [...sessionReferences, ...args.references].some((reference) => reference.role === "bottom");
+  const farshiEvidence = [bottomWear.details, args.skuName, args.productDetails].filter(Boolean).join(" ");
+  const farshiGeneration = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, farshiEvidence) === "farshi";
   const productForPrompt = farshiGeneration && typeof product.bottomWearDetails === "string"
     ? {
       ...product,
@@ -746,11 +770,15 @@ export function composeGenerationPrompt(args: {
   const sareeDrapePlanJson = isSaree && !isTrueBack ? requiredJsonSection("Canonical saree drape plan", sareeDrapePlan, 4_000) : "";
   const patternGeometryJson = compactJson(patternGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
   const embroideryGeometryJson = compactJson(embroideryGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
-  // Allow model face and approved pose anchor so the AI can recreate
-  // the identical model and studio background for the back pose.
-  // Defense in depth: strip out any stray front product references if mistakenly passed.
+  // Allow model face, style-set, and approved pose so the back pose recreates
+  // the identical person and studio. Defense in depth: strip stray front product.
   const promptReferences = isTrueBack
-    ? args.references.filter((ref) => isDirectBackProductRole(ref.role) || ref.role === "model_identity" || ref.role === "approved_pose")
+    ? args.references.filter((ref) =>
+      isDirectBackProductRole(ref.role)
+      || ref.role === "model_identity"
+      || ref.role === "style_reference"
+      || ref.role === "approved_pose"
+    )
     : args.references;
   if (isTrueBack && !promptReferences.some((ref) => isDirectBackProductRole(ref.role))) {
     throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
@@ -798,7 +826,7 @@ export function composeGenerationPrompt(args: {
   const fashionKnowledge = boundedText(args.fashionKnowledge, 700);
   const generationMemory = boundedText(args.generationMemory, 900);
   const recordedVisibility = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
-  const visibilityRules = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference) === "farshi"
+  const visibilityRules = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, farshiEvidence) === "farshi"
     ? reconcileFarshiVisibilityRules(recordedVisibility)
     : recordedVisibility;
   const poseCategory = (isTrueBack || args.pose.id === "back")
@@ -849,6 +877,8 @@ EDIT GOAL:
 Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${boundedText(args.pose.title, 160)}. The finished image must look like the same real professional photoshoot as every other frame in this set.
 CRITICAL PRODUCT INTEGRITY RULE: The product clothing (garment, fabric, colors, prints, embroidery, neckline, sleeves, and bottom wear) must be taken EXCLUSIVELY and EXACTLY from the UPLOADED PRODUCT reference images. The clothing/outfit worn by the person in the STYLE REFERENCE image is strictly ignored and 100% DISCARDED. Absolutely DO NOT copy, transfer, or blend the style reference image's garment onto the model. Dress the model ONLY in the uploaded product.
 Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE${hasApprovedAnchor ? " as already photographed in APPROVED POSE 1 - rebuild exactly the set Pose 1 shows, including in a back view" : " (if supplied)"} and the SCENE LOCK below - never a different or generic set. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
+
+${listingAuthorityDirective(hasModelReference, hasStyleReference)}
 
 ${sceneLock}
 
@@ -925,7 +955,7 @@ Embroidery geometry: ${embroideryGeometryJson}
 - Reproduce embroidery as the same internal geometry: same lattice or motif structure, same count and rhythm of repeated units, same borders, same coverage area, and the same relationship to the neckline, tie, drawstring and tassel.
 - If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".`)}
 
-${bottomWearSection({ bottomWear, isSaree: isSareeShoot, hasBottomReference })}
+${bottomWearSection({ bottomWear, isSaree: isSareeShoot, hasBottomReference, evidenceText: farshiEvidence })}
 
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
 ${lockedDetailsDirective()}
