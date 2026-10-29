@@ -19,6 +19,7 @@ import {
   recordedBottomWearText,
   resolveBottomWearPresentation,
 } from "./garmentPoses.ts";
+import { isNonProductEvidenceRole } from "./referencePolicy.ts";
 
 // Print and embroidery are what make a garment this SKU rather than a similar
 // one, and a single free-text sentence cannot pin motif scale, spacing or the
@@ -1009,7 +1010,7 @@ function garmentEvidence(product: JsonRecord): GarmentRegionEvidence[] {
       explicitlyAbsent: stringArray(obj.explicitlyAbsent ?? obj.explicitly_absent),
       uncertainty: stringValue(obj.uncertainty),
     };
-  });
+  }).filter((entry) => !isNonProductEvidenceRole(entry.sourceRole));
 }
 
 function normalizeReferenceRole(value: unknown) {
@@ -1726,7 +1727,7 @@ If the SKU is a standalone upper garment (e.g. single kurti, standalone dress, s
 Build a precise Product Identity Profile. Perform a rigorous geographic evidence audit for construction, closures and decoration placement. Break the garment into specific physical regions. For stitched garments use (e.g. front neckline, front chest/yoke, front body, front hem, center back, back neckline, back body, back hem, left side construction, right side construction, left sleeve/armhole, right sleeve/armhole, waist, bottom wear front, bottom wear back, bottom wear hem). For sarees use (e.g. inner pallu, outer pallu, pallu border, body upper border, body lower border, chest drape, front pleats, waist tuck, unstitched blouse piece).
   For each region, record its evidence in garmentEvidence:
   - region: the physical location.
-  - sourceRole: the exact role from the manifest that proves this observation (for example "front", "back", "bottom", "saree_back_drape", "fabric_pattern", or "saree_pallu_spread"). Never leave it blank for a confirmed observation.
+  - sourceRole: the exact product role from the manifest that proves this observation (for example "front", "back", "bottom", "saree_back_drape", "fabric_pattern", or "saree_pallu_spread"). Never leave it blank for a confirmed observation. Never use STYLE REFERENCE, MODEL FACE REFERENCE, or APPROVED POSE as sourceRole: those images are not product truth, and a detail visible only there is unknown.
   - state: "confirmed" (clearly visible in an authoritative reference), "confirmed_absent" (clearly proven to not exist there), or "unknown" (not visually proven either way).
 - visibleConstruction: explicitly what construction (seams, slits, folds) is proven there.
 - visibleDecoration: explicitly what trim, lace, embroidery, or print is proven there.

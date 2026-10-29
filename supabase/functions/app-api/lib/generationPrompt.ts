@@ -30,7 +30,7 @@ import {
   resolveBottomWearPresentation,
   withoutFarshiStructureContradictions,
 } from "./garmentPoses.ts";
-import { isDirectBackProductRole, roleLabel } from "./referencePolicy.ts";
+import { isDirectBackProductRole, isNonProductEvidenceRole, roleLabel } from "./referencePolicy.ts";
 import { sceneLockBlock } from "./sceneLock.ts";
 
 export type PromptReference = { role: string };
@@ -684,7 +684,8 @@ export function composeGenerationPrompt(args: {
   const isTrueBack = args.pose.id === "back";
   // Existing sessions can bypass normalizeAnalysis, so reapply rear-evidence
   // validation immediately before prompt construction as a final safety gate.
-  const promptEvidence = isTrueBack ? rearEvidenceOnly(evidence) : evidence;
+  const promptEvidence = (isTrueBack ? rearEvidenceOnly(evidence) : evidence)
+    .filter((entry) => !isNonProductEvidenceRole(objectValue(entry).sourceRole ?? objectValue(entry).source_role));
   const placement = isTrueBack
     ? []
     : sanitizeDetailPlacementMap(product.detailPlacementMap, evidence).map((entry) => boundedText(entry, 420));

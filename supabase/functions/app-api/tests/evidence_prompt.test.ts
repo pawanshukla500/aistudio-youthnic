@@ -58,6 +58,23 @@ Deno.test("Garment Truth Contract: Legacy placement and absence locks are preser
 
   assertStringIncludes(prompt, "Negative-evidence hard locks:");
   assertStringIncludes(prompt, "- Absence Lock 1");
+
+  const quarantined = composeGenerationPrompt({
+    skuName: "Test SKU",
+    productDetails: "Test details",
+    pose: poseData as any,
+    session: {
+      productIdentity: {
+        garmentEvidence: [
+          { region: "front body", sourceRole: "front", state: "confirmed", visibleDecoration: "large maroon medallion butti" },
+          { region: "front body", sourceRole: "style_reference", state: "confirmed", visibleDecoration: "small pink style-photo butti" },
+        ],
+      },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(quarantined, "large maroon medallion butti");
+  assertEquals(quarantined.includes("small pink style-photo butti"), false);
   assertStringIncludes(prompt, "- Absence Lock 2");
 });
 

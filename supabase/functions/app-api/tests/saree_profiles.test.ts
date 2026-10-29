@@ -241,6 +241,21 @@ Deno.test("rear placement locks require direct rear evidence with provenance", (
   assertEquals(explicitlyAbsent.productIdentity.detailPlacementMap, []);
 });
 
+Deno.test("style and model photos cannot become garment evidence", () => {
+  const normalized = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      garmentEvidence: [
+        { region: "front body", sourceRole: "front", state: "confirmed", visibleDecoration: "large maroon medallion butti" },
+        { region: "front body", sourceRole: "style_reference", state: "confirmed", visibleDecoration: "small pink butti from the style photo" },
+        { region: "front body", sourceRole: "model_identity", state: "confirmed", visibleDecoration: "style-photo neckline" },
+      ],
+    },
+  }, "kurta");
+  assertEquals(normalized.productIdentity.garmentEvidence.map((entry) => entry.sourceRole), ["front"]);
+  assertEquals(normalized.productIdentity.garmentEvidence[0]?.visibleDecoration, "large maroon medallion butti");
+});
+
 Deno.test("complete normalized saree session passes shared Studio and Catalog preflight", () => {
   const normalized = normalizeAnalysis({
     productIdentity: { garmentFamily: "saree" },

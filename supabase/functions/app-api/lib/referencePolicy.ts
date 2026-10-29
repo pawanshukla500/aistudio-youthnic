@@ -1,5 +1,17 @@
 export const MAX_IMAGE_REFERENCES = 16;
 
+const NON_PRODUCT_EVIDENCE_ROLES = new Set([
+  "style_reference",
+  "model_identity",
+  "approved_pose",
+]);
+
+/** Style, model, and approved-pose photos are not garment truth. */
+export function isNonProductEvidenceRole(value: unknown) {
+  const role = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return NON_PRODUCT_EVIDENCE_ROLES.has(role);
+}
+
 export const PRODUCT_REFERENCE_ROLES = [
   "front",
   "back",
