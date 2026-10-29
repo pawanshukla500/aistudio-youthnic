@@ -314,6 +314,7 @@ Deno.test("Pose 6 macro QA applies the anatomy veto even when the face is absent
   assertStringIncludes(prompt, "ANATOMICAL REALISM - apply to every pose and every crop");
   assertStringIncludes(prompt, "Fail pose_requirement for THREE HANDS, EXTRA HANDS, EXTRA ARMS");
   assertStringIncludes(prompt, "This anatomy veto is independent of face visibility");
+  assertStringIncludes(prompt, "not a pose to repeat and not handheld props");
 
   const result = normalizePoseQaResult({
     pass: true,
