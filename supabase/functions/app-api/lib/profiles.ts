@@ -310,8 +310,11 @@ export function effectiveShowcaseIntent(args: {
   family: GarmentPoseFamily;
   includesBottomWear: boolean;
 }): ShowcaseIntent {
-  const recorded = normalizeShowcaseIntent(args.creative.showcaseIntent ?? args.creative.showcase_intent);
+  const recordedValue = normalizeShowcaseIntent(args.creative.showcaseIntent ?? args.creative.showcase_intent);
   if (isSareePoseFamily(args.family)) return "saree_drape";
+  // Enum validity is not garment compatibility: a non-saree must never inherit
+  // pallu/pleat direction from a stale or misclassified analysis.
+  const recorded = recordedValue === "saree_drape" ? "" : recordedValue;
   // A complete-set frame is only coherent when this shoot actually renders the
   // bottom. Consumers must serialize this same effective intent, not the stale
   // analysis value that was suppressed for a top-only shoot.
@@ -1592,7 +1595,10 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     // A bottom-led plan is not valid for this shoot. Discard its pose prose as
     // well as the plan-derived brief so model-supplied palazzo/bottom direction
     // cannot leak back into an explicitly top-only normalization.
-    if (creativeDirection.showcasePlan && !showcaseShot) return fallbackShowcase;
+    if (creativeDirection.showcasePlan && !showcaseShot) {
+      creativeDirection.showcasePlan = null;
+      return fallbackShowcase;
+    }
     const planRules = fallbackShowcase.productVisibilityRules;
     const mergedRules = [...planRules];
     for (const rule of pose.productVisibilityRules) {
@@ -1981,12 +1987,19 @@ export function mergeVariantColorways(
     return input.replace(colorTokenPattern(oldColor, "giu") ?? /$^/g, newColor);
   };
   const replaceBaseColor = (input: string) => replaceColor(input, baseMainColor, mainColor);
-  const hasColor = (input: string, color: string) => colorTokenPattern(color)?.test(input) ?? false;
   const colorModifier = "(?:light|dark|deep|bright|pale|soft|muted|rich|warm|cool|dusty|pastel|vivid|royal|emerald|ruby|sapphire|navy|midnight|sky|powder|steel|forest|bottle|olive|sage|mint|lime|sea|teal|turquoise|mustard|gold|golden|coral|peach|fuchsia|magenta|blush|rose|hot|lavender|lilac|mauve|plum|chocolate|coffee|camel|charcoal|ivory|cream|beige|wine|blood|cherry|burnt)";
   const colorBase = "(?:off-white|off\\s+white|chocolate-brown|ivory|white|ecru|cream|beige|black|blue|navy|red|ruby|maroon|burgundy|wine|green|emerald|olive|sage|mint|teal|turquoise|yellow|mustard|gold|golden|orange|rust|coral|peach|pink|fuchsia|magenta|purple|violet|lavender|lilac|mauve|plum|brown|chocolate|coffee|tan|camel|grey|gray|silver|charcoal)";
   const bottomColorPhrase = `(?:${colorModifier}(?:-[a-z]+)?\\s+){0,2}${colorBase}`;
   const bottomGarment = "(?:farshi|farsi|pajama|pyjama|palazzo|trousers?|pants?|sharara|gharara|salwar|patiala|churidar|skirt|lehenga|leggings?|dhoti|culottes?|shorts?|bottoms?|bottom\\s+wear)";
   const bottomFabric = "(?:crepe|silk|cotton|chanderi|organza|georgette|satin|linen|rayon|viscose|muslin|velvet|chiffon|net|tulle|denim|khadi|cambric|lawn|poplin|brocade|jacquard|modal|tencel|polyester)";
+  const hasDominantBottomColor = (input: string, color: string) => {
+    const normalized = color.trim();
+    if (!normalized) return false;
+    const token = escapeRegExp(normalized);
+    // A border/trim mention is not proof that the dominant fabric was updated.
+    return new RegExp(`(?<![\\p{L}\\p{N}_])${token}(?=\\s+${bottomGarment}\\b)`, "iu").test(input) ||
+      new RegExp(`\\b(?:in|of)\\s+${token}(?=\\s+${bottomFabric}\\b)`, "iu").test(input);
+  };
   const recordedBottomColors = (details: string) => {
     const leading = details.match(new RegExp(`^\\s*(${bottomColorPhrase})(?=\\s+${bottomGarment}\\b)`, "i"));
     const inFabric = details.match(new RegExp(`\\b(?:in|of)\\s+(${bottomColorPhrase})(?=\\s+${bottomFabric}\\b)`, "i"));
@@ -2004,15 +2017,15 @@ export function mergeVariantColorways(
     let updated = replaceBaseColor(input);
     if (bottomWearColor) {
       for (const oldColor of baseBottomColors) {
-        // A shared upper/bottom base colour is already handled by the established
-        // main-colour path. Replace a distinct bottom colour only when it directly
-        // describes a bottom garment or its fabric, never same-coloured upper craft.
-        if (oldColor.toLowerCase() !== baseMainColor.toLowerCase()) {
-          const token = escapeRegExp(oldColor);
-          updated = updated
-            .replace(new RegExp(`(?<![\\p{L}\\p{N}_])${token}(?=\\s+${bottomGarment}\\b)`, "giu"), bottomWearColor)
-            .replace(new RegExp(`(\\b(?:in|of)\\s+)${token}(?=\\s+${bottomFabric}\\b)`, "giu"), `$1${bottomWearColor}`);
-        }
+        // The main-colour pass has already changed a shared old token to mainColor.
+        // Repaint only bottom-anchored occurrences so same-coloured upper craft
+        // and embroidery remain untouched.
+        const directionOldColor = oldColor.toLowerCase() === baseMainColor.toLowerCase() ? mainColor : oldColor;
+        if (!directionOldColor) continue;
+        const token = escapeRegExp(directionOldColor);
+        updated = updated
+          .replace(new RegExp(`(?<![\\p{L}\\p{N}_])${token}(?=\\s+${bottomGarment}\\b)`, "giu"), bottomWearColor)
+          .replace(new RegExp(`(\\b(?:in|of)\\s+)${token}(?=\\s+${bottomFabric}\\b)`, "giu"), `$1${bottomWearColor}`);
       }
     }
     return updated;
@@ -2051,7 +2064,7 @@ export function mergeVariantColorways(
       for (const oldColor of recordedBottomColors(withoutOldVariantSuffix)) {
         updatedBottom = replaceColor(updatedBottom, oldColor, bottomWearColor);
       }
-      if (!hasColor(updatedBottom, bottomWearColor)) {
+      if (!hasDominantBottomColor(updatedBottom, bottomWearColor)) {
         updatedBottom = `${updatedBottom}${updatedBottom ? " " : ""}(Variant Colorway: ${bottomWearColor})`;
       }
       cloned.productIdentity.bottomWearDetails = updatedBottom;

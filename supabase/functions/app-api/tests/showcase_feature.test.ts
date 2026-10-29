@@ -479,6 +479,31 @@ Deno.test("normalizeAnalysis top_only removes model-supplied bottom showcase pro
   assertEquals(showcase.title, "Full-Length Silhouette Showcase");
   assertEquals(showcase.primaryReference, "front");
   assertEquals(JSON.stringify(showcase).toLowerCase().includes("palazzo"), false);
+  assertEquals(normalized.creativeDirection.showcasePlan, null);
+});
+
+Deno.test("CodeAnt Major: prompt-time defense removes rejected top-only showcase metadata from legacy sessions", () => {
+  for (const [key, featureRegion] of [["showcasePlan", "bottom_wear"], ["showcase_plan", "complete_set"]] as const) {
+    const prompt = composeGenerationPrompt({
+      skuName: "TOP-ONLY-LEGACY",
+      productDetails: "Standalone ankle-length kurti",
+      pose: pose("showcase", 6) as never,
+      session: {
+        productIdentity: {
+          garmentFamily: "kurta_or_kurti_set",
+          length: "ankle-length",
+          bottomWearDetails: "none - standalone garment",
+        },
+        creativeDirection: { [key]: { ...bottomPlan, featureRegion } },
+        bottomWearMode: "top_only",
+      },
+      references: [{ role: "front" }],
+    });
+
+    assertEquals(prompt.includes(bottomPlan.heroFeature), false);
+    assertEquals(prompt.includes(`"${key}"`), false);
+    assertStringIncludes(prompt, '"showcaseIntent":"full_length_silhouette"');
+  }
 });
 
 Deno.test("Pose 6 garment summary preserves bottom specifications within five parts", () => {

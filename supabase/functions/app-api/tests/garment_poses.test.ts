@@ -374,3 +374,48 @@ Deno.test("an explicit recorded showcase intent outranks the inferred one", () =
   });
   assertStringIncludes(prompt, "SHOWCASE FRAME HARD RULE (PLAYFUL, SET-MATCHED)");
 });
+
+Deno.test("CodeAnt Major: non-saree garments reject stale saree_drape showcase intent", () => {
+  const cases = [
+    {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", length: "ankle-length" },
+      category: "long kurti",
+      bottomWearMode: "top_only",
+      expectedIntent: '"showcaseIntent":"full_length_silhouette"',
+      expectedRule: "SHOWCASE FRAME HARD RULE (TRUE FALL AND LENGTH)",
+    },
+    {
+      productIdentity: { garmentFamily: "short_kurti_top", length: "waist-length" },
+      category: "short kurti top",
+      bottomWearMode: "top_only",
+      expectedIntent: '"showcaseIntent":"playful_backdrop"',
+      expectedRule: "SHOWCASE FRAME HARD RULE (PLAYFUL, SET-MATCHED)",
+    },
+    {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", bottomWearDetails: "Ivory palazzo" },
+      category: "kurta set",
+      bottomWearMode: "included",
+      expectedIntent: '"showcaseIntent":"set_full_length"',
+      expectedRule: "SHOWCASE FRAME HARD RULE (COMPLETE SET)",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const prompt = composeGenerationPrompt({
+      skuName: "NON-SAREE-INTENT",
+      productDetails: testCase.category,
+      pose: pose("showcase", 6) as never,
+      session: {
+        productIdentity: testCase.productIdentity,
+        category: testCase.category,
+        creativeDirection: { showcaseIntent: "saree_drape" },
+        bottomWearMode: testCase.bottomWearMode,
+      },
+      references: [{ role: "front" }],
+    });
+    assertStringIncludes(prompt, testCase.expectedIntent);
+    assertStringIncludes(prompt, testCase.expectedRule);
+    assertEquals(prompt.includes("SHOWCASE FRAME HARD RULE (DRAPE-LED)"), false);
+    assertEquals(prompt.includes("Front pleats stay flat, evenly stacked and vertical"), false);
+  }
+});

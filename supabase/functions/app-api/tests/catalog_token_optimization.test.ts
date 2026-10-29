@@ -448,3 +448,83 @@ Deno.test("F-22 bottom recoloring preserves same-colored upper garment craftsman
   assertStringIncludes(prompt, "ruby red Farshi Pajama");
   assertEquals(/ruby red thread upper-yoke/i.test(prompt), false);
 });
+
+Deno.test("CodeAnt Major: shared base color still permits a contrasting bottom in showcase directions", () => {
+  const baseAnalysis = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "royal blue",
+      bottomWearDetails: "Royal blue Farshi Pajama with wide flared legs",
+    },
+    creativeDirection: {
+      showcasePlan: {
+        heroFeature: "royal blue silk kurti with royal blue Farshi Pajama",
+        featureRegion: "complete_set",
+        shotType: "full_body_feature",
+      },
+    },
+  }, "kurta set");
+
+  const merged = mergeVariantColorways(baseAnalysis, {
+    mainColor: "emerald green",
+    bottomWearColor: "ruby red",
+  });
+  assertStringIncludes(merged.productIdentity.bottomWearDetails, "ruby red Farshi Pajama");
+  assertEquals(
+    merged.creativeDirection.showcasePlan?.heroFeature,
+    "emerald green silk kurti with ruby red Farshi Pajama",
+  );
+  assertEquals(merged.creativeDirection.showcasePlan?.heroFeature.includes("emerald green Farshi"), false);
+});
+
+Deno.test("CodeAnt Major: shared in-fabric base color permits a contrasting bottom without touching the upper", () => {
+  const baseAnalysis = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "royal blue",
+      bottomWearDetails: "Palazzo in royal blue crepe with wide straight legs",
+    },
+    creativeDirection: {
+      showcasePlan: {
+        heroFeature: "royal blue kurti with palazzo in royal blue crepe",
+        featureRegion: "complete_set",
+        shotType: "full_body_feature",
+      },
+    },
+  }, "kurta set");
+
+  const merged = mergeVariantColorways(baseAnalysis, {
+    mainColor: "emerald green",
+    bottomWearColor: "ruby red",
+  });
+  assertEquals(
+    merged.creativeDirection.showcasePlan?.heroFeature,
+    "emerald green kurti with palazzo in ruby red crepe",
+  );
+  assertStringIncludes(merged.productIdentity.bottomWearDetails, "Palazzo in ruby red crepe");
+});
+
+Deno.test("CodeAnt nitpick: a border-only new color cannot suppress the dominant bottom variant suffix", () => {
+  const baseAnalysis = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      mainColor: "royal blue",
+      bottomWearDetails: "Farshi Pajama with ivory fabric and a ruby red border",
+    },
+  }, "kurta set");
+
+  const merged = mergeVariantColorways(baseAnalysis, {
+    mainColor: "emerald green",
+    bottomWearColor: "ruby red",
+  });
+  assertEquals(
+    merged.productIdentity.bottomWearDetails,
+    "Farshi Pajama with ivory fabric and a ruby red border (Variant Colorway: ruby red)",
+  );
+
+  const remerged = mergeVariantColorways(merged, {
+    mainColor: "emerald green",
+    bottomWearColor: "ruby red",
+  });
+  assertEquals(remerged.productIdentity.bottomWearDetails.match(/Variant Colorway:/g)?.length, 1);
+});

@@ -730,10 +730,17 @@ export function composeGenerationPrompt(args: {
   );
   const modelJson = compactJson(model, { maxString: 500, maxItems: 16, maxKeys: 32 });
   const showcaseIntent = effectiveShowcaseIntent({ creative, family: poseFamily, includesBottomWear: bottomWear.includesBottomWear });
+  const showcaseShot = effectiveShowcaseShot(creative, { includesBottomWear: bottomWear.includesBottomWear });
   const creativeForPrompt: JsonRecord = { ...creative, showcaseIntent };
   // A legacy snake_case alias must not survive beside the corrected camelCase
   // value and reintroduce the raw complete-set direction in the serialized JSON.
   delete creativeForPrompt.showcase_intent;
+  // Existing sessions can bypass normalizeAnalysis. Never serialize a plan that
+  // this shoot rejected (for example bottom-led direction in a top-only shoot).
+  if (!showcaseShot) {
+    delete creativeForPrompt.showcasePlan;
+    delete creativeForPrompt.showcase_plan;
+  }
   const creativeJson = compactJson(creativeForPrompt, { maxString: 500, maxItems: 16, maxKeys: 32 });
   const sareeTruthJson = isSaree ? requiredJsonSection(isTrueBack ? "Direct rear saree truth" : "Canonical saree truth", sareeTruth, 10_000) : "";
   const sareeDrapePlanJson = isSaree && !isTrueBack ? requiredJsonSection("Canonical saree drape plan", sareeDrapePlan, 4_000) : "";
@@ -764,7 +771,6 @@ export function composeGenerationPrompt(args: {
   // only for a cached analysis made before showcasePlan existed. Resolved by the
   // shared helper so the pose brief, this rule, the shoot memory and the feedback
   // row all describe the same frame.
-  const showcaseShot = effectiveShowcaseShot(creative, { includesBottomWear: bottomWear.includesBottomWear });
   const sceneLock = sceneLockBlock({ creativeDirection: creative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference });
   const isMacroShowcase = isShowcase && showcaseShot?.shotType === "macro_detail";
   const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL) && !isMacroShowcase;
