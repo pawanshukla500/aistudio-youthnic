@@ -366,7 +366,9 @@ function embroideryGeometryOf(product: JsonRecord) {
 function detectPoseCategory(text: string) {
   const t = text.toLowerCase();
   if (/\b(back|rear|behind|posterior)\b/.test(t) || t.includes("back view") || t.includes("true back") || t.includes("rear full")) return "back";
-  if (/side|profile|lateral|three\.quarter|3\.4/.test(t)) return "side";
+  // A three-quarter catalog turn is not a 90-degree profile. Matching
+  // "three-quarter" here was selecting a staggered stance.
+  if (/\b(side|profile|lateral)\b/.test(t) || t.includes("side view") || t.includes("side profile")) return "side";
   if (/\b(sit|sitting|seated)\b/.test(t)) return "sitting";
   if (/back|rear|behind|posterior/.test(t)) return "back";
   if (/front|hero|straight|facing/.test(t)) return "front";
@@ -838,11 +840,15 @@ export function composeGenerationPrompt(args: {
       ? "showcase"
       : (isPose4 && isSittingDemanded)
         ? "sitting"
-        // Pose 2 is a planted 35-to-45 turn. "side" and "three-quarter" in the
-        // planner text must not select the 90-degree profile with a staggered stance.
-        : (args.pose.poseNumber === 2 || args.pose.id === "angled")
-          ? "angled"
-          : detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || "") + " " + (args.pose.bodyPosition || ""));
+        // Pose 4 is a planted editorial stance. Planner wording such as
+        // "three-quarter" must not select the 90-degree profile.
+        : isPose4
+          ? "dynamic"
+          // Pose 2 is a planted 35-to-45 turn. "side" and "three-quarter" in the
+          // planner text must not select the 90-degree profile with a staggered stance.
+          : (args.pose.poseNumber === 2 || args.pose.id === "angled")
+            ? "angled"
+            : detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || "") + " " + (args.pose.bodyPosition || ""));
   const categoryRules = poseCategoryRules(poseCategory);
   // Compaction keeps the first 1,400 characters of this block. The current
   // frame and the seated rules have to lead, or a long six-pose summary

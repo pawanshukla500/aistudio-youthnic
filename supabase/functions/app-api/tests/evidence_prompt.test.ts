@@ -1137,6 +1137,37 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   assertEquals(plannerPose2.includes("exactly 90 degrees"), false);
   assertEquals(plannerPose2.includes("staggered stance"), false);
 
+  const plannerPose4 = composeGenerationPrompt({
+    skuName: "KURTA-SET-01",
+    productDetails: "Purple floral printed kurta with farshi pajama",
+    pose: {
+      id: "creative",
+      title: "Natural Editorial Pose",
+      poseNumber: 4,
+      description: "A natural editorial pose that follows the selected creative direction.",
+      cameraAngle: "editorial",
+      framing: "full body",
+      bodyPosition: "Relaxed editorial stance: contrapposto or a soft three-quarter lean, both feet grounded and close; never a frozen walking stride",
+      handPlacement: "relaxed",
+      expression: "calm",
+      highlightedDetails: ["silhouette"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "editorial",
+      consistencyNotes: "locked",
+      prompt: "Create a natural editorial catalog frame with a soft three-quarter lean and both feet grounded and close. Never a frozen walking stride or a wide leg split.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "purple", bottomWearDetails: "farshi pajama" },
+      creativeDirection: { seatedPoseRequired: "no" },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(plannerPose4, "POSE CATEGORY RULES (DYNAMIC):");
+  assertStringIncludes(plannerPose4, "NATURAL EDITORIAL POSE:");
+  assertEquals(plannerPose4.includes("exactly 90 degrees"), false);
+  assertEquals(plannerPose4.includes("staggered stance"), false);
+
   // Test Pose 6: Feature showcase
   const pose6Prompt = composeGenerationPrompt({
     skuName: "KURTA-SET-01",
