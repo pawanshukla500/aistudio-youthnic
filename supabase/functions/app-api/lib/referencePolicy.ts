@@ -310,10 +310,12 @@ export function selectReferences<T extends ReferenceLike>(
   const protectedSet = new Set(protectedProduct);
   const remainingProduct = product.filter((reference) => !protectedSet.has(reference));
   const anchor = approved.slice(0, 1);
-  // Duplicate product photos must not crowd out the style reference or Pose 1
-  // continuity anchor. Protected product regions still outrank extra fronts.
-  // True-back selection returns earlier and never reaches this mix.
-  const priority = [...model, ...protectedProduct, ...style, ...anchor, ...remainingProduct];
+  // Listing identity first: GPT Image 2 attends hardest to the earliest
+  // uploads. Model face and style-set (backdrop/room/lighting) must precede
+  // product photos so the shoot does not inherit a mannequin-studio wall.
+  // Style clothing stays quarantined by the prompt. Protected product regions
+  // still outrank extra fronts. True-back selection returns earlier.
+  const priority = [...model, ...style, ...protectedProduct, ...anchor, ...remainingProduct];
   return priority.slice(0, maxReferences);
 }
 

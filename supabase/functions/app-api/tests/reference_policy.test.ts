@@ -171,6 +171,23 @@ Deno.test("non-saree selection reserves front, bottom, back, and mannequin befor
   assertEquals(selected.some((reference) => reference.hash === "back"), true);
 });
 
+Deno.test("listing identity images precede product photos so face and set are not drowned", () => {
+  const selected = selectReferences([
+    { role: "front", hash: "front" },
+    { role: "bottom", hash: "bottom" },
+    { role: "back", hash: "back" },
+    { role: "mannequin", hash: "mannequin" },
+    { role: "fabric_pattern", hash: "fabric" },
+    { role: "style_reference", hash: "style" },
+    { role: "model_identity", hash: "model" },
+  ], [{ role: "approved_pose", hash: "anchor" }], "full_front", "kurta_or_kurti_set");
+  assertEquals(
+    selected.map((reference) => reference.role).slice(0, 4),
+    ["model_identity", "style_reference", "front", "bottom"],
+  );
+  assertEquals(selected.some((reference) => reference.role === "approved_pose"), true);
+});
+
 Deno.test("style reference and Pose 1 anchor survive duplicate product overflow before extra fronts", () => {
   const selected = selectReferences([
     { role: "model_identity", hash: "model" },
