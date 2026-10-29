@@ -668,6 +668,34 @@ function lockedDetailsDirective(): string {
   ].join("\n");
 }
 
+// Cached analyses can still ask for a stride. The 1,400-character pose block is
+// the first section compacted, so that corrective line disappears while the raw
+// prompt and body position survive. Rewrite only those pose fields.
+const UNPLANTED_POSE_PATTERN = /\b(?:walk(?:ing|s)?|strides?|mid-step|stepped|lifted foot|foot lifted|step(?:s|ping)? forward)\b/i;
+
+function plantedPoseReplacement(pose: { id: string; poseNumber: number }, sitting: boolean): string {
+  const poseNumber = pose.poseNumber;
+  const id = pose.id;
+  if (poseNumber === 2 || id === "angled") {
+    return "Torso and hips turn 35 to 45 degrees. Both feet stay planted and close.";
+  }
+  if ((poseNumber === 4 || id === "creative") && sitting) {
+    return "Elegant seated editorial. Hem and footwear stay visible.";
+  }
+  if (poseNumber === 4 || id === "creative") {
+    return "Natural editorial stance. Both feet stay planted and close.";
+  }
+  if (poseNumber === 6 || id === "showcase") {
+    return "Planted weight shift. Both feet stay close.";
+  }
+  return "Natural catalog stance. Both feet stay planted and close.";
+}
+
+function withoutUnplantedPose(value: unknown, replacement: string): string {
+  const text = String(value ?? "");
+  return UNPLANTED_POSE_PATTERN.test(text) ? replacement : text;
+}
+
 export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
   session: JsonRecord; references: PromptReference[]; correction?: string; learnings?: string; fashionKnowledge?: string;
@@ -790,9 +818,12 @@ export function composeGenerationPrompt(args: {
     creative,
     stylingNotes: styling?.stylingNotes,
   });
+  const plantedStance = plantedPoseReplacement(args.pose, isSittingDemanded);
+  const poseDescription = boundedText(withoutUnplantedPose(args.pose.description, plantedStance), 600);
+  const posePrompt = boundedText(withoutUnplantedPose(args.pose.prompt, plantedStance), 1_200);
 
   const allowedDelta = [
-    `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(args.pose.bodyPosition, 360)}`,
+    `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(withoutUnplantedPose(args.pose.bodyPosition, plantedStance), 360)}`,
     `camera angle: ${boundedText(args.pose.cameraAngle, 360)}`,
     `framing: ${boundedText(args.pose.framing, 360)}`,
     `expression: ${boundedText(args.pose.expression, 360)}`,
@@ -978,7 +1009,7 @@ ${allowedDelta.map((value) => `- ${value}`).join("\n")}
 
 POSE REQUIREMENT:
 ${poseVariationDirective(args.pose, isSittingDemanded)}
-Description: ${boundedText(args.pose.description, 600)}
+Description: ${poseDescription}
 Details to highlight: ${highlightedDetails}
 Visibility rules: ${visibilityRules}
 Purpose: ${boundedText(args.pose.purpose, 420)}
@@ -1026,7 +1057,7 @@ ${learnings}
 
 PROMPT:
 (Pose, camera and framing only. The SCENE LOCK above decides the set.)
-${boundedText(args.pose.prompt, 1_200)}
+${posePrompt}
 
 REALISTIC INTEGRATION:
 - Treat this as frame ${args.pose.poseNumber} from one photographed contact sheet, not a new image concept. Reuse the same physical set coordinates, time of day, camera family, exposure, white balance, light direction, shadow density, and color grade established by Pose 1.

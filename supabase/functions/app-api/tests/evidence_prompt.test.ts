@@ -1066,6 +1066,41 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   });
   assertStringIncludes(pose4Prompt, "CURRENT FRAME (POSE 4 - NATURAL EDITORIAL STANCE)");
   assertStringIncludes(pose4Prompt, "NEVER a frozen mid-step, a spin, a wide leg split");
+  assertStringIncludes(pose4Prompt, "Natural editorial stance. Both feet stay planted and close.");
+  assertEquals(pose4Prompt.includes("Show walking motion."), false);
+  assertEquals(pose4Prompt.includes("Mid-stride walk"), false);
+
+  const walkingPose2 = composeGenerationPrompt({
+    skuName: "KURTA-SET-01",
+    productDetails: "Purple floral printed kurta with patiala salwar",
+    pose: {
+      id: "angled",
+      title: "Three-Quarter Sleeve and Fall View",
+      poseNumber: 2,
+      description: "Mid-step walk toward camera",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "walking stride, one foot lifted",
+      handPlacement: "one hand near collar",
+      expression: "natural soft smile",
+      highlightedDetails: ["side silhouette", "sleeve"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "angle",
+      consistencyNotes: "locked",
+      prompt: "Walk forward and show the side.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "purple" },
+      creativeDirection: { seatedPoseRequired: "no" },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(walkingPose2, "POSE CATEGORY RULES (SIDE):");
+  assertStringIncludes(walkingPose2, "Torso and hips turn 35 to 45 degrees. Both feet stay planted and close.");
+  assertEquals(walkingPose2.includes("Walk forward"), false);
+  assertEquals(walkingPose2.includes("one foot lifted"), false);
+  assertEquals(walkingPose2.includes("Mid-step walk toward camera"), false);
 
   // Test Pose 6: Feature showcase
   const pose6Prompt = composeGenerationPrompt({
