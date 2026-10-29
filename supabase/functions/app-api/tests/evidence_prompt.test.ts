@@ -299,6 +299,23 @@ Deno.test("Pose 1 copy is a living portrait, never a catalog-hero freeze", () =>
     references: [{ role: "front" }, { role: "style_reference" }, { role: "model_identity" }],
   });
   assertStringIncludes(prompt, "CURRENT FRAME (POSE 1 - LIVING FULL-FRONT)");
+  assertEquals(
+    prompt.indexOf("CURRENT FRAME (POSE 1 - LIVING FULL-FRONT)")
+      < prompt.indexOf("6-POSE PLAN VARIATION DIRECTIVE"),
+    true,
+  );
+  let overBudget = prompt;
+  if (overBudget.length <= IMAGE_PROMPT_SAFE_CHARS) {
+    const pad = "EVIDENCE-PAD ".repeat(Math.ceil((IMAGE_PROMPT_SAFE_CHARS - overBudget.length + 800) / 13));
+    overBudget = overBudget.replace(
+      "GARMENT TRUTH CONTRACT (EVIDENCE BY REGION):\n",
+      `GARMENT TRUTH CONTRACT (EVIDENCE BY REGION):\n${pad}\n`,
+    );
+  }
+  assertEquals(overBudget.length > IMAGE_PROMPT_SAFE_CHARS, true);
+  const compactedPose1 = compactFullPromptSafely(overBudget);
+  assertEquals(compactedPose1.length <= IMAGE_PROMPT_SAFE_CHARS, true);
+  assertStringIncludes(compactedPose1, "CURRENT FRAME (POSE 1 - LIVING FULL-FRONT)");
   assertStringIncludes(prompt, "straight-on full-length living portrait establishing the outfit from head to hem");
   assertStringIncludes(prompt, "Square-on full-length living portrait with weight in one hip");
   assertStringIncludes(prompt, "straight-on full-body front photograph of a living photographed person");

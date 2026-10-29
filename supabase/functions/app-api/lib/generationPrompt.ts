@@ -644,7 +644,26 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
   const isPose5 = poseNum === 5 || pose.id === "closeup";
   const isPose6 = poseNum === 6 || pose.id === "showcase";
 
-  const lines = [
+  const livingLock = " Same living photographed person, same style-set room, and exact uploaded product DNA. Never a mannequin, T-pose, or stiff freeze.";
+  const currentFrame = isPose1
+    ? "CURRENT FRAME (POSE 1 - LIVING FULL-FRONT): Grounded, weight-bearing, straight-on full-length living portrait establishing the outfit from head to hem. Slight hip/shoulder offset, relaxed knees and elbows, living fabric drape, and a natural gentle smile or calm composure. Never a mannequin, T-pose, or stiff catalog freeze."
+    : isPose2
+      ? `CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN): Torso and hips MUST physically rotate 35 to 45 degrees with one foot stepped forward. DO NOT render a flat frontal standing pose or repeat Pose 1. Reveal side silhouette, garment depth, side seams, and sleeve shape.${livingLock}`
+      : isPose3
+        ? `CURRENT FRAME (POSE 3 - 180° REAR VIEW): Model faces fully away from camera. Shoulders and hips square to rear. Hair swept forward, dupatta draped forward over arms/front so rear construction is 100% visible. Rebuild the STYLE REFERENCE room, not the rear product's pre-shoot studio. If an over-shoulder glance shows a face, it must match the MODEL FACE REFERENCE.${livingLock}`
+        : isPose4
+          ? (isSittingDemanded
+            ? `CURRENT FRAME (POSE 4 - SEATED EDITORIAL): Elegant seated editorial posture on a minimal studio bench or architectural step from the established set. Both legs, bottom wear volume, hemline, and footwear remain fully visible and beautifully arranged.${livingLock}`
+            : `CURRENT FRAME (POSE 4 - DYNAMIC WALKING STRIDE): Active dynamic walking movement captured mid-step across the studio floor with natural fabric flutter and movement. NEVER render a static standing hero repeat!${livingLock}`)
+          : isPose5
+            ? "CURRENT FRAME (POSE 5 - ZOOMED-IN DETAIL): Genuinely zoomed in on product craftsmanship and selling details. NEVER repeat a full-body or wide hero frame. The close-up MUST highlight the primary uploaded garment's signature details (such as kurti butti work, chest/yoke embroidery, or neckline craft), and must NEVER focus on a secondary accessory like a dupatta or stole. Keep the same person and style-set lighting; product DNA only from the uploaded garment."
+            : isPose6
+              ? `CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE): Framing, angle, and physical stance MUST visibly diverge from Pose 1. Feet separated or angled to showcase feature volume/flare. Never repeat the flat frontal hero stance. It must complement the other five images while showing a distinctly different pose, maintaining complete consistency of model, uploaded product, background set, and overall styling.${livingLock}`
+              : "";
+
+  // CURRENT FRAME first: compactOptionalPromptContent trims POSE REQUIREMENT to 1,400 chars from the start.
+  return [
+    currentFrame,
     "6-POSE PLAN VARIATION DIRECTIVE (MANDATORY PHYSICAL DIVERGENCE):",
     "Every shoot executes a distinct 6-pose plan where each frame has a unique physical geometry and purpose. Under NO circumstances should any frame repeat a static frontal standing pose:",
     "- Pose 1 (full_front): Square-on full-length living portrait with weight in one hip, relaxed knees, and a living stance, showing the complete silhouette. Never a mannequin or stiff catalog freeze.",
@@ -653,42 +672,7 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
     "- Pose 4 (creative): Active dynamic walking stride across the room with natural fabric flutter or elegant seated editorial pose on a studio bench/step (if demanded); strictly prohibit static standing in place.",
     "- Pose 5 (closeup): Genuinely zoomed-in detail crop (face-and-detail or tight product-detail); strictly prohibit full-body hero repeat.",
     "- Pose 6 (showcase): Dynamic feature-specific composition with stance, framing, and angle visibly diverging from Pose 1 (e.g. feet separated or angled to showcase trouser/Patiala/farshi volume and pleats, or drape spread).",
-  ];
-
-  const livingLock = " Same living photographed person, same style-set room, and exact uploaded product DNA. Never a mannequin, T-pose, or stiff freeze.";
-  if (isPose1) {
-    lines.push(
-      "CURRENT FRAME (POSE 1 - LIVING FULL-FRONT): Grounded, weight-bearing, straight-on full-length living portrait establishing the outfit from head to hem. Slight hip/shoulder offset, relaxed knees and elbows, living fabric drape, and a natural gentle smile or calm composure. Never a mannequin, T-pose, or stiff catalog freeze.",
-    );
-  } else if (isPose2) {
-    lines.push(
-      `CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN): Torso and hips MUST physically rotate 35 to 45 degrees with one foot stepped forward. DO NOT render a flat frontal standing pose or repeat Pose 1. Reveal side silhouette, garment depth, side seams, and sleeve shape.${livingLock}`,
-    );
-  } else if (isPose3) {
-    lines.push(
-      `CURRENT FRAME (POSE 3 - 180° REAR VIEW): Model faces fully away from camera. Shoulders and hips square to rear. Hair swept forward, dupatta draped forward over arms/front so rear construction is 100% visible. Rebuild the STYLE REFERENCE room, not the rear product's pre-shoot studio. If an over-shoulder glance shows a face, it must match the MODEL FACE REFERENCE.${livingLock}`,
-    );
-  } else if (isPose4) {
-    if (isSittingDemanded) {
-      lines.push(
-        `CURRENT FRAME (POSE 4 - SEATED EDITORIAL): Elegant seated editorial posture on a minimal studio bench or architectural step from the established set. Both legs, bottom wear volume, hemline, and footwear remain fully visible and beautifully arranged.${livingLock}`,
-      );
-    } else {
-      lines.push(
-        `CURRENT FRAME (POSE 4 - DYNAMIC WALKING STRIDE): Active dynamic walking movement captured mid-step across the studio floor with natural fabric flutter and movement. NEVER render a static standing hero repeat!${livingLock}`,
-      );
-    }
-  } else if (isPose5) {
-    lines.push(
-      "CURRENT FRAME (POSE 5 - ZOOMED-IN DETAIL): Genuinely zoomed in on product craftsmanship and selling details. NEVER repeat a full-body or wide hero frame. The close-up MUST highlight the primary uploaded garment's signature details (such as kurti butti work, chest/yoke embroidery, or neckline craft), and must NEVER focus on a secondary accessory like a dupatta or stole. Keep the same person and style-set lighting; product DNA only from the uploaded garment.",
-    );
-  } else if (isPose6) {
-    lines.push(
-      `CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE): Framing, angle, and physical stance MUST visibly diverge from Pose 1. Feet separated or angled to showcase feature volume/flare. Never repeat the flat frontal hero stance. It must complement the other five images while showing a distinctly different pose, maintaining complete consistency of model, uploaded product, background set, and overall styling.${livingLock}`,
-    );
-  }
-
-  return lines.join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 function listingAuthorityDirective(hasModelReference: boolean, hasStyleReference: boolean): string {
