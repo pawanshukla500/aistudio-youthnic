@@ -43,7 +43,7 @@ function listingIdentityPromptRank(role: string, isTrueBack: boolean) {
   return 10;
 }
 
-/** Face and style-set precede product photos so GPT Image 2 does not copy a pre-shoot studio. */
+/** Face and style-set precede product photos so GPT Image 2 and product-truth analysis do not copy a pre-shoot studio. */
 export function listingIdentityPromptOrder<T extends PromptReference>(references: T[], isTrueBack = false): T[] {
   return [...references].sort((left, right) =>
     listingIdentityPromptRank(left.role, isTrueBack) - listingIdentityPromptRank(right.role, isTrueBack)

@@ -1883,7 +1883,9 @@ export const CONSISTENCY_RULES = [
 // three waist pleats on each side, one large pleat at each side joint, and a
 // 6-inch hem panel joined to the leg with a 4-inch taper. Cached v23 analyses
 // still forbid that hem, so they must be re-read.
-export const ANALYSIS_VERSION = "generation-session-v26-listing-identity-lock";
+// v27 sends model face and style-set before product photos on analysis IMAGE
+// parts so cached v26 scene locks that copied product-studio rooms are re-read.
+export const ANALYSIS_VERSION = "generation-session-v27-listing-identity-analysis-order";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

@@ -35,3 +35,11 @@ Deno.test("generateImage FormData follows listing identity order from the pose t
   assertEquals(source.includes("isTrueBack: poseData.id === \"back\""), true);
   assertEquals(/hasFrontProduct/.test(source), false);
 });
+
+Deno.test("product-truth analysis IMAGE parts follow listing identity order", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  assertEquals(
+    [...source.matchAll(/listingIdentityPromptOrder\(await loadAvailableReferences/g)].length,
+    3,
+  );
+});

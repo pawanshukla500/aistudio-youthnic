@@ -1739,7 +1739,7 @@ async function analyze(request: Request, args: JsonRecord) {
   const started = Date.now();
   const analysisRunIds: string[] = [];
   if (!normalized) {
-    const loaded = await loadAvailableReferences(references, orgId, String(args.category || ""));
+    const loaded = listingIdentityPromptOrder(await loadAvailableReferences(references, orgId, String(args.category || "")));
     const manifest: Array<{ number: number; role: string }> = [];
     const parts: JsonRecord[] = [];
     loaded.forEach((reference, index) => {
@@ -2713,7 +2713,7 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     }
   }
 
-  const loaded = await loadAvailableReferences(references, orgId, String(inputs.category || ""));
+  const loaded = listingIdentityPromptOrder(await loadAvailableReferences(references, orgId, String(inputs.category || "")));
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
   loaded.forEach((reference, index) => {
@@ -5389,7 +5389,7 @@ async function analyzeCatalogVariant(
   }
 
   // Full base analysis for the first SKU in the batch
-  const loaded = await loadAvailableReferences(references, String(batch.organization_id), category);
+  const loaded = listingIdentityPromptOrder(await loadAvailableReferences(references, String(batch.organization_id), category));
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
   loaded.forEach((reference, index) => {

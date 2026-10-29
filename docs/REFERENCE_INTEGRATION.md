@@ -32,7 +32,7 @@ The virtual try-on construction follows OpenAI's official multimodal image promp
 
 - Front and back product images are required.
 - Fabric/pattern, additional product, style, and model-identity references are optional but, when present, stay on every pose including true-back.
-- GPT Image 2 attends hardest to the earliest uploads, so model face and style-set precede product photos in both the prompt IMAGE labels and the provider `image[]` order.
+- GPT Image 2 attends hardest to the earliest uploads, so model face and style-set precede product photos in prompt IMAGE labels, the provider `image[]` order, and product-truth analysis IMAGE parts.
 - Reference changes invalidate the analysis fingerprint and pose plan.
 - Generation is blocked until the current analysis and plan are ready.
 - Poses are generated sequentially with one worker claim at a time.
