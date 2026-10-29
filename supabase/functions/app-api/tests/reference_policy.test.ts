@@ -7,6 +7,7 @@ import {
   missingRequiredReferenceLabels,
   roleLabel,
   selectCurrentCatalogProductReferences,
+  collapseDuplicateUploads,
   selectReferences,
 } from "../lib/referencePolicy.ts";
 
@@ -46,6 +47,17 @@ Deno.test("critical saree regions survive provider-limit truncation before dupli
   assertEquals(roles.includes("approved_pose"), true);
   assertEquals(roles.includes("model_identity"), true);
   assertEquals(selected.filter((reference) => reference.role === "saree_front_drape").length < 12, true);
+});
+
+Deno.test("analysis sees one copy when the model photo and the style photo are the same file", () => {
+  const collapsed = collapseDuplicateUploads([
+    { role: "model_identity", hash: "row-model", storagePath: "organizations/org/references/whatsapp.jpg" },
+    { role: "front", hash: "front", storagePath: "organizations/org/references/front.jpg" },
+    { role: "fabric_pattern", hash: "flat", storagePath: "organizations/org/references/flat.jpg" },
+    { role: "mannequin", hash: "flat-row", storagePath: "organizations/org/references/flat.jpg" },
+    { role: "style_reference", hash: "row-style", storagePath: "organizations/org/references/whatsapp.jpg" },
+  ]);
+  assertEquals(collapsed.map((reference) => reference.role), ["front", "fabric_pattern", "style_reference"]);
 });
 
 Deno.test("an identical model-face and style upload is sent once, as the style reference", () => {

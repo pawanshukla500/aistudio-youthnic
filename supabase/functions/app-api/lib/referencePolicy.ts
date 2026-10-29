@@ -346,7 +346,7 @@ export function selectReferences<T extends ReferenceLike>(
  * hash, storage path, or download URL is enough; a missing hash must not let
  * the duplicate through.
  */
-function collapseDuplicateUploads<T extends ReferenceLike>(selected: T[]): T[] {
+export function collapseDuplicateUploads<T extends ReferenceLike>(selected: T[]): T[] {
   const model = selected.find((reference) => reference.role === "model_identity");
   const style = selected.find((reference) => reference.role === "style_reference");
   const modelMatchesStyle = Boolean(model && style && sameUploadedImage(model, style));
