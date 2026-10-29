@@ -1,15 +1,21 @@
 export const MAX_IMAGE_REFERENCES = 16;
 
-const NON_PRODUCT_EVIDENCE_ROLES = new Set([
+const NON_PRODUCT_EVIDENCE_PREFIXES = [
   "style_reference",
   "model_identity",
+  "model_face_reference",
   "approved_pose",
-]);
+];
 
-/** Style, model, and approved-pose photos are not garment truth. */
+/**
+ * Style, model, and approved-pose photos are not garment truth.
+ * Analysis records the manifest label, which is the long role text, not only
+ * the short role id.
+ */
 export function isNonProductEvidenceRole(value: unknown) {
   const role = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  return NON_PRODUCT_EVIDENCE_ROLES.has(role);
+  if (!role) return false;
+  return NON_PRODUCT_EVIDENCE_PREFIXES.some((prefix) => role === prefix || role.startsWith(`${prefix}_`));
 }
 
 export const PRODUCT_REFERENCE_ROLES = [

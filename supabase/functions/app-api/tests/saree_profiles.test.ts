@@ -249,6 +249,7 @@ Deno.test("style and model photos cannot become garment evidence", () => {
         { region: "front body", sourceRole: "front", state: "confirmed", visibleDecoration: "large maroon medallion butti" },
         { region: "front body", sourceRole: "style_reference", state: "confirmed", visibleDecoration: "small pink butti from the style photo" },
         { region: "front body", sourceRole: "model_identity", state: "confirmed", visibleDecoration: "style-photo neckline" },
+        { region: "front body", sourceRole: "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop", state: "confirmed", visibleDecoration: "verbose style-label butti" },
       ],
     },
   }, "kurta");

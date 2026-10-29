@@ -2,12 +2,21 @@ import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import {
   MAX_IMAGE_REFERENCES,
   canUsePoseOneAnchor,
+  isNonProductEvidenceRole,
   isSareeReferenceSet,
   missingRequiredReferenceLabels,
   roleLabel,
   selectCurrentCatalogProductReferences,
   selectReferences,
 } from "../lib/referencePolicy.ts";
+
+Deno.test("verbose style, model, and approved-pose labels are not product evidence", () => {
+  assertEquals(isNonProductEvidenceRole(roleLabel("style_reference")), true);
+  assertEquals(isNonProductEvidenceRole(roleLabel("model_identity")), true);
+  assertEquals(isNonProductEvidenceRole(roleLabel("approved_pose")), true);
+  assertEquals(isNonProductEvidenceRole(roleLabel("front")), false);
+  assertEquals(isNonProductEvidenceRole(""), false);
+});
 
 Deno.test("critical saree regions survive provider-limit truncation before duplicates and anchors", () => {
   const references = [
