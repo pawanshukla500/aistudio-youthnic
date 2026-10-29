@@ -1893,7 +1893,9 @@ export const CONSISTENCY_RULES = [
 // v26 keeps the three-quarter turn with both feet planted, so a cached v25
 // plan cannot still ask for a stepped-forward walk that opens a joined hem.
 // v27 stops the planner from taking pose inspiration from the style photo, so a
-// cached plan cannot still copy that photo's stance or handheld props.
+// cached plan cannot still copy that photo's stance or handheld props. It also
+// refuses garment evidence sourced from the style photo, the model photo, or
+// an approved pose.
 export const ANALYSIS_VERSION = "generation-session-v27-style-pose-quarantine";
 
 export function smallHash(value: string) {
