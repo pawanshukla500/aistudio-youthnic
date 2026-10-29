@@ -24,7 +24,7 @@ import {
   type StudioPose,
   type StylingPlanProfile,
 } from "./profiles.ts";
-import { appendRejectedAttemptHistory, buildPoseQaPrompt, parseQaResponse, qaStorageDisposition, unavailableQaResult } from "./qa.ts";
+import { appendRejectedAttemptHistory, buildPoseQaPrompt, parseQaResponse, qaStorageDisposition, sessionHasBottomReference, unavailableQaResult } from "./qa.ts";
 import { assertGenerationPromptWithinLimit, composeGenerationPrompt } from "./lib/generationPrompt.ts";
 import {
   AI_MODEL_REGISTRY,
@@ -2021,7 +2021,7 @@ async function validatePose(args: {
     ],
     hasApprovedAnchor: args.approved.length > 0,
     hasModelReference: qaRefs.some((reference) => reference.role === "model_identity"),
-    hasSessionBottomReference: args.references.some((reference) => reference.role === "bottom"),
+    hasSessionBottomReference: sessionHasBottomReference(args.references, args.session),
     referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`),
   });
   const baseParts: JsonRecord[] = [

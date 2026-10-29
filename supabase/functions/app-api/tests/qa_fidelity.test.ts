@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { normalizeAnalysis } from "../lib/profiles.ts";
-import { buildPoseQaPrompt, normalizePoseQaResult } from "../lib/qa.ts";
+import { buildPoseQaPrompt, normalizePoseQaResult, sessionHasBottomReference } from "../lib/qa.ts";
 
 const genericCritical = [
   "garment_identity",
@@ -236,6 +236,37 @@ Deno.test("close-up QA requires a large product detail and can omit the face in 
   assertStringIncludes(productDetail, "Pass model_face when no recognizable face is in frame");
   assertStringIncludes(productDetail, "apply only when a recognizable face is in frame");
   assertStringIncludes(productDetail, "pass face_realism and model_face");
+});
+
+Deno.test("session bottom evidence is true even when the pose manifest is rear-only", () => {
+  assertEquals(sessionHasBottomReference([{ role: "back" }, { role: "style_reference" }], {
+    references: [{ role: "front" }, { role: "bottom" }, { role: "back" }],
+  }), true);
+  assertEquals(sessionHasBottomReference([{ role: "back" }], { references: [{ role: "front" }, { role: "back" }] }), false);
+  assertEquals(sessionHasBottomReference([{ role: "bottom" }], { references: [] }), true);
+});
+
+Deno.test("a back-pose QA prompt still applies Farshi structure from session bottom evidence", () => {
+  const prompt = buildPoseQaPrompt({
+    poseNumber: 3,
+    poseType: "back",
+    poseTitle: "Full Back View",
+    poseDirection: { id: "back", title: "Full Back View" },
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      bottomWearDetails: "Palazzo, wide legs, joined silhouette",
+    },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: true,
+    hasModelReference: true,
+    hasSessionBottomReference: true,
+    referenceManifest: ["IMAGE 1: BACK PRODUCT", "IMAGE 2: STYLE REFERENCE", "IMAGE 3: APPROVED POSE 1"],
+  });
+  assertStringIncludes(prompt, "hem panel 6 inches wide is joined");
+  assertStringIncludes(prompt, "Do not fail the joined 6-inch hem panel itself");
 });
 
 Deno.test("QA applies the Farshi hem structure only when the bottom is Farshi", () => {

@@ -122,6 +122,21 @@ export function appendRejectedAttemptHistory<T>(existing: T[], next: T, limit = 
   return [...existing, next].slice(-Math.max(1, limit));
 }
 
+/**
+ * Pose-scoped manifests (true-back especially) often omit the bottom photo.
+ * Session uploads remain the authority for whether Farshi lock applies.
+ */
+export function sessionHasBottomReference(
+  poseReferences: Array<{ role?: string }>,
+  session: { references?: unknown } | null | undefined,
+): boolean {
+  if (poseReferences.some((reference) => reference.role === "bottom")) return true;
+  const sessionReferences = Array.isArray(session?.references)
+    ? session.references as Array<{ role?: string }>
+    : [];
+  return sessionReferences.some((reference) => reference.role === "bottom");
+}
+
 export function buildPoseQaPrompt(args: {
   poseNumber: number; poseType: string; poseTitle: string; poseDirection: unknown;
   productIdentity: unknown; creativeDirection: unknown; modelIdentity: unknown;

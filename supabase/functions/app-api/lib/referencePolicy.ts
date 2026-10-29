@@ -309,13 +309,11 @@ export function selectReferences<T extends ReferenceLike>(
   protectedProduct.sort((left, right) => (roleRank.get(left.role) ?? 99) - (roleRank.get(right.role) ?? 99));
   const protectedSet = new Set(protectedProduct);
   const remainingProduct = product.filter((reference) => !protectedSet.has(reference));
-  const productPriority = [...protectedProduct, ...remainingProduct];
   const anchor = approved.slice(0, 1);
   // Duplicate product photos must not crowd out the style reference or Pose 1
   // continuity anchor. Protected product regions still outrank extra fronts.
-  const priority = poseType === "back"
-    ? [...productPriority, ...model, ...anchor]
-    : [...model, ...protectedProduct, ...style, ...anchor, ...remainingProduct];
+  // True-back selection returns earlier and never reaches this mix.
+  const priority = [...model, ...protectedProduct, ...style, ...anchor, ...remainingProduct];
   return priority.slice(0, maxReferences);
 }
 
