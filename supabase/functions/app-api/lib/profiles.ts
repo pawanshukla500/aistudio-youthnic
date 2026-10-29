@@ -1654,13 +1654,13 @@ export function buildCombinedAnalysisPrompt(args: {
   const isFarshiSku = /farshi|farsi/i.test(`${args.skuName} ${args.productDetails}`);
   return `You are the visual merchandiser and shoot planner for a fashion e-commerce studio.
 
-Analyze EVERY supplied image before answering.
-${manifest}
-
 LISTING IDENTITY LOCK (read before product geometry): MODEL FACE REFERENCE is the person for every pose that shows a face. STYLE REFERENCE is the photoshoot set — backdrop, room, wall, floor, props, lighting, hair/makeup mood — for all six listing poses. PRODUCT photos are 100% garment DNA only. Every pose must be a living photographed person with weight-bearing stance and relaxed joints, never a mannequin or stiff catalog freeze.
 SCENE AUTHORITY: when a STYLE REFERENCE image is supplied, that image defines the shoot. Describe what it actually shows - wall colour and finish, floor or ground surface, every prop and its placement, plant or furniture presence, light direction and quality, camera height and distance, depth of field, colour grade - concretely enough to rebuild that set from the description alone. Never replace it with a generic "clean premium studio backdrop": a plain seamless-paper description when the reference shows a styled set is a failure of this analysis. A requested scene direction refines mood, styling and props on top of the referenced set; it does not replace the referenced backdrop. Only when no style reference is supplied does the requested scene direction define the scene by itself.
 PRODUCT vs STYLE DIVISION: Product references are garment/SKU truth only (cut, colour, print, embroidery, construction). The STYLE REFERENCE is the sole authority for photoshoot backdrop, room architecture, flooring, lighting, camera, mood, AND jewellery/ornament taste when those pieces are not already part of the product. THE CLOTHING WORN IN THE STYLE REFERENCE MUST BE 100% DISCARDED; NEVER DRESS THE MODEL IN THE STYLE REFERENCE'S CLOTHING OR BORROW ITS PRINTS/COLORS. Never mix a product-photo wall, arch, urn, pot, plant, or courtyard into creativeDirection.
 CRITICAL NEGATIVE RULE FOR SCENE & BACKGROUND: Product reference images (FRONT, BACK, BOTTOM, FABRIC, MANNEQUIN) frequently show the garment in an existing pre-shoot studio, outdoor location, archway, courtyard, terracotta pots/urns, plants, or furniture. You are STRICTLY FORBIDDEN from describing, extracting, or incorporating ANY background elements, walls, arches, urns, pots, plants, or furniture from the PRODUCT reference images into creativeDirection or backgroundStyle! The photoshoot scene MUST BE DERIVED 100% FROM THE STYLE REFERENCE (if supplied), or from the requested scene direction (if no style reference is supplied), or designed as a fresh, clean, elegant, neutral fashion studio.
+
+Analyze EVERY supplied image before answering.
+${manifest}
 
 REFERENCE AUTHORITY (highest to lowest):
 1. MODEL FACE REFERENCE (if supplied) - the exact, non-negotiable face and identity for the model. Overrides any face you would otherwise design.
@@ -1892,7 +1892,9 @@ export const CONSISTENCY_RULES = [
 // room when a style-set is present.
 // v30 stops Pose 1 analysis/default copy from asking for a catalog-hero freeze.
 // v31 stops analysis LOCKED DETAILS from co-authorizing Pose 1 as the room.
-export const ANALYSIS_VERSION = "generation-session-v31-listing-identity-style-set-room";
+// v32 puts listing identity and scene authority before the IMAGE manifest so
+// cached v31 analyses that still read product photos first are re-read.
+export const ANALYSIS_VERSION = "generation-session-v32-listing-identity-leads-analysis";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

@@ -62,7 +62,7 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v31-listing-identity-style-set-room");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v32-listing-identity-leads-analysis");
   const prompt = buildCombinedAnalysisPrompt({
     skuName: "LISTING-IDENTITY",
     category: "kurta set",
@@ -79,6 +79,10 @@ Deno.test("analysis version invalidates cached analyses without rear evidence pr
   assertStringIncludes(prompt, "do not record Pose 1 as the room");
   assertEquals(/from the style reference \/ Pose 1/i.test(prompt), false);
   assertEquals(/catalog stance|catalog composure/i.test(prompt), false);
+  assertEquals(
+    prompt.indexOf("LISTING IDENTITY LOCK") < prompt.indexOf("Analyze EVERY supplied image"),
+    true,
+  );
   assertEquals(
     prompt.indexOf("LISTING IDENTITY LOCK") < prompt.indexOf("REFERENCE AUTHORITY"),
     true,

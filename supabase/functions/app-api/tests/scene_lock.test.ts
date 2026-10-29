@@ -180,4 +180,12 @@ Deno.test("the analysis describes the set once instead of inside every pose prom
   });
   assertStringIncludes(prompt, "SCENE IS SHARED, NOT PER POSE");
   assertEquals(prompt.includes("the exact studio/scene background and lighting inside EVERY SINGLE 'prompt' string"), false);
+  assertEquals(
+    prompt.indexOf("LISTING IDENTITY LOCK") < prompt.indexOf("Analyze EVERY supplied image"),
+    true,
+  );
+  assertEquals(
+    prompt.indexOf("SCENE AUTHORITY:") < prompt.indexOf("IMAGE 1:"),
+    true,
+  );
 });
