@@ -163,6 +163,49 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   assertStringIncludes(prompt, "glances back over her shoulder");
 });
 
+Deno.test("a true-back prompt without a Pose 1 anchor keeps the style reference for set continuity only", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "BACK-SET-FALLBACK-SKU",
+    productDetails: "Preserve the exact garment.",
+    pose: {
+      id: "back",
+      title: "True back",
+      poseNumber: 3,
+      description: "Show the true rear.",
+      cameraAngle: "straight back",
+      framing: "full body",
+      bodyPosition: "facing away",
+      handPlacement: "clear",
+      expression: "not visible",
+      highlightedDetails: [],
+      productVisibilityRules: [],
+      purpose: "document rear",
+      consistencyNotes: "rear only",
+      prompt: "Render the real rear construction.",
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "dress",
+        garmentEvidence: [
+          { region: "front hem", sourceRole: "front", state: "confirmed", visibleDecoration: "front-only-lace-marker" },
+          { region: "back hem", sourceRole: "back", state: "confirmed_absent", visibleDecoration: "rear-plain-marker", explicitlyAbsent: ["rear-lace-absent-marker"] },
+        ],
+      },
+    },
+    references: [{ role: "back" }, { role: "model_identity" }, { role: "front" }, { role: "fabric_pattern" }, { role: "style_reference" }],
+  });
+
+  // The style image survives as the only set authority, ordered after the rear product.
+  assertStringIncludes(prompt, "IMAGE 1: BACK PRODUCT");
+  assertStringIncludes(prompt, "IMAGE 3: STYLE REFERENCE");
+  // Front-only product evidence still never enters the rear frame.
+  assertEquals(prompt.includes("front-only-lace-marker"), false);
+  // The style garment stays quarantined while its set stays authoritative.
+  assertStringIncludes(prompt, "ABSOLUTE PROHIBITION ON COPYING THE STYLE REFERENCE GARMENT");
+  assertStringIncludes(prompt, "as the STYLE REFERENCE shows it");
+  assertStringIncludes(prompt, "BACK-POSE EVIDENCE VETO");
+});
+
 Deno.test("a saree true-back prompt cannot carry a hallucinated front-derived blouse or border into the rear", () => {
   const prompt = composeGenerationPrompt({
     skuName: "REAR-ONLY-SAREE",

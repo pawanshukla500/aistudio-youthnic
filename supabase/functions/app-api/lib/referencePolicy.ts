@@ -253,11 +253,18 @@ export function selectReferences<T extends ReferenceLike>(
   // front details into the rear). However, the model_identity reference and
   // the approved Pose 1 anchor MUST be included so the generator preserves the
   // exact model identity and identical photoshoot studio environment/backdrop.
+  // When no approved Pose 1 anchor exists yet, the back frame would otherwise
+  // have no visual set authority at all and the backdrop drifts: fall back to
+  // the style reference for set/backdrop only. The generation prompt quarantines
+  // its garment, so product truth stays rear-only.
   if (poseType === "back") {
     const rearProduct = selectTrueBackReferences(references, normalizedFamily);
     const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
     const anchor = approved.slice(0, 1);
-    const priority = [...rearProduct, ...model, ...anchor];
+    const styleFallback = anchor.length === 0
+      ? references.filter((reference) => reference.role === "style_reference").slice(0, 1)
+      : [];
+    const priority = [...rearProduct, ...model, ...anchor, ...styleFallback];
     return priority.slice(0, maxReferences);
   }
   const order = preferredProductOrder(poseType, normalizedFamily, preferredRole);

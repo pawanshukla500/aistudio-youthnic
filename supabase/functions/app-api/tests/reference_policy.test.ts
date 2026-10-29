@@ -90,6 +90,39 @@ Deno.test("true back poses use exactly one direct rear product image while prese
   assertEquals(saree.some((r) => r.role === "saree_blouse_back_piece"), false);
 });
 
+Deno.test("true back pose without a Pose 1 anchor falls back to the style reference for set continuity", () => {
+  const withoutAnchor = selectReferences(
+    [
+      { role: "model_identity", hash: "model" },
+      { role: "front", hash: "front" },
+      { role: "back", hash: "back" },
+      { role: "fabric_pattern", hash: "fabric" },
+      { role: "style_reference", hash: "style" },
+    ],
+    [],
+    "back",
+    "dress",
+  );
+  assertEquals(withoutAnchor.map((reference) => reference.role), ["back", "model_identity", "style_reference"]);
+  // Front-only product evidence must still never leak into the rear frame.
+  assertEquals(withoutAnchor.some((r) => r.role === "front"), false);
+  assertEquals(withoutAnchor.some((r) => r.role === "fabric_pattern"), false);
+
+  // With an approved Pose 1 anchor the style garment stays out of the back frame.
+  const withAnchor = selectReferences(
+    [
+      { role: "model_identity", hash: "model" },
+      { role: "front", hash: "front" },
+      { role: "back", hash: "back" },
+      { role: "style_reference", hash: "style" },
+    ],
+    [{ role: "approved_pose", hash: "anchor" }],
+    "back",
+    "dress",
+  );
+  assertEquals(withAnchor.map((reference) => reference.role), ["back", "model_identity", "approved_pose"]);
+});
+
 Deno.test("Catalog keeps prior assets for audit but resolves only current direct front and rear uploads", () => {
   const references = selectCurrentCatalogProductReferences([
     { id: "old-front", role: "front", downloadUrl: "https://assets.example/old-front.jpg", storagePath: "old/front.jpg" },
