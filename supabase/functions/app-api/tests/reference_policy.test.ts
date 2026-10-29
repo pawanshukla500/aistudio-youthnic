@@ -247,3 +247,27 @@ Deno.test("showcase evidenceReference promotes exact verbose analysis manifest l
     assertEquals(selected[0]?.role, role);
   }
 });
+
+Deno.test("CodeAnt Major: preferred additional product evidence survives duplicate overflow at the worker cap", () => {
+  const references = [
+    { role: "model_identity", hash: "model" },
+    ...Array.from({ length: MAX_IMAGE_REFERENCES }, (_, index) => ({ role: "front", hash: `front-${index}` })),
+    { role: "additional_product", hash: "preferred-additional" },
+    { role: "bottom", hash: "bottom" },
+    { role: "fabric_pattern", hash: "fabric" },
+    { role: "back", hash: "back" },
+    { role: "mannequin", hash: "mannequin" },
+    { role: "style_reference", hash: "style" },
+  ];
+  const selected = selectReferences(
+    references,
+    [],
+    "showcase",
+    "kurta_or_kurti_set",
+    MAX_IMAGE_REFERENCES,
+    "additional_product",
+  );
+
+  assertEquals(selected.length, MAX_IMAGE_REFERENCES);
+  assertEquals(selected.some((reference) => reference.hash === "preferred-additional"), true);
+});

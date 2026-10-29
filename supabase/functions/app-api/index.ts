@@ -1088,9 +1088,9 @@ async function loadAvailableReferences(
  * was paid latency for bytes the prompt never saw. Required-evidence roles stay
  * in the set so the availability gate still runs against real bytes.
  */
-function poseReferenceCandidates(references: ReferenceInput[], poseType: string, garmentFamily: string) {
+function poseReferenceCandidates(references: ReferenceInput[], poseType: string, garmentFamily: string, preferredRole = "") {
   const required = requiredAvailabilityRoles(references, garmentFamily);
-  const selected = new Set<ReferenceInput>(selectReferences(references, [], poseType, garmentFamily, MAX_REFERENCES));
+  const selected = new Set<ReferenceInput>(selectReferences(references, [], poseType, garmentFamily, MAX_REFERENCES, preferredRole));
   return references.filter((reference) => selected.has(reference) || required.has(reference.role));
 }
 
@@ -2985,7 +2985,7 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
   const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
   const storedPoseData = (pose.generation_data || {}) as JsonRecord;
   const poseData = { ...(storedPoseData as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
-  const candidates = poseReferenceCandidates(sourceInputs, poseData.id, garmentFamily);
+  const candidates = poseReferenceCandidates(sourceInputs, poseData.id, garmentFamily, poseData.primaryReference);
   // Image generation posts the blobs as multipart form data. Only Gemini QA
   // needs the inline base64 copy, so a QA-disabled shoot never pays for it.
   const referenceLoadOptions = { encodeBase64: Boolean(job.pose_qa) || storedPoseData.poseQaRequested === true };
