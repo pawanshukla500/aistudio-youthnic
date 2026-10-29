@@ -74,6 +74,18 @@ Deno.test("an identical model-face and style upload is sent once, as the style r
     "kurta_or_kurti_set",
   );
   assertEquals(back.map((reference) => reference.role), ["back", "style_reference"]);
+
+  const sameObject = selectReferences(
+    [
+      { role: "model_identity", hash: "row-model", storagePath: "organizations/org/references/whatsapp.jpg" },
+      { role: "style_reference", hash: "row-style", storagePath: "organizations/org/references/whatsapp.jpg" },
+      { role: "front", hash: "front", storagePath: "organizations/org/references/front.jpg" },
+    ],
+    [],
+    "full_front",
+    "kurta_or_kurti_set",
+  );
+  assertEquals(sameObject.map((reference) => reference.role), ["front", "style_reference"]);
 });
 
 Deno.test("legacy saree aliases remain valid and pallu has a distinct authority label", () => {

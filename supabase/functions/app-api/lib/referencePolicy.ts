@@ -342,7 +342,9 @@ export function selectReferences<T extends ReferenceLike>(
  * The same file is often uploaded as both the model face and the style
  * reference. Sending it twice makes that outfit outvote the product photos.
  * Keep the style copy, which still supplies the face when no separate model
- * photo remains, and drop any later image with the same content hash.
+ * photo remains, and drop any later image of the same stored file. A content
+ * hash, storage path, or download URL is enough; a missing hash must not let
+ * the duplicate through.
  */
 function collapseDuplicateUploads<T extends ReferenceLike>(selected: T[]): T[] {
   const model = selected.find((reference) => reference.role === "model_identity");
@@ -352,20 +354,29 @@ function collapseDuplicateUploads<T extends ReferenceLike>(selected: T[]): T[] {
   const unique: T[] = [];
   for (const reference of selected) {
     if (modelMatchesStyle && reference.role === "model_identity") continue;
-    const hash = String(reference.hash || "").trim();
-    if (hash) {
-      if (seen.has(hash)) continue;
-      seen.add(hash);
-    }
+    const keys = uploadIdentityKeys(reference);
+    if (keys.length > 0 && keys.some((key) => seen.has(key))) continue;
+    for (const key of keys) seen.add(key);
     unique.push(reference);
   }
   return unique;
 }
 
+function uploadIdentityKeys(reference: ReferenceLike) {
+  const hash = String(reference.hash || "").trim();
+  const path = String(reference.storagePath || "").trim();
+  const url = String(reference.downloadUrl || "").trim();
+  return [
+    hash ? `hash:${hash}` : "",
+    path ? `path:${path}` : "",
+    url ? `url:${url}` : "",
+  ].filter(Boolean);
+}
+
 function sameUploadedImage(left: ReferenceLike, right: ReferenceLike) {
-  const leftHash = String(left.hash || "").trim();
-  const rightHash = String(right.hash || "").trim();
-  return Boolean(leftHash) && leftHash === rightHash;
+  const leftKeys = new Set(uploadIdentityKeys(left));
+  if (leftKeys.size === 0) return false;
+  return uploadIdentityKeys(right).some((key) => leftKeys.has(key));
 }
 
 export function canUsePoseOneAnchor(garmentFamily: string, qaStatus: unknown, qaEnabled?: boolean) {
