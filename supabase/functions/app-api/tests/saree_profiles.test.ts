@@ -61,7 +61,7 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v27-listing-identity-analysis-order");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v28-listing-identity-scene-first");
   const prompt = buildCombinedAnalysisPrompt({
     skuName: "LISTING-IDENTITY",
     category: "kurta set",
@@ -72,6 +72,14 @@ Deno.test("analysis version invalidates cached analyses without rear evidence pr
   });
   assertStringIncludes(prompt, "living photographed person");
   assertEquals(/catalog stance|catalog composure/i.test(prompt), false);
+  assertEquals(
+    prompt.indexOf("LISTING IDENTITY LOCK") < prompt.indexOf("REFERENCE AUTHORITY"),
+    true,
+  );
+  assertEquals(
+    prompt.indexOf("SCENE AUTHORITY:") < prompt.indexOf("PRINT AND EMBROIDERY GEOMETRY"),
+    true,
+  );
 });
 
 Deno.test("analysis prompt distinguishes farshi from palazzo and does not take bottom print from upper fabric close-ups", () => {
