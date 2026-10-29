@@ -5,8 +5,10 @@
  * grade; only the pose, camera angle and framing move. The scene used to reach
  * the image model three ways - Gemini's creativeDirection JSON, a free-text
  * backdrop inside every pose prompt, and the reference images - and whichever
- * one a frame leaned on won. A back view, which never gets the style reference,
- * could land on a different wall.
+ * one a frame leaned on won. A stale analysis that copied a product-photo
+ * courtyard into creativeDirection can still beat the style-set photos unless
+ * this lock names the STYLE REFERENCE as sole set authority. Style-set photos
+ * stay on every pose, including true-back.
  *
  * The scene lock is a single short block, built from the shared creative
  * direction, that every pose receives verbatim and near the top of the prompt,
@@ -74,7 +76,14 @@ export function sceneLockBlock(args: {
   const grade = distinct(creative.colorTreatment);
   const continuity = distinct(creative.setContinuity);
   const lines = [
-    set.length ? `- Set and backdrop: ${set.join("; ")}` : "",
+    args.hasStyleReference
+      ? "- Set and backdrop: the STYLE REFERENCE image(s) in the manifest are the sole photoshoot set. Rebuild that room, wall, floor, props, and lighting in every pose, including true-back. Never reproduce a product-photo studio, courtyard, arch, urn, terracotta pot, plant, or wall from FRONT/BACK/BOTTOM/MANNEQUIN photos unless that same element is visibly in the style-set images."
+      : "",
+    set.length
+      ? (args.hasStyleReference
+        ? `- Set hint from analysis (subordinate to STYLE REFERENCE photos): ${set.join("; ")}. Discard this hint if it describes a product-photo studio or any courtyard/arch/urn/pot/plant that is not in the style-set images.`
+        : `- Set and backdrop: ${set.join("; ")}`)
+      : "",
     props.length ? `- Props and furniture: ${props.join("; ")}. Nothing is added or removed between frames.` : "- Props and furniture: exactly those of the established set. Nothing is added or removed between frames.",
     light.length ? `- Light: ${light.join("; ")}` : "",
     grade.length ? `- Colour grade: ${grade.join("; ")}` : "",

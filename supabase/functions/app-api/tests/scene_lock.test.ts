@@ -86,7 +86,25 @@ Deno.test("the hero frame establishes the set; Studio's Auto sentence is never t
   });
   assertStringIncludes(block, "This frame establishes the set for all six frames");
   assertStringIncludes(block, "as the STYLE REFERENCE shows it");
+  assertStringIncludes(block, "the STYLE REFERENCE image(s) in the manifest are the sole photoshoot set");
+  assertStringIncludes(block, "subordinate to STYLE REFERENCE photos");
   assertEquals(block.includes(AUTO_BACKGROUND_STYLE), false);
+});
+
+Deno.test("a style-set shoot discards stored product-studio scene prose", () => {
+  const block = sceneLockBlock({
+    creativeDirection: {
+      backgroundStyle: "Terracotta urn courtyard with carved arches behind the mannequin",
+      studioEnvironment: "Pre-shoot product studio",
+    },
+    poseNumber: 1,
+    hasApprovedAnchor: false,
+    hasStyleReference: true,
+  });
+  assertStringIncludes(block, "the STYLE REFERENCE image(s) in the manifest are the sole photoshoot set");
+  assertStringIncludes(block, "Never reproduce a product-photo studio, courtyard, arch, urn");
+  assertStringIncludes(block, "Discard this hint if it describes a product-photo studio");
+  assertEquals(block.indexOf("sole photoshoot set") < block.indexOf("Terracotta urn courtyard"), true);
 });
 
 Deno.test("repeated scene values are stated once and long ones stay bounded", () => {
