@@ -140,7 +140,7 @@ function canonicalSareeTruth(value: unknown) {
         ...knownFields(record, ["region", "state", "visibleConstruction", "visibleDecoration", "closures", "explicitlyAbsent", "uncertainty"]),
         sourceRole: record.sourceRole ?? record.source_role ?? "",
       };
-    }),
+    }).filter((entry) => !isNonProductEvidenceRole(entry.sourceRole)),
   };
 }
 

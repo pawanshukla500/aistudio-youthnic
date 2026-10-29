@@ -181,6 +181,33 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   assertStringIncludes(prompt, "glances back over her shoulder");
 });
 
+Deno.test("a saree prompt drops style-photo region evidence even when analysis was not normalized", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "STYLE-MOTIF-SAREE",
+    productDetails: "Olive silk saree",
+    pose: {
+      id: "full_front", title: "Front", poseNumber: 1, description: "front", cameraAngle: "front", framing: "full", bodyPosition: "standing",
+      handPlacement: "relaxed", expression: "calm", highlightedDetails: [], productVisibilityRules: [], purpose: "hero", consistencyNotes: "locked", prompt: "Front hero.", enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "saree",
+        sareeTruth: {
+          body: { mainFabric: "silk", baseColor: "olive" },
+          regionEvidence: [
+            { region: "body", sourceRole: "saree_body_detail", state: "confirmed", visibleDecoration: "product-peacock-marker" },
+            { region: "body", sourceRole: "STYLE REFERENCE - SOLE AUTHORITY for the backdrop", state: "confirmed", visibleDecoration: "style-butti-marker" },
+          ],
+        },
+        sareeDrapePlan: { shoulderSide: "left" },
+      },
+    },
+    references: [{ role: "saree_front_drape" }, { role: "saree_body_detail" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(prompt, "product-peacock-marker");
+  assertEquals(prompt.includes("style-butti-marker"), false);
+});
+
 Deno.test("a saree true-back prompt cannot carry a hallucinated front-derived blouse or border into the rear", () => {
   const prompt = composeGenerationPrompt({
     skuName: "REAR-ONLY-SAREE",
