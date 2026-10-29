@@ -77,11 +77,11 @@ export function sceneLockBlock(args: {
   const continuity = distinct(creative.setContinuity);
   const lines = [
     args.hasStyleReference
-      ? "- Set and backdrop: the STYLE REFERENCE image(s) in the manifest are the sole photoshoot set. Rebuild that room, wall, floor, props, and lighting in every pose, including true-back. Never reproduce a product-photo studio, courtyard, arch, urn, terracotta pot, plant, or wall from FRONT/BACK/BOTTOM/MANNEQUIN photos unless that same element is visibly in the style-set images."
+      ? "- Set and backdrop: STYLE REFERENCE photos are the sole set for every pose, including true-back. Discard product-photo studios, courtyards, arches, urns, or pots unless they are in those photos."
       : "",
     set.length
       ? (args.hasStyleReference
-        ? `- Set hint from analysis (subordinate to STYLE REFERENCE photos): ${set.join("; ")}. Discard this hint if it describes a product-photo studio or any courtyard/arch/urn/pot/plant that is not in the style-set images.`
+        ? `- Set hint (subordinate to STYLE REFERENCE): ${set.join("; ")}.`
         : `- Set and backdrop: ${set.join("; ")}`)
       : "",
     props.length ? `- Props and furniture: ${props.join("; ")}. Nothing is added or removed between frames.` : "- Props and furniture: exactly those of the established set. Nothing is added or removed between frames.",
