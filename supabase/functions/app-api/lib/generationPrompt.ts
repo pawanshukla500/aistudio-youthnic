@@ -601,33 +601,33 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
 
   if (isPose1) {
     lines.push(
-      "CURRENT FRAME (POSE 1 - SQUARE HERO): Grounded, balanced, straight-on catalog hero stance establishing the full outfit silhouette from head to hem. Relaxed, effortless poise with a natural gentle smile or calm composure.",
+      "CURRENT FRAME (POSE 1 - SQUARE HERO): Grounded, balanced, straight-on catalog hero stance establishing the full outfit silhouette from head to hem. Relaxed, effortless poise with weight visibly settled, slight natural asymmetry, and relaxed joints - never stiff or robotic - with a natural gentle smile or calm composure. Hands relaxed beside the body with visible forearm continuity.",
     );
   } else if (isPose2) {
     lines.push(
-      "CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN): Torso and hips MUST physically rotate 35 to 45 degrees with one foot stepped forward. DO NOT render a flat frontal standing pose or repeat Pose 1. Reveal side silhouette, garment depth, side seams, and sleeve shape.",
+      "CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN): Torso and hips MUST physically rotate 35 to 45 degrees with one foot stepped forward and weight shifted naturally onto one leg. DO NOT render a flat frontal standing pose or repeat Pose 1. Reveal side silhouette, garment depth, side seams, and sleeve shape with relaxed joints and slight natural asymmetry - never a stiff, twisted, or mannequin-like turn. Hands stay clear of side seams with visible forearm continuity.",
     );
   } else if (isPose3) {
     lines.push(
-      "CURRENT FRAME (POSE 3 - 180° REAR VIEW): Model faces fully away from camera. Shoulders and hips square to rear. Hair swept forward, dupatta draped forward over arms/front so rear construction is 100% visible.",
+      "CURRENT FRAME (POSE 3 - 180° REAR VIEW): Model faces fully away from camera. Shoulders and hips square to rear with weight relaxed and natural, slight asymmetry, never rigid. Hair swept forward, dupatta draped forward over arms/front so rear construction is 100% visible. Hands rest naturally at the sides with visible forearm continuity.",
     );
   } else if (isPose4) {
     if (isSittingDemanded) {
       lines.push(
-        "CURRENT FRAME (POSE 4 - SEATED EDITORIAL): Elegant seated editorial posture on a minimal studio bench or architectural step from the established set. Both legs, bottom wear volume, hemline, and footwear remain fully visible and beautifully arranged.",
+        "CURRENT FRAME (POSE 4 - SEATED EDITORIAL): Elegant seated editorial posture on a minimal studio bench or architectural step from the established set, sitting the way a real model sits - spine tall but relaxed, weight settled, legs gracefully placed. Both legs, bottom wear volume, hemline, and footwear remain fully visible and beautifully arranged.",
       );
     } else {
       lines.push(
-        "CURRENT FRAME (POSE 4 - DYNAMIC WALKING STRIDE): Active dynamic walking movement captured mid-step across the studio floor with natural fabric flutter and movement. NEVER render a static standing hero repeat!",
+        "CURRENT FRAME (POSE 4 - DYNAMIC WALKING STRIDE): Active dynamic walking movement captured mid-step across the studio floor with weight visibly transferring between legs, natural relaxed arm swing, and natural fabric flutter and movement. NEVER render a static standing hero repeat or a stiff, frozen, robotic stride!",
       );
     }
   } else if (isPose5) {
     lines.push(
-      "CURRENT FRAME (POSE 5 - ZOOMED-IN DETAIL): Genuinely zoomed in on product craftsmanship and selling details. NEVER repeat a full-body or wide hero frame. The close-up MUST highlight the primary uploaded garment's signature details (such as kurti butti work, chest/yoke embroidery, or neckline craft), and must NEVER focus on a secondary accessory like a dupatta or stole.",
+      "CURRENT FRAME (POSE 5 - ZOOMED-IN DETAIL): Genuinely zoomed in on product craftsmanship and selling details. The model's upper body stays relaxed and natural. NEVER repeat a full-body or wide hero frame. The close-up MUST highlight the primary uploaded garment's signature details (such as kurti butti work, chest/yoke embroidery, or neckline craft), and must NEVER focus on a secondary accessory like a dupatta or stole. Any visible hand rests near - never covering - the detail with a continuous visible forearm; a cropped floating hand on the garment is forbidden.",
     );
   } else if (isPose6) {
     lines.push(
-      "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE): Framing, angle, and physical stance MUST visibly diverge from Pose 1. Feet separated or angled to showcase feature volume/flare. Never repeat the flat frontal hero stance. It must complement the other five images while showing a distinctly different pose, maintaining complete consistency of model, uploaded product, background set, and overall styling.",
+      "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE): Framing, angle, and physical stance MUST visibly diverge from Pose 1 with relaxed, weight-shifted, naturally asymmetric posture - never stiff or mirrored. Feet separated or angled to showcase feature volume/flare. Never repeat the flat frontal hero stance. It must complement the other five images while showing a distinctly different pose, maintaining complete consistency of model, uploaded product, background set, and overall styling. Hands stay clear of the featured detail with visible forearm continuity.",
     );
   }
 
@@ -636,8 +636,9 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
 
 function referenceImageScopeDirective(): string {
   return [
-    "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:",
-    "- STYLE / REFERENCE IMAGE SCOPE: from the reference image (style reference / model reference), take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction.",
+    "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY (APPLIES IDENTICALLY TO ALL SIX POSES):",
+    "- MODEL FACE TRUTH: the MODEL FACE REFERENCE image (or the APPROVED POSE 1 anchor once Pose 1 is approved) is the exact, non-negotiable face, hair, skin tone and body-proportion truth for the model in every pose. Reproduce that same real person identically in all six frames - never a similar-looking model, never a beautified average.",
+    "- STYLE / REFERENCE IMAGE SCOPE: from the style reference image, take ONLY the photoshoot background/backdrop, room architecture, flooring, props, pose inspiration, framing, and overall photography direction.",
     "- ABSOLUTE PROHIBITION ON COPYING THE STYLE REFERENCE GARMENT: The clothing, outfit, saree, dress, fabric, color, embroidery, or prints shown on the person in the STYLE REFERENCE image MUST BE 100% DISCARDED. Absolutely DO NOT copy, borrow, blend, or reproduce the style reference's clothing onto the model.",
     "- PRODUCT INTEGRITY (SOLE TRUTH FROM UPLOADED PRODUCT IMAGES): the product itself (fabric, colors, prints, pattern geometry, neckline, sleeves, hem, embroidery, trims, closures, and complete bottom wear) MUST come exclusively from uploaded product references. The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows. Our product and its design must stay exactly as uploaded in the product photos.",
   ].join("\n");
@@ -648,8 +649,9 @@ function anatomicalIntegrityDirective(): string {
     "STRICT HUMAN ANATOMY & NATURAL LIMB INTEGRITY (ZERO TOLERANCE FOR EXTRA LIMBS):",
     "- EXACTLY TWO ARMS AND TWO HANDS: The model must have strictly and exactly TWO arms and TWO hands in total. It is STRICTLY FORBIDDEN to render a third hand, extra hand, extra arm, duplicate wrist, floating hand, or phantom limb anywhere on the body, garment, waist, drape, or set.",
     "- COORDINATED HAND PLACEMENT: When one hand is holding, touching, or adjusting the garment/pallu/dupatta, the other hand must be naturally placed (e.g. resting at the side, on hip, or relaxed). NO THIRD HAND may appear resting on the waist, navel, or pleats. There must never be hands sprouting from the drape or floating disconnected from an arm.",
-    "- REAL ANATOMICAL CONNECTION: Every visible hand MUST connect seamlessly to a real, visible, anatomically correct forearm and arm belonging to the model. Knuckles, wrists, and elbows must bend naturally.",
+    "- REAL ANATOMICAL CONNECTION: Every visible hand MUST connect seamlessly to a real, visible, anatomically correct forearm and arm belonging to the model. Knuckles, wrists, and elbows must bend naturally. Never render a hand resting on the waist, hips, navel, fabric pleats, or held drape without a continuous, clearly visible forearm joining that hand to the model's shoulder.",
     "- NATURAL FINGERS: Each hand must have exactly five natural, cleanly formed fingers with realistic nails and knuckles — never fused, melted, webbed, mangled, missing, or extra fingers.",
+    "- NATURAL RELAXED POSTURE: The model stands, turns, walks, and sits the way a real catalog model does - weight visibly shifted onto one leg or mid-step, slight natural asymmetry in shoulders and arms, relaxed joints, soft natural hand shapes. Never a stiff, frozen, robotic, mannequin-like, or symmetrically mirrored stance.",
     "- PROHIBITED ANATOMICAL DEFECTS: Three hands, extra arms, duplicate hands, phantom hands, severed limbs, unnatural joint angles, or extra body parts under any circumstances.",
   ].join("\n");
 }
@@ -1020,7 +1022,7 @@ REALISTIC INTEGRATION:
 - Treat this as frame ${args.pose.poseNumber} from one photographed contact sheet, not a new image concept. Reuse the same physical set coordinates, time of day, camera family, exposure, white balance, light direction, shadow density, and color grade established by Pose 1.
 - Preserve natural fabric drape, folds, gravity, occlusion, thickness and construction for this exact material and fit.
 - Match locked lighting direction, color temperature, shadows, contact shadows, perspective, lens feel, depth and scene geometry.
-- Keep anatomy realistic and keep hands away from product details.
+- Keep anatomy realistic with relaxed weight-bearing posture and slight natural asymmetry - never stiff, robotic, or mannequin-like - and keep every visible hand joined to the model by a continuous visible forearm, away from product details.
 - Preserve believable pores, flyaway hairs, fabric microtexture, seam depth, edge transitions, optical depth of field, and grounded foot/contact shadows. Avoid waxy skin, over-smoothed fabric, duplicated motifs, over-sharpening, floating garments, plastic texture, and other synthetic AI tells.
 ${faceRequired ? `- Render the eyes with correct anatomy: two naturally shaped, correctly positioned eyes with realistic iris detail, natural catchlights, and a correctly aligned gaze - never crossed, misaligned, melted, or malformed.
 - Follow the planned expression; do not force a smile. If teeth show, render them naturally aligned in the correct count - never uniformly perfect, fused, extra, missing, or warped.

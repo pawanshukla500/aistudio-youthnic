@@ -966,8 +966,9 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   assertStringIncludes(pose2Prompt, "DO NOT render a flat frontal standing pose or repeat Pose 1");
 
   // 2. Reference Image Scope & Product Integrity
-  assertStringIncludes(pose2Prompt, "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:");
-  assertStringIncludes(pose2Prompt, "from the reference image (style reference / model reference), take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction");
+  assertStringIncludes(pose2Prompt, "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY (APPLIES IDENTICALLY TO ALL SIX POSES):");
+  assertStringIncludes(pose2Prompt, "MODEL FACE TRUTH:");
+  assertStringIncludes(pose2Prompt, "from the style reference image, take ONLY the photoshoot background/backdrop");
   assertStringIncludes(pose2Prompt, "The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows");
 
   // 3. Locked Details Across All Six Images
@@ -1244,4 +1245,84 @@ Deno.test("Pose 6 hard rule and aesthetic photoshoot direction survive prompt co
   assertEquals(compacted.length <= IMAGE_PROMPT_SAFE_CHARS, true);
   assertStringIncludes(compacted, "POSE 6 HARD RULE (AESTHETIC FEATURE SHOWCASE & DETAIL LOCK):");
   assertStringIncludes(compacted, "SHOWCASE FRAME SUBJECT: mirror-work bell sleeve cuff");
+});
+
+Deno.test("natural model appearance: every pose demands relaxed posture, visible forearms, and no floating hands", () => {
+  const poses = [
+    { id: "full_front", poseNumber: 1 },
+    { id: "angled", poseNumber: 2 },
+    { id: "back", poseNumber: 3 },
+    { id: "creative", poseNumber: 4 },
+    { id: "closeup", poseNumber: 5 },
+    { id: "showcase", poseNumber: 6 },
+  ];
+  for (const pose of poses) {
+    const refs = pose.id === "back"
+      ? [{ role: "front" }, { role: "back" }, { role: "style_reference" }]
+      : [{ role: "front" }, { role: "style_reference" }];
+    const prompt = composeGenerationPrompt({
+      skuName: "NISHI-PEACH-KURTI-SET",
+      productDetails: "Peach kurti with butti work, matching bottom wear",
+      pose: {
+        id: pose.id,
+        title: `Pose ${pose.poseNumber}`,
+        poseNumber: pose.poseNumber,
+        description: "test pose",
+        cameraAngle: "eye level",
+        framing: "full body",
+        bodyPosition: "test stance",
+        handPlacement: "hands relaxed",
+        expression: "natural smile",
+        highlightedDetails: ["butti work"],
+        productVisibilityRules: ["detail readable"],
+        purpose: "catalog",
+        consistencyNotes: "locked",
+        prompt: "Test generation prompt",
+        enabled: true,
+      } as any,
+      session: {
+        productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "peach" },
+        creativeDirection: {},
+        modelIdentity: { face: "same model" },
+      },
+      references: refs,
+    });
+    assertStringIncludes(prompt, "continuous visible forearm");
+    assertStringIncludes(prompt, "never stiff");
+  }
+  const heroPrompt = composeGenerationPrompt({
+    skuName: "NISHI-PEACH-KURTI-SET",
+    productDetails: "Peach kurti",
+    pose: {
+      id: "full_front", title: "Hero", poseNumber: 1, description: "hero",
+      cameraAngle: "eye level", framing: "full body", bodyPosition: "hero stance",
+      handPlacement: "relaxed", expression: "natural", highlightedDetails: [],
+      productVisibilityRules: [], purpose: "catalog", consistencyNotes: "locked",
+      prompt: "Hero prompt", enabled: true,
+    } as any,
+    session: { productIdentity: { garmentFamily: "kurta_or_kurti_set" }, creativeDirection: {} },
+    references: [{ role: "front" }],
+  });
+  assertStringIncludes(heroPrompt, "Never render a hand resting on the waist, hips, navel, fabric pleats, or held drape without a continuous, clearly visible forearm");
+  assertStringIncludes(heroPrompt, "MODEL FACE TRUTH");
+  assertStringIncludes(heroPrompt, "APPLIES IDENTICALLY TO ALL SIX POSES");
+});
+
+Deno.test("style reference stays set-and-face authority and never becomes garment truth", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "NISHI-PEACH-KURTI-SET",
+    productDetails: "Peach kurti with gold butti work",
+    pose: {
+      id: "angled", title: "Angled", poseNumber: 2, description: "angled",
+      cameraAngle: "three-quarter", framing: "full body", bodyPosition: "turned",
+      handPlacement: "relaxed", expression: "natural", highlightedDetails: [],
+      productVisibilityRules: [], purpose: "catalog", consistencyNotes: "locked",
+      prompt: "Angled prompt", enabled: true,
+    } as any,
+    session: { productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "peach" }, creativeDirection: {} },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(prompt, "STYLE / REFERENCE IMAGE SCOPE: from the style reference image, take ONLY the photoshoot background/backdrop");
+  assertStringIncludes(prompt, "MODEL FACE TRUTH");
+  assertStringIncludes(prompt, "MUST BE 100% DISCARDED");
 });
