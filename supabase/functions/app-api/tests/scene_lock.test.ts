@@ -139,6 +139,7 @@ Deno.test("cached setContinuity cannot tell a style-set SCENE LOCK to rebuild Po
   assertStringIncludes(lock, "STYLE REFERENCE photos are the sole set");
   assertStringIncludes(lock, "the STYLE REFERENCE room (Pose 1 is person and lighting only)");
   assertEquals(lock.includes("identical studio set, wall color, and lighting established in Pose 1"), false);
+  assertEquals(prompt.includes("identical studio set, wall color, and lighting established in Pose 1"), false);
   assertStringIncludes(lock, "APPROVED POSE 1 is the same person and lighting");
 });
 

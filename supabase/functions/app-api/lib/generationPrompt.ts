@@ -804,7 +804,7 @@ export function composeGenerationPrompt(args: {
     delete creativeForPrompt.showcasePlan;
     delete creativeForPrompt.showcase_plan;
   }
-  const creativeJson = compactJson(creativeForPrompt, { maxString: 500, maxItems: 16, maxKeys: 32 });
+  const creativeJsonRaw = compactJson(creativeForPrompt, { maxString: 500, maxItems: 16, maxKeys: 32 });
   const sareeTruthJson = isSaree ? requiredJsonSection(isTrueBack ? "Direct rear saree truth" : "Canonical saree truth", sareeTruth, 10_000) : "";
   const sareeDrapePlanJson = isSaree && !isTrueBack ? requiredJsonSection("Canonical saree drape plan", sareeDrapePlan, 4_000) : "";
   const patternGeometryJson = compactJson(patternGeometryOf(product), { maxString: 500, maxItems: 16, maxKeys: 24 });
@@ -831,6 +831,7 @@ export function composeGenerationPrompt(args: {
   const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
+  const creativeJson = hasStyleReference ? styleSetOwnsListingRoom(creativeJsonRaw) : creativeJsonRaw;
   const isPose1 = args.pose.id === "full_front" || args.pose.poseNumber === 1;
   let posePrompt = hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.prompt || "")) : String(args.pose.prompt || "");
   let poseDescription = hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.description || "")) : String(args.pose.description || "");
