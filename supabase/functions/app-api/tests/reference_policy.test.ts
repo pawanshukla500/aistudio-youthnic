@@ -171,6 +171,38 @@ Deno.test("non-saree selection reserves front, bottom, back, and mannequin befor
   assertEquals(selected.some((reference) => reference.hash === "back"), true);
 });
 
+Deno.test("all uploaded style-set photos stay identity-first instead of dropping extras by hash", () => {
+  const selected = selectReferences([
+    { role: "front", hash: "front" },
+    { role: "back", hash: "back" },
+    { role: "style_reference", hash: "style-room" },
+    { role: "style_reference", hash: "style-lighting" },
+    { role: "style_reference", hash: "style-props" },
+    { role: "model_identity", hash: "model" },
+  ], [], "full_front", "kurta_or_kurti_set");
+  assertEquals(
+    selected.map((reference) => reference.role).slice(0, 5),
+    ["model_identity", "style_reference", "style_reference", "style_reference", "front"],
+  );
+  assertEquals(
+    selected.filter((reference) => reference.role === "style_reference").map((reference) => reference.hash),
+    ["style-room", "style-lighting", "style-props"],
+  );
+
+  const trueBack = selectReferences([
+    { role: "front", hash: "front" },
+    { role: "back", hash: "back" },
+    { role: "style_reference", hash: "style-room" },
+    { role: "style_reference", hash: "style-lighting" },
+    { role: "style_reference", hash: "style-props" },
+    { role: "model_identity", hash: "model" },
+  ], [{ role: "approved_pose", hash: "anchor" }], "back", "dress");
+  assertEquals(
+    trueBack.map((reference) => reference.role),
+    ["model_identity", "style_reference", "style_reference", "style_reference", "back", "approved_pose"],
+  );
+});
+
 Deno.test("listing identity images precede product photos so face and set are not drowned", () => {
   const selected = selectReferences([
     { role: "front", hash: "front" },

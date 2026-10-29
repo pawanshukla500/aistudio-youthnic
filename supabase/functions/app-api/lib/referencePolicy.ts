@@ -1,4 +1,6 @@
 export const MAX_IMAGE_REFERENCES = 16;
+/** Studio accepts up to three style-set photos; dropping extras by hash loses the intended room. */
+export const MAX_STYLE_REFERENCES = 3;
 
 export const PRODUCT_REFERENCE_ROLES = [
   "front",
@@ -255,7 +257,7 @@ export function selectReferences<T extends ReferenceLike>(
   if (poseType === "back") {
     const rearProduct = selectTrueBackReferences(references, normalizedFamily);
     const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
-    const style = references.filter((reference) => reference.role === "style_reference").slice(0, 1);
+    const style = references.filter((reference) => reference.role === "style_reference").slice(0, MAX_STYLE_REFERENCES);
     const anchor = approved.slice(0, 1);
     // GPT Image 2 attends hardest to the earliest uploads. Face and style-set
     // go first so the back frame does not inherit the rear product's pre-shoot
@@ -266,7 +268,7 @@ export function selectReferences<T extends ReferenceLike>(
   const order = preferredProductOrder(poseType, normalizedFamily, preferredRole);
 
   const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
-  const style = references.filter((reference) => reference.role === "style_reference").slice(0, 1);
+  const style = references.filter((reference) => reference.role === "style_reference").slice(0, MAX_STYLE_REFERENCES);
   const product = order.flatMap((role) => references.filter((reference) => reference.role === role));
   // A SKU can have several photos of one region. Taking every image from an
   // early role (many bottoms, many fronts) can exhaust the provider limit and
