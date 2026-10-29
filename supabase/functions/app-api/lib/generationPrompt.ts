@@ -831,14 +831,13 @@ export function composeGenerationPrompt(args: {
   const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
-  const creativeJson = hasStyleReference ? styleSetOwnsListingRoom(creativeJsonRaw) : creativeJsonRaw;
+  const listingCopy = (value: unknown) => hasStyleReference ? styleSetOwnsListingRoom(String(value ?? "")) : String(value ?? "");
+  const creativeJson = listingCopy(creativeJsonRaw);
   const isPose1 = args.pose.id === "full_front" || args.pose.poseNumber === 1;
-  let posePrompt = hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.prompt || "")) : String(args.pose.prompt || "");
-  let poseDescription = hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.description || "")) : String(args.pose.description || "");
-  const poseConsistency = hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.consistencyNotes || "")) : String(args.pose.consistencyNotes || "");
-  const poseVisibility = hasStyleReference
-    ? boundedStrings(args.pose.productVisibilityRules, 12, 260).map(styleSetOwnsListingRoom)
-    : boundedStrings(args.pose.productVisibilityRules, 12, 260);
+  let posePrompt = listingCopy(args.pose.prompt);
+  let poseDescription = listingCopy(args.pose.description);
+  const poseConsistency = listingCopy(args.pose.consistencyNotes);
+  const poseVisibility = boundedStrings(args.pose.productVisibilityRules, 12, 260).map(listingCopy);
   if (isPose1) {
     posePrompt = softenPose1HeroCopy(posePrompt);
     poseDescription = softenPose1HeroCopy(poseDescription);
@@ -851,7 +850,7 @@ export function composeGenerationPrompt(args: {
     )
     : rules;
   const isCloseup = args.pose.id === "closeup";
-  const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).join(", ");
+  const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).map(listingCopy).join(", ");
   const closeupMode = isCloseup ? resolveCloseupMode({ pose: args.pose, creative }) : "face_and_detail";
   const closeupHeroDetail = boundedText(creative.closeupHeroDetail || creative.closeup_hero_detail || highlightedDetails, 260);
   // Pose 5's own recorded subject, without the current pose's highlights as a
@@ -862,9 +861,7 @@ export function composeGenerationPrompt(args: {
   // only for a cached analysis made before showcasePlan existed. Resolved by the
   // shared helper so the pose brief, this rule, the shoot memory and the feedback
   // row all describe the same frame.
-  const sceneLock = hasStyleReference
-    ? styleSetOwnsListingRoom(sceneLockBlock({ creativeDirection: creative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference }))
-    : sceneLockBlock({ creativeDirection: creative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference });
+  const sceneLock = listingCopy(sceneLockBlock({ creativeDirection: creative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference }));
   const isMacroShowcase = isShowcase && showcaseShot?.shotType === "macro_detail";
   const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL) && !isMacroShowcase;
   const faceQualityInstruction = faceRequired
@@ -881,23 +878,15 @@ export function composeGenerationPrompt(args: {
   });
 
   const allowedDelta = [
-    `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(args.pose.bodyPosition, 360)}`,
-    `camera angle: ${boundedText(args.pose.cameraAngle, 360)}`,
-    `framing: ${boundedText(args.pose.framing, 360)}`,
-    `expression: ${boundedText(args.pose.expression, 360)}`,
+    `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(listingCopy(args.pose.bodyPosition), 360)}`,
+    `camera angle: ${boundedText(listingCopy(args.pose.cameraAngle), 360)}`,
+    `framing: ${boundedText(listingCopy(args.pose.framing), 360)}`,
+    `expression: ${boundedText(listingCopy(args.pose.expression), 360)}`,
   ];
-  const correction = boundedText(args.correction, 1_200);
-  const learnings = boundedText(
-    hasStyleReference ? styleSetOwnsListingRoom(String(args.learnings || "")) : String(args.learnings || ""),
-    900,
-  );
-  const fashionKnowledge = boundedText(args.fashionKnowledge, 700);
-  const generationMemory = boundedText(
-    softenPose1HeroCopy(
-      hasStyleReference ? styleSetOwnsListingRoom(String(args.generationMemory || "")) : String(args.generationMemory || ""),
-    ),
-    900,
-  );
+  const correction = boundedText(listingCopy(args.correction), 1_200);
+  const learnings = boundedText(listingCopy(args.learnings), 900);
+  const fashionKnowledge = boundedText(listingCopy(args.fashionKnowledge), 700);
+  const generationMemory = boundedText(softenPose1HeroCopy(listingCopy(args.generationMemory)), 900);
   const recordedVisibility = poseVisibility.join("; ");
   const visibilityRules = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, farshiEvidence) === "farshi"
     ? reconcileFarshiVisibilityRules(recordedVisibility)
@@ -1076,7 +1065,7 @@ ${creative?.suggestedAccessories ? `The stylist has proposed adding: ${boundedTe
 
 ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
 ${allowedDelta.map((value) => `- ${value}`).join("\n")}
-- Hand placement: ${boundedText(args.pose.handPlacement, 360)}
+- Hand placement: ${boundedText(listingCopy(args.pose.handPlacement), 360)}
 - Everything not named here stays locked.
 
 POSE REQUIREMENT:
@@ -1084,7 +1073,7 @@ ${poseVariationDirective(args.pose, isSittingDemanded)}
 Description: ${boundedText(poseDescription, 600)}
 Details to highlight: ${highlightedDetails}
 Visibility rules: ${visibilityRules}
-Purpose: ${boundedText(hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.purpose || "")) : String(args.pose.purpose || ""), 420)}
+Purpose: ${boundedText(listingCopy(args.pose.purpose), 420)}
 Consistency notes: ${boundedText(poseConsistency, 600)}
 ${categoryRules ? `POSE CATEGORY RULES (${poseCategory.toUpperCase()}):\n${categoryRules}` : ""}
 GARMENT POSE GRAMMAR (${garmentPoseFamilyHeading(poseFamily)}) - body language and framing only; it never changes the garment's design, print, colour, fit or construction:

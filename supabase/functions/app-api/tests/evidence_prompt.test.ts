@@ -249,7 +249,7 @@ Deno.test("cached pose-plan copy cannot tell a style-set later frame to rebuild 
       description: "True back in the identical studio set, wall color, and lighting established in Pose 1.",
       cameraAngle: "back",
       framing: "full body",
-      bodyPosition: "away",
+      bodyPosition: "facing away in the identical studio set, wall color, and lighting established in Pose 1",
       handPlacement: "clear",
       expression: "not visible",
       highlightedDetails: [],
@@ -261,8 +261,11 @@ Deno.test("cached pose-plan copy cannot tell a style-set later frame to rebuild 
     } as any,
     session: { productIdentity: { garmentFamily: "dress" } },
     references: [{ role: "back" }, { role: "style_reference" }, { role: "approved_pose" }, { role: "model_identity" }],
+    correction: "Rebuild the identical studio set, wall color, and lighting established in Pose 1.",
   });
   assertStringIncludes(prompt, "STYLE REFERENCE room (Pose 1 is person and lighting only)");
+  assertStringIncludes(prompt, "pose/body position: facing away in the STYLE REFERENCE room (Pose 1 is person and lighting only)");
+  assertStringIncludes(prompt, "CORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:\nRebuild the STYLE REFERENCE room (Pose 1 is person and lighting only).");
   assertStringIncludes(prompt, "exact same STYLE REFERENCE backdrop wall, floor, and lighting");
   assertStringIncludes(prompt, "STYLE REFERENCE room while showcasing the authoritative back");
   assertStringIncludes(prompt, "Description: True back in the STYLE REFERENCE room (Pose 1 is person and lighting only).");
