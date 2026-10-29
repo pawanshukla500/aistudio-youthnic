@@ -316,7 +316,7 @@ export function compactFullPromptSafely(prompt: string): string {
   compacted = compactPromptBlock(
     compacted,
     "GARMENT POSE GRAMMAR (",
-    ["\nSTYLE REFERENCE SITTING OVERRIDE", "\nSEATED EDITORIAL POSE REQUIREMENT", "\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:", "\n\nPROMPT:"],
+    ["\nDO NOT COPY THE STYLE POSE", "\nSEATED EDITORIAL POSE REQUIREMENT", "\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:", "\n\nPROMPT:"],
     900,
   );
   compacted = compactPromptBlock(
@@ -585,7 +585,7 @@ ${coreRule}
 }
 
 const SEATED_EDITORIAL_REQUIREMENT = `SEATED EDITORIAL POSE REQUIREMENT (POSE 4):
-- The style reference or product requirements specifically demand an elegant seated pose for this frame.
+- The product notes demand an elegant seated pose for this frame.
 - Model must be seated gracefully on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (style reference / Pose 1). Do not bring in new furniture.
 - Both legs, bottom wear (farshi/trousers/pleats), hemline, and footwear MUST remain fully visible, untangled, and unbunched.
 - Posture must be upright, poised, and relaxed editorial - showcasing garment fit and draping without wrinkling or obscuring key details.`;
@@ -597,7 +597,7 @@ function poseVariationDirective(): string {
     "- Pose 1 (full_front): Natural square-on catalog hero, weight slightly on one leg, shoulders relaxed, complete silhouette readable.",
     "- Pose 2 (angled): Mandatory 35-to-45 degree turn of torso and hips, both feet planted and close. Never a walking stride or a lifted foot. Keep a joined hem closed.",
     "- Pose 3 (back): 180° true full rear view, shoulders and hips facing fully away; hair and dupatta swept forward for 100% unobstructed rear view. Same face identity and the same style-reference backdrop.",
-    "- Pose 4 (creative): A natural editorial stance that is clearly not Pose 1 - relaxed contrapposto or a soft lean, both feet grounded and close - or an elegant seated editorial pose when the style reference is seated. Never a frozen walking stride, a spin, or a wide leg split.",
+    "- Pose 4 (creative): A natural editorial stance that is clearly not Pose 1 - relaxed contrapposto or a soft lean, both feet grounded and close, or a seated editorial only when the product notes demand sitting. Never copy the style photo's pose. Never a frozen walking stride, a spin, or a wide leg split.",
     "- Pose 5 (closeup): Genuinely zoomed-in detail crop (face-and-detail or tight product-detail); strictly prohibit full-body hero repeat.",
     "- Pose 6 (showcase): A distinct natural catalog stance and framing that sells the named feature without repeating Pose 1. Keep the feet close enough that a joined or tapered hem stays intact.",
   ].join("\n");
@@ -667,6 +667,7 @@ function lockedDetailsDirective(): string {
 // the first section compacted, so that corrective line disappears while the raw
 // prompt and body position survive. Rewrite only those pose fields.
 const UNPLANTED_POSE_PATTERN = /\b(?:walk(?:ing|s)?|strides?|mid-step|stepped|lifted foot|foot lifted|step(?:s|ping)? forward|feet (?:naturally )?spaced|feet separated|feet apart|shoulder-width|shoulder width|legs spread|wide stance)\b/i;
+const COPIED_SITTING_PATTERN = /\b(?:sit|sits|sitting|seated)\b/i;
 const HELD_OBJECT_PATTERN = /\b(?:sparklers?|fireworks?|handheld props?)\b/i;
 
 function plantedPoseReplacement(pose: { id: string; poseNumber: number }, sitting: boolean): string {
@@ -690,6 +691,12 @@ function plantedPoseReplacement(pose: { id: string; poseNumber: number }, sittin
 function withoutUnplantedPose(value: unknown, replacement: string): string {
   const text = String(value ?? "");
   return UNPLANTED_POSE_PATTERN.test(text) || HELD_OBJECT_PATTERN.test(text) ? replacement : text;
+}
+
+function catalogPoseText(value: unknown, replacement: string, keepSitting: boolean): string {
+  const planted = withoutUnplantedPose(value, replacement);
+  if (keepSitting || !COPIED_SITTING_PATTERN.test(planted)) return planted;
+  return replacement;
 }
 
 const RELAXED_HANDS = "Both hands relaxed and clear of the garment, holding nothing copied from the style or model photo.";
@@ -719,10 +726,6 @@ function creativeDirectionKey(key: string) {
   return key.trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
-function poseOrPropText(value: string, replacement: string) {
-  return UNPLANTED_POSE_PATTERN.test(value) || HELD_OBJECT_PATTERN.test(value) ? replacement : value;
-}
-
 function withoutHeldObjectClauses(value: string) {
   if (!HELD_OBJECT_PATTERN.test(value)) return value;
   const kept = value.split(/(?<=[.!;])\s+/).map((part) => part.trim()).filter((part) => part && !HELD_OBJECT_PATTERN.test(part));
@@ -745,10 +748,14 @@ function withoutInventedCatchlights(value: string) {
   return kept.join(" ").trim() || "Eyes stay as the identity photo shows them, including a cover.";
 }
 
-function withoutPoseOrHeldClauses(value: string, emptyFallback: string) {
-  if (!UNPLANTED_POSE_PATTERN.test(value) && !HELD_OBJECT_PATTERN.test(value)) return value;
+function withoutPoseOrHeldClauses(value: string, emptyFallback: string, dropSitting = false) {
+  const mentionsSitting = dropSitting && COPIED_SITTING_PATTERN.test(value);
+  if (!UNPLANTED_POSE_PATTERN.test(value) && !HELD_OBJECT_PATTERN.test(value) && !mentionsSitting) return value;
   const kept = value.split(/(?<=[.!;])\s+/).map((part) => part.trim()).filter((part) => (
-    part && !UNPLANTED_POSE_PATTERN.test(part) && !HELD_OBJECT_PATTERN.test(part)
+    part
+    && !UNPLANTED_POSE_PATTERN.test(part)
+    && !HELD_OBJECT_PATTERN.test(part)
+    && !(dropSitting && COPIED_SITTING_PATTERN.test(part))
   ));
   return kept.join(" ").trim() || emptyFallback;
 }
@@ -779,19 +786,19 @@ function sanitizeCreativeDirection(
       const normalized = creativeDirectionKey(key);
       if (typeof entry === "string") {
         if (CREATIVE_BODY_KEYS.has(normalized)) {
-          output[key] = poseOrPropText(entry, planted);
+          output[key] = catalogPoseText(entry, planted, sitting);
           continue;
         }
         if (CREATIVE_HAND_KEYS.has(normalized)) {
-          output[key] = poseOrPropText(entry, RELAXED_HANDS);
+          output[key] = catalogPoseText(entry, RELAXED_HANDS, sitting);
           continue;
         }
         if (normalized === "expression") {
-          output[key] = poseOrPropText(entry, CALM_EXPRESSION);
+          output[key] = catalogPoseText(entry, CALM_EXPRESSION, sitting);
           continue;
         }
         if (CREATIVE_DISTINCTION_KEYS.has(normalized)) {
-          output[key] = poseOrPropText(entry, PLANTED_DISTINCTION);
+          output[key] = catalogPoseText(entry, PLANTED_DISTINCTION, sitting);
           continue;
         }
         if (CREATIVE_HELD_KEYS.has(normalized)) {
@@ -803,12 +810,12 @@ function sanitizeCreativeDirection(
           continue;
         }
         if (CREATIVE_CAMERA_KEYS.has(normalized)) {
-          output[key] = withoutPoseOrHeldClauses(entry, ROOM_CAMERA_ONLY);
+          output[key] = withoutPoseOrHeldClauses(entry, ROOM_CAMERA_ONLY, !sitting);
           continue;
         }
       }
       if (CREATIVE_VISIBILITY_KEYS.has(normalized) && Array.isArray(entry)) {
-        output[key] = entry.map((item) => typeof item === "string" ? poseOrPropText(item, PLANTED_VISIBILITY) : visit(item));
+        output[key] = entry.map((item) => typeof item === "string" ? catalogPoseText(item, PLANTED_VISIBILITY, sitting) : visit(item));
         continue;
       }
       output[key] = visit(entry);
@@ -944,14 +951,14 @@ export function composeGenerationPrompt(args: {
       ? "The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face MUST match the MODEL FACE REFERENCE, or the STYLE REFERENCE when no separate model photo was uploaded. APPROVED POSE 1 is the room only: do not copy its pose or objects in the hands. Never substitute a different person or face."
       : "This frame is a PRODUCT-DETAIL close-up. Do not force a full beauty-face crop. If any portion of the face appears it MUST match the identity lock - same jawline, eyes, skin texture with visible pores, and makeup. Prefer filling the frame with the named product selling detail; omit or crop the face when a full face would make that detail too small to read.";
   const plantedStance = plantedPoseReplacement(args.pose, isSittingDemanded);
-  const poseDescription = boundedText(withoutUnplantedPose(args.pose.description, plantedStance), 600);
-  const posePrompt = boundedText(withoutUnplantedPose(args.pose.prompt, plantedStance), 1_200);
+  const poseDescription = boundedText(catalogPoseText(args.pose.description, plantedStance, isSittingDemanded), 600);
+  const posePrompt = boundedText(catalogPoseText(args.pose.prompt, plantedStance, isSittingDemanded), 1_200);
 
   const allowedDelta = [
-    `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(withoutUnplantedPose(args.pose.bodyPosition, plantedStance), 360)}`,
+    `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(catalogPoseText(args.pose.bodyPosition, plantedStance, isSittingDemanded), 360)}`,
     `camera angle: ${boundedText(args.pose.cameraAngle, 360)}`,
     `framing: ${boundedText(args.pose.framing, 360)}`,
-    `expression: ${boundedText(withoutUnplantedPose(args.pose.expression, CALM_EXPRESSION), 360)}`,
+    `expression: ${boundedText(catalogPoseText(args.pose.expression, CALM_EXPRESSION, isSittingDemanded), 360)}`,
   ];
   const correction = boundedText(args.correction, 1_200);
   const learnings = boundedText(args.learnings, 900);
@@ -1146,7 +1153,7 @@ ${directedCreative.suggestedAccessories ? `The stylist has proposed adding: ${bo
 
 ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
 ${allowedDelta.map((value) => `- ${value}`).join("\n")}
-- Hand placement: ${boundedText(withoutUnplantedPose(args.pose.handPlacement, RELAXED_HANDS), 360)}
+- Hand placement: ${boundedText(catalogPoseText(args.pose.handPlacement, RELAXED_HANDS, isSittingDemanded), 360)}
 - Everything not named here stays locked.
 
 POSE REQUIREMENT:
@@ -1169,9 +1176,8 @@ ${isShowcase
       : showcaseHardRule(showcaseIntent, poseFamily))
     : ""}
 ${isPose4 && hasStyleReference ? `
-STYLE REFERENCE SITTING OVERRIDE (POSE 4):
-- Look at the STYLE REFERENCE image in the manifest. If that image, or any uploaded reference that shows a model pose, depicts a sitting/seated person, this 4th pose MUST be a seated editorial pose even if the written pose plan still describes walking or movement.
-- Keep garment, bottom wear, hemline, and footwear fully visible. Use only seating furniture/props that already belong to the style-reference set.
+DO NOT COPY THE STYLE POSE (POSE 4):
+- A person sitting in the STYLE REFERENCE does not make this frame seated. Copy the room only.
 ` : ""}
 ${correction ? `
 CORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:

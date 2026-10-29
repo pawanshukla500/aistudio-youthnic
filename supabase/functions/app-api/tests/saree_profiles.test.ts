@@ -61,7 +61,7 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v29-room-not-composition");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v30-pose4-stands");
 });
 
 Deno.test("analysis prompt distinguishes farshi from palazzo and does not take bottom print from upper fabric close-ups", () => {
@@ -342,6 +342,8 @@ Deno.test("analysis prompt locks style-reference backdrop, jewellery, seated pos
   assertStringIncludes(prompt, "PRODUCT vs STYLE DIVISION");
   assertStringIncludes(prompt, "PRODUCT FIRST, STYLE REFERENCE SECOND");
   assertStringIncludes(prompt, "SEATED POSE LOCK");
+  assertStringIncludes(prompt, "A person sitting in the STYLE REFERENCE");
+  assertStringIncludes(prompt, "is not a request to sit");
   assertStringIncludes(prompt, "seatedPoseRequired");
   assertStringIncludes(prompt, "THIS POSE SELLS PRODUCT DETAIL");
   assertStringIncludes(prompt, '"product_detail"');
@@ -359,14 +361,25 @@ Deno.test("normalizeAnalysis persists seated pose and closeup mode locks", () =>
       closeupHeroDetail: "yoke embroidery lattice",
     },
   }, "ethnic/fusion");
-  assertEquals(normalized.creativeDirection.seatedPoseRequired, "yes");
-  assertEquals(normalized.creativeDirection.seatedPoseReason, "style reference model is seated on a stone plinth");
+  assertEquals(normalized.creativeDirection.seatedPoseRequired, "no");
+  assertEquals(normalized.creativeDirection.seatedPoseReason, "The style photo's pose is not a sitting request.");
   assertEquals(normalized.creativeDirection.closeupMode, CLOSEUP_PRODUCT_DETAIL);
   assertEquals(normalized.creativeDirection.closeupHeroDetail, "yoke embroidery lattice");
   assertEquals(isSeatedEditorialPoseDemanded({
-    pose: { id: "creative", prompt: "walk and swirl" },
+    pose: { id: "creative", prompt: "Seated on the floor leaning on the chair", bodyPosition: "seated on the rug" },
     productDetails: "no seating requested",
-    creative: normalized.creativeDirection,
+    creative: {
+      seatedPoseRequired: "yes",
+      seatedPoseReason: "style reference model is seated on a stone plinth",
+    },
+  }), false);
+  assertEquals(isSeatedEditorialPoseDemanded({
+    pose: { id: "creative", prompt: "walk and swirl" },
+    productDetails: "kurta set",
+    creative: {
+      seatedPoseRequired: "yes",
+      seatedPoseReason: "buyer asked for a seated listing frame",
+    },
   }), true);
   assertEquals(isSeatedEditorialPoseDemanded({
     pose: { id: "creative", prompt: "walk and swirl" },

@@ -255,6 +255,12 @@ export type CloseupMode = typeof CLOSEUP_FACE_AND_DETAIL | typeof CLOSEUP_PRODUC
 const YES_DIRECTION_FLAG = /^(yes|true|required|1)$/i;
 const NO_DIRECTION_FLAG = /^(no|false|0)$/i;
 const SITTING_POSE_RE = /\b(sit|sits|sitting|seated)\b/i;
+
+/** A cached plan can record "yes" only because the style photo shows a sit. */
+function stylePhotoSittingReason(value: unknown): boolean {
+  const text = String(value ?? "").replace(/\bnot\s+(?:seated|sitting|sit)\b/gi, "");
+  return /\bstyle reference\b/i.test(text) && SITTING_POSE_RE.test(text);
+}
 const PRODUCT_DETAIL_CLOSEUP_RE =
   /\b(product[_\s-]?detail(?:[_\s-]?(?:first|only|crop))?|detail[_\s-]?(?:first|only|crop)|omit(?:ting)?(?: the)? face|face optional|without(?: a)?(?: full)? face|macro (?:product )?detail)\b/i;
 
@@ -410,9 +416,12 @@ export function isSeatedEditorialPoseDemanded(args: {
   stylingNotes?: string;
 }): boolean {
   const recorded = args.creative?.seatedPoseRequired ?? args.creative?.seated_pose_required;
-  if (isYesDirectionFlag(recorded)) return true;
+  const stylePhotoSat = stylePhotoSittingReason(args.creative?.seatedPoseReason ?? args.creative?.seated_pose_reason);
+  // A style photo of someone sitting is the room, not a request for pose 4 to sit.
+  if (isYesDirectionFlag(recorded) && !stylePhotoSat) return true;
   // User notes can still demand sitting even when analysis recorded "no".
   if (SITTING_POSE_RE.test(String(args.productDetails ?? ""))) return true;
+  if (stylePhotoSat) return false;
   // An explicit "no" must win over leftover "seated" wording in seatedPoseReason or styling notes.
   if (String(recorded ?? "").trim() && normalizeYesNoFlag(recorded) === "no") return false;
   if (SITTING_POSE_RE.test(joinedPoseText(args.pose))) return true;
@@ -845,7 +854,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       id: "creative",
       title: "Natural Editorial Pose",
       framing: "3:4 portrait with a garment-appropriate full or three-quarter body editorial crop",
-      bodyPosition: "Relaxed editorial stance that is clearly not the hero pose: contrapposto or a soft three-quarter lean, both feet grounded and close so hems and pleats stay intact, or an elegant seated posture on a low studio bench/step when the style reference is seated; never a frozen walking stride or a wide leg split",
+      bodyPosition: "Relaxed editorial stance that is clearly not the hero pose: contrapposto or a soft three-quarter lean, both feet grounded and close so hems and pleats stay intact. Sit only when the product notes demand sitting. Never a frozen walking stride or a wide leg split",
       handPlacement: "Relaxed and intentional; hands must not cover the garment's key selling features or change its apparent shape",
       expression: "Calm, natural warmth — a small genuine smile or an easy glance; never a frozen laugh or an artificial grin",
       productVisibilityRules: isSaree
@@ -857,12 +866,12 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
           "if seated on a bench or architectural step, both trouser legs and footwear remain visible, unbunched, and fully displayed",
         ],
       consistencyNotes: "Borrow only art direction, backdrop, and jewellery/ornament taste from style references; garment, bottom wear, footwear, accessories that ship with the product, model, and shoot continuity remain locked",
-      description: "A natural editorial pose that follows the selected creative direction (relaxed standing stance, or seated when the style reference is seated) without hiding the garment.",
+      description: "A natural editorial pose with both feet grounded and close, unless the product notes demand a seated frame.",
       cameraAngle: "Product-appropriate editorial angle",
       highlightedDetails: isSaree ? ["fabric movement", "fluidity", "creative direction"] : ["movement", "silhouette", "creative direction"],
       primaryReference: "front",
       purpose: "Campaign and social-commerce storytelling",
-      prompt: "Create a natural editorial catalog frame that is clearly not the hero pose — a relaxed contrapposto or soft three-quarter lean with both feet grounded and close, so hems and pleats stay intact (or an elegant seated pose on a minimal studio bench/step if the style reference shows a sitting pose). Never a frozen walking stride, a spin, or a wide leg split. Use a calm, natural expression. Preserve the complete product, bottom wear silhouette, and footwear. Rebuild the photoshoot backdrop, wall, floor, lighting, and jewellery from the style reference only - never from product-photo backgrounds.",
+      prompt: "Create a natural editorial catalog frame that is clearly not the hero pose — a relaxed contrapposto or soft three-quarter lean with both feet grounded and close, so hems and pleats stay intact. Sit only when the product notes demand sitting. Never copy a seated pose from the style photo. Never a frozen walking stride, a spin, or a wide leg split. Use a calm, natural expression. Preserve the complete product, bottom wear silhouette, and footwear. Rebuild the photoshoot backdrop, wall, floor, lighting, and jewellery from the style reference only - never from product-photo backgrounds.",
       enabled: true,
     },
     {
@@ -1527,8 +1536,12 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
       creative.suggestedAccessories ?? creative.suggested_accessories,
       "No additional accessory needed - style with only what the product references show",
     ),
-    seatedPoseRequired: normalizeYesNoFlag(creative.seatedPoseRequired ?? creative.seated_pose_required, "no"),
-    seatedPoseReason: stringValue(creative.seatedPoseReason ?? creative.seated_pose_reason, ""),
+    seatedPoseRequired: stylePhotoSittingReason(creative.seatedPoseReason ?? creative.seated_pose_reason)
+      ? "no"
+      : normalizeYesNoFlag(creative.seatedPoseRequired ?? creative.seated_pose_required, "no"),
+    seatedPoseReason: stylePhotoSittingReason(creative.seatedPoseReason ?? creative.seated_pose_reason)
+      ? "The style photo's pose is not a sitting request."
+      : stringValue(creative.seatedPoseReason ?? creative.seated_pose_reason, ""),
     closeupMode: normalizeCloseupMode(creative.closeupMode ?? creative.closeup_mode),
     closeupHeroDetail: stringValue(creative.closeupHeroDetail ?? creative.closeup_hero_detail, ""),
     showcaseIntent: normalizeShowcaseIntent(creative.showcaseIntent ?? creative.showcase_intent),
@@ -1794,8 +1807,7 @@ Create exactly six product-specific camera setups in one coherent commercial cov
 - angled: mandatory 35 to 45 degree intentional turn of torso and hips with both feet planted and close, clearly revealing side construction, garment depth, side seam, and sleeve silhouette. Never a walking stride or a lifted foot, and never open a joined Farshi hem. Must be visibly turned away from flat frontal — NEVER a static frontal standing repeat! Natural, effortless glance following the angle with an authentic soft smile or composed editorial look (never an exaggerated or frozen stock smile). Do not copy the pose or the handheld props from the style or model-face photo.
 - back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees. For outfits with a dupatta or shawl, the dupatta must be draped forward over arms or front so the rear garment (neckline, back panel, embroidery, hem) is 100% unobstructed and visible. Hair swept forward or in an updo. The studio set, backdrop wall, lighting, and model identity must strictly match the other poses.
 - creative:
-  * SEATED POSE LOCK: Inspect the STYLE REFERENCE image first. Also inspect any other uploaded image that shows a model pose, plus the user product notes. If ANY of those show a sitting/seated person, or the notes demand sitting, set creativeDirection.seatedPoseRequired to "yes" and seatedPoseReason to a one-line evidence note (for example "style reference model is seated on a stone plinth"). Then this 4th pose MUST be an elegant seated editorial pose (minimal studio bench, architectural plinth/step, or a clean prop that already belongs to the style-reference set). Keep the garment, bottom wear, hemline, and footwear completely visible and beautifully arranged, never crumpled or hidden. Do not seat poses 1-3 or 5 just because pose 4 sits.
-  * OTHERWISE (seatedPoseRequired "no"): design this 4th pose as a natural editorial stance that is clearly not the hero pose - relaxed contrapposto or a soft three-quarter lean, both feet grounded and close so hems, pleats, and a joined Farshi hem stay intact. Never a frozen walking stride, a spin, or a wide leg split. Expression is calm and genuine - a small smile or an easy glance, never a frozen laugh.
+  * SEATED POSE LOCK: Pose 4 sits only when the user product notes explicitly demand sitting. Set creativeDirection.seatedPoseRequired to "yes" only for that request, and seatedPoseReason to a one-line quote of the note. A person sitting in the STYLE REFERENCE, the MODEL FACE photo, a product photo, or APPROVED POSE 1 is not a request to sit: set seatedPoseRequired to "no" and do not copy that pose. When the notes demand sitting, this 4th pose is an elegant seated editorial on furniture that already belongs to the set, with the garment, bottom wear, hemline, and footwear fully visible. Otherwise design a natural editorial stance that is clearly not the hero pose - relaxed contrapposto or a soft three-quarter lean, both feet grounded and close so hems, pleats, and a joined Farshi hem stay intact. Never a frozen walking stride, a spin, or a wide leg split. Expression is calm and genuine - a small smile or an easy glance, never a frozen laugh.
 - closeup: THIS POSE SELLS PRODUCT DETAIL. First choose the single most important real selling detail from the PRIMARY UPLOADED PRODUCT GARMENT (e.g. kurti butti work, chest/yoke embroidery, neckline craftsmanship, handwork, sleeve craft, or weave) and record it in creativeDirection.closeupHeroDetail. CRITICAL: Pose 5 MUST highlight the primary garment's key signature detail (for example, if the kurti has butti work, Pose 5 must clearly showcase that work). It is STRICTLY FORBIDDEN to focus on or crop in on a secondary accessory like a dupatta, stole, or scarf when the primary garment has butti work, embroidery, or signature craft to showcase! (Only focus on a dupatta if the uploaded product is purely a standalone dupatta). Then choose framing and record it in creativeDirection.closeupMode:
   * "face_and_detail" when that detail sits at neckline/chest/yoke and stays LARGE beside the face: genuine zoomed-in face-to-chest or face-to-waist crop. Face is the locked identity with a calm natural expression (relaxed eyes, never a forced grin) AND the product detail occupies a large, catalog-readable portion of the frame - never a tiny hint of embroidery under a beauty close-up.
   * "product_detail" when a full face would shrink that selling detail below readable catalog size: crop to the product detail so it fills most of the frame. Face may be partial at the edge or omitted. Never a full-body hero repeat, and never a face-only beauty crop.
@@ -1828,12 +1840,12 @@ SCENE IS SHARED, NOT PER POSE: do NOT describe the background, set, walls, floor
 Across all six, ONLY pose, angle, framing, and expression may change.
 LOCKED DETAILS ACROSS ALL SIX IMAGES:
 Lock and remember all important details across all 6 images to avoid consistency mistakes:
-- Photoshoot backdrop: Exact same room architecture, wall finish, flooring, lighting, shadows, and set props from the style reference / Pose 1.
+- Photoshoot backdrop: Exact same room architecture, wall finish, flooring, lighting, shadows, and furniture from the style reference / Pose 1.
 - Footwear: Exact same pair, style, heel, finish, and color across all 6 frames.
 - Ornaments & jewellery: Exact same pieces, metal type, count, and placement across all 6 frames.
 - Accessories & styling: Exact same bag, belt, dupatta drape treatment, hair, and makeup across all 6 frames.
 - Product layout & product design: Garment construction, cuts, seams, trims, embroidery geometry, pattern repeat, and bottom-wear architecture remain locked across all 6 frames.
-REFERENCE IMAGE SCOPE: Model face comes from the MODEL FACE REFERENCE when one is attached; otherwise it comes from the STYLE REFERENCE face. Backdrop, wall, floor, props, and lighting come from the STYLE REFERENCE on all six poses. Clothing comes only from the uploaded product photos. Discard the style-reference outfit, and discard every face and background inside the product photos.
+REFERENCE IMAGE SCOPE: Model face comes from the MODEL FACE REFERENCE when one is attached; otherwise it comes from the STYLE REFERENCE face. Backdrop, wall, floor, furniture, and lighting come from the STYLE REFERENCE on all six poses. Clothing comes only from the uploaded product photos. Discard the style-reference outfit, and discard every face and background inside the product photos. Do not copy that photo's pose.
 
 Return STRICT JSON only:
 {"productIdentity":{"garmentFamily":"","category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[],"garmentEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeTruth":{"body":{"mainFabric":"","weave":"","weaveGeometry":"","texture":"","transparency":"","shine":"","baseColor":"","secondaryColors":[],"pattern":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","motifPlacement":"","embellishment":"","bodyOrientation":""},"borders":{"upperBorder":"","lowerBorder":"","borderWidth":"","upperBorderWidth":"","lowerBorderWidth":"","borderColors":"","construction":"","motifGeometry":"","edgeTreatment":"","continuityRules":"","tasselColor":"","tasselConstruction":"","tasselSpacing":""},"pallu":{"hasDistinctPallu":false,"startingRegion":"","baseColor":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","borders":"","artwork":"","zari":"","embroidery":"","tassels":"","edgeTreatment":"","visualOrientation":"","evidenceReferences":"","uncertainty":""},"pleatZone":{"patternBehavior":"","borderBehavior":"","embellishmentBehavior":"","hasSpecialPanel":false},"blouse":{"hasBlouse":false,"color":"","fabric":"","frontConstruction":"","backConstruction":"","neckline":"","sleeves":"","ties":"","closure":"","embroidery":"","border":"","pattern":"","fit":"","isUnstitchedPiece":false},"physics":{"weight":"","stiffness":"","fluidity":"","transparency":"","shine":"","creaseBehavior":"","expectedFall":""},"regionEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeDrapePlan":{"baseDrapeFamily":"","shoulderSide":"","waistTuck":"","frontPleatTreatment":"","palluShoulderPlacement":"","openOrPleatedPallu":"","palluSpread":"","palluFallDirection":"","palluVisibleLength":"","handInteraction":"","movementAmount":"","pinningBehavior":"","borderVisibility":"","blouseVisibility":"","coverageConstraints":"","poseSpecificDrapeState":""},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":"","seatedPoseRequired":"no","seatedPoseReason":"","closeupMode":"face_and_detail","closeupHeroDetail":""},"showcasePlan":{"heroFeature":"","featureRegion":"","shotType":"","whyItSells":"","evidenceReference":"","framing":"","cameraAngle":"","bodyPosition":"","handPlacement":"","expression":"","distinctFrom":"","visibilityRules":[]},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"angled","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"back","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"creative","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"closeup","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"showcase","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""}]}  `;
@@ -1901,7 +1913,9 @@ export const CONSISTENCY_RULES = [
 // v29 stops treating the style photo's composition and handheld objects as
 // part of the set, and stops demanding catchlights when the identity photo
 // covers the eyes. Cached v28 plans can still name those objects as props.
-export const ANALYSIS_VERSION = "generation-session-v29-room-not-composition";
+// v30 stops treating a seated style photo as a request for pose 4 to sit.
+// Cached v29 plans can still set seatedPoseRequired because the style model is sitting.
+export const ANALYSIS_VERSION = "generation-session-v30-pose4-stands";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

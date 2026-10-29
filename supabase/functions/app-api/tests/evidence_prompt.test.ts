@@ -807,8 +807,10 @@ Deno.test("composeGenerationPrompt enforces seated editorial pose for Pose 4 whe
   assertStringIncludes(promptWithoutSitting, "POSE CATEGORY RULES (DYNAMIC):");
   assertStringIncludes(promptWithoutSitting, "NATURAL EDITORIAL POSE: A relaxed catalog stance");
   assertStringIncludes(promptWithoutSitting, "Do not freeze a walking stride");
-  assertStringIncludes(promptWithoutSitting, "STYLE REFERENCE SITTING OVERRIDE (POSE 4):");
+  assertStringIncludes(promptWithoutSitting, "DO NOT COPY THE STYLE POSE (POSE 4):");
+  assertStringIncludes(promptWithoutSitting, "A person sitting in the STYLE REFERENCE does not make this frame seated.");
   assertEquals(promptWithoutSitting.includes("SEATED EDITORIAL POSE REQUIREMENT (POSE 4):"), false);
+  assertEquals(promptWithoutSitting.includes("STYLE REFERENCE SITTING OVERRIDE"), false);
 });
 
 Deno.test("composeGenerationPrompt seats pose 4 from seatedPoseRequired even when pose text is walking", () => {
@@ -841,7 +843,7 @@ Deno.test("composeGenerationPrompt seats pose 4 from seatedPoseRequired even whe
       creativeDirection: {
         backgroundStyle: "Clean architectural studio",
         seatedPoseRequired: "yes",
-        seatedPoseReason: "style reference model is seated on a stone plinth",
+        seatedPoseReason: "buyer asked for a seated listing frame",
       },
     },
     references: [{ role: "front" }, { role: "style_reference" }],
@@ -850,6 +852,55 @@ Deno.test("composeGenerationPrompt seats pose 4 from seatedPoseRequired even whe
   assertStringIncludes(prompt, "POSE CATEGORY RULES (SITTING):");
   assertStringIncludes(prompt, "SEATED EDITORIAL POSE REQUIREMENT (POSE 4):");
   assertStringIncludes(prompt, "Elegant seated editorial pose on a minimal studio bench");
+  assertStringIncludes(prompt, "The product notes demand an elegant seated pose for this frame.");
+});
+
+Deno.test("composeGenerationPrompt keeps pose 4 standing when only the style photo is seated", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "RAMAN-TEAL",
+    productDetails: "Teal bandhani kurti with white wide cuffed pants",
+    pose: {
+      id: "creative",
+      title: "Editorial",
+      poseNumber: 4,
+      description: "Floor sit copied from the style photo",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "Seated on the floor leaning on the red chair",
+      handPlacement: "one hand on the knee while seated",
+      expression: "calm while seated",
+      highlightedDetails: ["gold hem"],
+      productVisibilityRules: ["full garment visible"],
+      purpose: "editorial",
+      consistencyNotes: "locked set",
+      prompt: "Sit on the rug the way the style reference sits.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "teal",
+        bottomWearDetails: "white wide cuffed pants",
+      },
+      creativeDirection: {
+        backgroundStyle: "Green wall, red chair, and rug",
+        composition: "Seated on the rug. Floral wall stays.",
+        seatedPoseRequired: "yes",
+        seatedPoseReason: "style reference model is seated on a stone plinth",
+      },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+
+  assertStringIncludes(prompt, "CURRENT FRAME (POSE 4 - NATURAL EDITORIAL STANCE)");
+  assertStringIncludes(prompt, "DO NOT COPY THE STYLE POSE (POSE 4):");
+  assertStringIncludes(prompt, "POSE CATEGORY RULES (DYNAMIC):");
+  assertStringIncludes(prompt, "Natural editorial stance. Both feet stay planted and close.");
+  assertStringIncludes(prompt, "Floral wall stays.");
+  assertEquals(prompt.includes("SEATED EDITORIAL POSE REQUIREMENT"), false);
+  assertEquals(prompt.includes("Seated on the floor"), false);
+  assertEquals(prompt.includes("Sit on the rug"), false);
+  assertEquals(prompt.includes("while seated"), false);
 });
 
 Deno.test("composeGenerationPrompt locks style-reference jewellery and dual-mode pose 5", () => {
