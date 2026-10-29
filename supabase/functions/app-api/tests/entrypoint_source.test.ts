@@ -22,4 +22,6 @@ Deno.test("CodeAnt Major: worker candidate loading forwards preferred showcase e
     source.includes("poseReferenceCandidates(sourceInputs, poseData.id, garmentFamily, poseData.primaryReference)"),
     true,
   );
+  assertEquals(source.includes('|| reference.role === "model_identity"'), true);
+  assertEquals(source.includes('|| reference.role === "style_reference"'), true);
 });

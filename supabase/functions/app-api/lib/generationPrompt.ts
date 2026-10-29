@@ -596,7 +596,7 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
   const lines = [
     "6-POSE PLAN VARIATION DIRECTIVE (MANDATORY PHYSICAL DIVERGENCE):",
     "Every shoot executes a distinct 6-pose plan where each frame has a unique physical geometry and purpose. Under NO circumstances should any frame repeat a static frontal standing pose:",
-    "- Pose 1 (full_front): Square-on catalog hero stance with balanced weight, showing complete silhouette.",
+    "- Pose 1 (full_front): Square-on full-length hero with weight in one hip, relaxed knees, and a living stance, showing the complete silhouette. Never a mannequin or stiff catalog freeze.",
     "- Pose 2 (angled): Mandatory 35-to-45 degree physical turn of torso and hips with one foot forward; strictly prohibit flat frontal standing or repeating Pose 1.",
     "- Pose 3 (back): 180° true full rear view, shoulders and hips facing fully away; hair and dupatta swept forward for 100% unobstructed rear view.",
     "- Pose 4 (creative): Active dynamic walking stride across the room with natural fabric flutter or elegant seated editorial pose on a studio bench/step (if demanded); strictly prohibit static standing in place.",
@@ -606,7 +606,7 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
 
   if (isPose1) {
     lines.push(
-      "CURRENT FRAME (POSE 1 - SQUARE HERO): Grounded, balanced, straight-on catalog hero stance establishing the full outfit silhouette from head to hem. Relaxed, effortless poise with a natural gentle smile or calm composure.",
+      "CURRENT FRAME (POSE 1 - SQUARE HERO): Grounded, weight-bearing, straight-on full-length hero establishing the outfit from head to hem. Slight hip/shoulder offset, relaxed knees and elbows, living fabric drape, and a natural gentle smile or calm composure. Never a mannequin, T-pose, or stiff catalog freeze.",
     );
   } else if (isPose2) {
     lines.push(

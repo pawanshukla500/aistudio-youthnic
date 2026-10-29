@@ -1092,7 +1092,12 @@ async function loadAvailableReferences(
 function poseReferenceCandidates(references: ReferenceInput[], poseType: string, garmentFamily: string, preferredRole = "") {
   const required = requiredAvailabilityRoles(references, garmentFamily);
   const selected = new Set<ReferenceInput>(selectReferences(references, [], poseType, garmentFamily, MAX_REFERENCES, preferredRole));
-  return references.filter((reference) => selected.has(reference) || required.has(reference.role));
+  return references.filter((reference) =>
+    selected.has(reference)
+    || required.has(reference.role)
+    || reference.role === "model_identity"
+    || reference.role === "style_reference"
+  );
 }
 
 function extensionForMimeType(mimeType: string) {
