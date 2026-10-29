@@ -179,6 +179,9 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   assertStringIncludes(prompt, "HAIR REAR VISIBILITY LOCK");
   assertStringIncludes(prompt, "SET & BACKDROP HARD LOCK TO APPROVED POSE 1");
   assertStringIncludes(prompt, "ZERO NEW PROPS");
+  assertStringIncludes(prompt, "Objects in the hands are not the set.");
+  assertStringIncludes(prompt, "rebuild only the room those images show");
+  assertStringIncludes(prompt, "furniture in the room");
   assertStringIncludes(prompt, "glances back over her shoulder");
   assertStringIncludes(prompt, "Copy the room, not its pose or objects in the hands.");
   assertStringIncludes(prompt, "APPROVED POSE 1 is the room only");
@@ -1057,7 +1060,7 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
 
   // 2. Reference Image Scope & Product Integrity
   assertStringIncludes(pose2Prompt, "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:");
-  assertStringIncludes(pose2Prompt, "the STYLE REFERENCE is the only source for the photoshoot backdrop, wall, floor, props, lighting, and camera mood on all six poses");
+  assertStringIncludes(pose2Prompt, "the STYLE REFERENCE is the only source for the photoshoot backdrop, wall, floor, lighting, and camera mood on all six poses");
   assertStringIncludes(pose2Prompt, "SET ONLY: the direction below is backdrop, light, and camera. It does not set the pose, the garment, or handheld props.");
   assertStringIncludes(pose2Prompt, "the STYLE REFERENCE face, hair, skin tone, and body proportions are the model identity for all six poses");
   assertStringIncludes(pose2Prompt, "The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows");
@@ -1065,7 +1068,7 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
 
   // 3. Locked Details Across All Six Images
   assertStringIncludes(pose2Prompt, "LOCKED DETAILS ACROSS ALL SIX IMAGES (AVOID CONSISTENCY MISTAKES):");
-  assertStringIncludes(pose2Prompt, "Background / Backdrop: Exact same physical room, wall finish, flooring, lighting, shadows, and props across all 6 frames");
+  assertStringIncludes(pose2Prompt, "Background / Backdrop: Exact same physical room, wall finish, flooring, lighting, and shadows across all 6 frames");
   assertStringIncludes(pose2Prompt, "Footwear: The exact same footwear (pair, style, heel, color, finish) across all 6 frames");
   assertStringIncludes(pose2Prompt, "Ornaments & Jewellery: Identical jewellery pieces, metal type, count, and placement across all 6 frames");
   assertStringIncludes(pose2Prompt, "Product Layout & Product Design: Garment construction, cuts, seams, trims, embroidery geometry, pattern repeat, and bottom-wear architecture remain locked across all 6 frames");

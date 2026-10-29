@@ -346,7 +346,7 @@ Deno.test("analysis prompt locks style-reference backdrop, jewellery, seated pos
   assertStringIncludes(prompt, "THIS POSE SELLS PRODUCT DETAIL");
   assertStringIncludes(prompt, '"product_detail"');
   assertStringIncludes(prompt, "closeupHeroDetail");
-  assertStringIncludes(prompt, "rebuild the photoshoot backdrop, wall, floor, lighting and props from the STYLE REFERENCE only");
+  assertStringIncludes(prompt, "rebuild the photoshoot backdrop, wall, floor, lighting and furniture from the STYLE REFERENCE only");
 });
 
 Deno.test("normalizeAnalysis persists seated pose and closeup mode locks", () => {
