@@ -22,7 +22,7 @@ Legacy source of truth: `C:\Users\shukl\Desktop\Fashion-Catalog-Studio-main`
 
 ## Product consistency rules
 
-MODEL FACE REFERENCE locks the person. STYLE REFERENCE locks hair/makeup mood, jewellery taste, and the photoshoot backdrop/room/lighting for all six poses, including true-back. PRODUCT PHOTOS (FRONT, BACK, BOTTOM, FABRIC, MANNEQUIN) are the exclusive 100% DNA for garment cut, print, embroidery, colour, and construction. Style clothing is discarded. Generated Pose 1 is identity and set continuity only; it never outranks the original product photos.
+MODEL FACE REFERENCE locks the person. STYLE REFERENCE locks hair/makeup mood, jewellery taste, and the photoshoot backdrop/room/lighting for all six poses, including true-back. PRODUCT PHOTOS (FRONT, BACK, BOTTOM, FABRIC, MANNEQUIN) are the exclusive 100% DNA for garment cut, print, embroidery, colour, and construction. Style clothing is discarded. Generated Pose 1 is identity and lighting continuity only; it never outranks the original product photos, and it never hard-locks later frames to a product-studio room if Pose 1 drifted.
 
 Every generation prompt repeats the locked invariants and limits the permitted delta to pose, camera angle, framing, expression, and explicitly planned movement. The back pose requires the uploaded back reference, rebuilds the style-set room (not the rear product's pre-shoot studio), and keeps the same face on any over-shoulder glance. The close-up must preserve the same model while revealing an actually present primary-garment detail. Every pose must read as a living photographed person, never a mannequin or stiff freeze.
 
@@ -32,7 +32,7 @@ The virtual try-on construction follows OpenAI's official multimodal image promp
 
 - Front and back product images are required.
 - Fabric/pattern, additional product, style, and model-identity references are optional but, when present, stay on every pose including true-back.
-- GPT Image 2 attends hardest to the earliest uploads and the earliest prompt text, so model face and style-set precede product photos in prompt IMAGE labels, the provider `image[]` order, and product-truth analysis IMAGE parts. Listing identity and scene authority lead both the generation prompt and the analysis prompt. When style-set photos are present, the scene lock treats those photos as the sole set and stored product-studio room prose as a hint.
+- GPT Image 2 attends hardest to the earliest uploads and the earliest prompt text, so model face and style-set precede product photos in prompt IMAGE labels, the provider `image[]` order, and product-truth analysis IMAGE parts. Listing identity and scene authority lead both the generation prompt and the analysis prompt. When style-set photos are present, the scene lock treats those photos as the sole set and stored product-studio room prose as a hint. Pose 1 may confirm the person and lighting; it does not replace the style-set room.
 - Reference changes invalidate the analysis fingerprint and pose plan.
 - Generation is blocked until the current analysis and plan are ready.
 - Poses are generated sequentially with one worker claim at a time.

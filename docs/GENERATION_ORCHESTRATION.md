@@ -25,16 +25,20 @@ loses nothing: the next call resumes from the database.
   pose gets the same block, high in the prompt where compaction never trims it. Only the pose,
   camera angle and framing differ between frames. When style-set photos are present, those
   images are the sole set; stored room prose is a hint and must not copy a product-photo studio.
-- Pose 1 is the visual anchor for poses 2–6, including the back view. The back view sends
-  model identity and the style-set before the rear product so GPT Image 2 rebuilds the same
-  room instead of the product-photo studio; style clothing stays quarantined. The prompt also
-  points it at the set Pose 1 shows, not at "a clean studio".
+- Pose 1 is the person and lighting anchor for poses 2–6, including the back view. The back
+  view sends model identity and the style-set before the rear product so GPT Image 2 rebuilds
+  the same room instead of the product-photo studio; style clothing stays quarantined. When
+  style-set photos are present, they remain the sole set even if Pose 1 copied a product
+  studio. Without a style-set, the prompt points later frames at the set Pose 1 shows, not at
+  "a clean studio".
 - The analysis describes the set once, in `creativeDirection`, not inside each pose prompt. Any
   scene wording that is left in a pose prompt is marked as subordinate to the lock.
 - Studio's "Auto from references" background keeps the analysed set. Only an explicit choice,
   such as Studio grey or Studio white, replaces it.
-- When QA is on and Pose 1 is attached, `styling_continuity` fails a frame shot on a different
-  wall, floor or light, and the worker retries it.
+- When QA is on and a style-set is attached, `styling_continuity` fails a frame that copies a
+  product-photo studio or contradicts the STYLE REFERENCE room, even if Pose 1 also drifted.
+  Without a style-set, it fails a frame shot on a different wall, floor or light from Pose 1,
+  and the worker retries it.
 
 ## Regeneration history and timing
 

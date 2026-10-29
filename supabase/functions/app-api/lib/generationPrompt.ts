@@ -903,7 +903,13 @@ ${generationMemory}
 EDIT GOAL:
 Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${boundedText(args.pose.title, 160)}. The finished image must look like the same real professional photoshoot as every other frame in this set.
 CRITICAL PRODUCT INTEGRITY RULE: The product clothing (garment, fabric, colors, prints, embroidery, neckline, sleeves, and bottom wear) must be taken EXCLUSIVELY and EXACTLY from the UPLOADED PRODUCT reference images. The clothing/outfit worn by the person in the STYLE REFERENCE image is strictly ignored and 100% DISCARDED. Absolutely DO NOT copy, transfer, or blend the style reference image's garment onto the model. Dress the model ONLY in the uploaded product.
-Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE${hasApprovedAnchor ? " as already photographed in APPROVED POSE 1 - rebuild exactly the set Pose 1 shows, including in a back view" : " (if supplied)"} and the SCENE LOCK below - never a different or generic set. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
+Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE${
+  hasStyleReference && hasApprovedAnchor
+    ? " photos. Pose 1 is the same person; if it copied a product-photo studio, rebuild the STYLE REFERENCE room, including in a back view"
+    : hasApprovedAnchor
+      ? " as already photographed in APPROVED POSE 1 - rebuild exactly the set Pose 1 shows, including in a back view"
+      : " (if supplied)"
+} and the SCENE LOCK below - never a different or generic set. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
 
 ${sceneLock}
 
@@ -985,15 +991,21 @@ ${bottomWearSection({ bottomWear, isSaree: isSareeShoot, hasBottomReference, evi
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
 ${lockedDetailsDirective()}
 ${creativeJson}
-- Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild the scene those images actually show: the same wall colour and finish, floor or ground surface, props and their placement, light direction and quality, and colour grade. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
-- ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS: Never reproduce the background, wall, arches, urns, pots, plants, steps, or environment visible behind the garment in the product reference photos (front, back, bottom, mannequin). The photoshoot set must come exclusively from the STYLE REFERENCE (or Pose 1 anchor / studio specification).
+- Build the set described above, and where a STYLE REFERENCE image is supplied, rebuild that room. APPROVED POSE 1 may confirm the person and lighting but never replaces the STYLE REFERENCE. Where only APPROVED POSE 1 is supplied, rebuild the scene that image shows. Do not substitute a neutral seamless studio backdrop, a white or grey sweep, or a different set that merely feels premium.
+- ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS: Never reproduce the background, wall, arches, urns, pots, plants, steps, or environment visible behind the garment in the product reference photos (front, back, bottom, mannequin). The photoshoot set must come exclusively from the STYLE REFERENCE (or Pose 1 / studio specification when no style reference is present).
 - BACKDROP AND SET CONTINUITY ACROSS ALL POSES: The exact same photoshoot set (wall color, wall finish, floor, lighting, and any props established by the style reference / Pose 1) must remain identical across every pose in this set without drift or forgetting context.
 ${hasApprovedAnchor
-  ? `- SET & BACKDROP HARD LOCK TO APPROVED POSE 1:
+  ? (hasStyleReference
+    ? `- SET & BACKDROP HARD LOCK TO STYLE REFERENCE:
+  * Rebuild the STYLE REFERENCE room. Pose 1 is the same person and lighting only.
+  * If Pose 1 copied a product-photo studio, courtyard, arch, urn, or pot, discard it.
+  * ZERO NEW PROPS beyond the STYLE REFERENCE set.
+  * Only pose and framing change.`
+    : `- SET & BACKDROP HARD LOCK TO APPROVED POSE 1:
   * Rebuild the EXACT SAME physical room and backdrop set from Pose 1: identical wall color, wall plaster/paint finish, texture, architectural elements, floor surface, and carpet/rug.
   * ZERO NEW PROPS: Absolutely do NOT introduce new props, urns, brass urlis, flower petals, random steps, pedestals, or vases not shown in Pose 1.
   * LIGHTING & SHADOW CONTINUITY: Keep the exact same light direction, shadow density, and warm/cool color temperature established in Pose 1.
-  * The camera and model remain in the exact same photoshoot location - only the pose and framing change.`
+  * The camera and model remain in the exact same photoshoot location - only the pose and framing change.`)
   : "- Maintain a single, consistent studio set, wall finish, flooring, and lighting setup across all poses."}
 
 ${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in every frame:

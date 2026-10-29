@@ -67,7 +67,8 @@ Deno.test("the back view is pointed at Pose 1's set, not at a clean studio", () 
     references: [{ role: "back" }, { role: "model_identity" }, { role: "style_reference" }, { role: "approved_pose" }],
   });
   assertStringIncludes(prompt, "STYLE REFERENCE");
-  assertStringIncludes(prompt, "as already photographed in APPROVED POSE 1 - rebuild exactly the set Pose 1 shows, including in a back view");
+  assertStringIncludes(prompt, "if it copied a product-photo studio, rebuild the STYLE REFERENCE room, including in a back view");
+  assertEquals(prompt.includes("rebuild exactly the set Pose 1 shows"), false);
   assertEquals(prompt.includes("or the clean commercial studio direction"), false);
   assertStringIncludes(prompt, PALACE_SET.backgroundStyle);
   // The Gemini pose text still reaches the model, but under the lock.
@@ -89,6 +90,19 @@ Deno.test("the hero frame establishes the set; Studio's Auto sentence is never t
   assertStringIncludes(block, "STYLE REFERENCE photos are the sole set");
   assertStringIncludes(block, "subordinate to STYLE REFERENCE");
   assertEquals(block.includes(AUTO_BACKGROUND_STYLE), false);
+});
+
+Deno.test("style-set outranks a drifted Pose 1 room on later frames", () => {
+  const block = sceneLockBlock({
+    creativeDirection: PALACE_SET,
+    poseNumber: 2,
+    hasApprovedAnchor: true,
+    hasStyleReference: true,
+  });
+  assertStringIncludes(block, "STYLE REFERENCE photos are the sole set");
+  assertStringIncludes(block, "APPROVED POSE 1 is the same person and lighting");
+  assertStringIncludes(block, "Discard a product-photo studio");
+  assertEquals(block.includes("APPROVED POSE 1 in the manifest is this set as photographed"), false);
 });
 
 Deno.test("a style-set shoot discards stored product-studio scene prose", () => {

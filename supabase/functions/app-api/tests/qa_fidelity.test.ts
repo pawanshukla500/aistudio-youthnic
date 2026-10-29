@@ -423,3 +423,42 @@ Deno.test("Pose 1 QA fails styling_continuity when the listing set copies a prod
   assertEquals(withoutStyle.includes("STYLE-SET AUTHORITY"), false);
   assertEquals(withoutStyle.includes("never a product-photo studio"), false);
 });
+
+Deno.test("later-pose QA does not lock the set to a drifted Pose 1 when a style reference is present", () => {
+  const withStyle = buildPoseQaPrompt({
+    poseNumber: 2,
+    poseType: "angled",
+    poseTitle: "Angled",
+    poseDirection: { id: "angled", title: "Angled" },
+    productIdentity: { garmentFamily: "kurta_or_kurti_set" },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: true,
+    hasModelReference: true,
+    hasStyleReference: true,
+    referenceManifest: ["IMAGE 1: MODEL FACE REFERENCE", "IMAGE 2: STYLE REFERENCE", "IMAGE 3: APPROVED POSE 1"],
+  });
+  assertStringIncludes(withStyle, "STYLE REFERENCE is the listing set");
+  assertStringIncludes(withStyle, "even when APPROVED POSE 1 also copied that product studio");
+  assertEquals(withStyle.includes("contradicts APPROVED POSE 1"), false);
+
+  const withoutStyle = buildPoseQaPrompt({
+    poseNumber: 2,
+    poseType: "angled",
+    poseTitle: "Angled",
+    poseDirection: { id: "angled", title: "Angled" },
+    productIdentity: { garmentFamily: "kurta_or_kurti_set" },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: true,
+    hasModelReference: true,
+    hasStyleReference: false,
+    referenceManifest: ["IMAGE 1: MODEL FACE REFERENCE", "IMAGE 2: APPROVED POSE 1"],
+  });
+  assertStringIncludes(withoutStyle, "contradicts APPROVED POSE 1");
+  assertEquals(withoutStyle.includes("STYLE REFERENCE is the listing set"), false);
+});

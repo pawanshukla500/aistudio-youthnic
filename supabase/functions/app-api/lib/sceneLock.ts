@@ -90,7 +90,9 @@ export function sceneLockBlock(args: {
     continuity.length ? `- Continuity: ${continuity.join("; ")}` : "",
   ].filter(Boolean);
   const anchor = args.hasApprovedAnchor
-    ? "- APPROVED POSE 1 in the manifest is this set as photographed. Match its wall colour and finish, floor, props, light direction and colour grade exactly."
+    ? (args.hasStyleReference
+      ? "- APPROVED POSE 1 is the same person and lighting. The set remains the STYLE REFERENCE photos. Discard a product-photo studio in Pose 1."
+      : "- APPROVED POSE 1 in the manifest is this set as photographed. Match its wall colour and finish, floor, props, light direction and colour grade exactly.")
     : args.poseNumber === 1
       ? `- This frame establishes the set for all six frames: build exactly the set above${args.hasStyleReference ? " as the STYLE REFERENCE shows it" : ""}.`
       : `- Build exactly the set above${args.hasStyleReference ? " as the STYLE REFERENCE shows it" : ""}; every other frame of this shoot uses the same one.`;
