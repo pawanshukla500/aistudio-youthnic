@@ -173,7 +173,7 @@ export function missingRequiredReferenceLabels(references: ReferenceLike[], garm
 
 export function roleLabel(role: string) {
   const labels: Record<string, string> = {
-    model_identity: "MODEL FACE REFERENCE - exact face, hair, skin tone and body-proportion truth; any garment or background in this image is unrelated and must not influence the SKU or set",
+    model_identity: "MODEL FACE REFERENCE - exact face, hair, skin tone and body-proportion truth; any garment, pose, or object in the hands, and any background, must not influence the SKU or set",
     front: "FRONT PRODUCT - authoritative front garment design and construction ONLY. Pre-shoot background, walls, arches, urns, pots, plants, floor, and location in this image MUST BE 100% DISCARDED; never reproduce them. Any face or body in this photo is not the model",
     back: "BACK PRODUCT - authoritative rear garment construction and design ONLY. Pre-shoot background, walls, and setting MUST BE 100% DISCARDED",
     fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority UPPER-garment texture, weave, print and embroidery truth; not bottom-wear print unless this image itself shows the trousers/skirt; background must be ignored",
@@ -188,7 +188,7 @@ export function roleLabel(role: string) {
     saree_blouse_front: "SAREE BLOUSE FRONT - authoritative blouse colour, fabric, front construction, neckline and sleeves; background ignored",
     saree_blouse_back_piece: "SAREE BLOUSE BACK OR UNSTITCHED PIECE - authoritative back construction, ties, closures, or proof that only an unstitched blouse piece exists; background ignored",
     approved_pose: "APPROVED POSE 1 - scene, lighting, styling, and shoot-continuity anchor only. Original product references always outrank its garment. The face is the MODEL FACE REFERENCE when one is attached, otherwise the STYLE REFERENCE. Never a different person",
-    style_reference: "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, props, composition, mood, and lighting on every pose, including the back view; never product identity or garment. The clothing/outfit in this image must be 100% DISCARDED; dress the model ONLY in the uploaded product. When a MODEL FACE REFERENCE is also attached, discard the face, hair, and body in this image too. When no MODEL FACE REFERENCE is attached, this image's face, hair, and body proportions are the model identity for all six poses",
+    style_reference: "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, props, composition, mood, and lighting on every pose, including the back view. Copy the room only: do not copy the pose or objects in the hands. The clothing in this image must be 100% DISCARDED; dress the model ONLY in the uploaded product. When a MODEL FACE REFERENCE is also attached, discard the face, hair, and body in this image too. When no MODEL FACE REFERENCE is attached, this image's face, hair, and body proportions are the model identity for all six poses",
   };
   return labels[role] || role.toUpperCase();
 }
