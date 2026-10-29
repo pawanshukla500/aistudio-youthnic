@@ -781,12 +781,12 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
         "no garment detail hidden by hands or hair",
       ],
       consistencyNotes: "Establish the model, face, hair, accessories, footwear, scene, lighting, and color-treatment anchor for poses 2-5",
-      description: "Straight-on full-body hero view with the complete product readable from head to hem.",
+      description: "Straight-on full-body living portrait with the complete product readable from head to hem.",
       cameraAngle: "Eye-level straight-on full-body",
       highlightedDetails: ["front construction", "overall silhouette", "complete outfit"],
       primaryReference: "front",
       purpose: "Primary e-commerce listing image",
-      prompt: "Create a straight-on full-body front hero image of a living photographed person. Show the complete outfit, preserving the authentic bottom wear silhouette (exact cut, volume, two distinct legs, pleating, and hem) plus the exact bottom-wear print and footwear, with weight in one hip, relaxed joints, living fabric drape, and a realistic natural expression (not a mannequin, stiff freeze, or forced smile).",
+      prompt: "Create a straight-on full-body front photograph of a living photographed person. Show the complete outfit, preserving the authentic bottom wear silhouette (exact cut, volume, two distinct legs, pleating, and hem) plus the exact bottom-wear print and footwear, with weight in one hip, relaxed joints, living fabric drape, and a realistic natural expression (not a mannequin, stiff freeze, or forced smile).",
       enabled: true,
     },
     {
@@ -1789,7 +1789,7 @@ In every family the pose may only change body position, angle, framing and expre
 
 Create exactly six product-specific camera setups in one coherent commercial coverage sequence with MANDATORY PHYSICAL VARIATION across all 6 slots, in this order and with these ids: full_front, angled, back, creative, closeup, showcase. They are NOT repeats of each other. Marketplace listing contract: MODEL FACE REFERENCE locks the face; STYLE REFERENCE locks hair/makeup mood, jewellery taste, and the backdrop/room/lighting for all six poses; PRODUCT PHOTOS lock 100% garment DNA. Every pose must look like a natural photographed person — weight-bearing, relaxed joints, slight asymmetry — never a mannequin or stiff catalog freeze. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints. Every individual prompt must (1) describe THIS product's exact colour, fabric, construction and selling details from the product references, and (2) direct the model's stance, angle, action, and expression, while creativeDirection must rebuild the photoshoot backdrop, wall, floor, lighting and props from the STYLE REFERENCE only.
 
-- full_front: square, unobstructed head-to-toe hero of a living photographed person; establishes face/hair/styling/footwear/scene/lighting anchor with weight in one hip, relaxed knees, living fabric drape, and an authentic gentle smile or relaxed glance. Never describe a mannequin, T-pose, stiff freeze, or plastic fashion-doll body.
+- full_front: square, unobstructed head-to-toe photograph of a living person; establishes face/hair/styling/footwear/scene/lighting anchor with weight in one hip, relaxed knees, living fabric drape, and an authentic gentle smile or relaxed glance. Never describe a mannequin, T-pose, stiff freeze, catalog-hero freeze, or plastic fashion-doll body.
 - angled: mandatory 35 to 45 degree intentional turn of torso and hips with one foot stepped forward, clearly revealing side construction, garment depth, side seam, and sleeve silhouette. Must be visibly turned away from flat frontal — NEVER a static frontal standing repeat! Natural, effortless glance following the angle with an authentic soft smile or composed editorial look (never an exaggerated or frozen stock smile).
 - back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees. For outfits with a dupatta or shawl, the dupatta must be draped forward over arms or front so the rear garment (neckline, back panel, embroidery, hem) is 100% unobstructed and visible. Hair swept forward or in an updo. The studio set, backdrop wall, lighting, and model identity must strictly match the other poses.
 - creative:
@@ -1842,7 +1842,7 @@ export const CONSISTENCY_RULES = [
   "Original product references always outrank generated images and style references.",
   "From the reference image, take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction. The product itself must stay based on uploaded product images and must not be redesigned.",
   "Lock and hold identical photoshoot backdrop, wall finish, flooring, lighting, footwear, jewellery, ornaments, accessories, styling, makeup, hair, product layout, and product design across all six images.",
-  "Every shoot must execute a distinct 6-pose plan with clear physical variation across all 6 slots: full front hero, 35-to-45 degree turn (never flat frontal), true rear view (hair and dupatta forward), dynamic walking movement or seated editorial (never static standing), tight product-detail close-up, and unique feature showcase.",
+  "Every shoot must execute a distinct 6-pose plan with clear physical variation across all 6 slots: full front living portrait, 35-to-45 degree turn (never flat frontal), true rear view (hair and dupatta forward), dynamic walking movement or seated editorial (never static standing), tight product-detail close-up, and unique feature showcase.",
   "Model expressions and smiles must look natural, relaxed, and realistic with soft lips and calm warmth — strictly avoid artificial, forced, stiff, or frozen stock catalog smiles.",
   "If a MODEL FACE REFERENCE image was supplied, it is the exact, non-negotiable face and identity for the model in every pose, including pose 1 - reproduce it as closely as photographically possible and never substitute, average, or beautify a different face.",
   "Keep the same model face, skin tone, hair, body proportions, makeup, accessories, and footwear across all six poses.",
@@ -1890,7 +1890,8 @@ export const CONSISTENCY_RULES = [
 // the planner does not lock a product-studio room from earlier product ranks.
 // v29 stops cached pose-plan copy from telling later frames to rebuild Pose 1's
 // room when a style-set is present.
-export const ANALYSIS_VERSION = "generation-session-v29-listing-identity-pose1-subordinate";
+// v30 stops Pose 1 analysis/default copy from asking for a catalog-hero freeze.
+export const ANALYSIS_VERSION = "generation-session-v30-listing-identity-living-pose1";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

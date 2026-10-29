@@ -10,6 +10,7 @@ import {
   compactFullPromptSafely,
   composeGenerationPrompt,
   listingIdentityPromptOrder,
+  softenPose1HeroCopy,
   styleSetOwnsListingRoom,
 } from "../lib/generationPrompt.ts";
 import { normalizeAnalysis } from "../lib/profiles.ts";
@@ -262,6 +263,45 @@ Deno.test("cached pose-plan copy cannot tell a style-set later frame to rebuild 
   assertEquals(prompt.includes("identical studio set, wall color, and lighting established in Pose 1"), false);
   assertEquals(prompt.includes("identical studio set/backdrop wall from Pose 1"), false);
   assertStringIncludes(prompt, "never as a face or set source");
+});
+
+Deno.test("Pose 1 copy is a living portrait, never a catalog-hero freeze", () => {
+  assertEquals(
+    softenPose1HeroCopy("Create a straight-on full-body front hero image of a living photographed person."),
+    "Create a straight-on full-body front photograph of a living photographed person.",
+  );
+  const prompt = composeGenerationPrompt({
+    skuName: "LIVING-POSE-1",
+    productDetails: "",
+    pose: {
+      id: "full_front",
+      title: "Full Front Product View",
+      poseNumber: 1,
+      description: "Straight-on full-body hero view with the complete product readable from head to hem.",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "Square to camera with weight in one hip",
+      handPlacement: "relaxed",
+      expression: "natural",
+      highlightedDetails: ["front construction"],
+      productVisibilityRules: [],
+      purpose: "listing",
+      consistencyNotes: "",
+      prompt: "Create a straight-on full-body front hero image of a living photographed person.",
+      enabled: true,
+    } as any,
+    session: { productIdentity: { garmentFamily: "kurta_or_kurti_set" } },
+    references: [{ role: "front" }, { role: "style_reference" }, { role: "model_identity" }],
+  });
+  assertStringIncludes(prompt, "CURRENT FRAME (POSE 1 - LIVING FULL-FRONT)");
+  assertStringIncludes(prompt, "straight-on full-length living portrait establishing the outfit from head to hem");
+  assertStringIncludes(prompt, "Square-on full-length living portrait with weight in one hip");
+  assertStringIncludes(prompt, "straight-on full-body front photograph of a living photographed person");
+  assertStringIncludes(prompt, "full-body living portrait with the complete product readable from head to hem");
+  assertEquals(prompt.includes("straight-on full-length hero"), false);
+  assertEquals(prompt.includes("Square-on full-length hero"), false);
+  assertEquals(prompt.includes("front hero image"), false);
+  assertEquals(prompt.includes("full-body hero view"), false);
 });
 
 Deno.test("stored Pose 1 set-continuity rules cannot override a style-set later frame", () => {

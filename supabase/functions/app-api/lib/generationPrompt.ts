@@ -53,6 +53,20 @@ export function styleSetOwnsListingRoom(text: string): string {
     .replace(/\bSame model identity, styling, footwear, set, backdrop and lighting as Pose 1\b/gi, "Same model identity, styling, and footwear as Pose 1; STYLE REFERENCE room");
 }
 
+/** Cached Pose 1 plans still ask for a catalog “hero”. GPT Image 2 reads that as a stiff freeze. */
+export function softenPose1HeroCopy(text: string): string {
+  return String(text ?? "")
+    .replace(/\bstraight-on full-body front hero image\b/gi, "straight-on full-body front photograph")
+    .replace(/\bstraight-on full-body hero view\b/gi, "straight-on full-body living portrait")
+    .replace(/\bstraight-on full-length hero\b/gi, "straight-on full-length living portrait")
+    .replace(/\bsquare-on full-length hero\b/gi, "square-on full-length living portrait")
+    .replace(/\bfull-body front hero image\b/gi, "full-body front photograph")
+    .replace(/\bfront hero image\b/gi, "front living portrait")
+    .replace(/\bhero image of a living photographed person\b/gi, "photograph of a living photographed person")
+    .replace(/\bhead-to-toe hero\b/gi, "head-to-toe living portrait")
+    .replace(/\bfull-length hero\b/gi, "full-length living portrait");
+}
+
 /** Face and style-set precede product photos so GPT Image 2 and product-truth analysis do not copy a pre-shoot studio. Same-rank items keep upload order. */
 export function listingIdentityPromptOrder<T extends PromptReference>(references: T[], isTrueBack = false): T[] {
   return references
@@ -625,7 +639,7 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
   const lines = [
     "6-POSE PLAN VARIATION DIRECTIVE (MANDATORY PHYSICAL DIVERGENCE):",
     "Every shoot executes a distinct 6-pose plan where each frame has a unique physical geometry and purpose. Under NO circumstances should any frame repeat a static frontal standing pose:",
-    "- Pose 1 (full_front): Square-on full-length hero with weight in one hip, relaxed knees, and a living stance, showing the complete silhouette. Never a mannequin or stiff catalog freeze.",
+    "- Pose 1 (full_front): Square-on full-length living portrait with weight in one hip, relaxed knees, and a living stance, showing the complete silhouette. Never a mannequin or stiff catalog freeze.",
     "- Pose 2 (angled): Mandatory 35-to-45 degree physical turn of torso and hips with one foot forward; strictly prohibit flat frontal standing or repeating Pose 1.",
     "- Pose 3 (back): 180° true full rear view, shoulders and hips facing fully away; hair and dupatta swept forward for 100% unobstructed rear view.",
     "- Pose 4 (creative): Active dynamic walking stride across the room with natural fabric flutter or elegant seated editorial pose on a studio bench/step (if demanded); strictly prohibit static standing in place.",
@@ -636,7 +650,7 @@ function poseVariationDirective(pose: StudioPose & { poseNumber: number }, isSit
   const livingLock = " Same living photographed person, same style-set room, and exact uploaded product DNA. Never a mannequin, T-pose, or stiff freeze.";
   if (isPose1) {
     lines.push(
-      "CURRENT FRAME (POSE 1 - LIVING FULL-FRONT): Grounded, weight-bearing, straight-on full-length hero establishing the outfit from head to hem. Slight hip/shoulder offset, relaxed knees and elbows, living fabric drape, and a natural gentle smile or calm composure. Never a mannequin, T-pose, or stiff catalog freeze.",
+      "CURRENT FRAME (POSE 1 - LIVING FULL-FRONT): Grounded, weight-bearing, straight-on full-length living portrait establishing the outfit from head to hem. Slight hip/shoulder offset, relaxed knees and elbows, living fabric drape, and a natural gentle smile or calm composure. Never a mannequin, T-pose, or stiff catalog freeze.",
     );
   } else if (isPose2) {
     lines.push(
@@ -822,11 +836,17 @@ export function composeGenerationPrompt(args: {
   const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
-  const posePrompt = hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.prompt || "")) : String(args.pose.prompt || "");
+  const isPose1 = args.pose.id === "full_front" || args.pose.poseNumber === 1;
+  let posePrompt = hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.prompt || "")) : String(args.pose.prompt || "");
+  let poseDescription = String(args.pose.description || "");
   const poseConsistency = hasStyleReference ? styleSetOwnsListingRoom(String(args.pose.consistencyNotes || "")) : String(args.pose.consistencyNotes || "");
   const poseVisibility = hasStyleReference
     ? boundedStrings(args.pose.productVisibilityRules, 12, 260).map(styleSetOwnsListingRoom)
     : boundedStrings(args.pose.productVisibilityRules, 12, 260);
+  if (isPose1) {
+    posePrompt = softenPose1HeroCopy(posePrompt);
+    poseDescription = softenPose1HeroCopy(poseDescription);
+  }
   const promptRules = hasStyleReference
     ? rules.map((rule) =>
       /identical studio backdrop wall color.*established in Pose 1/i.test(rule)
@@ -1055,7 +1075,7 @@ ${allowedDelta.map((value) => `- ${value}`).join("\n")}
 
 POSE REQUIREMENT:
 ${poseVariationDirective(args.pose, isSittingDemanded)}
-Description: ${boundedText(args.pose.description, 600)}
+Description: ${boundedText(poseDescription, 600)}
 Details to highlight: ${highlightedDetails}
 Visibility rules: ${visibilityRules}
 Purpose: ${boundedText(args.pose.purpose, 420)}

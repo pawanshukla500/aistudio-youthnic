@@ -7,6 +7,7 @@ import {
   ANALYSIS_VERSION,
   assertSareeGenerationReady,
   buildCombinedAnalysisPrompt,
+  getPoseSlots,
   CLOSEUP_PRODUCT_DETAIL,
   hasRecordedBottomWear,
   isFarshiBottomWear,
@@ -61,7 +62,7 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v29-listing-identity-pose1-subordinate");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v30-listing-identity-living-pose1");
   const prompt = buildCombinedAnalysisPrompt({
     skuName: "LISTING-IDENTITY",
     category: "kurta set",
@@ -71,6 +72,10 @@ Deno.test("analysis version invalidates cached analyses without rear evidence pr
     referenceManifest: [{ number: 1, role: "front" }],
   });
   assertStringIncludes(prompt, "living photographed person");
+  assertStringIncludes(prompt, "head-to-toe photograph of a living person");
+  assertStringIncludes(prompt, "catalog-hero freeze");
+  assertEquals(/head-to-toe hero/i.test(prompt), false);
+  assertEquals(/front hero image/i.test(prompt), false);
   assertEquals(/catalog stance|catalog composure/i.test(prompt), false);
   assertEquals(
     prompt.indexOf("LISTING IDENTITY LOCK") < prompt.indexOf("REFERENCE AUTHORITY"),
@@ -80,6 +85,10 @@ Deno.test("analysis version invalidates cached analyses without rear evidence pr
     prompt.indexOf("SCENE AUTHORITY:") < prompt.indexOf("PRINT AND EMBROIDERY GEOMETRY"),
     true,
   );
+  const pose1 = getPoseSlots({ productIdentity: { garmentFamily: "kurta_or_kurti_set" } })[0];
+  assertEquals(pose1.id, "full_front");
+  assertStringIncludes(pose1.prompt, "front photograph of a living photographed person");
+  assertEquals(/hero image|full-body hero view/i.test(`${pose1.prompt} ${pose1.description}`), false);
 });
 
 Deno.test("analysis prompt distinguishes farshi from palazzo and does not take bottom print from upper fabric close-ups", () => {
