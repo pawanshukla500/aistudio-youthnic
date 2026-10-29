@@ -345,7 +345,7 @@ export function formatGenerationMemoryBrief(args: {
   }
   if (approved.length || memory.approvedAssets.length) {
     const poses = memory.approvedAssets.map((asset) => `pose ${asset.poseIndex}`).join(", ");
-    lines.push(`Previous approved output in this shoot: ${approved.join(", ") || "approved_pose"}${poses ? ` (${poses})` : ""}. Use it for set continuity only, never as the face or the garment.`);
+    lines.push(`Previous approved output in this shoot: ${approved.join(", ") || "approved_pose"}${poses ? ` (${poses})` : ""}. Use it for set continuity only, never as the face, the pose, the objects in the hands, or the garment.`);
   }
   for (const detail of memory.preservedDetails.slice(0, 6)) {
     lines.push(detail);

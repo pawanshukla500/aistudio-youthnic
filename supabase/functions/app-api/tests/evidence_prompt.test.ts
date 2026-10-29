@@ -180,6 +180,8 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   assertStringIncludes(prompt, "SET & BACKDROP HARD LOCK TO APPROVED POSE 1");
   assertStringIncludes(prompt, "ZERO NEW PROPS");
   assertStringIncludes(prompt, "glances back over her shoulder");
+  assertStringIncludes(prompt, "Copy the room, not its pose or objects in the hands.");
+  assertStringIncludes(prompt, "APPROVED POSE 1 is the room only");
 });
 
 Deno.test("a saree prompt drops style-photo region evidence even when analysis was not normalized", () => {
@@ -968,6 +970,7 @@ Deno.test("composeGenerationPrompt locks style-reference jewellery and dual-mode
   assertStringIncludes(memoryPrompt, "GENERATION MEMORY (DO NOT FORGET)");
   assertStringIncludes(memoryPrompt, "Product images (SKU/garment truth only): front, back");
   assertStringIncludes(memoryPrompt, "Style reference remains set/backdrop authority");
+  assertStringIncludes(memoryPrompt, "Do not copy the style or Pose 1 stance, or handheld props.");
 
   const padded = productDetail.replace(
     "Create ONE real-camera fashion e-commerce photograph",
