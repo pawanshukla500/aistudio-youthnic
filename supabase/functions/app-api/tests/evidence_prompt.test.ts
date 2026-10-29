@@ -813,6 +813,44 @@ Deno.test("composeGenerationPrompt enforces seated editorial pose for Pose 4 whe
   assertEquals(promptWithoutSitting.includes("STYLE REFERENCE SITTING OVERRIDE"), false);
 });
 
+Deno.test("composeGenerationPrompt keeps pose 1 a front hero when the plan copied a sit", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "RAMAN-TEAL",
+    productDetails: "Teal bandhani kurti",
+    pose: {
+      id: "full_front",
+      title: "Seated hero",
+      poseNumber: 1,
+      description: "Sit on the floor like the style photo",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "Seated on the floor",
+      handPlacement: "relaxed",
+      expression: "calm",
+      highlightedDetails: ["gold hem"],
+      productVisibilityRules: ["full garment visible"],
+      purpose: "hero",
+      consistencyNotes: "locked",
+      prompt: "Copy the seated style photo.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "teal" },
+      creativeDirection: {
+        seatedPoseRequired: "yes",
+        seatedPoseReason: "style reference model is seated on a stone plinth",
+      },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(prompt, "POSE CATEGORY RULES (FRONT):");
+  assertStringIncludes(prompt, "FRONT HERO POSE:");
+  assertEquals(prompt.includes("POSE CATEGORY RULES (SITTING):"), false);
+  assertEquals(prompt.includes("SEATED / SITTING EDITORIAL POSE:"), false);
+  assertEquals(prompt.includes("Sit on the floor"), false);
+  assertEquals(prompt.includes("Seated hero"), false);
+});
+
 Deno.test("composeGenerationPrompt seats pose 4 from seatedPoseRequired even when pose text is walking", () => {
   const prompt = composeGenerationPrompt({
     skuName: "SEATED-FLAG-SET",
@@ -893,9 +931,12 @@ Deno.test("composeGenerationPrompt keeps pose 4 standing when only the style pho
         jewellery: "small studs",
         ornaments: "none",
         makeup: "natural",
-        hair: "side braid",
+        hair: "side braid. She is seated on the floor.",
         stylingNotes: "Sit like the reference. Keep the choker.",
         themeInterpretation: "festive teal",
+      },
+      modelIdentity: {
+        face: "Seated woman in sunglasses with a side braid. She is walking toward the chair.",
       },
     },
     references: [{ role: "front" }, { role: "style_reference" }],
@@ -909,10 +950,15 @@ Deno.test("composeGenerationPrompt keeps pose 4 standing when only the style pho
   assertStringIncludes(prompt, "Green wall stays.");
   assertStringIncludes(prompt, "gold hem");
   assertStringIncludes(prompt, "Keep the choker.");
+  assertStringIncludes(prompt, "side braid");
+  assertStringIncludes(prompt, "sunglasses");
   assertStringIncludes(prompt, "Pose 4: Catalog stance");
+  assertEquals(prompt.includes("Seated woman"), false);
+  assertEquals(prompt.includes("She is walking"), false);
   assertStringIncludes(prompt, "Eye-level catalog angle.");
   assertEquals(prompt.includes("SEATED EDITORIAL POSE REQUIREMENT"), false);
   assertEquals(prompt.includes("Seated on the floor"), false);
+  assertEquals(prompt.toLowerCase().includes("seated on the floor"), false);
   assertEquals(prompt.includes("Sit on the rug"), false);
   assertEquals(prompt.includes("while seated"), false);
   assertEquals(prompt.includes("sparkler"), false);

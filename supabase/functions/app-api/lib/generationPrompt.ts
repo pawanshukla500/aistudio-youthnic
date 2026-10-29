@@ -776,10 +776,35 @@ function poseListItem(value: unknown, sitting: boolean): string {
   return poseInstructionText(value, sitting, "");
 }
 
-function sanitizeIdentityText(model: JsonRecord): JsonRecord {
+const IDENTITY_FACE_PATTERN = /\b(?:eyes?|sunglass(?:es)?|shades|cover(?:ed|ing)?|braid|jaw|nose|lips?|hair|skin|face)\b/i;
+
+function withoutCopiedPoseInIdentity(value: string, sitting: boolean): string {
+  const dropSitting = !sitting;
+  const poseLike = (part: string) => UNPLANTED_POSE_PATTERN.test(part)
+    || HELD_OBJECT_PATTERN.test(part)
+    || (dropSitting && COPIED_SITTING_PATTERN.test(part));
+  if (!poseLike(value)) return value;
+  const kept = value.split(/(?<=[.!;])\s+/).map((part) => {
+    const clause = part.trim();
+    if (!clause || !poseLike(clause)) return clause;
+    if (!IDENTITY_FACE_PATTERN.test(clause)) return "";
+    const text = (dropSitting ? clause.replace(COPIED_SITTING_PATTERN, "") : clause)
+      .replace(UNPLANTED_POSE_PATTERN, "")
+      .replace(HELD_OBJECT_PATTERN, "")
+      .replace(/\s{2,}/g, " ")
+      .replace(/\s+([,.;])/g, "$1")
+      .trim();
+    return text;
+  }).filter(Boolean);
+  return kept.join(" ").trim() || "Eyes stay as the identity photo shows them, including a cover.";
+}
+
+function sanitizeIdentityText(model: JsonRecord, sitting: boolean): JsonRecord {
   const output: JsonRecord = {};
   for (const [key, value] of Object.entries(model)) {
-    output[key] = typeof value === "string" ? withoutInventedCatchlights(value) : value;
+    output[key] = typeof value === "string"
+      ? withoutCopiedPoseInIdentity(withoutInventedCatchlights(value), sitting)
+      : value;
   }
   return output;
 }
@@ -915,7 +940,7 @@ export function composeGenerationPrompt(args: {
       : productCore(productForPrompt, bottomWear.includesBottomWear),
     { maxString: 360, maxItems: 16, maxKeys: 32 },
   );
-  const modelJson = compactJson(sanitizeIdentityText(model), { maxString: 500, maxItems: 16, maxKeys: 32 });
+  const modelJson = compactJson(sanitizeIdentityText(model, isSittingDemanded), { maxString: 500, maxItems: 16, maxKeys: 32 });
   const showcaseIntent = effectiveShowcaseIntent({ creative: directedCreative, family: poseFamily, includesBottomWear: bottomWear.includesBottomWear });
   const showcaseShot = effectiveShowcaseShot(directedCreative, { includesBottomWear: bottomWear.includesBottomWear });
   const creativeForPrompt: JsonRecord = { ...directedCreative, showcaseIntent };
@@ -1024,7 +1049,18 @@ export function composeGenerationPrompt(args: {
           // planner text must not select the 90-degree profile with a staggered stance.
           : (args.pose.poseNumber === 2 || args.pose.id === "angled")
             ? "angled"
-            : detectPoseCategory(args.pose.id + " " + (args.pose.prompt || "") + " " + (args.pose.description || "") + " " + (args.pose.bodyPosition || ""));
+            // Pose 1 is the listing hero. A copied sit or the word "side" must not turn it into a seated frame or a 90-degree profile.
+            : (args.pose.poseNumber === 1 || args.pose.id === "full_front")
+              ? "front"
+              // Pose 5 is a craft crop. Sitting or walking words in the plan must not replace that crop with a seated or striding category.
+              : (args.pose.poseNumber === 5 || args.pose.id === "closeup")
+                ? "playful"
+                : detectPoseCategory([
+                    args.pose.id,
+                    poseDescription,
+                    posePrompt,
+                    catalogPoseText(args.pose.bodyPosition, plantedStance, isSittingDemanded),
+                  ].join(" "));
   const categoryRules = poseCategoryRules(poseCategory);
   // Compaction keeps the first 1,400 characters of this block. The current
   // frame and the seated rules have to lead, or a long six-pose summary
@@ -1173,11 +1209,11 @@ ${hasApprovedAnchor
   : "- Maintain a single, consistent studio set, wall finish, flooring, and lighting setup across all poses."}
 
 ${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in every frame:
-- Footwear: ${boundedText(withoutHeldObjectClauses(String(styling.footwear ?? "")), 360)}
-- Jewellery: ${boundedText(withoutHeldObjectClauses(String(styling.jewellery ?? "")), 360)}
-- Ornaments and accessories: ${boundedText(withoutHeldObjectClauses(String(styling.ornaments ?? "")), 360)}
-- Makeup: ${boundedText(withoutHeldObjectClauses(String(styling.makeup ?? "")), 360)}
-- Hair: ${boundedText(withoutHeldObjectClauses(String(styling.hair ?? "")), 360)}
+- Footwear: ${boundedText(poseInstructionText(styling.footwear, isSittingDemanded, ""), 360)}
+- Jewellery: ${boundedText(poseInstructionText(styling.jewellery, isSittingDemanded, ""), 360)}
+- Ornaments and accessories: ${boundedText(poseInstructionText(styling.ornaments, isSittingDemanded, ""), 360)}
+- Makeup: ${boundedText(poseInstructionText(styling.makeup, isSittingDemanded, ""), 360)}
+- Hair: ${boundedText(poseInstructionText(styling.hair, isSittingDemanded, ""), 360)}
 ${stylingNotes ? `- Stylist notes: ${boundedText(stylingNotes, 600)}` : ""}
 ${themeInterpretation ? `- Theme being served: ${boundedText(themeInterpretation, 600)}` : ""}
 - Style the model with exactly these pieces - the same metal, the same count, the same placement in every frame. Do not add a necklace, bangle, ring, belt, bag, hair ornament or any other accessory this plan does not list, and do not drop one it does.
