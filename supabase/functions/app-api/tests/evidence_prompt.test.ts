@@ -147,6 +147,17 @@ Deno.test("listing identity prompt order puts face and style-set before product 
     ], false).map((reference) => reference.role),
     ["model_identity", "style_reference", "fabric_pattern", "back"],
   );
+  // Same-rank style-set photos keep the order they were uploaded, not hash/sort shuffle.
+  assertEquals(
+    listingIdentityPromptOrder([
+      { role: "style_reference", id: "c" },
+      { role: "front", id: "front" },
+      { role: "style_reference", id: "a" },
+      { role: "style_reference", id: "b" },
+      { role: "model_identity", id: "model" },
+    ], false).map((reference) => reference.id),
+    ["model", "c", "a", "b", "front"],
+  );
 });
 
 Deno.test("a true-back prompt uses only the direct rear image and never leaks a front-only lace claim", () => {
@@ -189,6 +200,11 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   assertStringIncludes(prompt, "IMAGE 3: APPROVED POSE 1");
   assertStringIncludes(prompt, "Rebuild the STYLE REFERENCE room, not the rear product's pre-shoot studio");
   assertStringIncludes(prompt, "LISTING AUTHORITY - SAME PERSON, SAME SET, EXACT PRODUCT DNA IN ALL SIX POSES:");
+  assertEquals(
+    prompt.indexOf("LISTING AUTHORITY - SAME PERSON, SAME SET, EXACT PRODUCT DNA IN ALL SIX POSES:")
+      < prompt.indexOf("EDIT GOAL:"),
+    true,
+  );
   assertStringIncludes(prompt, "rear-plain-marker");
   assertEquals(prompt.includes("front-only-lace-marker"), false);
   assertEquals(prompt.includes("front-lace-construction-marker"), false);
@@ -1053,6 +1069,11 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   assertStringIncludes(pose2Prompt, "from the reference image (style reference / model reference), take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction");
   assertStringIncludes(pose2Prompt, "The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows");
   assertStringIncludes(pose2Prompt, "LISTING AUTHORITY - SAME PERSON, SAME SET, EXACT PRODUCT DNA IN ALL SIX POSES:");
+  assertEquals(
+    pose2Prompt.indexOf("LISTING AUTHORITY - SAME PERSON, SAME SET, EXACT PRODUCT DNA IN ALL SIX POSES:")
+      < pose2Prompt.indexOf("EDIT GOAL:"),
+    true,
+  );
   assertStringIncludes(pose2Prompt, "NATURAL LIVING POSE: the body occupies the room with weight in the feet");
   assertStringIncludes(pose2Prompt, "Apply that set and styling to every pose in this shoot");
 

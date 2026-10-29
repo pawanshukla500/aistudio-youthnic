@@ -43,11 +43,15 @@ function listingIdentityPromptRank(role: string, isTrueBack: boolean) {
   return 10;
 }
 
-/** Face and style-set precede product photos so GPT Image 2 and product-truth analysis do not copy a pre-shoot studio. */
+/** Face and style-set precede product photos so GPT Image 2 and product-truth analysis do not copy a pre-shoot studio. Same-rank items keep upload order. */
 export function listingIdentityPromptOrder<T extends PromptReference>(references: T[], isTrueBack = false): T[] {
-  return [...references].sort((left, right) =>
-    listingIdentityPromptRank(left.role, isTrueBack) - listingIdentityPromptRank(right.role, isTrueBack)
-  );
+  return references
+    .map((reference, index) => ({ reference, index }))
+    .sort((left, right) =>
+      listingIdentityPromptRank(left.reference.role, isTrueBack) - listingIdentityPromptRank(right.reference.role, isTrueBack)
+      || left.index - right.index
+    )
+    .map((entry) => entry.reference);
 }
 
 // OpenAI rejects image-edit prompts at 32,000 characters. Keep a meaningful
@@ -886,6 +890,8 @@ export function composeGenerationPrompt(args: {
 
   const prompt = `Create ONE real-camera fashion e-commerce photograph for ${boundedText(args.skuName, 160) || "this product"} that is indistinguishable from an unretouched frame of a professional catalog shoot.
 
+${listingAuthorityDirective(hasModelReference, hasStyleReference)}
+
 REFERENCE MANIFEST IN UPLOAD ORDER:
 ${manifest}
 ${generationMemory ? `
@@ -898,8 +904,6 @@ EDIT GOAL:
 Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${boundedText(args.pose.title, 160)}. The finished image must look like the same real professional photoshoot as every other frame in this set.
 CRITICAL PRODUCT INTEGRITY RULE: The product clothing (garment, fabric, colors, prints, embroidery, neckline, sleeves, and bottom wear) must be taken EXCLUSIVELY and EXACTLY from the UPLOADED PRODUCT reference images. The clothing/outfit worn by the person in the STYLE REFERENCE image is strictly ignored and 100% DISCARDED. Absolutely DO NOT copy, transfer, or blend the style reference image's garment onto the model. Dress the model ONLY in the uploaded product.
 Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE${hasApprovedAnchor ? " as already photographed in APPROVED POSE 1 - rebuild exactly the set Pose 1 shows, including in a back view" : " (if supplied)"} and the SCENE LOCK below - never a different or generic set. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
-
-${listingAuthorityDirective(hasModelReference, hasStyleReference)}
 
 ${sceneLock}
 
