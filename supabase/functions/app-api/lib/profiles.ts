@@ -256,14 +256,13 @@ const YES_DIRECTION_FLAG = /^(yes|true|required|1)$/i;
 const NO_DIRECTION_FLAG = /^(no|false|0)$/i;
 const SITTING_POSE_RE = /\b(sit|sits|sitting|seated)\b/i;
 
-const REFERENCE_PHOTO_REASON = /\b(?:style reference|model face|model photo|approved pose|reference photo|the photo|this photo|the image)\b/i;
 const EXPLICIT_SIT_REQUEST = /\b(?:buyer|customer|request(?:ed)?|ask(?:ed|s)?|product notes)\b/i;
 
-/** A cached plan can record "yes" because it is describing a reference photo. */
+/** A non-empty reason is a description of a photo unless it is an explicit request. */
 function stylePhotoSittingReason(value: unknown): boolean {
-  const text = String(value ?? "");
-  if (EXPLICIT_SIT_REQUEST.test(text)) return false;
-  return REFERENCE_PHOTO_REASON.test(text);
+  const text = String(value ?? "").trim();
+  if (!text || EXPLICIT_SIT_REQUEST.test(text)) return false;
+  return true;
 }
 const PRODUCT_DETAIL_CLOSEUP_RE =
   /\b(product[_\s-]?detail(?:[_\s-]?(?:first|only|crop))?|detail[_\s-]?(?:first|only|crop)|omit(?:ting)?(?: the)? face|face optional|without(?: a)?(?: full)? face|macro (?:product )?detail)\b/i;
@@ -339,14 +338,6 @@ export function effectiveShowcaseIntent(args: {
   return "full_length_silhouette";
 }
 
-function joinedCreativeText(creative: JsonRecord | undefined) {
-  if (!creative) return "";
-  return Object.values(creative)
-    .filter((value) => typeof value === "string" || typeof value === "boolean" || typeof value === "number")
-    .map((value) => String(value))
-    .join(" ");
-}
-
 function joinedPoseText(pose: {
   id?: string;
   title?: string;
@@ -420,22 +411,12 @@ export function isSeatedEditorialPoseDemanded(args: {
   stylingNotes?: string;
 }): boolean {
   const recorded = args.creative?.seatedPoseRequired ?? args.creative?.seated_pose_required;
-  const stylePhotoSat = stylePhotoSittingReason(args.creative?.seatedPoseReason ?? args.creative?.seated_pose_reason);
-  // A style photo of someone sitting is the room, not a request for pose 4 to sit.
-  if (isYesDirectionFlag(recorded) && !stylePhotoSat) return true;
+  const describedPhoto = stylePhotoSittingReason(args.creative?.seatedPoseReason ?? args.creative?.seated_pose_reason);
+  // A written description of the style photo is the room, not a request for pose 4 to sit.
+  if (isYesDirectionFlag(recorded) && !describedPhoto) return true;
   // User notes can still demand sitting even when analysis recorded "no".
   if (SITTING_POSE_RE.test(String(args.productDetails ?? ""))) return true;
-  if (stylePhotoSat) return false;
-  // An explicit "no" must win over leftover "seated" wording in seatedPoseReason or styling notes.
-  if (String(recorded ?? "").trim() && normalizeYesNoFlag(recorded) === "no") return false;
-  if (SITTING_POSE_RE.test(joinedPoseText(args.pose))) return true;
-  if (SITTING_POSE_RE.test(String(args.stylingNotes ?? ""))) return true;
-  const creative = args.creative && typeof args.creative === "object" ? { ...args.creative } : {};
-  delete creative.seatedPoseRequired;
-  delete creative.seated_pose_required;
-  delete creative.seatedPoseReason;
-  delete creative.seated_pose_reason;
-  return SITTING_POSE_RE.test(joinedCreativeText(creative));
+  return false;
 }
 
 export type PoseSlotContext = {
