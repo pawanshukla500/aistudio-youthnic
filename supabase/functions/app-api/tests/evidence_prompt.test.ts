@@ -1635,7 +1635,7 @@ Deno.test("a compacted pose block keeps the current frame and seated rules, and 
   const creativeDirection = {
     backgroundStyle: "floral wall, cane bench, basket",
     seatedPoseRequired: "yes",
-    seatedPoseReason: "style reference includes a cane bench",
+    seatedPoseReason: "buyer asked for a seated listing frame",
   };
   const liveRefs = [
     { role: "front" },

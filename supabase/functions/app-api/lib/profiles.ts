@@ -256,10 +256,14 @@ const YES_DIRECTION_FLAG = /^(yes|true|required|1)$/i;
 const NO_DIRECTION_FLAG = /^(no|false|0)$/i;
 const SITTING_POSE_RE = /\b(sit|sits|sitting|seated)\b/i;
 
-/** A cached plan can record "yes" only because the style photo shows a sit. */
+const REFERENCE_PHOTO_REASON = /\b(?:style reference|model face|model photo|approved pose|reference photo|the photo|this photo|the image)\b/i;
+const EXPLICIT_SIT_REQUEST = /\b(?:buyer|customer|request(?:ed)?|ask(?:ed|s)?|product notes)\b/i;
+
+/** A cached plan can record "yes" because it is describing a reference photo. */
 function stylePhotoSittingReason(value: unknown): boolean {
-  const text = String(value ?? "").replace(/\bnot\s+(?:seated|sitting|sit)\b/gi, "");
-  return /\bstyle reference\b/i.test(text) && SITTING_POSE_RE.test(text);
+  const text = String(value ?? "");
+  if (EXPLICIT_SIT_REQUEST.test(text)) return false;
+  return REFERENCE_PHOTO_REASON.test(text);
 }
 const PRODUCT_DETAIL_CLOSEUP_RE =
   /\b(product[_\s-]?detail(?:[_\s-]?(?:first|only|crop))?|detail[_\s-]?(?:first|only|crop)|omit(?:ting)?(?: the)? face|face optional|without(?: a)?(?: full)? face|macro (?:product )?detail)\b/i;
