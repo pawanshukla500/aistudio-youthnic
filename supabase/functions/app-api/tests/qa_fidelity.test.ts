@@ -442,7 +442,11 @@ Deno.test("later-pose QA does not lock the set to a drifted Pose 1 when a style 
   });
   assertStringIncludes(withStyle, "STYLE REFERENCE is the listing set");
   assertStringIncludes(withStyle, "even when APPROVED POSE 1 also copied that product studio");
+  assertStringIncludes(withStyle, "never the room and never garment identity");
+  assertStringIncludes(withStyle, "never to judge the face or the room");
   assertEquals(withStyle.includes("contradicts APPROVED POSE 1"), false);
+  assertEquals(withStyle.includes("model/styling/scene continuity"), false);
+  assertEquals(withStyle.includes("confirm scene, lighting, and styling continuity"), false);
 
   const withoutStyle = buildPoseQaPrompt({
     poseNumber: 2,
@@ -460,5 +464,6 @@ Deno.test("later-pose QA does not lock the set to a drifted Pose 1 when a style 
     referenceManifest: ["IMAGE 1: MODEL FACE REFERENCE", "IMAGE 2: APPROVED POSE 1"],
   });
   assertStringIncludes(withoutStyle, "contradicts APPROVED POSE 1");
+  assertStringIncludes(withoutStyle, "model/styling/scene continuity");
   assertEquals(withoutStyle.includes("STYLE REFERENCE is the listing set"), false);
 });
