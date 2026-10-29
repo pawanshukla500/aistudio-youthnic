@@ -338,12 +338,14 @@ export function formatGenerationMemoryBrief(args: {
   const lines: string[] = [];
   lines.push(`Product images (SKU/garment truth only): ${product.join(", ") || memory.productRoles.join(", ") || "none labeled in this request"}.`);
   lines.push(`Style reference (photoshoot set, backdrop, lighting, jewellery taste only): ${style.join(", ") || (memory.styleRoles.length ? `${memory.styleRoles.join(", ")} uploaded for this session` : "none")}.`);
-  if (model.length || memory.modelRoles.length) {
-    lines.push(`Model identity lock: ${model.join(", ") || memory.modelRoles.join(", ")}.`);
+  if (model.length) {
+    lines.push(`Model identity lock: ${model.join(", ")}. Ignore every other face, including the style reference and any approved pose.`);
+  } else if (style.length) {
+    lines.push("Face lock: the style reference, because no separate model photo is attached. Discard its clothing.");
   }
   if (approved.length || memory.approvedAssets.length) {
     const poses = memory.approvedAssets.map((asset) => `pose ${asset.poseIndex}`).join(", ");
-    lines.push(`Previous approved output in this shoot: ${approved.join(", ") || "approved_pose"}${poses ? ` (${poses})` : ""}. Use it for identity and set continuity, never as garment geometry.`);
+    lines.push(`Previous approved output in this shoot: ${approved.join(", ") || "approved_pose"}${poses ? ` (${poses})` : ""}. Use it for set continuity only, never as the face or the garment.`);
   }
   for (const detail of memory.preservedDetails.slice(0, 6)) {
     lines.push(detail);
@@ -488,7 +490,7 @@ export function extractLearnedPromptPatterns(args: {
     extracted.push(pattern(
       "pose",
       "pose-plan-6-variation-lock",
-      "Every shoot executes a 6-pose plan with physical variation: Pose 1 hero, Pose 2 35-to-45 degree turn, Pose 3 true rear view, Pose 4 active movement or seated, Pose 5 close-up detail, Pose 6 unique feature showcase. Never duplicate frontal standing.",
+      "Every shoot executes a 6-pose plan: Pose 1 hero, Pose 2 planted 35-to-45 degree turn, Pose 3 true rear view, Pose 4 natural editorial stance or seated, Pose 5 close-up, Pose 6 feature showcase. Never a walking stride or a duplicate frontal stance.",
       overallOutcome,
     ));
     extracted.push(pattern(
@@ -506,7 +508,7 @@ export function extractLearnedPromptPatterns(args: {
     extracted.push(pattern(
       "garment",
       "product-reference-sole-truth",
-      "Derive only photoshoot backdrop, model face/style guidance, pose inspiration, and framing from the style reference. The product cut, design, and bottom wear must remain 100% faithful to uploaded product images.",
+      "The style reference supplies the backdrop, and the face only when no separate model photo was uploaded. Discard its clothing, pose, and handheld props. Product cut, print, and bottom wear come only from the product photos.",
       overallOutcome,
     ));
   }
