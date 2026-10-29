@@ -392,6 +392,13 @@ export function resolveCloseupMode(args: {
   return CLOSEUP_FACE_AND_DETAIL;
 }
 
+/** "yes" only when the stored flag is an explicit sit, not a description of a reference photo. */
+export function recordedSeatedPoseDemand(creative: JsonRecord | undefined): "yes" | "no" {
+  const recorded = creative?.seatedPoseRequired ?? creative?.seated_pose_required;
+  const describedPhoto = stylePhotoSittingReason(creative?.seatedPoseReason ?? creative?.seated_pose_reason);
+  return isYesDirectionFlag(recorded) && !describedPhoto ? "yes" : "no";
+}
+
 export function isSeatedEditorialPoseDemanded(args: {
   pose?: {
     id?: string;
@@ -410,10 +417,8 @@ export function isSeatedEditorialPoseDemanded(args: {
   creative?: JsonRecord;
   stylingNotes?: string;
 }): boolean {
-  const recorded = args.creative?.seatedPoseRequired ?? args.creative?.seated_pose_required;
-  const describedPhoto = stylePhotoSittingReason(args.creative?.seatedPoseReason ?? args.creative?.seated_pose_reason);
   // A written description of the style photo is the room, not a request for pose 4 to sit.
-  if (isYesDirectionFlag(recorded) && !describedPhoto) return true;
+  if (recordedSeatedPoseDemand(args.creative) === "yes") return true;
   // User notes can still demand sitting even when analysis recorded "no".
   if (SITTING_POSE_RE.test(String(args.productDetails ?? ""))) return true;
   return false;

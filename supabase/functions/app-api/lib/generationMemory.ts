@@ -8,7 +8,7 @@
  * remains an audit ledger and is not accepted here.
  */
 
-import { effectiveShowcaseIntent, type JsonRecord } from "./profiles.ts";
+import { effectiveShowcaseIntent, recordedSeatedPoseDemand, type JsonRecord } from "./profiles.ts";
 import { detectGarmentPoseFamily, resolveBottomWearPresentation } from "./garmentPoses.ts";
 import { PRODUCT_REFERENCE_ROLES } from "./referencePolicy.ts";
 import { type PromptPatternKind } from "./promptPatterns.ts";
@@ -190,8 +190,10 @@ function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirect
     .filter(Boolean)
     .slice(0, 3);
   if (absences.length) details.push(`Do not invent: ${absences.join("; ")}`);
-  const seated = boundedText(creativeDirection.seatedPoseRequired ?? creativeDirection.seated_pose_required, 20);
-  if (seated) details.push(`Seated pose 4 required: ${seated}`);
+  const recordedSeat = creativeDirection.seatedPoseRequired ?? creativeDirection.seated_pose_required;
+  if (String(recordedSeat ?? "").trim()) {
+    details.push(`Seated pose 4 required: ${recordedSeatedPoseDemand(creativeDirection)}`);
+  }
   const closeupMode = boundedText(creativeDirection.closeupMode ?? creativeDirection.closeup_mode, 40);
   const hero = boundedText(creativeDirection.closeupHeroDetail ?? creativeDirection.closeup_hero_detail, 120);
   if (closeupMode) {

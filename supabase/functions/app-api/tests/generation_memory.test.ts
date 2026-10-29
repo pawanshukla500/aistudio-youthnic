@@ -58,6 +58,20 @@ Deno.test("generation memory labels product vs style and keeps approved outputs 
   assertEquals(brief.includes("Use it for identity"), false);
   assertStringIncludes(brief, "Do not copy the product-photo courtyard.");
   assertEquals(brief.includes("gold yoke embroidery"), true);
+  assertStringIncludes(brief, "Seated pose 4 required: yes");
+
+  const describedPhoto = formatGenerationMemoryBrief({
+    references: [{ role: "front" }, { role: "style_reference" }],
+    memory: buildGenerationMemory({
+      references: [{ role: "front" }, { role: "style_reference" }],
+      creativeDirection: {
+        seatedPoseRequired: "yes",
+        seatedPoseReason: "Seated on the floor leaning on the red chair",
+      },
+    }),
+  });
+  assertStringIncludes(describedPhoto, "Seated pose 4 required: no");
+  assertEquals(describedPhoto.includes("Seated pose 4 required: yes"), false);
 });
 
 Deno.test("clone memory keeps labeled references but drops prior generated outputs", () => {

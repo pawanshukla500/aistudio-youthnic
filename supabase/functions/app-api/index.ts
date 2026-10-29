@@ -15,6 +15,7 @@ import {
   mergeVariantColorways,
   normalizeAnalysis,
   normalizeStylingPlan,
+  recordedSeatedPoseDemand,
   parseJsonResponse,
   ACTIVE_GENERATION_JOB_STATUSES,
   REQUIRED_POSE_IDS,
@@ -2341,7 +2342,7 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   const learnedPatterns = extractLearnedPromptPatterns({
     category: String(sessionData.category || ""),
     hasStyleReference: (Array.isArray(sessionData.references) ? sessionData.references : []).some((entry) => String((entry as JsonRecord)?.role || "") === "style_reference"),
-    seatedPoseRequired: String((sessionData.creativeDirection as JsonRecord | undefined)?.seatedPoseRequired || ""),
+    seatedPoseRequired: recordedSeatedPoseDemand(jsonRecord(sessionData.creativeDirection)),
     closeupMode: String((sessionData.creativeDirection as JsonRecord | undefined)?.closeupMode || ""),
     // The frame that was actually generated, not the one originally planned: a
     // close-up collision widens it, and learning a framing that never shipped is

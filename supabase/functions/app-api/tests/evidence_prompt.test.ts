@@ -861,18 +861,18 @@ Deno.test("composeGenerationPrompt keeps pose 4 standing when only the style pho
     productDetails: "Teal bandhani kurti with white wide cuffed pants",
     pose: {
       id: "creative",
-      title: "Editorial",
+      title: "Seated floor lean",
       poseNumber: 4,
       description: "Floor sit copied from the style photo",
-      cameraAngle: "eye level",
-      framing: "full body",
+      cameraAngle: "Low angle of the seated model",
+      framing: "Full body seated on the floor. Green wall stays.",
       bodyPosition: "Seated on the floor leaning on the red chair",
       handPlacement: "one hand on the knee while seated",
       expression: "calm while seated",
-      highlightedDetails: ["gold hem"],
-      productVisibilityRules: ["full garment visible"],
-      purpose: "editorial",
-      consistencyNotes: "locked set",
+      highlightedDetails: ["gold hem", "sparkler"],
+      productVisibilityRules: ["full garment visible", "while seated"],
+      purpose: "Copy the style photo's floor sit",
+      consistencyNotes: "Keep the wide stance from the style photo",
       prompt: "Sit on the rug the way the style reference sits.",
       enabled: true,
     } as any,
@@ -888,6 +888,15 @@ Deno.test("composeGenerationPrompt keeps pose 4 standing when only the style pho
         seatedPoseRequired: "yes",
         seatedPoseReason: "style reference model is seated on a stone plinth",
       },
+      stylingPlan: {
+        footwear: "burgundy heels",
+        jewellery: "small studs",
+        ornaments: "none",
+        makeup: "natural",
+        hair: "side braid",
+        stylingNotes: "Sit like the reference. Keep the choker.",
+        themeInterpretation: "festive teal",
+      },
     },
     references: [{ role: "front" }, { role: "style_reference" }],
   });
@@ -897,10 +906,19 @@ Deno.test("composeGenerationPrompt keeps pose 4 standing when only the style pho
   assertStringIncludes(prompt, "POSE CATEGORY RULES (DYNAMIC):");
   assertStringIncludes(prompt, "Natural editorial stance. Both feet stay planted and close.");
   assertStringIncludes(prompt, "Floral wall stays.");
+  assertStringIncludes(prompt, "Green wall stays.");
+  assertStringIncludes(prompt, "gold hem");
+  assertStringIncludes(prompt, "Keep the choker.");
+  assertStringIncludes(prompt, "Pose 4: Catalog stance");
+  assertStringIncludes(prompt, "Eye-level catalog angle.");
   assertEquals(prompt.includes("SEATED EDITORIAL POSE REQUIREMENT"), false);
   assertEquals(prompt.includes("Seated on the floor"), false);
   assertEquals(prompt.includes("Sit on the rug"), false);
   assertEquals(prompt.includes("while seated"), false);
+  assertEquals(prompt.includes("sparkler"), false);
+  assertEquals(prompt.includes("wide stance"), false);
+  assertEquals(prompt.includes("floor sit"), false);
+  assertEquals(prompt.includes("Seated floor"), false);
 });
 
 Deno.test("composeGenerationPrompt locks style-reference jewellery and dual-mode pose 5", () => {

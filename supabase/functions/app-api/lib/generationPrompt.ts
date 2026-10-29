@@ -760,6 +760,22 @@ function withoutPoseOrHeldClauses(value: string, emptyFallback: string, dropSitt
   return kept.join(" ").trim() || emptyFallback;
 }
 
+function poseInstructionText(value: unknown, sitting: boolean, emptyFallback: string): string {
+  return withoutPoseOrHeldClauses(String(value ?? ""), emptyFallback, !sitting);
+}
+
+function poseTitleText(value: unknown, sitting: boolean): string {
+  const text = String(value ?? "");
+  const copiedPose = UNPLANTED_POSE_PATTERN.test(text)
+    || HELD_OBJECT_PATTERN.test(text)
+    || (!sitting && COPIED_SITTING_PATTERN.test(text));
+  return copiedPose ? "Catalog stance" : text;
+}
+
+function poseListItem(value: unknown, sitting: boolean): string {
+  return poseInstructionText(value, sitting, "");
+}
+
 function sanitizeIdentityText(model: JsonRecord): JsonRecord {
   const output: JsonRecord = {};
   for (const [key, value] of Object.entries(model)) {
@@ -931,7 +947,13 @@ export function composeGenerationPrompt(args: {
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
   const isCloseup = args.pose.id === "closeup";
-  const highlightedDetails = boundedStrings(args.pose.highlightedDetails, 12, 260).join(", ");
+  const highlightedDetails = boundedStrings(
+    (Array.isArray(args.pose.highlightedDetails) ? args.pose.highlightedDetails : [])
+      .map((item) => poseListItem(item, isSittingDemanded))
+      .filter(Boolean),
+    12,
+    260,
+  ).join(", ");
   const closeupMode = isCloseup ? resolveCloseupMode({ pose: args.pose, creative: directedCreative }) : "face_and_detail";
   const closeupHeroDetail = boundedText(directedCreative.closeupHeroDetail || directedCreative.closeup_hero_detail || highlightedDetails, 260);
   // Pose 5's own recorded subject, without the current pose's highlights as a
@@ -951,20 +973,37 @@ export function composeGenerationPrompt(args: {
       ? "The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face MUST match the MODEL FACE REFERENCE, or the STYLE REFERENCE when no separate model photo was uploaded. APPROVED POSE 1 is the room only: do not copy its pose or objects in the hands. Never substitute a different person or face."
       : "This frame is a PRODUCT-DETAIL close-up. Do not force a full beauty-face crop. If any portion of the face appears it MUST match the identity lock - same jawline, eyes, skin texture with visible pores, and makeup. Prefer filling the frame with the named product selling detail; omit or crop the face when a full face would make that detail too small to read.";
   const plantedStance = plantedPoseReplacement(args.pose, isSittingDemanded);
+  const poseTitle = boundedText(poseTitleText(args.pose.title, isSittingDemanded), 160);
   const poseDescription = boundedText(catalogPoseText(args.pose.description, plantedStance, isSittingDemanded), 600);
   const posePrompt = boundedText(catalogPoseText(args.pose.prompt, plantedStance, isSittingDemanded), 1_200);
+  const poseCamera = boundedText(poseInstructionText(args.pose.cameraAngle, isSittingDemanded, "Eye-level catalog angle."), 360);
+  const poseFraming = boundedText(poseInstructionText(args.pose.framing, isSittingDemanded, "Catalog framing."), 360);
+  const posePurpose = boundedText(poseInstructionText(args.pose.purpose, isSittingDemanded, "Show the garment clearly."), 420);
+  const poseConsistency = boundedText(poseInstructionText(args.pose.consistencyNotes, isSittingDemanded, "Same model, product, and backdrop as the other frames."), 600);
+  const stylingNotes = styling
+    ? poseInstructionText(styling.stylingNotes, isSittingDemanded, "")
+    : "";
+  const themeInterpretation = styling
+    ? poseInstructionText(styling.themeInterpretation, isSittingDemanded, "")
+    : "";
 
   const allowedDelta = [
     `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(catalogPoseText(args.pose.bodyPosition, plantedStance, isSittingDemanded), 360)}`,
-    `camera angle: ${boundedText(args.pose.cameraAngle, 360)}`,
-    `framing: ${boundedText(args.pose.framing, 360)}`,
+    `camera angle: ${poseCamera}`,
+    `framing: ${poseFraming}`,
     `expression: ${boundedText(catalogPoseText(args.pose.expression, CALM_EXPRESSION, isSittingDemanded), 360)}`,
   ];
   const correction = boundedText(args.correction, 1_200);
   const learnings = boundedText(args.learnings, 900);
   const fashionKnowledge = boundedText(args.fashionKnowledge, 700);
   const generationMemory = boundedText(args.generationMemory, 900);
-  const recordedVisibility = boundedStrings(args.pose.productVisibilityRules, 12, 260).join("; ");
+  const recordedVisibility = boundedStrings(
+    (Array.isArray(args.pose.productVisibilityRules) ? args.pose.productVisibilityRules : [])
+      .map((item) => poseListItem(item, isSittingDemanded))
+      .filter(Boolean),
+    12,
+    260,
+  ).join("; ");
   const visibilityRules = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference) === "farshi"
     ? reconcileFarshiVisibilityRules(recordedVisibility)
     : recordedVisibility;
@@ -1035,7 +1074,7 @@ ${generationMemory}
 ` : ""}
 
 EDIT GOAL:
-Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${boundedText(args.pose.title, 160)}. The finished image must look like the same real professional photoshoot as every other frame in this set.
+Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${poseTitle}. The finished image must look like the same real professional photoshoot as every other frame in this set.
 CRITICAL PRODUCT INTEGRITY RULE: The product clothing (garment, fabric, colors, prints, embroidery, neckline, sleeves, and bottom wear) must be taken EXCLUSIVELY and EXACTLY from the UPLOADED PRODUCT reference images. The clothing/outfit worn by the person in the STYLE REFERENCE image is strictly ignored and 100% DISCARDED. Absolutely DO NOT copy, transfer, or blend the style reference image's garment onto the model. Dress the model ONLY in the uploaded product.
 Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE${hasApprovedAnchor ? " as already photographed in APPROVED POSE 1 - rebuild exactly the set Pose 1 shows, including in a back view" : " (if supplied)"} and the SCENE LOCK below - never a different or generic set. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
 
@@ -1139,8 +1178,8 @@ ${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, ide
 - Ornaments and accessories: ${boundedText(withoutHeldObjectClauses(String(styling.ornaments ?? "")), 360)}
 - Makeup: ${boundedText(withoutHeldObjectClauses(String(styling.makeup ?? "")), 360)}
 - Hair: ${boundedText(withoutHeldObjectClauses(String(styling.hair ?? "")), 360)}
-${styling.stylingNotes ? `- Stylist notes: ${boundedText(withoutHeldObjectClauses(String(styling.stylingNotes)), 600)}` : ""}
-${styling.themeInterpretation ? `- Theme being served: ${boundedText(withoutHeldObjectClauses(String(styling.themeInterpretation)), 600)}` : ""}
+${stylingNotes ? `- Stylist notes: ${boundedText(stylingNotes, 600)}` : ""}
+${themeInterpretation ? `- Theme being served: ${boundedText(themeInterpretation, 600)}` : ""}
 - Style the model with exactly these pieces - the same metal, the same count, the same placement in every frame. Do not add a necklace, bangle, ring, belt, bag, hair ornament or any other accessory this plan does not list, and do not drop one it does.
 - JEWELLERY & ORNAMENT LOCK: Wear exactly the jewellery and ornaments in this plan. If the plan copied style-reference ornaments, keep those pieces identical. Do not invent competing necklaces, maang tikkas, extra bangles, or hair jewellery. Product-included jewellery from the product references outranks style-reference jewellery when both exist, and nothing in this plan may hide neckline or embroidery.
 - This is styling only. It never becomes part of the garment, never hides or replaces a garment detail, bottom wear or footwear shown in the product references, and never contradicts the placement or absence locks above.
@@ -1161,8 +1200,8 @@ ${poseRequirementLead}
 Description: ${poseDescription}
 Details to highlight: ${highlightedDetails}
 Visibility rules: ${visibilityRules}
-Purpose: ${boundedText(args.pose.purpose, 420)}
-Consistency notes: ${boundedText(args.pose.consistencyNotes, 600)}
+Purpose: ${posePurpose}
+Consistency notes: ${poseConsistency}
 GARMENT POSE GRAMMAR (${garmentPoseFamilyHeading(poseFamily)}) - body language and framing only; it never changes the garment's design, print, colour, fit or construction:
 ${garmentPoseDirection(poseFamily)}
 ${isShowcase
