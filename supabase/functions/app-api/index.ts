@@ -1924,7 +1924,7 @@ function normalizeImageSize(aspectRatio: string, imageSize: string, model: strin
   return is2k ? "2048x2048" : "1024x1024";
 }
 
-async function generateImage(args: { prompt: string; model: string; size: string; quality: string; references: LoadedReference[] }) {
+async function generateImage(args: { prompt: string; model: string; size: string; quality: string; references: LoadedReference[]; isTrueBack?: boolean }) {
   // composeGenerationPrompt enforces this too. Keep the provider boundary guarded
   // so future callers cannot send an oversized prompt and trigger a paid-job retry.
   assertGenerationPromptWithinLimit(args.prompt);
@@ -1942,8 +1942,11 @@ async function generateImage(args: { prompt: string; model: string; size: string
   // GPT Image 2 always processes reference images at high fidelity and rejects
   // input_fidelity. Older supported GPT Image edit models accept the hint.
   if (["gpt-image-1.5", "gpt-image-1"].includes(args.model)) body.append("input_fidelity", "high");
-  for (let index = 0; index < args.references.length; index += 1) {
-    const reference = args.references[index];
+  // Last-mile defense: FormData image[] order must match IMAGE N labels. Inferring
+  // true-back from a missing front photo would promote rear SKUs on close-ups.
+  const references = listingIdentityPromptOrder(args.references, Boolean(args.isTrueBack));
+  for (let index = 0; index < references.length; index += 1) {
+    const reference = references[index];
     body.append("image[]", reference.blob, `${String(index + 1).padStart(2, "0")}_${reference.role}_${reference.filename.replace(/[^a-zA-Z0-9._-]/g, "_")}`);
   }
   const isReve = args.model.startsWith("reve-");
@@ -3312,7 +3315,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     const generatedStarted = Date.now();
     const generated = await generateImage({
       prompt, model: imageGenerationRoute.model, size: normalizeImageSize(String(job.aspect_ratio || "3:4"), String(job.image_size || "2K"), imageGenerationRoute.model),
-      quality: String(job.quality || DEFAULT_IMAGE_QUALITY), references: selected,
+      quality: String(job.quality || DEFAULT_IMAGE_QUALITY), references: selected, isTrueBack: poseData.id === "back",
     });
     // Measured before QA runs, so it is the image provider's time alone.
     const generationMs = Date.now() - generatedStarted;

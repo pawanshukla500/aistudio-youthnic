@@ -25,3 +25,13 @@ Deno.test("CodeAnt Major: worker candidate loading forwards preferred showcase e
   assertEquals(source.includes('|| reference.role === "model_identity"'), true);
   assertEquals(source.includes('|| reference.role === "style_reference"'), true);
 });
+
+Deno.test("generateImage FormData follows listing identity order from the pose true-back flag", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  assertEquals(
+    source.includes("listingIdentityPromptOrder(args.references, Boolean(args.isTrueBack))"),
+    true,
+  );
+  assertEquals(source.includes("isTrueBack: poseData.id === \"back\""), true);
+  assertEquals(/hasFrontProduct/.test(source), false);
+});

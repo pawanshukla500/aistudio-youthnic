@@ -136,6 +136,17 @@ Deno.test("listing identity prompt order puts face and style-set before product 
     ], true).map((reference) => reference.role),
     ["model_identity", "style_reference", "back", "approved_pose"],
   );
+  // A close-up without a front photo is not a true-back frame. Rear SKU must
+  // not jump ahead of fabric/detail product photos.
+  assertEquals(
+    listingIdentityPromptOrder([
+      { role: "fabric_pattern" },
+      { role: "back" },
+      { role: "style_reference" },
+      { role: "model_identity" },
+    ], false).map((reference) => reference.role),
+    ["model_identity", "style_reference", "fabric_pattern", "back"],
+  );
 });
 
 Deno.test("a true-back prompt uses only the direct rear image and never leaks a front-only lace claim", () => {
