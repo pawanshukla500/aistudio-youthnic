@@ -666,7 +666,7 @@ function lockedDetailsDirective(): string {
 // Cached analyses can still ask for a stride. The 1,400-character pose block is
 // the first section compacted, so that corrective line disappears while the raw
 // prompt and body position survive. Rewrite only those pose fields.
-const UNPLANTED_POSE_PATTERN = /\b(?:walk(?:ing|s)?|strides?|mid-step|stepped|lifted foot|foot lifted|step(?:s|ping)? forward)\b/i;
+const UNPLANTED_POSE_PATTERN = /\b(?:walk(?:ing|s)?|strides?|mid-step|stepped|lifted foot|foot lifted|step(?:s|ping)? forward|feet (?:naturally )?spaced|feet separated|feet apart|shoulder-width|shoulder width|legs spread|wide stance)\b/i;
 
 function plantedPoseReplacement(pose: { id: string; poseNumber: number }, sitting: boolean): string {
   const poseNumber = pose.poseNumber;

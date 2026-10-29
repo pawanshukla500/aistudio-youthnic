@@ -1198,6 +1198,8 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   assertStringIncludes(pose6Prompt, "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE)");
   assertStringIncludes(pose6Prompt, "Framing, angle, and physical stance MUST visibly diverge from Pose 1");
   assertStringIncludes(pose6Prompt, "Same model face, same uploaded product, and the same style-reference backdrop as the other five frames.");
+  assertStringIncludes(pose6Prompt, "Planted weight shift. Both feet stay close.");
+  assertEquals(pose6Prompt.includes("feet separated"), false);
 });
 
 Deno.test("composeGenerationPrompt enforces anatomical integrity and eliminates extra hands", () => {

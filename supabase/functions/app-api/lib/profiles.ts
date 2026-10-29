@@ -772,7 +772,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       id: "full_front",
       title: "Full Front Product View",
       framing: "3:4 portrait, head-to-toe with footwear and garment hem fully inside frame",
-      bodyPosition: "Square to camera with balanced weight and a natural, relaxed catalog stance establishing full outfit silhouette from head to hem; feet naturally spaced, arms relaxed, never stiff or robotic",
+      bodyPosition: "Square to camera with balanced weight and a natural, relaxed catalog stance establishing full outfit silhouette from head to hem; both feet planted and close so a joined hem stays closed, arms relaxed, never stiff or robotic",
       handPlacement: "Hands relaxed beside the body without covering neckline, waist, pockets, or trims",
       expression: "Natural, warm, approachable expression with a soft, genuine smile or calm composed glance; never a forced, stiff, or artificial toothy smile",
       productVisibilityRules: [
