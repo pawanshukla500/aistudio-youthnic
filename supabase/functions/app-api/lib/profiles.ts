@@ -1667,7 +1667,7 @@ REFERENCE AUTHORITY (highest to lowest):
 6. MANNEQUIN / FLAT-LAY SHOT - on a mannequin or dress form, authoritative for worn shape, fit, proportion and drape; laid flat, authoritative for outline, construction, panel layout and length only, since flat cloth shows no worn drape.
 7. BOTTOM WEAR / FARSHI - when supplied, pixel-level authority for the trousers/skirt cut, volume, hem, color and print. Never copy upper-garment embroidery onto this panel.
 8. ADDITIONAL PRODUCT - another source of product truth, including supporting bottom-wear evidence.
-9. STYLE REFERENCE - creative direction only. From the style reference, take the photoshoot background/backdrop, pose inspiration, framing, and overall photography direction for all six poses. Take the model face from that image only when no MODEL FACE REFERENCE is supplied; when a MODEL FACE REFERENCE is supplied, discard the style-reference face, hair, and body. ABSOLUTE PROHIBITION ON COPYING THE PRODUCT FROM THE STYLE REFERENCE: The clothing, outfit, saree, dress, fabric, color, prints, or embroidery worn by the person in the style reference MUST BE 100% DISCARDED. Absolutely DO NOT copy, reproduce, or borrow the style reference's clothing. The product itself must stay based exclusively on uploaded product images and must not be redesigned. Never copy its garment, product color, bottoms, logos, or accessories.
+9. STYLE REFERENCE - creative direction only. From the style reference, take the photoshoot background/backdrop, framing, and lighting for all six poses. Do not copy that photo's pose, stance, or handheld props into any pose. Take the model face from that image only when no MODEL FACE REFERENCE is supplied; when a MODEL FACE REFERENCE is supplied, discard the style-reference face, hair, and body. ABSOLUTE PROHIBITION ON COPYING THE PRODUCT FROM THE STYLE REFERENCE: The clothing, outfit, saree, dress, fabric, color, prints, or embroidery worn by the person in the style reference MUST BE 100% DISCARDED. Absolutely DO NOT copy, reproduce, or borrow the style reference's clothing. The product itself must stay based exclusively on uploaded product images and must not be redesigned. Never copy its garment, product color, bottoms, logos, or accessories.
 
 Product references are frequently flat-lay, folded, pinned, or shot on a mannequin or dress form. Read the garment through that presentation: infer how each panel, hem, sleeve and closure behaves once it is worn on a live human body, and record that in the profile. The mannequin, dress form, hanger, clips, pins and the flat surface are photography apparatus, never part of the product - never describe them as garment features and never let them appear in the pose plan.
 
@@ -1850,7 +1850,7 @@ export const CONSISTENCY_RULES = [
   "Keep exact garment colors, fabric, texture, pattern scale and placement, print, embroidery, logos, stitching, trims, buttons, zippers, pockets, fit, silhouette, and length.",
   "Keep the exact bottom wear cut, silhouette, volume, pleats, hem, fabric, color, and print shown in product references across all poses. Never substitute farshi/farsi pajama with palazzo, lehenga/skirt, dhoti, or salwar, and never drop or miniaturize the bottom-wear motifs.",
   "Use the back product image as the sole authority for the back pose.",
-  "Style references control background, lighting, composition, camera, mood, and creative treatment. When a style reference is provided, it is the sole authority for the photoshoot backdrop environment and architecture.",
+  "Style references control backdrop, lighting, and camera mood, not the pose, handheld props, or garment. When a style reference is provided, it is the sole authority for the photoshoot backdrop.",
   "Product reference images are for the garment only: never copy or reproduce pre-shoot background walls, arches, urns, pots, plants, or furniture from product references into the generated images.",
   "When a style reference shows jewellery or ornaments that complement this product, keep those exact pieces unless the product itself already includes jewellery; never invent a competing jewellery story.",
   "Pose 5 must be a tight product-detail close-up, never a full-body hero repeat. Include a sharp face only when that crop still leaves the selling detail large and readable; otherwise crop to the product detail.",
@@ -1891,7 +1891,9 @@ export const CONSISTENCY_RULES = [
 // only from the product photos. Cached v24 plans still ask for a mid-step walk.
 // v26 keeps the three-quarter turn with both feet planted, so a cached v25
 // plan cannot still ask for a stepped-forward walk that opens a joined hem.
-export const ANALYSIS_VERSION = "generation-session-v26-planted-three-quarter";
+// v27 stops the planner from taking pose inspiration from the style photo, so a
+// cached plan cannot still copy that photo's stance or handheld props.
+export const ANALYSIS_VERSION = "generation-session-v27-style-pose-quarantine";
 
 export function smallHash(value: string) {
   let hash = 2166136261;
