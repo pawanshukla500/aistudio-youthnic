@@ -2338,6 +2338,8 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   const bottomWear = resolveBottomWearPresentation({
     mode: sessionData.bottomWearMode ?? sessionData.bottom_wear_mode,
     productIdentity: sessionData.productIdentity,
+    skuName: String(sessionData.skuName || job.sku_name || ""),
+    productDetails: String(sessionData.productDetails || ""),
   });
   const learnedPatterns = extractLearnedPromptPatterns({
     category: String(sessionData.category || ""),

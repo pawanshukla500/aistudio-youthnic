@@ -70,7 +70,19 @@ export const FARSHI_SILHOUETTE_STRUCTURE =
  * A dedicated bottom-wear photo is the Farshi authority when analysis was
  * unsure or called the cut a plain palazzo. Named cuts such as sharara stay put.
  */
-export function effectiveBottomCutClass(cutClass: BottomCutClass, hasBottomReference: boolean): BottomCutClass {
+export function effectiveBottomCutClass(
+  cutClass: BottomCutClass,
+  hasBottomReference: boolean,
+  context?: { skuName?: string; productDetails?: string; details?: string },
+): BottomCutClass {
+  const contextText = context
+    ? [
+        positiveBottomWearPortion(text(context.skuName)),
+        positiveBottomWearPortion(text(context.productDetails)),
+        positiveBottomWearPortion(text(context.details)),
+      ].filter(Boolean).join(" ")
+    : "";
+  if (/\b(?:farshi|farsi|fasi)\b/i.test(contextText)) return "farshi";
   if (hasBottomReference && (cutClass === "palazzo" || cutClass === "none" || cutClass === "other")) return "farshi";
   return cutClass;
 }
@@ -102,7 +114,7 @@ export function reconcileFarshiVisibilityRules(rules: string): string {
 const ABSENT_BOTTOM_WEAR =
   /^(unknown|unproven|none|n\/a|na|n\.a\.?|not applicable|standalone|not visible|not recorded|not specified|no bottom(?:s)?(?:\s+wear)?|no trousers?|no pants?)(\b|[.\s-]|$)/i;
 const BOTTOM_GARMENT_CLASS =
-  /\b(?:farshi|farsi|pajama|pyjama|palazzo|trousers?|pants?|sharara|gharara|salwar|patiala|churidar|skirt|lehenga|leggings?|dhoti|culottes?|shorts?)\b/i;
+  /\b(?:farshi|farsi|fasi|pajama|pyjama|palazzo|trousers?|pants?|sharara|gharara|salwar|patiala|churidar|skirt|lehenga|leggings?|dhoti|culottes?|shorts?)\b/i;
 
 const BENGALI_SAREE_RE =
   /\b(bengali|bangla(?:deshi)?|bengal|tant|taant|jamdani|dhakai|garad|garod|korial|baluchari|swarnachari|kantha|lal\s*paar|laal\s*paar|red\s*and\s*white\s*saree|shantipuri|begumpuri|murshidabad|bishnupuri|atpoure|aatpoure|athpourey|aanchal|anchal)\b/i;
@@ -162,7 +174,7 @@ export function recordedBottomWearText(productIdentity: unknown): string {
  * classify as palazzo, so everything from the first negation onward is dropped
  * before the garment class is read.
  */
-function positiveBottomWearPortion(details: string) {
+export function positiveBottomWearPortion(details: string): string {
   if (!details || ABSENT_BOTTOM_WEAR.test(details)) return "";
   const firstNegative = details.search(/\b(?:not|without|no)\b/i);
   return (firstNegative === -1 ? details : details.slice(0, firstNegative)).trim();
@@ -173,24 +185,42 @@ export function hasBottomWearInAnalysis(productIdentity: unknown): boolean {
   return Boolean(positive) && BOTTOM_GARMENT_CLASS.test(positive);
 }
 
-export function classifyBottomCut(detailsOrProduct: unknown): BottomCutClass {
+export function classifyBottomCut(
+  detailsOrProduct: unknown,
+  extraContext?: { skuName?: string; productDetails?: string },
+): BottomCutClass {
   const isObj = detailsOrProduct && typeof detailsOrProduct === "object" && !Array.isArray(detailsOrProduct);
   const details = typeof detailsOrProduct === "string"
     ? detailsOrProduct
     : recordedBottomWearText(detailsOrProduct);
   const positive = positiveBottomWearPortion(details);
-  if (!positive && !isObj) return "none";
-  if (/\b(farshi|farsi)\b/i.test(positive)) return "farshi";
+
+  const contextStr = [
+    extraContext?.skuName,
+    extraContext?.productDetails,
+  ].filter(Boolean).join(" ");
+
+  // Direct check for Farshi / Farsi / Fasi in positive details
+  if (/\b(?:farshi|farsi|fasi)\b/i.test(positive)) return "farshi";
+
   if (isObj) {
     const product = detailsOrProduct as JsonRecord;
-    const extra = [
-      text(product.silhouette),
-      text(product.bottomWear),
-      text(product.bottom_wear),
-      recordedBottomWearText(product),
+    const positiveExtra = [
+      positiveBottomWearPortion(text(product.skuName ?? product.sku_name)),
+      positiveBottomWearPortion(text(product.title ?? product.name)),
+      positiveBottomWearPortion(text(product.productDetails ?? product.product_details)),
+      positiveBottomWearPortion(text(product.silhouette)),
+      positiveBottomWearPortion(text(product.bottomWear)),
+      positiveBottomWearPortion(text(product.bottom_wear)),
     ].join(" ");
-    if (/\b(farshi|farsi)\b/i.test(extra)) return "farshi";
+    if (/\b(?:farshi|farsi|fasi)\b/i.test(positiveExtra)) return "farshi";
   }
+
+  if (contextStr && /\b(?:farshi|farsi|fasi)\b/i.test(contextStr)) {
+    return "farshi";
+  }
+
+  if (!positive && !isObj) return "none";
   if (/\b(sharara|gharara)\b/i.test(positive)) return "sharara_gharara";
   if (/\bpalazzo\b/i.test(positive)) return "palazzo";
   if (/\b(churidar|patiala|salwar)\b/i.test(positive)) return "salwar_churidar";
@@ -224,17 +254,30 @@ export function normalizeBottomWearMode(value: unknown, fallback: BottomWearMode
 export function resolveBottomWearPresentation(args: {
   mode?: unknown;
   productIdentity?: unknown;
+  skuName?: string;
+  productDetails?: string;
+  hasBottomReference?: boolean;
 }): BottomWearPresentation {
   const mode = normalizeBottomWearMode(args.mode);
   const details = recordedBottomWearText(args.productIdentity);
   const recordedInAnalysis = hasBottomWearInAnalysis(args.productIdentity);
-  const includesBottomWear = mode === "included" ? true : mode === "top_only" ? false : recordedInAnalysis;
+  const includesBottomWear = mode === "included"
+    ? true
+    : mode === "top_only"
+    ? false
+    : (args.hasBottomReference ? true : recordedInAnalysis);
+  const cutClass = includesBottomWear
+    ? classifyBottomCut(args.productIdentity ?? details, {
+        skuName: args.skuName,
+        productDetails: args.productDetails,
+      })
+    : "none";
   return {
     mode,
     includesBottomWear,
     recordedInAnalysis,
     details: includesBottomWear ? details : "",
-    cutClass: includesBottomWear ? classifyBottomCut(details) : "none",
+    cutClass,
     source: mode === "auto" ? "analysis" : "user",
   };
 }

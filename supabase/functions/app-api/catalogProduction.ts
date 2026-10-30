@@ -151,6 +151,8 @@ export async function recordShowcaseFeatureOutcome(
     const bottomWear = resolveBottomWearPresentation({
       mode: sessionData.bottomWearMode ?? sessionData.bottom_wear_mode,
       productIdentity,
+      skuName: text(sessionData.skuName),
+      productDetails: text(sessionData.productDetails),
     });
     // The effective shot, not the planned one: a close-up collision widens the
     // frame, and scoring the tight framing that was never generated would teach

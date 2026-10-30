@@ -27,10 +27,10 @@ export type FashionKnowledgeSelection = {
   guidance: string;
 };
 
-const BOTTOM_IDENTITY_RE = /\b(farshi|farsi|pajama|bottom.?wear|palazzo|sharara|gharara|salwar|trouser)\b/i;
+const BOTTOM_IDENTITY_RE = /\b(farshi|farsi|fasi|pajama|bottom.?wear|palazzo|sharara|gharara|salwar|trouser)\b/i;
 const CUT_PRINT_RE =
-  /\b(cut|silhouette|print|motif|floral|boota|volume|pleat|farshi|farsi|palazzo|lehenga|pajama)\b/i;
-const FARSHI_RE = /\b(farshi|farsi)\b/i;
+  /\b(cut|silhouette|print|motif|floral|boota|volume|pleat|farshi|farsi|fasi|palazzo|lehenga|pajama)\b/i;
+const FARSHI_RE = /\b(farshi|farsi|fasi)\b/i;
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";

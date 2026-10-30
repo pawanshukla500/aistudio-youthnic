@@ -101,6 +101,11 @@ Deno.test("analysis prompt distinguishes farshi from palazzo and does not take b
   assertEquals(hasRecordedBottomWear({ bottomWearDetails: "No bottom wear" }), false);
   assertEquals(hasRecordedBottomWear({ bottomWearDetails: "No bottom wear recorded" }), false);
   assertEquals(isFarshiBottomWear("Farsi pajama with large gold florals"), true);
+  assertEquals(isFarshiBottomWear("Fasi salwar with three waist pleats"), true);
+  assertEquals(isFarshiBottomWear("Farshi salwar with narrow hem and 4-inch taper"), true);
+  assertEquals(isFarshiBottomWear("Fasi pajama, chevron print"), true);
+  assertEquals(isFarshiBottomWear("fasi"), true);
+  assertEquals(isFarshiBottomWear({ skuName: "MOGRA-FASI", bottomWearDetails: "salwar" }), true);
   assertEquals(isFarshiBottomWear("Palazzo pants, solid magenta; NOT farshi"), false);
 });
 

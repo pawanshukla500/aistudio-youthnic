@@ -421,3 +421,29 @@ Deno.test("CodeAnt Major: non-saree garments reject stale saree_drape showcase i
     assertEquals(prompt.includes("Front pleats stay flat, evenly stacked and vertical"), false);
   }
 });
+
+Deno.test("Fasi / Farsi / Farshi salwar variants are classified as Farshi with canonical silhouette", () => {
+  assertEquals(classifyBottomCut("fasi"), "farshi");
+  assertEquals(classifyBottomCut("fasi salwar"), "farshi");
+  assertEquals(classifyBottomCut("farsi salwar"), "farshi");
+  assertEquals(classifyBottomCut("farshi salwar"), "farshi");
+  assertEquals(classifyBottomCut("fasi pajama"), "farshi");
+  assertEquals(classifyBottomCut("Fasi cut pants with soft flowy drape"), "farshi");
+  assertEquals(classifyBottomCut("farsi style salwar with pleated waist"), "farshi");
+  assertEquals(classifyBottomCut({ skuName: "MOGRA-FASI-SET", bottomWearDetails: "salwar" }), "farshi");
+  assertEquals(classifyBottomCut("salwar", { skuName: "BT-FASI-01" }), "farshi");
+  assertEquals(classifyBottomCut("salwar", { productDetails: "includes farsi salwar" }), "farshi");
+
+  assertEquals(effectiveBottomCutClass("salwar_churidar", true, { skuName: "MOGRA-FASI" }), "farshi");
+  assertEquals(effectiveBottomCutClass("salwar_churidar", false, { skuName: "MOGRA-FASI" }), "farshi");
+  assertEquals(effectiveBottomCutClass("salwar_churidar", true, { details: "farsi salwar" }), "farshi");
+  assertEquals(effectiveBottomCutClass("salwar_churidar", false, { details: "fasi salwar" }), "farshi");
+  assertEquals(effectiveBottomCutClass("salwar_churidar", false), "salwar_churidar");
+
+  const presentation = resolveBottomWearPresentation({
+    productIdentity: { bottomWearDetails: "fasi salwar with 3 waist pleats" },
+    skuName: "MOGRA-FASI",
+  });
+  assertEquals(presentation.includesBottomWear, true);
+  assertEquals(presentation.cutClass, "farshi");
+});
