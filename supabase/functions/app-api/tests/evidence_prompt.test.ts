@@ -1836,3 +1836,69 @@ Deno.test("Fasi salwar SKU enforces Farshi silhouette and preserves bottom refer
   // Verify front kurta construction does not leak onto rear
   assertEquals(prompt.includes("front-yoke-embroidery-should-not-leak"), false);
 });
+
+
+Deno.test("composeGenerationPrompt dynamically links bottom wear to exact IMAGE tag and forbids upper-garment and style bleed", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "MOGRA",
+    productDetails: "Kurti set with Farshi chevron bottom",
+    pose: {
+      id: "full_front",
+      title: "Hero Stance",
+      poseNumber: 1,
+      enabled: true,
+      prompt: "Full front hero",
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "mustard yellow",
+        bottomWearDetails: "Farshi pants, dark chocolate-brown chevron print",
+      },
+    },
+    references: [
+      { role: "model_identity" },
+      { role: "front" },
+      { role: "bottom" },
+      { role: "style_reference" },
+      { role: "fabric_pattern" },
+    ],
+  });
+
+  assertStringIncludes(prompt, "DEDICATED BOTTOM WEAR AUTHORITY (IMAGE 3): IMAGE 3 (labeled BOTTOM WEAR / FARSHI)");
+  assertStringIncludes(prompt, "ZERO BLEED FROM UPPER GARMENT: Strictly DO NOT copy the upper kurta's fabric, embroidery, butti, or print (from IMAGE 5) onto the bottom wear");
+  assertStringIncludes(prompt, "ZERO BLEED FROM STYLE REFERENCE: Strictly DO NOT copy or borrow the trousers, pants, or outfit from IMAGE 4");
+  assertStringIncludes(prompt, "- Bottom wear truth: The trousers/bottom wear MUST be derived EXCLUSIVELY from IMAGE 3 (BOTTOM WEAR / FARSHI)");
+});
+
+Deno.test("composeGenerationPrompt preserves bottom wear architecture and image reference on back pose", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "MOGRA",
+    productDetails: "Kurti set with Farshi chevron bottom",
+    pose: {
+      id: "back",
+      title: "Rear Stance",
+      poseNumber: 3,
+      enabled: true,
+      prompt: "True rear view",
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "mustard yellow",
+        bottomWearDetails: "Farshi pants, dark chocolate-brown chevron print",
+      },
+    },
+    references: [
+      { role: "back" },
+      { role: "bottom" },
+      { role: "model_identity" },
+      { role: "style_reference" },
+    ],
+  });
+
+  assertStringIncludes(prompt, "IMAGE 2: BOTTOM WEAR / FARSHI");
+  assertStringIncludes(prompt, "DEDICATED BOTTOM WEAR AUTHORITY (IMAGE 2): IMAGE 2 (labeled BOTTOM WEAR / FARSHI)");
+  assertStringIncludes(prompt, "TRUE BACK BOTTOM-WEAR ARCHITECTURE: In this rear view, reproduce the trousers/Farshi silhouette, two distinct flared legs, and authentic print from IMAGE 2");
+  assertStringIncludes(prompt, "6-inch joined hem panel with 4-inch taper");
+});

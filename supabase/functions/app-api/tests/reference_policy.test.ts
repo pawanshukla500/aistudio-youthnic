@@ -333,3 +333,37 @@ Deno.test("CodeAnt Major: preferred additional product evidence survives duplica
   assertEquals(selected.length, MAX_IMAGE_REFERENCES);
   assertEquals(selected.some((reference) => reference.hash === "preferred-additional"), true);
 });
+
+
+Deno.test("selectReferences preserves bottom wear reference on back pose for multi-piece suits while strictly excluding front and fabric swatches", () => {
+  const references = [
+    { role: "front", hash: "front-kurta" },
+    { role: "back", hash: "rear-kurta" },
+    { role: "bottom", hash: "farshi-chevron-pants" },
+    { role: "fabric_pattern", hash: "kurta-embroidery-swatch" },
+    { role: "model_identity", hash: "model-face" },
+    { role: "style_reference", hash: "room-backdrop" },
+  ];
+  const selected = selectReferences(references, [], "back", "kurta_or_kurti_set");
+  const roles = selected.map((r) => r.role);
+  assertEquals(roles.includes("back"), true);
+  assertEquals(roles.includes("bottom"), true);
+  assertEquals(roles.includes("model_identity"), true);
+  assertEquals(roles.includes("style_reference"), true);
+  // Front and fabric pattern must remain excluded from rear
+  assertEquals(roles.includes("front"), false);
+  assertEquals(roles.includes("fabric_pattern"), false);
+});
+
+Deno.test("selectReferences does not attach bottom wear to back pose for sarees", () => {
+  const references = [
+    { role: "saree_front_drape", hash: "front" },
+    { role: "saree_back_drape", hash: "rear" },
+    { role: "bottom", hash: "unrelated-bottom" },
+    { role: "style_reference", hash: "room" },
+  ];
+  const selected = selectReferences(references, [], "back", "saree");
+  const roles = selected.map((r) => r.role);
+  assertEquals(roles.includes("saree_back_drape"), true);
+  assertEquals(roles.includes("bottom"), false);
+});
