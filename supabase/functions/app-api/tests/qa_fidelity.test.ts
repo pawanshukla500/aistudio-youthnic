@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { normalizeAnalysis } from "../lib/profiles.ts";
-import { buildPoseQaPrompt, normalizePoseQaResult } from "../lib/qa.ts";
+import { buildPoseQaPrompt, hasAnatomicalDefectText, normalizePoseQaResult } from "../lib/qa.ts";
 
 const genericCritical = [
   "garment_identity",
@@ -377,4 +377,38 @@ Deno.test("Pose 6 macro QA applies the anatomy veto even when the face is absent
   assertEquals(result.pass, false);
   assertEquals(result.automaticallyVerified, false);
   assertEquals(result.failed.includes("pose_requirement"), true);
+});
+Deno.test("hasAnatomicalDefectText detects positive defect mentions and respects negative phrases", () => {
+  // Happy path: no defects mentioned
+  assertEquals(hasAnatomicalDefectText("Model looks natural with relaxed arms."), false);
+  // Edge case: negated defect phrases
+  assertEquals(hasAnatomicalDefectText("Zero extra hands detected, clean natural two hands."), false);
+  assertEquals(hasAnatomicalDefectText("No floating hand or duplicate wrist present."), false);
+  assertEquals(hasAnatomicalDefectText("Image is free of extra limbs and malformed fingers."), false);
+  // Failure modes: positive defect mentions
+  assertEquals(hasAnatomicalDefectText("Three hands visible resting on waist and hip."), true);
+  assertEquals(hasAnatomicalDefectText("An extra hand appears holding the dupatta."), true);
+  assertEquals(hasAnatomicalDefectText("A floating hand is resting on the pleats."), true);
+  assertEquals(hasAnatomicalDefectText("Six fingers detected on right hand."), true);
+});
+
+Deno.test("normalizePoseQaResult vetoes image when reason describes anatomical duplication despite pass=true", () => {
+  const result = normalizePoseQaResult({
+    pass: true,
+    score: 98,
+    checks: Object.fromEntries(genericCritical.map((key) => [key, "pass"])),
+    scores: Object.fromEntries(genericCritical.map((key) => [key, 98])),
+    failed: [],
+    reason: "Fabric and embroidery match reference, but three hands are visible on the model's waist.",
+    correction: "Ensure model has strictly two arms and two hands.",
+  }, {
+    garmentFamily: "kurta_or_kurti_set",
+    poseType: "full_front",
+  });
+
+  assertEquals(result.pass, false);
+  assertEquals(result.outcome, "rejected_by_qa");
+  assertEquals(result.failed.includes("pose_requirement"), true);
+  assertEquals(result.scores.pose_requirement, 0);
+  assertStringIncludes(result.reason, "pose_requirement");
 });

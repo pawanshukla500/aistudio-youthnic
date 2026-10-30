@@ -118,6 +118,20 @@ export function qaStorageDisposition(args: { qaEnabled: boolean; qaUnavailable: 
   };
 }
 
+export function hasAnatomicalDefectText(text: string): boolean {
+  if (!text) return false;
+  const matches = text.matchAll(/\b(?:(?:three|3|extra|duplicate|phantom|floating|third)\s+(?:hands?|arms?|limbs?|wrists?)|(?:severed\s+limb)|(?:extra|fused|malformed|six|6)\s+fingers)\b/gi);
+  for (const match of matches) {
+    const idx = match.index ?? 0;
+    const prefix = text.slice(Math.max(0, idx - 60), idx).toLowerCase();
+    if (/\b(?:no|zero|without|neither|never|free\s+of)\b[^.;!?]*$/i.test(prefix)) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 export function appendRejectedAttemptHistory<T>(existing: T[], next: T, limit = 3): T[] {
   return [...existing, next].slice(-Math.max(1, limit));
 }
@@ -279,6 +293,12 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
     const key = String(value || "").toLowerCase().replace(/[^a-z_]/g, "");
     if (checkKeys.includes(key as never)) failed.add(key);
   }
+  const textFeedback = `${String(raw.reason || "")} ${String(raw.correction || "")}`;
+  const hasAnatomyDefect = hasAnatomicalDefectText(textFeedback);
+  if (hasAnatomyDefect) {
+    failed.add("pose_requirement");
+    checks["pose_requirement"] = "fail";
+  }
   if (typeof raw.pass !== "boolean" && Object.keys(checks).length === 0) throw new Error("QA returned no structured verdict.");
 
   // A per-attribute score is only trustworthy when the validator actually
@@ -301,6 +321,9 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
   }
   const weighted = Object.entries(scores).map(([key, score]) => ({ score, weight: criticalChecks.includes(key) ? 2 : 1 }));
   const totalWeight = weighted.reduce((sum, entry) => sum + entry.weight, 0);
+    if (hasAnatomyDefect && (scores["pose_requirement"] === undefined || scores["pose_requirement"] >= RETRY_FLOOR)) {
+    scores["pose_requirement"] = 40;
+  }
   const productFidelity = totalWeight
     ? Math.round(weighted.reduce((sum, entry) => sum + entry.score * entry.weight, 0) / totalWeight)
     : Math.max(0, Math.min(100, Number(raw.score) || 0));
@@ -308,7 +331,7 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
   const severe: string[] = [];
   const lowConfidence: string[] = [];
   for (const [key, score] of Object.entries(scores)) {
-    if (!criticalChecks.includes(key)) continue;
+    if (!criticalChecks.includes(key) && key !== "pose_requirement") continue;
     if (score < RETRY_FLOOR) {
       failed.add(key);
     }
