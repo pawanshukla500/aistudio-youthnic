@@ -151,7 +151,7 @@ async function main() {
     {
       id: "creative",
       title: "Natural Editorial Stance",
-      prompt: "photorealistic full-body editorial frame of same adult South Asian female model, oval face warm medium skin dark almond eyes full lips, dark hair low bun with gajra, dewy makeup. Relaxed catalog stance, both feet grounded and close, small weight shift, not a walking stride. Wearing same mustard yellow V-neck floral kurta, bell sleeves with chevron cuffs, dark-brown and beige bold chevron zigzag Farshi pants with the joined 6-inch tapered hem kept closed, two distinct legs, ankle-length revealing gold mojari juttis and gold sequin lace band. Striped dupatta resting naturally. One hand lightly guiding dupatta fold, calm genuine expression. Wrinkle-free fabric, natural skin pores, exactly two arms two hands.",
+      prompt: "photorealistic full-body editorial frame of same adult South Asian female model, oval face warm medium skin dark almond eyes full lips, dark hair low bun with gajra, dewy makeup. Relaxed catalog stance, both feet grounded and close, small weight shift, not a walking stride. Wearing same mustard yellow V-neck floral kurta, bell sleeves with chevron cuffs, dark-brown and beige bold chevron zigzag Farshi pants with the joined 6-inch hem panel tapering 4 inches kept closed, two distinct legs, ankle-length revealing gold mojari juttis and gold sequin lace band. Striped dupatta resting naturally. One hand lightly guiding dupatta fold, calm genuine expression. Wrinkle-free fabric, natural skin pores, exactly two arms two hands.",
       enabled: true,
       framing: "full body including floor and feet",
       purpose: "editorial catalog stance and authentic fabric drape",
@@ -162,7 +162,7 @@ async function main() {
       handPlacement: "one hand lightly guiding dupatta fold, other arm resting naturally with a soft bend",
       consistencyNotes: "same set, props, styling, footwear, lighting",
       primaryReference: "front",
-      highlightedDetails: ["Farshi tapered flare and two-leg separation", "kurta drape", "dupatta flow", "juttis visible"],
+      highlightedDetails: ["Farshi joined 6-inch hem panel with 4-inch taper and two-leg separation", "kurta drape", "dupatta flow", "juttis visible"],
       productVisibilityRules: ["two distinct Farshi legs clearly readable", "no skirt or lehenga fusion", "both hems readable"],
     },
     {
