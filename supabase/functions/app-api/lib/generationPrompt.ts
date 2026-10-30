@@ -481,6 +481,8 @@ function bottomWearSection(args: {
   hasBottomReference: boolean;
   skuName?: string;
   productDetails?: string;
+  promptReferences?: PromptReference[];
+  isTrueBack?: boolean;
 }) {
   // `isSaree` is the caller's exact garmentFamily match widened by the pose
   // family, so a session analysed under "ethnic/fusion" that the taxonomy
@@ -510,14 +512,27 @@ function bottomWearSection(args: {
   if (effectiveCutClass === "farshi") {
     cleanedDetails = withoutFarshiStructureContradictions(cleanedDetails);
   }
+  const bottomRefIndex = (args.promptReferences || []).findIndex((ref) => ref.role === "bottom");
+  const bottomImageTag = bottomRefIndex >= 0 ? `IMAGE ${bottomRefIndex + 1}` : null;
+  const fabricRefIndex = (args.promptReferences || []).findIndex((ref) => ref.role === "fabric_pattern");
+  const fabricImageTag = fabricRefIndex >= 0 ? `IMAGE ${fabricRefIndex + 1}` : null;
+  const styleRefIndex = (args.promptReferences || []).findIndex((ref) => ref.role === "style_reference");
+  const styleImageTag = styleRefIndex >= 0 ? `IMAGE ${styleRefIndex + 1}` : null;
+
   return `LOCKED BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT - HIGHEST FIDELITY:
 Bottom wear specification: ${boundedText(cleanedDetails, 1_200)}
-${args.hasBottomReference ? "- A dedicated BOTTOM WEAR / FARSHI image is in the reference manifest. That image is the pixel-level authority for bottom-wear cut, volume, hem, fabric color, and print. Copy it literally onto the worn trousers/skirt." : "- Read bottom-wear cut, volume, hem, fabric color, and print from FRONT, BACK, MANNEQUIN, and ADDITIONAL product images where the trousers/skirt are visible. Do not invent a simpler palazzo or a solid/plain bottom."}
+${args.hasBottomReference && bottomImageTag
+  ? `- DEDICATED BOTTOM WEAR AUTHORITY (${bottomImageTag}): ${bottomImageTag} (labeled BOTTOM WEAR / FARSHI) is the pixel-level authority for bottom-wear cut, volume, hem, fabric color, and print. Copy ${bottomImageTag} literally onto the lower body in this frame.
+- ZERO BLEED FROM UPPER GARMENT: Strictly DO NOT copy the upper kurta's fabric, embroidery, butti, or print${fabricImageTag ? ` (from ${fabricImageTag})` : ""} onto the bottom wear.
+- ZERO BLEED FROM STYLE REFERENCE: Strictly DO NOT copy or borrow the trousers, pants, or outfit from ${styleImageTag || "the STYLE REFERENCE"} image. The bottom wear must match ${bottomImageTag} 100%.`
+  : args.hasBottomReference
+    ? "- A dedicated BOTTOM WEAR / FARSHI image is in the reference manifest. That image is the pixel-level authority for bottom-wear cut, volume, hem, fabric color, and print. Copy it literally onto the worn trousers/skirt."
+    : "- Read bottom-wear cut, volume, hem, fabric color, and print from FRONT, BACK, MANNEQUIN, and ADDITIONAL product images where the trousers/skirt are visible. Do not invent a simpler palazzo or a solid/plain bottom."}
 - MANDATORY SILHOUETTE PRESERVATION: render the EXACT bottom wear cut, silhouette, leg volume, leg structure, pleat/gather architecture, and hem construction described above and shown in the product references, in EVERY pose.
 - ABSOLUTE PROHIBITION ON SILHOUETTE SUBSTITUTION:
 ${guard}
-- COLOR & PRINT TRANSFER: copy the exact base fabric color, sheen, and motif geometry of the bottom wear from the bottom-visible product references. Large-scale prints — whether bold chevron/zigzag geometric patterns, vertical stripes, or metallic florals/bootas — must remain at their exact recorded physical size, alignment, and density. You are STRICTLY FORBIDDEN from rendering the bottoms as solid/undecorated color, as faint dots/speckles, or as a miniaturized micro-print when the references show bold chevron/zigzag or floral motifs. Never use the kurta/upper FABRIC / PATTERN DETAIL close-up as the bottom print.
-- FULL-BODY READABILITY: in every full or three-quarter body frame the bottom wear must be visible from waistband to hem with the footwear grounded, and the join where the top's hem meets the bottom must not be hidden by hands, hair, or a dupatta.`;
+- COLOR & PRINT TRANSFER: copy the exact base fabric color, sheen, and motif geometry of the bottom wear from the bottom-visible product references${bottomImageTag ? ` (${bottomImageTag})` : ""}. Large-scale prints — whether bold chevron/zigzag geometric patterns, vertical stripes, or metallic florals/bootas — must remain at their exact recorded physical size, alignment, and density. You are STRICTLY FORBIDDEN from rendering the bottoms as solid/undecorated color, as faint dots/speckles, or as a miniaturized micro-print when the references show bold chevron/zigzag or floral motifs. Never use the kurta/upper FABRIC / PATTERN DETAIL close-up as the bottom print.
+- FULL-BODY READABILITY: in every full or three-quarter body frame the bottom wear must be visible from waistband to hem with the footwear grounded, and the join where the top's hem meets the bottom must not be hidden by hands, hair, or a dupatta.${args.isTrueBack && bottomImageTag ? (effectiveCutClass === "farshi" ? `\n- TRUE BACK BOTTOM-WEAR ARCHITECTURE: In this rear view, reproduce the Farshi silhouette, two distinct flared legs, and authentic print from ${bottomImageTag} (BOTTOM WEAR / FARSHI) seen from behind. The 6-inch joined hem panel with 4-inch taper must remain clearly visible above the footwear. Never render plain trousers and never copy the style-reference outfit.` : `\n- TRUE BACK BOTTOM-WEAR ARCHITECTURE: In this rear view, reproduce the authentic bottom wear silhouette, cut, and print from ${bottomImageTag} (BOTTOM WEAR / FARSHI) seen from behind. Never render plain unreferenced bottom wear and never copy the style-reference outfit.`) : ""}`;
 }
 
 function garmentPoseFamilyHeading(family: GarmentPoseFamily) {
@@ -985,7 +1000,7 @@ export function composeGenerationPrompt(args: {
   const promptReferences = isTrueBack
     ? args.references.filter((ref) =>
         isDirectBackProductRole(ref.role) ||
-        (bottomWear.includesBottomWear && ref.role === "bottom") ||
+        ref.role === "bottom" ||
         ref.role === "model_identity" ||
         ref.role === "style_reference" ||
         ref.role === "approved_pose"
@@ -995,6 +1010,8 @@ export function composeGenerationPrompt(args: {
     throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
   }
   const manifest = promptReferences.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
+  const bottomRefIndex = promptReferences.findIndex((ref) => ref.role === "bottom");
+  const bottomImageTag = bottomRefIndex >= 0 ? `IMAGE ${bottomRefIndex + 1}` : null;
   const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
@@ -1131,6 +1148,7 @@ SHOOT AUTHORITY - APPLY BEFORE ANYTHING ELSE:
 - Model face and body: ${hasModelReference ? "IMAGE labeled MODEL FACE REFERENCE only. Ignore every other face, including the style reference and the product photos." : hasStyleReference ? "the STYLE REFERENCE face, hair, and body proportions, because no separate model-face photo was uploaded." : "the locked model identity described below, held identical in every frame."}
 - Backdrop and background: ${hasStyleReference ? "the STYLE REFERENCE only, on all six poses, including this one. Same wall, floor, and light. Never a product-photo background and never a generic white sweep." : "the locked creative direction, identical in all six poses."}
 - Product DNA: uploaded product photos only. Copy garment design, print, colour, embroidery, and construction exactly. A detail crop may omit the face, but any visible face is still this same person and any visible set is still this same backdrop.
+${bottomWear.includesBottomWear && bottomImageTag ? `- Bottom wear truth: The trousers/bottom wear MUST be derived EXCLUSIVELY from ${bottomImageTag} (BOTTOM WEAR / FARSHI). Never copy upper-garment fabric/embroidery or style-reference clothing onto the bottom wear.` : ""}
 
 REFERENCE MANIFEST IN UPLOAD ORDER:
 ${manifest}
@@ -1142,7 +1160,7 @@ ${generationMemory}
 
 EDIT GOAL:
 Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${poseTitle}. The finished image must look like the same real professional photoshoot as every other frame in this set.
-CRITICAL PRODUCT INTEGRITY RULE: The product clothing (garment, fabric, colors, prints, embroidery, neckline, sleeves, and bottom wear) must be taken EXCLUSIVELY and EXACTLY from the UPLOADED PRODUCT reference images. The clothing/outfit worn by the person in the STYLE REFERENCE image is strictly ignored and 100% DISCARDED. Absolutely DO NOT copy, transfer, or blend the style reference image's garment onto the model. Dress the model ONLY in the uploaded product.
+CRITICAL PRODUCT INTEGRITY RULE: The product clothing (garment, fabric, colors, prints, embroidery, neckline, sleeves, and bottom wear) must be taken EXCLUSIVELY and EXACTLY from the UPLOADED PRODUCT reference images. The clothing/outfit worn by the person in the STYLE REFERENCE image is strictly ignored and 100% DISCARDED. Absolutely DO NOT copy, transfer, or blend the style reference image's garment onto the model. Dress the model ONLY in the uploaded product.${bottomWear.includesBottomWear && bottomImageTag ? ` The bottom wear must strictly replicate the fabric, print, cut, and silhouette of ${bottomImageTag} (BOTTOM WEAR / FARSHI) and must NOT match the kurta fabric or borrow from the style reference.` : ""}
 Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE${hasApprovedAnchor ? " as already photographed in APPROVED POSE 1 - rebuild exactly the set Pose 1 shows, including in a back view" : " (if supplied)"} and the SCENE LOCK below - never a different or generic set. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
 
 ${sceneLock}
@@ -1229,6 +1247,8 @@ ${bottomWearSection({
   hasBottomReference,
   skuName: String(args.skuName || ""),
   productDetails: String(args.productDetails || ""),
+  promptReferences,
+  isTrueBack,
 })}
 
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:

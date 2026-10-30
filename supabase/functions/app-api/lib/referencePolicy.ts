@@ -177,7 +177,7 @@ export function roleLabel(role: string) {
     front: "FRONT PRODUCT - authoritative front garment design and construction ONLY. Pre-shoot background, walls, arches, urns, pots, plants, floor, and location in this image MUST BE 100% DISCARDED; never reproduce them. Any face or body in this photo is not the model",
     back: "BACK PRODUCT - authoritative rear garment construction and design ONLY. Pre-shoot background, walls, and setting MUST BE 100% DISCARDED",
     fabric_pattern: "FABRIC / PATTERN DETAIL - high-priority UPPER-garment texture, weave, print and embroidery truth; not bottom-wear print unless this image itself shows the trousers/skirt; background must be ignored",
-    bottom: "BOTTOM WEAR / FARSHI - pixel-level authority for the trousers/skirt cut, volume, hem, fabric color and print; never copy upper-garment embroidery onto this panel; pre-shoot floor and background must be ignored",
+    bottom: "BOTTOM WEAR / FARSHI - pixel-level authority for the trousers/skirt cut, volume, hem, fabric color and print; never copy upper-garment fabric/embroidery or style-reference clothing onto this panel; pre-shoot floor and background must be ignored",
     mannequin: "MANNEQUIN / FLAT-LAY SHOT - exact garment shape and construction truth; never reproduce the apparatus or background surface",
     additional_product: "ADDITIONAL PRODUCT PHOTO - supporting product truth; background must be ignored",
     saree_front_drape: "FULL SAREE FRONT DRAPE - authoritative complete front drape, body, pleats, upper/lower borders and blouse-front truth; background must be ignored",
@@ -238,7 +238,7 @@ function preferredProductOrder(poseType: string, garmentFamily: string, preferre
       baseOrder = ["saree_front_drape", "front", "saree_body_detail", "fabric_pattern", "saree_pallu_spread", "saree_border_tassels", "saree_back_drape", "back", "saree_blouse_front", "saree_blouse_back_piece", "mannequin", "additional_product"];
     }
   } else {
-    if (poseType === "back") return ["back"];
+    if (poseType === "back") return ["back", "bottom"];
     if (poseType === "closeup") {
       baseOrder = ["fabric_pattern", "front", "bottom", "back", "mannequin", "additional_product"];
     } else if (poseType === "showcase") {
@@ -276,10 +276,13 @@ export function selectReferences<T extends ReferenceLike>(
     // style-reference backdrop still have to travel with this frame, or the
     // back view invents a different person and a different room.
     const rearProduct = selectTrueBackReferences(references, normalizedFamily);
+    const bottomProduct = normalizedFamily === "saree"
+      ? []
+      : references.filter((reference) => reference.role === "bottom").slice(0, 1);
     const model = references.filter((reference) => reference.role === "model_identity").slice(0, 1);
     const style = references.filter((reference) => reference.role === "style_reference").slice(0, 1);
     const anchor = approved.slice(0, 1);
-    const priority = [...rearProduct, ...model, ...style, ...anchor];
+    const priority = [...rearProduct, ...bottomProduct, ...model, ...style, ...anchor];
     return collapseDuplicateUploads(priority).slice(0, maxReferences);
   }
   const order = preferredProductOrder(poseType, normalizedFamily, preferredRole);
