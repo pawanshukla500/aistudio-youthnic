@@ -107,6 +107,34 @@ Deno.test("analysis prompt distinguishes farshi from palazzo and does not take b
   assertEquals(isFarshiBottomWear("fasi"), true);
   assertEquals(isFarshiBottomWear({ skuName: "MOGRA-FASI", bottomWearDetails: "salwar" }), true);
   assertEquals(isFarshiBottomWear("Palazzo pants, solid magenta; NOT farshi"), false);
+
+  // Generic bottom reference without Farshi mentions does not inject Farshi architecture
+  const nonFarshiPrompt = buildCombinedAnalysisPrompt({
+    skuName: "KURTI-PALAZZO-SET",
+    productDetails: "Silk kurta with matching palazzo; NOT farshi",
+    category: "Kurta Sets",
+    modelDirection: "",
+    sceneDirection: "",
+    referenceManifest: [
+      { number: 1, role: "FRONT PRODUCT" },
+      { number: 2, role: "BOTTOM PRODUCT" },
+    ],
+  });
+  assertEquals(nonFarshiPrompt.includes("AUTHORITATIVE FARSHI CUT DIRECTIVE"), false);
+
+  // Fasi SKU does inject Farshi architecture
+  const fasiPrompt = buildCombinedAnalysisPrompt({
+    skuName: "KURTI-FASI-SALWAR",
+    productDetails: "Kurti with matching fasi salwar",
+    category: "Kurta Sets",
+    modelDirection: "",
+    sceneDirection: "",
+    referenceManifest: [
+      { number: 1, role: "FRONT PRODUCT" },
+      { number: 2, role: "BOTTOM PRODUCT" },
+    ],
+  });
+  assertEquals(fasiPrompt.includes("AUTHORITATIVE FARSHI CUT DIRECTIVE"), true);
 });
 
 Deno.test("root-level sareeTruth and sareeDrapePlan survive canonical normalization", () => {

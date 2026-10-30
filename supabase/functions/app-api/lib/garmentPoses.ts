@@ -196,8 +196,8 @@ export function classifyBottomCut(
   const positive = positiveBottomWearPortion(details);
 
   const contextStr = [
-    extraContext?.skuName,
-    extraContext?.productDetails,
+    positiveBottomWearPortion(text(extraContext?.skuName)),
+    positiveBottomWearPortion(text(extraContext?.productDetails)),
   ].filter(Boolean).join(" ");
 
   // Direct check for Farshi / Farsi / Fasi in positive details

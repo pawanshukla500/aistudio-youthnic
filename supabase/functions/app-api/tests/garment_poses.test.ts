@@ -446,4 +446,10 @@ Deno.test("Fasi / Farsi / Farshi salwar variants are classified as Farshi with c
   });
   assertEquals(presentation.includesBottomWear, true);
   assertEquals(presentation.cutClass, "farshi");
+
+  // Negative constraint in extraContext does not trigger Farshi
+  const negativeInContext = classifyBottomCut("palazzo pants", {
+    productDetails: "Palazzo pants, solid magenta; NOT fasi",
+  });
+  assertEquals(negativeInContext, "palazzo");
 });

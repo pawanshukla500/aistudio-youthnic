@@ -16,6 +16,7 @@ import {
   hasBottomWearInAnalysis,
   isSareePoseFamily,
   normalizeBottomWearMode,
+  positiveBottomWearPortion,
   recordedBottomWearText,
   resolveBottomWearPresentation,
 } from "./garmentPoses.ts";
@@ -1554,13 +1555,15 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     stylingLock: stringValue(model.stylingLock ?? model.styling_lock, "Keep footwear and accessories identical across every pose"),
   };
   const poses = Array.isArray(rawPoses) ? rawPoses : [];
-  const poseContext = {
+  const poseContext: PoseSlotContext = {
     productIdentity,
     garmentFamily: productIdentity.garmentFamily,
     category: productIdentity.category || categoryFallback,
     bottomWearMode: options.bottomWearMode,
     showcasePlan: creativeDirection.showcasePlan,
     closeupHeroDetail: creativeDirection.closeupHeroDetail,
+    skuName: options.skuName,
+    productDetails: options.productDetails,
   };
   const poseSlots = getPoseSlots(poseContext);
   const showcaseFamily = poseFamilyFor(poseContext);
@@ -1659,8 +1662,12 @@ export function buildCombinedAnalysisPrompt(args: {
   analysisLearning?: string; showcaseFeedback?: string;
 }) {
   const manifest = args.referenceManifest.map(({ number, role }) => `IMAGE ${number}: ${role}`).join("\n");
-  const hasBottomRef = args.referenceManifest.some((m) => m.role === "bottom" || /bottom/i.test(m.role));
-  const isFarshiSku = hasBottomRef || /\b(?:farshi|farsi|fasi)\b/i.test(`${args.skuName} ${args.productDetails}`);
+  const positiveNotes = [
+    positiveBottomWearPortion(args.skuName),
+    positiveBottomWearPortion(args.productDetails),
+  ].filter(Boolean).join(" ");
+  const hasFarshiRef = args.referenceManifest.some((m) => /\b(?:farshi|farsi|fasi)\b/i.test(m.role));
+  const isFarshiSku = hasFarshiRef || /\b(?:farshi|farsi|fasi)\b/i.test(positiveNotes);
   return `You are the visual merchandiser and shoot planner for a fashion e-commerce studio.
 
 Analyze EVERY supplied image before answering.
