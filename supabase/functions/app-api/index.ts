@@ -2052,7 +2052,17 @@ async function validatePose(args: {
       ? [...baseParts, { text: "INDEPENDENT RECHECK: disregard prior numeric scores, re-inspect each critical region separately, and return newly reasoned evidence-based scores." }]
       : baseParts;
     const result = await visionJson(policy, parts);
-    return { result, qa: parseQaResponse(result.text, { garmentFamily, poseType: args.pose.id, productIdentity: args.session.productIdentity, bottomWearMode: args.session.bottomWearMode, creativeDirection: args.session.creativeDirection }) };
+    return {
+      result,
+      qa: parseQaResponse(result.text, {
+        garmentFamily,
+        poseType: args.pose.id,
+        productIdentity: args.session.productIdentity,
+        bottomWearMode: args.session.bottomWearMode,
+        creativeDirection: args.session.creativeDirection,
+        hasBottomReference: qaRefs.some((reference) => reference.role === "bottom"),
+      }),
+    };
   };
 
   const complex = ["saree", "lehenga", "suit", "multi-piece"].some((family) => garmentFamily.toLowerCase().includes(family));
@@ -2340,6 +2350,7 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     productIdentity: sessionData.productIdentity,
     skuName: String(sessionData.skuName || job.sku_name || ""),
     productDetails: String(sessionData.productDetails || ""),
+    hasBottomReference: (Array.isArray(sessionData.references) ? sessionData.references : []).some((entry) => String((entry as JsonRecord)?.role || "").toLowerCase() === "bottom"),
   });
   const learnedPatterns = extractLearnedPromptPatterns({
     category: String(sessionData.category || ""),

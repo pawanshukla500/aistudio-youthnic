@@ -131,14 +131,15 @@ export function buildPoseQaPrompt(args: {
   // QA must judge the shoot as it was configured. A top-only shoot has no
   // coordinated bottom to match, so bottom-wear fidelity is not a gate there.
   const productRecord = record(args.productIdentity);
+  const hasBottomReference = args.referenceManifest.some((line) => /\bbottom\b/i.test(line));
   const bottomWear = resolveBottomWearPresentation({
     mode: args.bottomWearMode,
     productIdentity: args.productIdentity,
     skuName: String(productRecord.skuName ?? productRecord.sku_name ?? ""),
     productDetails: String(productRecord.productDetails ?? productRecord.product_details ?? ""),
+    hasBottomReference,
   });
   const hasBottomWear = bottomWear.includesBottomWear;
-  const hasBottomReference = args.referenceManifest.some((line) => /\bbottom\b/i.test(line));
   const farshiBottom = hasBottomWear &&
     effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, {
       skuName: String(productRecord.skuName ?? productRecord.sku_name ?? ""),
@@ -253,9 +254,16 @@ Return STRICT JSON only:
 ${JSON.stringify({ pass: true, score: 100, checks: exampleChecks, scores: exampleScores, failed: [], reason: "short evidence-based verdict", correction: "specific correction for every failed field" })}`;
 }
 
-export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown; bottomWearMode?: unknown; creativeDirection?: unknown } = {}) {
+export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown; bottomWearMode?: unknown; creativeDirection?: unknown; hasBottomReference?: boolean } = {}) {
+  const productRecord = record(options.productIdentity);
   const hasBottomWear = options.hasBottomWear ??
-    resolveBottomWearPresentation({ mode: options.bottomWearMode, productIdentity: options.productIdentity }).includesBottomWear;
+    resolveBottomWearPresentation({
+      mode: options.bottomWearMode,
+      productIdentity: options.productIdentity,
+      skuName: String(productRecord.skuName ?? productRecord.sku_name ?? ""),
+      productDetails: String(productRecord.productDetails ?? productRecord.product_details ?? ""),
+      hasBottomReference: options.hasBottomReference,
+    }).includesBottomWear;
   const showcaseShot = effectiveShowcaseShot(record(options.creativeDirection), { includesBottomWear: hasBottomWear });
   const showcaseTightCrop = options.poseType === "showcase" && Boolean(
     showcaseShot &&
@@ -359,7 +367,7 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
   };
 }
 
-export function parseQaResponse(text: string, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown; bottomWearMode?: unknown; creativeDirection?: unknown } = {}) {
+export function parseQaResponse(text: string, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown; bottomWearMode?: unknown; creativeDirection?: unknown; hasBottomReference?: boolean } = {}) {
   return normalizePoseQaResult(parseJsonResponse(text), options);
 }
 
