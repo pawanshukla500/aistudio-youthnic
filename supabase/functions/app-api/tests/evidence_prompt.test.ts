@@ -1899,6 +1899,38 @@ Deno.test("composeGenerationPrompt preserves bottom wear architecture and image 
 
   assertStringIncludes(prompt, "IMAGE 2: BOTTOM WEAR / FARSHI");
   assertStringIncludes(prompt, "DEDICATED BOTTOM WEAR AUTHORITY (IMAGE 2): IMAGE 2 (labeled BOTTOM WEAR / FARSHI)");
-  assertStringIncludes(prompt, "TRUE BACK BOTTOM-WEAR ARCHITECTURE: In this rear view, reproduce the trousers/Farshi silhouette, two distinct flared legs, and authentic print from IMAGE 2");
+  assertStringIncludes(prompt, "TRUE BACK BOTTOM-WEAR ARCHITECTURE: In this rear view, reproduce the Farshi silhouette, two distinct flared legs, and authentic print from IMAGE 2");
   assertStringIncludes(prompt, "6-inch joined hem panel with 4-inch taper");
+});
+
+Deno.test("true-back pose for non-farshi bottom does not enforce farshi-specific joined hem rules", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "TROUSER-SET-BACK",
+    productDetails: "Straight pants kurti set",
+    pose: {
+      id: "back",
+      title: "Rear Stance",
+      poseNumber: 3,
+      enabled: true,
+      prompt: "True rear view",
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "royal blue",
+        bottomWearDetails: "Straight pencil trousers with ankle slit, solid navy",
+      },
+    },
+    references: [
+      { role: "back" },
+      { role: "bottom" },
+      { role: "model_identity" },
+      { role: "style_reference" },
+    ],
+  });
+
+  assertStringIncludes(prompt, "IMAGE 2: BOTTOM WEAR / FARSHI");
+  assertStringIncludes(prompt, "TRUE BACK BOTTOM-WEAR ARCHITECTURE: In this rear view, reproduce the authentic bottom wear silhouette, cut, and print from IMAGE 2");
+  assertEquals(prompt.includes("6-inch joined hem panel with 4-inch taper"), false);
+  assertEquals(prompt.includes("two distinct flared legs"), false);
 });
