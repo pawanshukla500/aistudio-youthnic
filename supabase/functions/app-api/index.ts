@@ -15,6 +15,7 @@ import {
   mergeVariantColorways,
   normalizeAnalysis,
   normalizeStylingPlan,
+  recordedSeatedPoseDemand,
   parseJsonResponse,
   ACTIVE_GENERATION_JOB_STATUSES,
   REQUIRED_POSE_IDS,
@@ -89,6 +90,7 @@ import {
   PRODUCT_REFERENCE_ROLES,
   canUsePoseOneAnchor,
   canonicalReferences,
+  collapseDuplicateUploads,
   isDirectBackProductRole,
   isSareeReferenceSet,
   missingRequiredReferenceLabels,
@@ -1732,7 +1734,7 @@ async function analyze(request: Request, args: JsonRecord) {
   const started = Date.now();
   const analysisRunIds: string[] = [];
   if (!normalized) {
-    const loaded = await loadAvailableReferences(references, orgId, String(args.category || ""));
+    const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, String(args.category || ""));
     const manifest: Array<{ number: number; role: string }> = [];
     const parts: JsonRecord[] = [];
     loaded.forEach((reference, index) => {
@@ -2340,7 +2342,7 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   const learnedPatterns = extractLearnedPromptPatterns({
     category: String(sessionData.category || ""),
     hasStyleReference: (Array.isArray(sessionData.references) ? sessionData.references : []).some((entry) => String((entry as JsonRecord)?.role || "") === "style_reference"),
-    seatedPoseRequired: String((sessionData.creativeDirection as JsonRecord | undefined)?.seatedPoseRequired || ""),
+    seatedPoseRequired: recordedSeatedPoseDemand(jsonRecord(sessionData.creativeDirection)),
     closeupMode: String((sessionData.creativeDirection as JsonRecord | undefined)?.closeupMode || ""),
     // The frame that was actually generated, not the one originally planned: a
     // close-up collision widens it, and learning a framing that never shipped is
@@ -2663,7 +2665,7 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
 
   // Token optimization: If base product analysis already exists for the batch, extract colorway only
   if (baseAnalysis && baseAnalysis.productIdentity?.garmentFamily) {
-    const loadedRefs = await loadAvailableReferences(colorwayCheckReferences(references), orgId, category);
+    const loadedRefs = await loadAvailableReferences(collapseDuplicateUploads(colorwayCheckReferences(references)), orgId, category);
     if (loadedRefs.length > 0) {
       const manifest = loadedRefs.map((reference, index) => ({ number: index + 1, role: roleLabel(reference.role) }));
       const parts: JsonRecord[] = [
@@ -2699,7 +2701,7 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     }
   }
 
-  const loaded = await loadAvailableReferences(references, orgId, String(inputs.category || ""));
+  const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, String(inputs.category || ""));
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
   loaded.forEach((reference, index) => {
@@ -5313,7 +5315,7 @@ async function analyzeCatalogVariant(
   // do not waste tokens re-analyzing the identical cut, silhouette, structure, and pose plan.
   // Instead, run a lightweight colorway analysis and merge into the base garment!
   if (baseAnalysis && baseAnalysis.productIdentity?.garmentFamily) {
-    const loadedRefs = await loadAvailableReferences(colorwayCheckReferences(references), String(batch.organization_id), category);
+    const loadedRefs = await loadAvailableReferences(collapseDuplicateUploads(colorwayCheckReferences(references)), String(batch.organization_id), category);
     if (loadedRefs.length > 0) {
       const manifest = loadedRefs.map((reference, index) => ({ number: index + 1, role: roleLabel(reference.role) }));
       const parts: JsonRecord[] = [
@@ -5372,7 +5374,7 @@ async function analyzeCatalogVariant(
   }
 
   // Full base analysis for the first SKU in the batch
-  const loaded = await loadAvailableReferences(references, String(batch.organization_id), category);
+  const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), String(batch.organization_id), category);
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
   loaded.forEach((reference, index) => {

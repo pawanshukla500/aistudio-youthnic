@@ -8,7 +8,7 @@
  * remains an audit ledger and is not accepted here.
  */
 
-import { effectiveShowcaseIntent, type JsonRecord } from "./profiles.ts";
+import { effectiveShowcaseIntent, recordedSeatedPoseDemand, type JsonRecord } from "./profiles.ts";
 import { detectGarmentPoseFamily, resolveBottomWearPresentation } from "./garmentPoses.ts";
 import { PRODUCT_REFERENCE_ROLES } from "./referencePolicy.ts";
 import { type PromptPatternKind } from "./promptPatterns.ts";
@@ -190,8 +190,10 @@ function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirect
     .filter(Boolean)
     .slice(0, 3);
   if (absences.length) details.push(`Do not invent: ${absences.join("; ")}`);
-  const seated = boundedText(creativeDirection.seatedPoseRequired ?? creativeDirection.seated_pose_required, 20);
-  if (seated) details.push(`Seated pose 4 required: ${seated}`);
+  const recordedSeat = creativeDirection.seatedPoseRequired ?? creativeDirection.seated_pose_required;
+  if (String(recordedSeat ?? "").trim()) {
+    details.push(`Seated pose 4 required: ${recordedSeatedPoseDemand(creativeDirection)}`);
+  }
   const closeupMode = boundedText(creativeDirection.closeupMode ?? creativeDirection.closeup_mode, 40);
   const hero = boundedText(creativeDirection.closeupHeroDetail ?? creativeDirection.closeup_hero_detail, 120);
   if (closeupMode) {
@@ -338,12 +340,14 @@ export function formatGenerationMemoryBrief(args: {
   const lines: string[] = [];
   lines.push(`Product images (SKU/garment truth only): ${product.join(", ") || memory.productRoles.join(", ") || "none labeled in this request"}.`);
   lines.push(`Style reference (photoshoot set, backdrop, lighting, jewellery taste only): ${style.join(", ") || (memory.styleRoles.length ? `${memory.styleRoles.join(", ")} uploaded for this session` : "none")}.`);
-  if (model.length || memory.modelRoles.length) {
-    lines.push(`Model identity lock: ${model.join(", ") || memory.modelRoles.join(", ")}.`);
+  if (model.length) {
+    lines.push(`Model identity lock: ${model.join(", ")}. Ignore every other face, including the style reference and any approved pose.`);
+  } else if (style.length) {
+    lines.push("Face lock: the style reference, because no separate model photo is attached. Discard its clothing.");
   }
   if (approved.length || memory.approvedAssets.length) {
     const poses = memory.approvedAssets.map((asset) => `pose ${asset.poseIndex}`).join(", ");
-    lines.push(`Previous approved output in this shoot: ${approved.join(", ") || "approved_pose"}${poses ? ` (${poses})` : ""}. Use it for identity and set continuity, never as garment geometry.`);
+    lines.push(`Previous approved output in this shoot: ${approved.join(", ") || "approved_pose"}${poses ? ` (${poses})` : ""}. Use it for set continuity only, never as the face, the pose, the objects in the hands, or the garment.`);
   }
   for (const detail of memory.preservedDetails.slice(0, 6)) {
     lines.push(detail);
@@ -414,7 +418,7 @@ export function extractLearnedPromptPatterns(args: {
       extracted.push(pattern(
         "scene",
         "style-reference-backdrop-lock",
-        "When a style reference is supplied, rebuild wall, floor, lighting, and props from that image only. Discard product-photo backgrounds. Never copy garment identity from the style frame.",
+        "When a style reference is supplied, rebuild the wall, floor, furniture, and lighting from that image only. Discard product-photo backgrounds. Do not copy its pose, objects in the hands, or garment.",
         sceneOutcome,
       ));
     }
@@ -466,7 +470,7 @@ export function extractLearnedPromptPatterns(args: {
     drape_feature:
       "A drape showcase frame holds or spreads the panel clear of the body so its artwork, border and full length read end to end.",
     movement_feature:
-      "A movement showcase frame uses controlled motion so the feature's fall, flare or fluidity is visible while the garment stays readable.",
+      "A movement showcase frame uses a planted weight shift with both feet close so the feature's fall or flare stays readable. Do not freeze a walking stride or lift a foot.",
   };
   if (showcaseOutcome && shotType && shotText[shotType]) {
     extracted.push(pattern("pose", `showcase-${shotType.replace(/_/g, "-")}-lock`, shotText[shotType], showcaseOutcome));
@@ -478,7 +482,7 @@ export function extractLearnedPromptPatterns(args: {
     extracted.push(pattern(
       "pose",
       "pose1-continuity-lock",
-      "Later poses reuse Pose 1 model identity and physical set. Pose 1 never overrides original product references for garment geometry.",
+      "Later poses reuse the reference face (MODEL FACE REFERENCE, or the STYLE REFERENCE face when no separate model photo was uploaded) and Pose 1's physical set. Pose 1 never overrides the product photos, and it is never a different person.",
       "success",
     ));
   }
@@ -488,7 +492,7 @@ export function extractLearnedPromptPatterns(args: {
     extracted.push(pattern(
       "pose",
       "pose-plan-6-variation-lock",
-      "Every shoot executes a 6-pose plan with physical variation: Pose 1 hero, Pose 2 35-to-45 degree turn, Pose 3 true rear view, Pose 4 active movement or seated, Pose 5 close-up detail, Pose 6 unique feature showcase. Never duplicate frontal standing.",
+      "Every shoot executes a 6-pose plan: Pose 1 hero, Pose 2 planted 35-to-45 degree turn, Pose 3 true rear view, Pose 4 natural editorial stance or seated, Pose 5 close-up, Pose 6 feature showcase. Never a walking stride or a duplicate frontal stance.",
       overallOutcome,
     ));
     extracted.push(pattern(
@@ -506,7 +510,7 @@ export function extractLearnedPromptPatterns(args: {
     extracted.push(pattern(
       "garment",
       "product-reference-sole-truth",
-      "Derive only photoshoot backdrop, model face/style guidance, pose inspiration, and framing from the style reference. The product cut, design, and bottom wear must remain 100% faithful to uploaded product images.",
+      "The style reference supplies the backdrop, and the face only when no separate model photo was uploaded. Discard its clothing, pose, and handheld props. Product cut, print, and bottom wear come only from the product photos.",
       overallOutcome,
     ));
   }

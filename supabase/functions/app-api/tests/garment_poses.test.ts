@@ -299,6 +299,8 @@ Deno.test("a standalone top gets playful, set-matched showcase direction without
   });
   assertStringIncludes(prompt, "GARMENT POSE GRAMMAR (SHORT KURTI TOP)");
   assertStringIncludes(prompt, "MATCH THE POSE TO THE SET");
+  assertStringIncludes(prompt, "Do not sit because the style photo sits");
+  assertEquals(prompt.includes("seated on the established step"), false);
   assertStringIncludes(prompt, "SHOWCASE FRAME HARD RULE (PLAYFUL, SET-MATCHED)");
   assertStringIncludes(prompt, "The product references prove no bottom garment ships with this SKU.");
 });

@@ -2,12 +2,22 @@ import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import {
   MAX_IMAGE_REFERENCES,
   canUsePoseOneAnchor,
+  isNonProductEvidenceRole,
   isSareeReferenceSet,
   missingRequiredReferenceLabels,
   roleLabel,
   selectCurrentCatalogProductReferences,
+  collapseDuplicateUploads,
   selectReferences,
 } from "../lib/referencePolicy.ts";
+
+Deno.test("verbose style, model, and approved-pose labels are not product evidence", () => {
+  assertEquals(isNonProductEvidenceRole(roleLabel("style_reference")), true);
+  assertEquals(isNonProductEvidenceRole(roleLabel("model_identity")), true);
+  assertEquals(isNonProductEvidenceRole(roleLabel("approved_pose")), true);
+  assertEquals(isNonProductEvidenceRole(roleLabel("front")), false);
+  assertEquals(isNonProductEvidenceRole(""), false);
+});
 
 Deno.test("critical saree regions survive provider-limit truncation before duplicates and anchors", () => {
   const references = [
@@ -39,6 +49,57 @@ Deno.test("critical saree regions survive provider-limit truncation before dupli
   assertEquals(selected.filter((reference) => reference.role === "saree_front_drape").length < 12, true);
 });
 
+Deno.test("analysis sees one copy when the model photo and the style photo are the same file", () => {
+  const collapsed = collapseDuplicateUploads([
+    { role: "model_identity", hash: "row-model", storagePath: "organizations/org/references/whatsapp.jpg" },
+    { role: "front", hash: "front", storagePath: "organizations/org/references/front.jpg" },
+    { role: "fabric_pattern", hash: "flat", storagePath: "organizations/org/references/flat.jpg" },
+    { role: "mannequin", hash: "flat-row", storagePath: "organizations/org/references/flat.jpg" },
+    { role: "style_reference", hash: "row-style", storagePath: "organizations/org/references/whatsapp.jpg" },
+  ]);
+  assertEquals(collapsed.map((reference) => reference.role), ["front", "fabric_pattern", "style_reference"]);
+});
+
+Deno.test("an identical model-face and style upload is sent once, as the style reference", () => {
+  const selected = selectReferences(
+    [
+      { role: "model_identity", hash: "same-photo" },
+      { role: "style_reference", hash: "same-photo" },
+      { role: "front", hash: "front" },
+      { role: "fabric_pattern", hash: "same-flat" },
+      { role: "mannequin", hash: "same-flat" },
+    ],
+    [],
+    "full_front",
+    "kurta_or_kurti_set",
+  );
+  assertEquals(selected.map((reference) => reference.role), ["front", "mannequin", "style_reference"]);
+  const back = selectReferences(
+    [
+      { role: "model_identity", hash: "same-photo" },
+      { role: "style_reference", hash: "same-photo" },
+      { role: "back", hash: "rear" },
+      { role: "front", hash: "front" },
+    ],
+    [],
+    "back",
+    "kurta_or_kurti_set",
+  );
+  assertEquals(back.map((reference) => reference.role), ["back", "style_reference"]);
+
+  const sameObject = selectReferences(
+    [
+      { role: "model_identity", hash: "row-model", storagePath: "organizations/org/references/whatsapp.jpg" },
+      { role: "style_reference", hash: "row-style", storagePath: "organizations/org/references/whatsapp.jpg" },
+      { role: "front", hash: "front", storagePath: "organizations/org/references/front.jpg" },
+    ],
+    [],
+    "full_front",
+    "kurta_or_kurti_set",
+  );
+  assertEquals(sameObject.map((reference) => reference.role), ["front", "style_reference"]);
+});
+
 Deno.test("legacy saree aliases remain valid and pallu has a distinct authority label", () => {
   const selected = selectReferences([
     { role: "front" },
@@ -58,12 +119,13 @@ Deno.test("true back poses use exactly one direct rear product image while prese
       { role: "front", hash: "front" },
       { role: "back", hash: "back" },
       { role: "fabric_pattern", hash: "fabric" },
+      { role: "style_reference", hash: "style" },
     ],
     [{ role: "approved_pose", hash: "front-anchor" }],
     "back",
     "dress",
   );
-  assertEquals(generic.map((reference) => reference.role), ["back", "model_identity", "approved_pose"]);
+  assertEquals(generic.map((reference) => reference.role), ["back", "model_identity", "style_reference", "approved_pose"]);
   assertEquals(generic.some((r) => r.role === "front"), false);
   assertEquals(generic.some((r) => r.role === "fabric_pattern"), false);
 
@@ -82,7 +144,7 @@ Deno.test("true back poses use exactly one direct rear product image while prese
     "back",
     "saree",
   );
-  assertEquals(saree.map((reference) => reference.role), ["saree_back_drape", "model_identity", "approved_pose"]);
+  assertEquals(saree.map((reference) => reference.role), ["saree_back_drape", "model_identity", "style_reference", "approved_pose"]);
   assertEquals(saree.some((r) => r.role === "saree_front_drape"), false);
   assertEquals(saree.some((r) => r.role === "saree_body_detail"), false);
   assertEquals(saree.some((r) => r.role === "saree_pallu_spread"), false);

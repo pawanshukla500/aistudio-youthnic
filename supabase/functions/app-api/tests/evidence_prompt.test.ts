@@ -11,6 +11,7 @@ import {
   composeGenerationPrompt,
 } from "../lib/generationPrompt.ts";
 import { normalizeAnalysis } from "../lib/profiles.ts";
+import { buildGenerationMemory, formatGenerationMemoryBrief } from "../lib/generationMemory.ts";
 
 Deno.test("Garment Truth Contract: Legacy placement and absence locks are preserved when garmentEvidence is populated", () => {
   const sessionData = {
@@ -58,6 +59,23 @@ Deno.test("Garment Truth Contract: Legacy placement and absence locks are preser
 
   assertStringIncludes(prompt, "Negative-evidence hard locks:");
   assertStringIncludes(prompt, "- Absence Lock 1");
+
+  const quarantined = composeGenerationPrompt({
+    skuName: "Test SKU",
+    productDetails: "Test details",
+    pose: poseData as any,
+    session: {
+      productIdentity: {
+        garmentEvidence: [
+          { region: "front body", sourceRole: "front", state: "confirmed", visibleDecoration: "large maroon medallion butti" },
+          { region: "front body", sourceRole: "style_reference", state: "confirmed", visibleDecoration: "small pink style-photo butti" },
+        ],
+      },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(quarantined, "large maroon medallion butti");
+  assertEquals(quarantined.includes("small pink style-photo butti"), false);
   assertStringIncludes(prompt, "- Absence Lock 2");
 });
 
@@ -147,7 +165,8 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   });
 
   assertStringIncludes(prompt, "IMAGE 1: BACK PRODUCT");
-  assertStringIncludes(prompt, "IMAGE 2: APPROVED POSE 1");
+  assertStringIncludes(prompt, "IMAGE 2: STYLE REFERENCE");
+  assertStringIncludes(prompt, "IMAGE 3: APPROVED POSE 1");
   assertStringIncludes(prompt, "rear-plain-marker");
   assertEquals(prompt.includes("front-only-lace-marker"), false);
   assertEquals(prompt.includes("front-lace-construction-marker"), false);
@@ -160,7 +179,39 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   assertStringIncludes(prompt, "HAIR REAR VISIBILITY LOCK");
   assertStringIncludes(prompt, "SET & BACKDROP HARD LOCK TO APPROVED POSE 1");
   assertStringIncludes(prompt, "ZERO NEW PROPS");
+  assertStringIncludes(prompt, "Objects in the hands are not the set.");
+  assertStringIncludes(prompt, "rebuild only the room those images show");
+  assertStringIncludes(prompt, "furniture in the room");
   assertStringIncludes(prompt, "glances back over her shoulder");
+  assertStringIncludes(prompt, "Copy the room, not its pose or objects in the hands.");
+  assertStringIncludes(prompt, "APPROVED POSE 1 is the room only");
+});
+
+Deno.test("a saree prompt drops style-photo region evidence even when analysis was not normalized", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "STYLE-MOTIF-SAREE",
+    productDetails: "Olive silk saree",
+    pose: {
+      id: "full_front", title: "Front", poseNumber: 1, description: "front", cameraAngle: "front", framing: "full", bodyPosition: "standing",
+      handPlacement: "relaxed", expression: "calm", highlightedDetails: [], productVisibilityRules: [], purpose: "hero", consistencyNotes: "locked", prompt: "Front hero.", enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "saree",
+        sareeTruth: {
+          body: { mainFabric: "silk", baseColor: "olive" },
+          regionEvidence: [
+            { region: "body", sourceRole: "saree_body_detail", state: "confirmed", visibleDecoration: "product-peacock-marker" },
+            { region: "body", sourceRole: "STYLE REFERENCE - SOLE AUTHORITY for the backdrop", state: "confirmed", visibleDecoration: "style-butti-marker" },
+          ],
+        },
+        sareeDrapePlan: { shoulderSide: "left" },
+      },
+    },
+    references: [{ role: "saree_front_drape" }, { role: "saree_body_detail" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(prompt, "product-peacock-marker");
+  assertEquals(prompt.includes("style-butti-marker"), false);
 });
 
 Deno.test("a saree true-back prompt cannot carry a hallucinated front-derived blouse or border into the rear", () => {
@@ -633,12 +684,50 @@ Deno.test("composeGenerationPrompt enforces style reference backdrop authority a
   });
 
   // Verify style reference authority
-  assertStringIncludes(prompt, "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, props, composition, mood, and lighting");
+  assertStringIncludes(prompt, "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, mood, and lighting");
+  assertEquals(prompt.includes("props, composition"), false);
+  assertEquals(prompt.includes("catchlights"), false);
+  assertStringIncludes(prompt, "do not copy the pose or objects in the hands");
+  assertStringIncludes(prompt, "If the eyes are hidden, keep that cover and the visible face.");
   assertStringIncludes(prompt, "Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE");
   // Verify pre-shoot background prohibition
   assertStringIncludes(prompt, "STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos");
   assertStringIncludes(prompt, "ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS");
   assertStringIncludes(prompt, "STRICT PROHIBITION ON COPYING PRE-SHOOT BACKGROUNDS");
+});
+
+Deno.test("composeGenerationPrompt rewrites a stored catchlight rule so a covered face stays covered", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "COVERED-FACE",
+    productDetails: "Green kurti",
+    pose: {
+      id: "full_front",
+      title: "Front",
+      poseNumber: 1,
+      description: "Front hero",
+      cameraAngle: "front",
+      framing: "full",
+      bodyPosition: "planted",
+      handPlacement: "relaxed",
+      expression: "calm",
+      highlightedDetails: ["kurti"],
+      productVisibilityRules: ["visible"],
+      purpose: "hero",
+      consistencyNotes: "locked",
+      prompt: "Front hero with the product readable.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "green" },
+      creativeDirection: { backgroundStyle: "Green wall and a red chair" },
+      consistencyRules: [
+        "Every face must be photorealistic and anatomically correct: natural skin texture with visible pores, correctly shaped and aligned eyes with realistic catchlights, and naturally aligned teeth.",
+      ],
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertEquals(prompt.includes("catchlights"), false);
+  assertStringIncludes(prompt, "eyes as the identity photo shows them, including a cover");
 });
 
 Deno.test("composeGenerationPrompt enforces seated editorial pose for Pose 4 when demanded", () => {
@@ -716,9 +805,50 @@ Deno.test("composeGenerationPrompt enforces seated editorial pose for Pose 4 whe
   });
 
   assertStringIncludes(promptWithoutSitting, "POSE CATEGORY RULES (DYNAMIC):");
-  assertStringIncludes(promptWithoutSitting, "DYNAMIC POSE: Show active movement");
-  assertStringIncludes(promptWithoutSitting, "STYLE REFERENCE SITTING OVERRIDE (POSE 4):");
+  assertStringIncludes(promptWithoutSitting, "NATURAL EDITORIAL POSE: A relaxed catalog stance");
+  assertStringIncludes(promptWithoutSitting, "Do not freeze a walking stride");
+  assertStringIncludes(promptWithoutSitting, "DO NOT COPY THE STYLE POSE (POSE 4):");
+  assertStringIncludes(promptWithoutSitting, "A person sitting in the STYLE REFERENCE does not make this frame seated.");
   assertEquals(promptWithoutSitting.includes("SEATED EDITORIAL POSE REQUIREMENT (POSE 4):"), false);
+  assertEquals(promptWithoutSitting.includes("STYLE REFERENCE SITTING OVERRIDE"), false);
+});
+
+Deno.test("composeGenerationPrompt keeps pose 1 a front hero when the plan copied a sit", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "RAMAN-TEAL",
+    productDetails: "Teal bandhani kurti",
+    pose: {
+      id: "full_front",
+      title: "Seated hero",
+      poseNumber: 1,
+      description: "Sit on the floor like the style photo",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "Seated on the floor",
+      handPlacement: "relaxed",
+      expression: "calm",
+      highlightedDetails: ["gold hem"],
+      productVisibilityRules: ["full garment visible"],
+      purpose: "hero",
+      consistencyNotes: "locked",
+      prompt: "Copy the seated style photo.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "teal" },
+      creativeDirection: {
+        seatedPoseRequired: "yes",
+        seatedPoseReason: "style reference model is seated on a stone plinth",
+      },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(prompt, "POSE CATEGORY RULES (FRONT):");
+  assertStringIncludes(prompt, "FRONT HERO POSE:");
+  assertEquals(prompt.includes("POSE CATEGORY RULES (SITTING):"), false);
+  assertEquals(prompt.includes("SEATED / SITTING EDITORIAL POSE:"), false);
+  assertEquals(prompt.includes("Sit on the floor"), false);
+  assertEquals(prompt.includes("Seated hero"), false);
 });
 
 Deno.test("composeGenerationPrompt seats pose 4 from seatedPoseRequired even when pose text is walking", () => {
@@ -751,7 +881,7 @@ Deno.test("composeGenerationPrompt seats pose 4 from seatedPoseRequired even whe
       creativeDirection: {
         backgroundStyle: "Clean architectural studio",
         seatedPoseRequired: "yes",
-        seatedPoseReason: "style reference model is seated on a stone plinth",
+        seatedPoseReason: "buyer asked for a seated listing frame",
       },
     },
     references: [{ role: "front" }, { role: "style_reference" }],
@@ -760,6 +890,81 @@ Deno.test("composeGenerationPrompt seats pose 4 from seatedPoseRequired even whe
   assertStringIncludes(prompt, "POSE CATEGORY RULES (SITTING):");
   assertStringIncludes(prompt, "SEATED EDITORIAL POSE REQUIREMENT (POSE 4):");
   assertStringIncludes(prompt, "Elegant seated editorial pose on a minimal studio bench");
+  assertStringIncludes(prompt, "The product notes demand an elegant seated pose for this frame.");
+});
+
+Deno.test("composeGenerationPrompt keeps pose 4 standing when only the style photo is seated", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "RAMAN-TEAL",
+    productDetails: "Teal bandhani kurti with white wide cuffed pants",
+    pose: {
+      id: "creative",
+      title: "Seated floor lean",
+      poseNumber: 4,
+      description: "Floor sit copied from the style photo",
+      cameraAngle: "Low angle of the seated model",
+      framing: "Full body seated on the floor. Green wall stays.",
+      bodyPosition: "Seated on the floor leaning on the red chair",
+      handPlacement: "one hand on the knee while seated",
+      expression: "calm while seated",
+      highlightedDetails: ["gold hem", "sparkler"],
+      productVisibilityRules: ["full garment visible", "while seated"],
+      purpose: "Copy the style photo's floor sit",
+      consistencyNotes: "Keep the wide stance from the style photo",
+      prompt: "Sit on the rug the way the style reference sits.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "teal",
+        bottomWearDetails: "white wide cuffed pants",
+      },
+      creativeDirection: {
+        backgroundStyle: "Green wall, red chair, and rug",
+        composition: "Seated on the rug. Floral wall stays.",
+        seatedPoseRequired: "yes",
+        seatedPoseReason: "style reference model is seated on a stone plinth",
+      },
+      stylingPlan: {
+        footwear: "burgundy heels",
+        jewellery: "small studs",
+        ornaments: "none",
+        makeup: "natural",
+        hair: "side braid. She is seated on the floor.",
+        stylingNotes: "Sit like the reference. Keep the choker.",
+        themeInterpretation: "festive teal",
+      },
+      modelIdentity: {
+        face: "Seated woman in sunglasses with a side braid. She is walking toward the chair.",
+      },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+
+  assertStringIncludes(prompt, "CURRENT FRAME (POSE 4 - NATURAL EDITORIAL STANCE)");
+  assertStringIncludes(prompt, "DO NOT COPY THE STYLE POSE (POSE 4):");
+  assertStringIncludes(prompt, "POSE CATEGORY RULES (DYNAMIC):");
+  assertStringIncludes(prompt, "Natural editorial stance. Both feet stay planted and close.");
+  assertStringIncludes(prompt, "Floral wall stays.");
+  assertStringIncludes(prompt, "Green wall stays.");
+  assertStringIncludes(prompt, "gold hem");
+  assertStringIncludes(prompt, "Keep the choker.");
+  assertStringIncludes(prompt, "side braid");
+  assertStringIncludes(prompt, "sunglasses");
+  assertStringIncludes(prompt, "Pose 4: Catalog stance");
+  assertEquals(prompt.includes("Seated woman"), false);
+  assertEquals(prompt.includes("She is walking"), false);
+  assertStringIncludes(prompt, "Eye-level catalog angle.");
+  assertEquals(prompt.includes("SEATED EDITORIAL POSE REQUIREMENT"), false);
+  assertEquals(prompt.includes("Seated on the floor"), false);
+  assertEquals(prompt.toLowerCase().includes("seated on the floor"), false);
+  assertEquals(prompt.includes("Sit on the rug"), false);
+  assertEquals(prompt.includes("while seated"), false);
+  assertEquals(prompt.includes("sparkler"), false);
+  assertEquals(prompt.includes("wide stance"), false);
+  assertEquals(prompt.includes("floor sit"), false);
+  assertEquals(prompt.includes("Seated floor"), false);
 });
 
 Deno.test("composeGenerationPrompt locks style-reference jewellery and dual-mode pose 5", () => {
@@ -919,6 +1124,7 @@ Deno.test("composeGenerationPrompt locks style-reference jewellery and dual-mode
   assertStringIncludes(memoryPrompt, "GENERATION MEMORY (DO NOT FORGET)");
   assertStringIncludes(memoryPrompt, "Product images (SKU/garment truth only): front, back");
   assertStringIncludes(memoryPrompt, "Style reference remains set/backdrop authority");
+  assertStringIncludes(memoryPrompt, "Do not copy the style or Pose 1 stance, or handheld props.");
 
   const padded = productDetail.replace(
     "Create ONE real-camera fashion e-commerce photograph",
@@ -963,16 +1169,21 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   assertStringIncludes(pose2Prompt, "6-POSE PLAN VARIATION DIRECTIVE");
   assertStringIncludes(pose2Prompt, "CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN)");
   assertStringIncludes(pose2Prompt, "Torso and hips MUST physically rotate 35 to 45 degrees");
+  assertStringIncludes(pose2Prompt, "Both feet stay planted and close");
+  assertStringIncludes(pose2Prompt, "never a walking stride or a lifted foot");
   assertStringIncludes(pose2Prompt, "DO NOT render a flat frontal standing pose or repeat Pose 1");
 
   // 2. Reference Image Scope & Product Integrity
   assertStringIncludes(pose2Prompt, "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:");
-  assertStringIncludes(pose2Prompt, "from the reference image (style reference / model reference), take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction");
+  assertStringIncludes(pose2Prompt, "the STYLE REFERENCE is the only source for the photoshoot backdrop, wall, floor, lighting, and camera mood on all six poses");
+  assertStringIncludes(pose2Prompt, "SET ONLY: the direction below is backdrop, light, and camera. It does not set the pose, the garment, or handheld props.");
+  assertStringIncludes(pose2Prompt, "the STYLE REFERENCE face, hair, skin tone, and body proportions are the model identity for all six poses");
   assertStringIncludes(pose2Prompt, "The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows");
+  assertStringIncludes(pose2Prompt, "If this written profile disagrees with the product photos on motif, neckline, sleeves, or hem, the photos win.");
 
   // 3. Locked Details Across All Six Images
   assertStringIncludes(pose2Prompt, "LOCKED DETAILS ACROSS ALL SIX IMAGES (AVOID CONSISTENCY MISTAKES):");
-  assertStringIncludes(pose2Prompt, "Background / Backdrop: Exact same physical room, wall finish, flooring, lighting, shadows, and props across all 6 frames");
+  assertStringIncludes(pose2Prompt, "Background / Backdrop: Exact same physical room, wall finish, flooring, lighting, and shadows across all 6 frames");
   assertStringIncludes(pose2Prompt, "Footwear: The exact same footwear (pair, style, heel, color, finish) across all 6 frames");
   assertStringIncludes(pose2Prompt, "Ornaments & Jewellery: Identical jewellery pieces, metal type, count, and placement across all 6 frames");
   assertStringIncludes(pose2Prompt, "Product Layout & Product Design: Garment construction, cuts, seams, trims, embroidery geometry, pattern repeat, and bottom-wear architecture remain locked across all 6 frames");
@@ -1013,8 +1224,108 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
     },
     references: [{ role: "front" }],
   });
-  assertStringIncludes(pose4Prompt, "CURRENT FRAME (POSE 4 - DYNAMIC WALKING STRIDE)");
-  assertStringIncludes(pose4Prompt, "Active dynamic walking movement captured mid-step across the studio floor");
+  assertStringIncludes(pose4Prompt, "CURRENT FRAME (POSE 4 - NATURAL EDITORIAL STANCE)");
+  assertStringIncludes(pose4Prompt, "NEVER a frozen mid-step, a spin, a wide leg split");
+  assertStringIncludes(pose4Prompt, "Natural editorial stance. Both feet stay planted and close.");
+  assertEquals(pose4Prompt.includes("Show walking motion."), false);
+  assertEquals(pose4Prompt.includes("Mid-stride walk"), false);
+
+  const walkingPose2 = composeGenerationPrompt({
+    skuName: "KURTA-SET-01",
+    productDetails: "Purple floral printed kurta with patiala salwar",
+    pose: {
+      id: "angled",
+      title: "Three-Quarter Sleeve and Fall View",
+      poseNumber: 2,
+      description: "Mid-step walk toward camera",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "walking stride, one foot lifted",
+      handPlacement: "one hand near collar",
+      expression: "natural soft smile",
+      highlightedDetails: ["side silhouette", "sleeve"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "angle",
+      consistencyNotes: "locked",
+      prompt: "Walk forward and show the side.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "purple" },
+      creativeDirection: { seatedPoseRequired: "no" },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(walkingPose2, "POSE CATEGORY RULES (ANGLED):");
+  assertStringIncludes(walkingPose2, "not a 90-degree profile");
+  assertEquals(walkingPose2.includes("exactly 90 degrees"), false);
+  assertEquals(walkingPose2.includes("staggered stance"), false);
+  assertStringIncludes(walkingPose2, "Torso and hips turn 35 to 45 degrees. Both feet stay planted and close.");
+  assertEquals(walkingPose2.includes("Walk forward"), false);
+  assertEquals(walkingPose2.includes("one foot lifted"), false);
+  assertEquals(walkingPose2.includes("Mid-step walk toward camera"), false);
+
+  const plannerPose2 = composeGenerationPrompt({
+    skuName: "KURTA-SET-01",
+    productDetails: "Purple floral printed kurta with patiala salwar",
+    pose: {
+      id: "angled",
+      title: "Professional Side / 3/4 View",
+      poseNumber: 2,
+      description: "A professional three-quarter or side view that reveals depth, drape, fit, and side construction.",
+      cameraAngle: "Eye-level 35-50 degree three-quarter view",
+      framing: "full body",
+      bodyPosition: "Rotate torso and hips together 35 to 45 degrees into an intentional three-quarter angle, both feet planted and close",
+      handPlacement: "away from the side seam",
+      expression: "natural glance",
+      highlightedDetails: ["side silhouette"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "depth",
+      consistencyNotes: "locked",
+      prompt: "Create an intentional 35-to-45 degree three-quarter fashion pose with both feet planted and close so a joined hem stays closed. Reveal side silhouette.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "purple", bottomWearDetails: "farshi pajama" },
+      creativeDirection: { seatedPoseRequired: "no" },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(plannerPose2, "POSE CATEGORY RULES (ANGLED):");
+  assertStringIncludes(plannerPose2, "Both feet stay planted and close");
+  assertEquals(plannerPose2.includes("exactly 90 degrees"), false);
+  assertEquals(plannerPose2.includes("staggered stance"), false);
+
+  const plannerPose4 = composeGenerationPrompt({
+    skuName: "KURTA-SET-01",
+    productDetails: "Purple floral printed kurta with farshi pajama",
+    pose: {
+      id: "creative",
+      title: "Natural Editorial Pose",
+      poseNumber: 4,
+      description: "A natural editorial pose that follows the selected creative direction.",
+      cameraAngle: "editorial",
+      framing: "full body",
+      bodyPosition: "Relaxed editorial stance: contrapposto or a soft three-quarter lean, both feet grounded and close; never a frozen walking stride",
+      handPlacement: "relaxed",
+      expression: "calm",
+      highlightedDetails: ["silhouette"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "editorial",
+      consistencyNotes: "locked",
+      prompt: "Create a natural editorial catalog frame with a soft three-quarter lean and both feet grounded and close. Never a frozen walking stride or a wide leg split.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "purple", bottomWearDetails: "farshi pajama" },
+      creativeDirection: { seatedPoseRequired: "no" },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(plannerPose4, "POSE CATEGORY RULES (DYNAMIC):");
+  assertStringIncludes(plannerPose4, "NATURAL EDITORIAL POSE:");
+  assertEquals(plannerPose4.includes("exactly 90 degrees"), false);
+  assertEquals(plannerPose4.includes("staggered stance"), false);
 
   // Test Pose 6: Feature showcase
   const pose6Prompt = composeGenerationPrompt({
@@ -1045,7 +1356,115 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   });
   assertStringIncludes(pose6Prompt, "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE)");
   assertStringIncludes(pose6Prompt, "Framing, angle, and physical stance MUST visibly diverge from Pose 1");
-  assertStringIncludes(pose6Prompt, "It must complement the other five images while showing a distinctly different pose");
+  assertStringIncludes(pose6Prompt, "Same model face, same uploaded product, and the same style-reference backdrop as the other five frames.");
+  assertStringIncludes(pose6Prompt, "Planted weight shift. Both feet stay close.");
+  assertEquals(pose6Prompt.includes("feet separated"), false);
+
+  const propPose = composeGenerationPrompt({
+    skuName: "KURTA-SET-01",
+    productDetails: "Purple floral printed kurta with patiala salwar",
+    pose: {
+      id: "full_front",
+      title: "Front Hero View",
+      poseNumber: 1,
+      description: "Square front hero",
+      cameraAngle: "eye level",
+      framing: "full",
+      bodyPosition: "standing",
+      handPlacement: "One hand holding a sparkler",
+      expression: "Playful wink with a sparkler",
+      highlightedDetails: ["neckline"],
+      productVisibilityRules: ["garment visible"],
+      purpose: "hero",
+      consistencyNotes: "locked",
+      prompt: "Full front hero pose.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "purple" },
+      creativeDirection: { seatedPoseRequired: "no" },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertEquals(propPose.includes("sparkler"), false);
+  assertStringIncludes(propPose, "holding nothing copied from the style or model photo");
+  assertStringIncludes(propPose, "Calm natural expression.");
+
+  const creativeLeak = composeGenerationPrompt({
+    skuName: "MANGO-MEHENDI",
+    productDetails: "Olive embroidered kurta",
+    pose: {
+      id: "showcase",
+      title: "Hem feature",
+      poseNumber: 6,
+      description: "Feature showcase",
+      cameraAngle: "low angle",
+      framing: "full body",
+      bodyPosition: "soft weight shift",
+      handPlacement: "hands relaxed",
+      expression: "calm poise",
+      highlightedDetails: ["gold hem"],
+      productVisibilityRules: ["hem visible"],
+      purpose: "showcase",
+      consistencyNotes: "locked",
+      prompt: "Show the gold hem.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "olive" },
+      stylingPlan: {
+        footwear: "juttis",
+        jewellery: "gold jhumkas",
+        ornaments: "gold jhumkas. One hand holds a sparkler.",
+        makeup: "natural",
+        hair: "side braid",
+        stylingNotes: "keep the yoke clear",
+      },
+      modelIdentity: {
+        face: "Side braid and sunglasses. Render realistic catchlights.",
+      },
+      creativeDirection: {
+        backgroundStyle: "Green festive wall, red patchwork chair, and a walking-distance rug",
+        composition: "Mid-stride walk toward the camera. Floral wall stays.",
+        cameraPerspective: "Low angle with a sparkler in frame",
+        propUsage: "Two handheld sparklers",
+        suggestedAccessories: "A small potli. Also two sparklers.",
+        showcasePlan: {
+          heroFeature: "gold hem embroidery",
+          featureRegion: "hem_border",
+          shotType: "full_body_feature",
+          whyItSells: "the hem craft is the signature",
+          bodyPosition: "frozen walking stride with feet separated",
+          handPlacement: "one hand holding a sparkler",
+          expression: "wink while holding a sparkler",
+          distinctFrom: "not the style photo walking pose",
+          visibilityRules: ["hem fully visible", "sparkler stays in frame"],
+        },
+      },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertEquals(creativeLeak.includes("sparkler"), false);
+  assertEquals(creativeLeak.includes("Mid-stride walk"), false);
+  assertEquals(creativeLeak.includes("catchlights"), false);
+  assertStringIncludes(creativeLeak, "Floral wall stays.");
+  assertStringIncludes(creativeLeak, "Side braid and sunglasses.");
+  assertStringIncludes(creativeLeak, "Room and camera only.");
+  assertEquals(creativeLeak.includes("feet separated"), false);
+  assertEquals(creativeLeak.includes("style photo walking pose"), false);
+  assertEquals(creativeLeak.includes("frozen walking stride with feet separated"), false);
+  assertStringIncludes(creativeLeak, "walking-distance rug");
+  assertStringIncludes(creativeLeak, "Set props only. Do not copy objects held in the style or model photo.");
+  assertStringIncludes(creativeLeak, "Planted weight shift. Both feet stay close.");
+  assertStringIncludes(creativeLeak, "holding nothing copied from the style or model photo");
+  assertStringIncludes(creativeLeak, "Calm natural expression.");
+  assertStringIncludes(creativeLeak, "gold hem embroidery");
+  assertStringIncludes(creativeLeak, "hem fully visible");
+  assertStringIncludes(creativeLeak, "gold jhumkas");
+  assertStringIncludes(creativeLeak, "A small potli.");
+  assertStringIncludes(creativeLeak, "keep the yoke clear");
+  assertStringIncludes(creativeLeak, "If the eyes are hidden, keep that cover and the visible face.");
+  assertStringIncludes(creativeLeak, "Do not invent an uncovered face.");
 });
 
 Deno.test("composeGenerationPrompt enforces anatomical integrity and eliminates extra hands", () => {
@@ -1244,4 +1663,120 @@ Deno.test("Pose 6 hard rule and aesthetic photoshoot direction survive prompt co
   assertEquals(compacted.length <= IMAGE_PROMPT_SAFE_CHARS, true);
   assertStringIncludes(compacted, "POSE 6 HARD RULE (AESTHETIC FEATURE SHOWCASE & DETAIL LOCK):");
   assertStringIncludes(compacted, "SHOWCASE FRAME SUBJECT: mirror-work bell sleeve cuff");
+});
+
+Deno.test("a compacted pose block keeps the current frame and seated rules, and drops a walking prompt", () => {
+  const productIdentity = {
+    garmentFamily: "kurta_or_kurti_set",
+    category: "ethnic set",
+    mainColor: "peach",
+    secondaryColors: ["maroon", "pink"],
+    fabric: "cotton silk",
+    pattern: "large maroon medallion butti",
+    print: "large maroon medallion butti scattered on a peach ground",
+    neckline: "round neck with embroidered yoke",
+    sleeveType: "three-quarter sleeves",
+    length: "knee length",
+    fit: "relaxed",
+    silhouette: "straight kurta",
+    bottomWearDetails: "pink floral farshi pajama with a 6-inch joined hem and a 4-inch taper, waist pleats and side-joint pleats",
+    footwearDetails: "jutti",
+    embroidery: "maroon medallion butti and yoke embroidery",
+    detailPlacementMap: ["large maroon medallion butti across the kurta body", "yoke embroidery at the neckline"],
+    garmentEvidence: [
+      {
+        region: "body",
+        state: "confirmed",
+        sourceRole: "front",
+        visibleConstruction: "peach kurta with large maroon medallion butti",
+        visibleDecoration: "large maroon medallion butti",
+        closures: "none",
+        explicitlyAbsent: [],
+        uncertainty: "none",
+      },
+    ],
+  };
+  const creativeDirection = {
+    backgroundStyle: "floral wall, cane bench, basket",
+    seatedPoseRequired: "yes",
+    seatedPoseReason: "buyer asked for a seated listing frame",
+  };
+  const liveRefs = [
+    { role: "front" },
+    { role: "back" },
+    { role: "bottom" },
+    { role: "fabric_pattern" },
+    { role: "style_reference" },
+    { role: "approved_pose" },
+  ];
+  const generationMemory = formatGenerationMemoryBrief({
+    references: liveRefs,
+    memory: buildGenerationMemory({
+      references: [...liveRefs, { role: "model_identity" }],
+      productIdentity,
+      creativeDirection,
+      bottomWearMode: "farshi",
+      approvedAssets: [{ poseIndex: 1, storagePath: "pose-1.jpg", role: "approved_pose" }],
+    }),
+  });
+  const session = { productIdentity, creativeDirection };
+  const pose2 = composeGenerationPrompt({
+    skuName: "NISHI-PEACH",
+    productDetails: "Peach kurta with large maroon medallion butti and pink floral farshi pajama",
+    pose: {
+      id: "angled",
+      title: "Three-quarter turn",
+      poseNumber: 2,
+      description: "Walk forward and show the side silhouette",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "walking stride, one foot lifted",
+      handPlacement: "relaxed",
+      expression: "calm",
+      highlightedDetails: ["medallion butti", "yoke"],
+      productVisibilityRules: ["full garment visible", "joined hem closed"],
+      purpose: "catalog",
+      consistencyNotes: "locked set",
+      prompt: "Walk forward and show the side.",
+      enabled: true,
+    } as any,
+    session,
+    references: liveRefs,
+    generationMemory,
+  });
+  assertEquals(pose2.length <= IMAGE_PROMPT_SAFE_CHARS, true);
+  assertEquals(pose2.includes("[truncated]"), true);
+  assertStringIncludes(pose2, "CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN): Torso and hips MUST physically rotate 35 to 45 degrees. Both feet stay planted and close; never a walking stride or a lifted foot.");
+  assertEquals(pose2.includes("Walk forward"), false);
+  assertEquals(pose2.includes("one foot lifted"), false);
+
+  const pose4 = composeGenerationPrompt({
+    skuName: "NISHI-PEACH",
+    productDetails: "Peach kurta with large maroon medallion butti and pink floral farshi pajama",
+    pose: {
+      id: "creative",
+      title: "Editorial",
+      poseNumber: 4,
+      description: "Dynamic walking motion and swirl",
+      cameraAngle: "eye level",
+      framing: "full body",
+      bodyPosition: "controlled walking movement",
+      handPlacement: "relaxed",
+      expression: "calm",
+      highlightedDetails: ["medallion butti", "yoke"],
+      productVisibilityRules: ["full garment visible", "joined hem closed"],
+      purpose: "catalog",
+      consistencyNotes: "locked set",
+      prompt: "Playful walking motion and garment swirl.",
+      enabled: true,
+    } as any,
+    session,
+    references: liveRefs,
+    generationMemory,
+  });
+  assertEquals(pose4.length <= IMAGE_PROMPT_SAFE_CHARS, true);
+  assertStringIncludes(pose4, "CURRENT FRAME (POSE 4 - SEATED EDITORIAL)");
+  assertStringIncludes(pose4, "SEATED EDITORIAL POSE REQUIREMENT (POSE 4):");
+  assertStringIncludes(pose4, "POSE CATEGORY RULES (SITTING):");
+  assertEquals(pose4.includes("Playful walking motion"), false);
 });

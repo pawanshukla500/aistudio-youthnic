@@ -22,7 +22,7 @@ Six-pose fashion catalog photoshoots generated from product references.
    and Gemini Flash QA runs at low. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
 2. **Product references are the truth (PR 131).** Generated images must take clothing EXCLUSIVELY
    from uploaded product references. The outfit/clothing shown in the STYLE REFERENCE image is 100% DISCARDED and QUARANTINED.
-   Style reference is strictly the authority for backdrop, room architecture, flooring, props, composition, and lighting.
+   Style reference is strictly the authority for backdrop, room architecture, flooring, and lighting. Copy the room only: do not copy the pose, the outfit, or objects in the hands.
    Never compromise product fidelity or generation quality for style matching.
 3. **Natural Human Anatomy (PR 131).** Every generated image must have strictly exactly two arms and two hands.
    Zero third hands, phantom limbs, or floating hands resting on waist/pleats without clear forearm connection.

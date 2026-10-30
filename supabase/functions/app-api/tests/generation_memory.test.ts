@@ -53,8 +53,25 @@ Deno.test("generation memory labels product vs style and keeps approved outputs 
   assertStringIncludes(brief, "Style reference");
   assertStringIncludes(brief, "style_reference");
   assertStringIncludes(brief, "Previous approved output");
+  assertStringIncludes(brief, "Use it for set continuity only, never as the face, the pose, the objects in the hands, or the garment.");
+  assertStringIncludes(brief, "Face lock: the style reference, because no separate model photo is attached.");
+  assertEquals(brief.includes("Use it for identity"), false);
   assertStringIncludes(brief, "Do not copy the product-photo courtyard.");
   assertEquals(brief.includes("gold yoke embroidery"), true);
+  assertStringIncludes(brief, "Seated pose 4 required: yes");
+
+  const describedPhoto = formatGenerationMemoryBrief({
+    references: [{ role: "front" }, { role: "style_reference" }],
+    memory: buildGenerationMemory({
+      references: [{ role: "front" }, { role: "style_reference" }],
+      creativeDirection: {
+        seatedPoseRequired: "yes",
+        seatedPoseReason: "Seated on the floor leaning on the red chair",
+      },
+    }),
+  });
+  assertStringIncludes(describedPhoto, "Seated pose 4 required: no");
+  assertEquals(describedPhoto.includes("Seated pose 4 required: yes"), false);
 });
 
 Deno.test("clone memory keeps labeled references but drops prior generated outputs", () => {
@@ -88,6 +105,9 @@ Deno.test("learned prompt patterns stay generic and fail closed without a catego
   });
   const titles = learned.map((pattern) => pattern.title);
   assertEquals(titles.includes("style-reference-backdrop-lock"), true);
+  const backdropLock = learned.find((pattern) => pattern.title === "style-reference-backdrop-lock")?.patternText ?? "";
+  assertStringIncludes(backdropLock, "Do not copy its pose, objects in the hands, or garment.");
+  assertEquals(backdropLock.includes("props"), false);
   assertEquals(titles.includes("seated-pose-4-lock"), true);
   assertEquals(titles.includes("pose1-continuity-lock"), true);
   assertEquals(titles.includes("pose-plan-6-variation-lock"), true);

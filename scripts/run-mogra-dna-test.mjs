@@ -22,7 +22,7 @@ async function main() {
     { role: "back", label: "BACK PRODUCT - authoritative rear garment construction and design ONLY. Pre-shoot background, walls, and setting MUST BE 100% DISCARDED", fileMatch: "ref_back" },
     { role: "fabric_pattern", label: "FABRIC / PATTERN DETAIL - high-priority UPPER-garment texture, weave, print and embroidery truth; not bottom-wear print unless this image itself shows the trousers/skirt; background must be ignored", fileMatch: "ref_fabric_pattern" },
     { role: "additional_product", label: "ADDITIONAL PRODUCT PHOTO - supporting product truth; background must be ignored", fileMatch: "ref_additional_product" },
-    { role: "style_reference", label: "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, props, composition, mood, and lighting; never product identity or garment. The clothing/outfit in this image must be 100% DISCARDED; dress model ONLY in uploaded product", fileMatch: "ref_style_reference" },
+    { role: "style_reference", label: "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, mood, and lighting; never product identity or garment. Copy the room only: do not copy the pose or objects in the hands. The clothing/outfit in this image must be 100% DISCARDED; dress model ONLY in uploaded product", fileMatch: "ref_style_reference" },
   ];
 
   const manifest = [];
@@ -65,7 +65,7 @@ REFERENCE AUTHORITY (highest to lowest):
 5. MANNEQUIN / FLAT-LAY SHOT - on a mannequin or dress form, authoritative for worn shape, fit, proportion and drape.
 6. BOTTOM WEAR / FARSHI - when supplied, pixel-level authority for the trousers/skirt cut, volume, hem, color and print. Never copy upper-garment embroidery onto this panel.
 7. ADDITIONAL PRODUCT - another source of product truth, including supporting bottom-wear evidence.
-8. STYLE REFERENCE - creative direction only. From the reference image, take ONLY the photoshoot background/backdrop, model face/style guidance, pose inspiration, framing, and overall photography direction. ABSOLUTE PROHIBITION ON COPYING THE PRODUCT FROM THE STYLE REFERENCE: The clothing, outfit, saree, dress, fabric, color, prints, or embroidery worn by the person in the style reference MUST BE 100% DISCARDED. Absolutely DO NOT copy, reproduce, or borrow the style reference's clothing.
+8. STYLE REFERENCE - creative direction only. From the style reference, take the photoshoot backdrop, wall, floor, and lighting for all six poses. Do not copy that photo's pose, stance, framing, or handheld props into any pose. Take the model face from that image only when no MODEL FACE REFERENCE is supplied; when a MODEL FACE REFERENCE is supplied, discard the style-reference face, hair, and body. ABSOLUTE PROHIBITION ON COPYING THE PRODUCT FROM THE STYLE REFERENCE: The clothing, outfit, saree, dress, fabric, color, prints, or embroidery worn by the person in the style reference MUST BE 100% DISCARDED. Absolutely DO NOT copy, reproduce, or borrow the style reference's clothing. The product itself must stay based exclusively on uploaded product images and must not be redesigned. Never copy its garment, product color, bottoms, logos, or accessories.
 
 First, determine the garmentFamily from the references: "kurta_or_kurti_set", "saree", "dress", "western_or_casual", or "other".
 

@@ -61,7 +61,7 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v24-farshi-joined-hem");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v31-room-not-framing");
 });
 
 Deno.test("analysis prompt distinguishes farshi from palazzo and does not take bottom print from upper fabric close-ups", () => {
@@ -241,6 +241,22 @@ Deno.test("rear placement locks require direct rear evidence with provenance", (
   assertEquals(explicitlyAbsent.productIdentity.detailPlacementMap, []);
 });
 
+Deno.test("style and model photos cannot become garment evidence", () => {
+  const normalized = normalizeAnalysis({
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      garmentEvidence: [
+        { region: "front body", sourceRole: "front", state: "confirmed", visibleDecoration: "large maroon medallion butti" },
+        { region: "front body", sourceRole: "style_reference", state: "confirmed", visibleDecoration: "small pink butti from the style photo" },
+        { region: "front body", sourceRole: "model_identity", state: "confirmed", visibleDecoration: "style-photo neckline" },
+        { region: "front body", sourceRole: "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop", state: "confirmed", visibleDecoration: "verbose style-label butti" },
+      ],
+    },
+  }, "kurta");
+  assertEquals(normalized.productIdentity.garmentEvidence.map((entry) => entry.sourceRole), ["front"]);
+  assertEquals(normalized.productIdentity.garmentEvidence[0]?.visibleDecoration, "large maroon medallion butti");
+});
+
 Deno.test("complete normalized saree session passes shared Studio and Catalog preflight", () => {
   const normalized = normalizeAnalysis({
     productIdentity: { garmentFamily: "saree" },
@@ -326,11 +342,14 @@ Deno.test("analysis prompt locks style-reference backdrop, jewellery, seated pos
   assertStringIncludes(prompt, "PRODUCT vs STYLE DIVISION");
   assertStringIncludes(prompt, "PRODUCT FIRST, STYLE REFERENCE SECOND");
   assertStringIncludes(prompt, "SEATED POSE LOCK");
+  assertStringIncludes(prompt, "A person sitting in the STYLE REFERENCE");
+  assertStringIncludes(prompt, "Do not copy that photo's pose, stance, framing, or handheld props");
+  assertStringIncludes(prompt, "is not a request to sit");
   assertStringIncludes(prompt, "seatedPoseRequired");
   assertStringIncludes(prompt, "THIS POSE SELLS PRODUCT DETAIL");
   assertStringIncludes(prompt, '"product_detail"');
   assertStringIncludes(prompt, "closeupHeroDetail");
-  assertStringIncludes(prompt, "rebuild the photoshoot backdrop, wall, floor, lighting and props from the STYLE REFERENCE only");
+  assertStringIncludes(prompt, "rebuild the photoshoot backdrop, wall, floor, lighting and furniture from the STYLE REFERENCE only");
 });
 
 Deno.test("normalizeAnalysis persists seated pose and closeup mode locks", () => {
@@ -343,14 +362,38 @@ Deno.test("normalizeAnalysis persists seated pose and closeup mode locks", () =>
       closeupHeroDetail: "yoke embroidery lattice",
     },
   }, "ethnic/fusion");
-  assertEquals(normalized.creativeDirection.seatedPoseRequired, "yes");
-  assertEquals(normalized.creativeDirection.seatedPoseReason, "style reference model is seated on a stone plinth");
+  assertEquals(normalized.creativeDirection.seatedPoseRequired, "no");
+  assertEquals(normalized.creativeDirection.seatedPoseReason, "The style photo's pose is not a sitting request.");
   assertEquals(normalized.creativeDirection.closeupMode, CLOSEUP_PRODUCT_DETAIL);
   assertEquals(normalized.creativeDirection.closeupHeroDetail, "yoke embroidery lattice");
   assertEquals(isSeatedEditorialPoseDemanded({
-    pose: { id: "creative", prompt: "walk and swirl" },
+    pose: { id: "creative", prompt: "Seated on the floor leaning on the chair", bodyPosition: "seated on the rug" },
     productDetails: "no seating requested",
-    creative: normalized.creativeDirection,
+    creative: {
+      seatedPoseRequired: "yes",
+      seatedPoseReason: "style reference model is seated on a stone plinth",
+    },
+  }), false);
+  assertEquals(isSeatedEditorialPoseDemanded({
+    pose: { id: "creative", prompt: "walk and swirl" },
+    productDetails: "kurta set",
+    creative: {
+      seatedPoseRequired: "yes",
+      seatedPoseReason: "buyer asked for a seated listing frame",
+    },
+  }), true);
+  assertEquals(isSeatedEditorialPoseDemanded({
+    pose: { id: "creative", prompt: "Seated on the floor", bodyPosition: "leaning on the red chair" },
+    productDetails: "teal kurti",
+    creative: {
+      seatedPoseRequired: "yes",
+      seatedPoseReason: "Seated on the floor leaning on the red chair",
+    },
+  }), false);
+  assertEquals(isSeatedEditorialPoseDemanded({
+    pose: { id: "creative", prompt: "Sit on the rug" },
+    productDetails: "teal kurti",
+    creative: { seatedPoseRequired: "yes", seatedPoseReason: "" },
   }), true);
   assertEquals(isSeatedEditorialPoseDemanded({
     pose: { id: "creative", prompt: "walk and swirl" },
