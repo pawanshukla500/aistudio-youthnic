@@ -256,7 +256,7 @@ const YES_DIRECTION_FLAG = /^(yes|true|required|1)$/i;
 const NO_DIRECTION_FLAG = /^(no|false|0)$/i;
 const SITTING_POSE_RE = /\b(sit|sits|sitting|seated)\b/i;
 
-const EXPLICIT_SIT_REQUEST = /\b(?:buyer|customer|request(?:ed)?|ask(?:ed|s)?|product notes)\b/i;
+const EXPLICIT_SIT_REQUEST = /\b(?:buyer|customer|client|merchant|seller|user|request(?:ed)?|ask(?:ed|s)?|product notes?|mandat(?:e|ory)|explicit(?:ly)?|instruct(?:ion|ed)?)\b/i;
 
 /** A non-empty reason is a description of a photo unless it is an explicit request. */
 function stylePhotoSittingReason(value: unknown): boolean {

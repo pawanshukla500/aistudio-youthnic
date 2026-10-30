@@ -350,13 +350,25 @@ export function collapseDuplicateUploads<T extends ReferenceLike>(selected: T[])
   const model = selected.find((reference) => reference.role === "model_identity");
   const style = selected.find((reference) => reference.role === "style_reference");
   const modelMatchesStyle = Boolean(model && style && sameUploadedImage(model, style));
-  const seen = new Set<string>();
+  const seenProduct = new Set<string>();
+  const seenStyle = new Set<string>();
+  const seenModel = new Set<string>();
   const unique: T[] = [];
   for (const reference of selected) {
     if (modelMatchesStyle && reference.role === "model_identity") continue;
     const keys = uploadIdentityKeys(reference);
-    if (keys.length > 0 && keys.some((key) => seen.has(key))) continue;
-    for (const key of keys) seen.add(key);
+    if (keys.length > 0) {
+      if (reference.role === "style_reference") {
+        if (keys.some((key) => seenStyle.has(key))) continue;
+        for (const key of keys) seenStyle.add(key);
+      } else if (reference.role === "model_identity") {
+        if (keys.some((key) => seenModel.has(key))) continue;
+        for (const key of keys) seenModel.add(key);
+      } else {
+        if (keys.some((key) => seenProduct.has(key))) continue;
+        for (const key of keys) seenProduct.add(key);
+      }
+    }
     unique.push(reference);
   }
   return unique;

@@ -668,7 +668,7 @@ function lockedDetailsDirective(): string {
 // prompt and body position survive. Rewrite only those pose fields.
 const UNPLANTED_POSE_PATTERN = /\b(?:walk(?:ing|s)?|strides?|mid-step|stepped|lifted foot|foot lifted|step(?:s|ping)? forward|feet (?:naturally )?spaced|feet separated|feet apart|shoulder-width|shoulder width|legs spread|wide stance)\b/i;
 const COPIED_SITTING_PATTERN = /\b(?:sit|sits|sitting|seated)\b/i;
-const HELD_OBJECT_PATTERN = /\b(?:sparklers?|fireworks?|handheld props?)\b/i;
+const HELD_OBJECT_PATTERN = /\b(?:sparklers?|fireworks?|handheld props?|handheld objects?|bags?|purses?|clutch(?:es)?|flowers?|bouquets?|diya[s]?|candles?|umbrellas?)\b/i;
 
 function plantedPoseReplacement(pose: { id: string; poseNumber: number }, sitting: boolean): string {
   const poseNumber = pose.poseNumber;
