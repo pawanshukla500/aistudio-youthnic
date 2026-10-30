@@ -177,12 +177,16 @@ export function assertGenerationPromptWithinLimit(prompt: string) {
   return prompt;
 }
 
-function isDirectRearEvidence(entry: JsonRecord) {
-  return isDirectBackProductRole(String(entry.sourceRole ?? entry.source_role ?? "").trim().toLowerCase());
+function isDirectRearOrBottomEvidence(entry: JsonRecord, includesBottomWear: boolean) {
+  const role = String(entry.sourceRole ?? entry.source_role ?? "").trim().toLowerCase();
+  const region = String(entry.region ?? "").trim().toLowerCase();
+  if (isDirectBackProductRole(role)) return true;
+  if (includesBottomWear && (role === "bottom" || region.startsWith("bottom wear") || region.startsWith("bottom_wear"))) return true;
+  return false;
 }
 
-function rearEvidenceOnly(evidence: JsonRecord[]) {
-  return evidence.filter((entry) => isDirectRearEvidence(objectValue(entry))).map((entry) => {
+function rearEvidenceOnly(evidence: JsonRecord[], includesBottomWear = false) {
+  return evidence.filter((entry) => isDirectRearOrBottomEvidence(objectValue(entry), includesBottomWear)).map((entry) => {
     const record = objectValue(entry);
     return {
       ...knownFields(record, ["region", "state", "visibleConstruction", "visibleDecoration", "closures", "explicitlyAbsent", "uncertainty"]),
@@ -200,8 +204,12 @@ function rearOnlyProductCore(product: JsonRecord, includesBottomWear = true) {
   return {
     garmentFamily: String(product.garmentFamily || ""),
     ...(bottomWear ? { bottomWearDetails: bottomWear } : {}),
-    rearVisualAuthority: "Only the direct uploaded BACK / SAREE REAR-BACK DRAPE image in this request.",
-    unprovenRearRule: "Render every rear construction, motif, border, tassel, closure, trim, and blouse-back detail as plain base fabric unless it is visible in that direct rear image.",
+    rearVisualAuthority: includesBottomWear
+      ? "Upper garment: only the direct uploaded BACK / SAREE REAR-BACK DRAPE image in this request. Bottom wear: authoritative bottom wear references and recorded bottom-wear details."
+      : "Only the direct uploaded BACK / SAREE REAR-BACK DRAPE image in this request.",
+    unprovenRearRule: includesBottomWear
+      ? "For the upper garment, render every rear construction, motif, border, tassel, closure, trim, and blouse-back detail as plain base fabric unless it is visible in that direct rear image. Bottom wear must faithfully preserve its authentic cut, volume, pleating, hem, and print DNA."
+      : "Render every rear construction, motif, border, tassel, closure, trim, and blouse-back detail as plain base fabric unless it is visible in that direct rear image.",
   };
 }
 
@@ -471,6 +479,8 @@ function bottomWearSection(args: {
   bottomWear: BottomWearPresentation;
   isSaree: boolean;
   hasBottomReference: boolean;
+  skuName?: string;
+  productDetails?: string;
 }) {
   // `isSaree` is the caller's exact garmentFamily match widened by the pose
   // family, so a session analysed under "ethnic/fusion" that the taxonomy
@@ -487,11 +497,15 @@ function bottomWearSection(args: {
 - Frame every pose so the upper garment - its neckline, sleeves, fit, print and hem line - remains the subject.
 - THIS SECTION OUTRANKS THE POSE BRIEF: the pose plan below was written from the product analysis and may still name bottom wear, a "complete set", or a waistband-to-hem read. Ignore every such instruction and follow this section instead.${args.bottomWear.mode === "top_only" && args.bottomWear.recordedInAnalysis ? "\n- The analysis recorded bottom-wear details for this SKU, but the shoot is configured TOP ONLY. Present the top as the product and keep the bottom neutral and non-matching." : ""}`;
   }
-  const effectiveCutClass = effectiveBottomCutClass(args.bottomWear.cutClass, args.hasBottomReference);
+  const effectiveCutClass = effectiveBottomCutClass(args.bottomWear.cutClass, args.hasBottomReference, {
+    skuName: args.skuName,
+    productDetails: args.productDetails,
+    details: args.bottomWear.details,
+  });
   const guard = bottomWearSubstitutionGuard(effectiveCutClass);
   let cleanedDetails = args.bottomWear.details;
   if (args.hasBottomReference || effectiveCutClass === "farshi") {
-    cleanedDetails = cleanedDetails.replace(/\bnot\s+(?:flared\s+)?farshi(?:\s*\/\s*farsi)?(?:\s+pajama|\s+pants)?\b/gi, "").trim();
+    cleanedDetails = cleanedDetails.replace(/\bnot\s+(?:flared\s+)?(?:farshi|farsi|fasi)(?:\s*\/\s*(?:farshi|farsi|fasi))?(?:\s+(?:pajama|pants|salwar))?\b/gi, "").trim();
   }
   if (effectiveCutClass === "farshi") {
     cleanedDetails = withoutFarshiStructureContradictions(cleanedDetails);
@@ -882,9 +896,33 @@ export function composeGenerationPrompt(args: {
   const storedRules = Array.isArray(args.session.consistencyRules) ? args.session.consistencyRules : CONSISTENCY_RULES;
   const rules = boundedStrings(storedRules.map((rule) => withoutInventedCatchlights(String(rule ?? ""))), 16, 420);
   const isTrueBack = args.pose.id === "back";
+  const hasBottomReference = args.references.some((reference) => reference.role === "bottom");
+  // Analysis records what the references prove; the shoot option records how the
+  // merchandiser wants it presented. "auto" keeps them in sync, an explicit
+  // choice wins, and a top-only shoot never gets an invented matching set.
+  const bottomWear = resolveBottomWearPresentation({
+    mode: args.bottomWearMode ?? args.session.bottomWearMode ?? args.session.bottom_wear_mode,
+    productIdentity: product,
+    skuName: String(args.skuName || ""),
+    productDetails: String(args.productDetails || ""),
+    hasBottomReference,
+  });
+  const farshiGeneration = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, {
+    skuName: String(args.skuName || ""),
+    productDetails: String(args.productDetails || ""),
+    details: bottomWear.details,
+  }) === "farshi";
+  const productForPrompt = farshiGeneration && typeof product.bottomWearDetails === "string"
+    ? {
+      ...product,
+      bottomWearDetails: withoutFarshiStructureContradictions(
+        product.bottomWearDetails.replace(/\bnot\s+(?:flared\s+)?(?:farshi|farsi|fasi)(?:\s*\/\s*(?:farshi|farsi|fasi))?(?:\s+(?:pajama|pants|salwar))?\b/gi, ""),
+      ),
+    }
+    : product;
   // Existing sessions can bypass normalizeAnalysis, so reapply rear-evidence
   // validation immediately before prompt construction as a final safety gate.
-  const promptEvidence = (isTrueBack ? rearEvidenceOnly(evidence) : evidence)
+  const promptEvidence = (isTrueBack ? rearEvidenceOnly(evidence, bottomWear.includesBottomWear) : evidence)
     .filter((entry) => !isNonProductEvidenceRole(objectValue(entry).sourceRole ?? objectValue(entry).source_role));
   const placement = isTrueBack
     ? []
@@ -905,23 +943,6 @@ export function composeGenerationPrompt(args: {
     productDetails: String(args.productDetails || ""),
     skuName: String(args.skuName || ""),
   });
-  // Analysis records what the references prove; the shoot option records how the
-  // merchandiser wants it presented. "auto" keeps them in sync, an explicit
-  // choice wins, and a top-only shoot never gets an invented matching set.
-  const bottomWear = resolveBottomWearPresentation({
-    mode: args.bottomWearMode ?? args.session.bottomWearMode ?? args.session.bottom_wear_mode,
-    productIdentity: product,
-  });
-  const hasBottomReference = args.references.some((reference) => reference.role === "bottom");
-  const farshiGeneration = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference) === "farshi";
-  const productForPrompt = farshiGeneration && typeof product.bottomWearDetails === "string"
-    ? {
-      ...product,
-      bottomWearDetails: withoutFarshiStructureContradictions(
-        product.bottomWearDetails.replace(/\bnot\s+(?:flared\s+)?farshi(?:\s*\/\s*farsi)?(?:\s+pajama|\s+pants)?\b/gi, ""),
-      ),
-    }
-    : product;
   const isShowcase = args.pose.id === "showcase";
   const isPose4 = args.pose.id === "creative" || args.pose.poseNumber === 4;
   const isSittingDemanded = isSeatedEditorialPoseDemanded({
@@ -962,7 +983,13 @@ export function composeGenerationPrompt(args: {
   // style-reference backdrop, and the Pose 1 continuity anchor. Front product
   // photos stay out so their construction cannot leak onto the rear.
   const promptReferences = isTrueBack
-    ? args.references.filter((ref) => isDirectBackProductRole(ref.role) || ref.role === "model_identity" || ref.role === "style_reference" || ref.role === "approved_pose")
+    ? args.references.filter((ref) =>
+        isDirectBackProductRole(ref.role) ||
+        (bottomWear.includesBottomWear && ref.role === "bottom") ||
+        ref.role === "model_identity" ||
+        ref.role === "style_reference" ||
+        ref.role === "approved_pose"
+      )
     : args.references;
   if (isTrueBack && !promptReferences.some((ref) => isDirectBackProductRole(ref.role))) {
     throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
@@ -1029,7 +1056,11 @@ export function composeGenerationPrompt(args: {
     12,
     260,
   ).join("; ");
-  const visibilityRules = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference) === "farshi"
+  const visibilityRules = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, {
+    skuName: String(args.skuName || ""),
+    productDetails: String(args.productDetails || ""),
+    details: bottomWear.details,
+  }) === "farshi"
     ? reconcileFarshiVisibilityRules(recordedVisibility)
     : recordedVisibility;
   const poseCategory = (isTrueBack || args.pose.id === "back")
@@ -1153,7 +1184,7 @@ SAREE DRAPE PLAN:
 ${sareeDrapePlanJson}`) : ""}
 User notes: ${isTrueBack ? "Non-authoritative for rear construction. The direct uploaded back product image remains the sole product source." : boundedText(args.productDetails, 1_200)}
 Reference authority: ${isTrueBack
-    ? "The one direct uploaded BACK / SAREE REAR-BACK DRAPE image in the manifest is the sole visual product authority. Do not derive rear construction from a front, pallu, body detail, border, blouse, mannequin, model, style, or generated image."
+    ? `The one direct uploaded BACK / SAREE REAR-BACK DRAPE image in the manifest is the sole visual product authority for the upper garment back.${bottomWear.includesBottomWear ? " Bottom wear preserves its authentic cut, volume, pleats, hem, and print DNA from the bottom wear references and recorded bottom-wear specifications." : ""} Do not derive upper-garment rear construction from a front, pallu, body detail, border, blouse, mannequin, model, style, or generated image.`
     : `original product images always outrank generated anchors and style references. FRONT controls front construction and, when bottoms are visible, bottom-wear cut and print; BACK solely controls rear construction including rear bottom-wear; FABRIC/PATTERN resolves UPPER-garment material, embroidery and small construction only unless that image itself shows the trousers/skirt; BOTTOM WEAR / FARSHI (if supplied) is the pixel-level authority for bottom-wear cut, volume, hem, color and print; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion, drape and bottom volume, while a FLAT-LAY resolves outline, construction, panel layout and length only, since flat cloth shows no worn drape. ADDITIONAL supports product truth including bottoms; STYLE controls art direction, photoshoot backdrop, room architecture, flooring, and lighting only - STYLE REFERENCE is the SOLE AUTHORITY for the photoshoot environment, never product identity. Product reference backgrounds must be 100% discarded.${isSaree ? " For sarees, FULL SAREE FRONT and REAR/BACK DRAPE control their complete worn regions; SAREE BODY/WEAVE controls body colour, weave and motif geometry; FULLY SPREAD PALLU alone controls the pallu boundary and artwork; BORDER/TASSELS controls edge geometry and tassel construction; BLOUSE FRONT/BACK controls only the matching blouse region. Never classify or treat the pallu spread as generic body fabric." : ""}`}
 - Product references may be flat-lay, folded, pinned or shot on a mannequin or dress form. Rebuild the garment as it falls on a live human body, and never render a mannequin, dress form, hanger, clip, pin, prop stand, or the flat background surface in the output.
 ${isSaree ? (isTrueBack
@@ -1169,13 +1200,14 @@ CRITICAL EVIDENCE RULES:
 - If a region's state is "confirmed_absent", do not render the decoration, trim, closure, or specialized construction represented by that region.
 - If a region's state is "unknown", it MUST be rendered in plain base fabric without any unproven decoration, trim, or specialized construction. UNKNOWN DOES NOT MEAN INFER.
 - Do NOT extrapolate decoration. If trim is confirmed at the front hem but the side seam is unknown, do not extend the trim up the side.
-${isTrueBack ? `- BACK-POSE EVIDENCE VETO: only a confirmed rear region whose Source is BACK PRODUCT or SAREE REAR / BACK DRAPE may place rear construction or decoration. A front-, fabric-, pallu-, border-, blouse-, mannequin-, model-, style-, generated-, or unrecorded source cannot prove a rear lace, trim, border, closure, or motif. If the direct rear evidence does not explicitly prove it, render plain base fabric in that rear region.
+${isTrueBack ? `- BACK-POSE EVIDENCE VETO: For the upper garment/saree rear, only a confirmed rear region whose Source is BACK PRODUCT or SAREE REAR / BACK DRAPE may place rear construction or decoration. A front-, fabric-, pallu-, border-, blouse-, mannequin-, model-, style-, generated-, or unrecorded source cannot prove a rear lace, trim, border, closure, or motif. If the direct rear evidence does not explicitly prove it, render plain base fabric in that upper-garment rear region. Bottom wear must faithfully maintain its authentic cut, print, volume, pleating, and hem from the bottom wear reference and recorded bottom-wear profile.
 - BACK-POSE DUPATTA & HAIR UNOBSTRUCTED RULE: Hair must be swept forward over shoulders or styled in an updo, and dupatta/shawl must drape forward over arms so the entire rear garment construction and embroidery are 100% visible and unobstructed.` : ""}
 
 ${isTrueBack ? `REAR PRODUCT GEOMETRY LOCK:
-- The direct rear product image is the only visual geometry source for this frame. Reproduce only the rear-facing motif shape, scale, spacing, orientation, repeat, density, weave, border, tassel, blouse-back, and embroidery actually visible there.
-- Do not use a fabric close-up, front frame, pallu spread, border image, blouse piece, or generated image to complete unseen rear geometry.
-- If the rear image does not clearly resolve a region, render it as plain base fabric with no inferred decoration, trim, closure, motif, border, tassel, or embroidery.` : (isSaree ? `SAREE GEOMETRY AND PATTERN LOCK - the difference between photographing THIS saree and inventing a similar one:
+- The direct rear product image is the only visual geometry source for the upper garment in this frame. Reproduce only the rear-facing motif shape, scale, spacing, orientation, repeat, density, weave, border, tassel, blouse-back, and embroidery actually visible there.
+- Do not use a fabric close-up, front frame, pallu spread, border image, blouse piece, or generated image to complete unseen upper-garment rear geometry.
+- If the rear image does not clearly resolve an upper-garment region, render it as plain base fabric with no inferred decoration, trim, closure, motif, border, tassel, or embroidery.
+- Bottom wear retains its authentic print geometry, physical motif scale, color, and Farshi silhouette/hem structure across all frames.` : (isSaree ? `SAREE GEOMETRY AND PATTERN LOCK - the difference between photographing THIS saree and inventing a similar one:
 - The SAREE BODY / WEAVE CLOSE-UP image is the pixel-level authority for the main body's motif shape, scale, spacing, orientation, and weave structure. Read the body geometry strictly from that image.
 - The FULLY SPREAD PALLU image is the sole authority for pallu artwork, scale, orientation, repeat, density, and edge construction.
 - The SAREE BORDER / TASSELS DETAIL image is the sole authority for upper/lower border widths, border motifs, and tassel construction.
@@ -1191,7 +1223,13 @@ Embroidery geometry: ${embroideryGeometryJson}
 - Reproduce embroidery as the same internal geometry: same lattice or motif structure, same count and rhythm of repeated units, same borders, same coverage area, and the same relationship to the neckline, tie, drawstring and tassel.
 - If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".`)}
 
-${bottomWearSection({ bottomWear, isSaree: isSareeShoot, hasBottomReference })}
+${bottomWearSection({
+  bottomWear,
+  isSaree: isSareeShoot,
+  hasBottomReference,
+  skuName: String(args.skuName || ""),
+  productDetails: String(args.productDetails || ""),
+})}
 
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
 ${lockedDetailsDirective()}

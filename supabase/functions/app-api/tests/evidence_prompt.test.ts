@@ -1780,3 +1780,59 @@ Deno.test("a compacted pose block keeps the current frame and seated rules, and 
   assertStringIncludes(pose4, "POSE CATEGORY RULES (SITTING):");
   assertEquals(pose4.includes("Playful walking motion"), false);
 });
+
+Deno.test("Fasi salwar SKU enforces Farshi silhouette and preserves bottom reference across back pose", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "MOGRA-FASI-SET",
+    productDetails: "Kurti set with fasi salwar in chevron print",
+    pose: {
+      id: "back",
+      title: "Full Back View",
+      poseNumber: 3,
+      description: "Rear catalog view",
+      cameraAngle: "back",
+      framing: "full",
+      bodyPosition: "away",
+      handPlacement: "sides",
+      expression: "away",
+      highlightedDetails: ["rear kurti", "fasi salwar from back"],
+      productVisibilityRules: ["dupatta draped forward", "fasi bottom wear visible from rear"],
+      purpose: "rear",
+      consistencyNotes: "locked",
+      prompt: "Show rear view of mogra fasi kurti set.",
+      enabled: true,
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        frontConstruction: "front-yoke-embroidery-should-not-leak",
+        bottomWearDetails: "fasi salwar, soft flowy drape, chevron zigzag print with gold sequin lace",
+        garmentEvidence: [
+          { region: "back neckline", sourceRole: "back", state: "confirmed", visibleConstruction: "round neck" },
+          { region: "bottom wear hem", sourceRole: "bottom", state: "confirmed", visibleDecoration: "gold sequin lace" },
+        ],
+      },
+    },
+    references: [{ role: "front" }, { role: "back" }, { role: "bottom" }],
+  });
+
+  // Verify Farshi structure lock is enforced for fasi salwar
+  assertStringIncludes(prompt, "FARSHI / FARSI HARD LOCK:");
+  assertStringIncludes(prompt, "FALL: soft and flowy, but structured, with a fluid or heavy drape.");
+  assertStringIncludes(prompt, "three waist pleats on each side");
+  assertStringIncludes(prompt, "one large pleat on each side at the side-seam joint");
+  assertStringIncludes(prompt, "separate hem panel 6 inches wide is joined");
+  assertStringIncludes(prompt, "tapers 4 inches from its upper edge to its lower edge");
+
+  // Verify bottom wear reference survives in true-back manifest alongside back product
+  assertStringIncludes(prompt, "IMAGE 1: BACK PRODUCT");
+  assertStringIncludes(prompt, "IMAGE 2: BOTTOM WEAR / FARSHI");
+  assertEquals(prompt.includes("IMAGE 1: FRONT PRODUCT"), false);
+
+  // Verify bottom wear evidence survives in rear evidence
+  assertStringIncludes(prompt, "Region BOTTOM WEAR HEM");
+  assertStringIncludes(prompt, "Source: bottom");
+
+  // Verify front kurta construction does not leak onto rear
+  assertEquals(prompt.includes("front-yoke-embroidery-should-not-leak"), false);
+});

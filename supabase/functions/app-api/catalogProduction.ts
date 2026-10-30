@@ -148,9 +148,14 @@ export async function recordShowcaseFeatureOutcome(
     }
     const sessionData = asRecord(session?.session_data);
     const productIdentity = asRecord(sessionData.productIdentity);
+    const hasBottomReference = Array.isArray(sessionData.references) &&
+      sessionData.references.some((entry) => String(asRecord(entry).role || "").toLowerCase() === "bottom");
     const bottomWear = resolveBottomWearPresentation({
       mode: sessionData.bottomWearMode ?? sessionData.bottom_wear_mode,
       productIdentity,
+      skuName: text(sessionData.skuName),
+      productDetails: text(sessionData.productDetails),
+      hasBottomReference,
     });
     // The effective shot, not the planned one: a close-up collision widens the
     // frame, and scoring the tight framing that was never generated would teach

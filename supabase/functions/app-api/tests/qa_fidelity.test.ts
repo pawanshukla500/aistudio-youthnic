@@ -144,6 +144,50 @@ Deno.test("missing or miniaturized bottom print fails QA even when face and kurt
   assert(result.productFidelity > 90, "A high kurta/face average must not hide a failed bottom.");
 });
 
+Deno.test("auto mode includes bottom_wear checks when bottom reference is present without bottom wear text", () => {
+  const prompt = buildPoseQaPrompt({
+    poseNumber: 1,
+    poseType: "full_front",
+    poseTitle: "Hero",
+    poseDirection: { id: "full_front", title: "Hero" },
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      skuName: "KURTI-FASI-SALWAR-SET",
+    },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: false,
+    hasModelReference: false,
+    bottomWearMode: "auto",
+    referenceManifest: ["IMAGE 1: FRONT PRODUCT", "IMAGE 2: BOTTOM PRODUCT REFERENCE"],
+  });
+  assertStringIncludes(prompt, "bottom_wear: when a separate bottom garment is recorded, this is SKU-critical");
+  assertStringIncludes(prompt, "When the bottom is Farshi/Farsi/Fasi, also fail bottom_wear unless the worn trousers match this structure");
+
+  const normalized = normalizePoseQaResult({
+    pass: true,
+    score: 95,
+    checks: Object.fromEntries([...genericCritical, "bottom_wear"].map((key) => [key, "pass"])),
+    scores: Object.fromEntries([...genericCritical, "bottom_wear"].map((key) => [key, 95])),
+    failed: [],
+    reason: "Passed all checks",
+    correction: "",
+  }, {
+    garmentFamily: "kurta_or_kurti_set",
+    poseType: "full_front",
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      skuName: "KURTI-FASI-SALWAR-SET",
+    },
+    bottomWearMode: "auto",
+    hasBottomReference: true,
+  });
+  assertEquals(normalized.pass, true);
+  assertEquals(normalized.checks.bottom_wear, "pass");
+});
+
 Deno.test("close-up QA does not treat bottom_wear as critical when trousers are cropped out", () => {
   const result = normalizePoseQaResult({
     pass: true,

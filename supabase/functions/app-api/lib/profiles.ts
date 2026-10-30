@@ -16,6 +16,7 @@ import {
   hasBottomWearInAnalysis,
   isSareePoseFamily,
   normalizeBottomWearMode,
+  positiveBottomWearPortion,
   recordedBottomWearText,
   resolveBottomWearPresentation,
 } from "./garmentPoses.ts";
@@ -741,6 +742,8 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
   const bottomPresentation = resolveBottomWearPresentation({
     mode: context.bottomWearMode,
     productIdentity: context.productIdentity ?? {},
+    skuName: context.skuName,
+    productDetails: context.productDetails,
   });
   const hasBottoms = bottomPresentation.includesBottomWear || (
     normalizeBottomWearMode(context.bottomWearMode) !== "top_only" &&
@@ -1453,7 +1456,7 @@ export function assertSareeGenerationReady(session: unknown) {
   }
 }
 
-export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, options: { bottomWearMode?: unknown } = {}) {
+export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, options: { bottomWearMode?: unknown; skuName?: string; productDetails?: string } = {}) {
   const product = objectValue(raw.productIdentity ?? raw.product_identity);
   const creative = objectValue(raw.creativeDirection ?? raw.creative_direction);
   const model = objectValue(raw.modelIdentity ?? raw.model_identity);
@@ -1552,19 +1555,23 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     stylingLock: stringValue(model.stylingLock ?? model.styling_lock, "Keep footwear and accessories identical across every pose"),
   };
   const poses = Array.isArray(rawPoses) ? rawPoses : [];
-  const poseContext = {
+  const poseContext: PoseSlotContext = {
     productIdentity,
     garmentFamily: productIdentity.garmentFamily,
     category: productIdentity.category || categoryFallback,
     bottomWearMode: options.bottomWearMode,
     showcasePlan: creativeDirection.showcasePlan,
     closeupHeroDetail: creativeDirection.closeupHeroDetail,
+    skuName: options.skuName,
+    productDetails: options.productDetails,
   };
   const poseSlots = getPoseSlots(poseContext);
   const showcaseFamily = poseFamilyFor(poseContext);
   const showcaseBottomPresentation = resolveBottomWearPresentation({
     mode: options.bottomWearMode,
     productIdentity,
+    skuName: options.skuName,
+    productDetails: options.productDetails,
   });
   const showcaseIncludesBottomWear = showcaseBottomPresentation.includesBottomWear || (
     normalizeBottomWearMode(options.bottomWearMode) !== "top_only" &&
@@ -1655,8 +1662,12 @@ export function buildCombinedAnalysisPrompt(args: {
   analysisLearning?: string; showcaseFeedback?: string;
 }) {
   const manifest = args.referenceManifest.map(({ number, role }) => `IMAGE ${number}: ${role}`).join("\n");
-  const hasBottomRef = args.referenceManifest.some((m) => m.role === "bottom" || /bottom/i.test(m.role));
-  const isFarshiSku = hasBottomRef || /farshi|farsi/i.test(`${args.skuName} ${args.productDetails}`);
+  const positiveNotes = [
+    positiveBottomWearPortion(args.skuName),
+    positiveBottomWearPortion(args.productDetails),
+  ].filter(Boolean).join(" ");
+  const hasFarshiRef = args.referenceManifest.some((m) => /\b(?:farshi|farsi|fasi)\b/i.test(m.role));
+  const isFarshiSku = hasFarshiRef || /\b(?:farshi|farsi|fasi)\b/i.test(positiveNotes);
   return `You are the visual merchandiser and shoot planner for a fashion e-commerce studio.
 
 Analyze EVERY supplied image before answering.
@@ -1699,17 +1710,17 @@ BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT (MANDATORY FOR SUITS, SETS, & CO-OR
 When the product is a multi-piece outfit (kurti/kurta set, salwar suit, co-ord set, lehenga, Indo-western), the customer buys the complete set and expects the EXACT bottom wear cut, silhouette, color, and pattern shown in the product references. NEVER gloss over bottom wear with generic words like "matching pants". You MUST inspect the bottom wear in FRONT PRODUCT, BACK PRODUCT, MANNEQUIN / FLAT-LAY, ADDITIONAL PRODUCT, and BOTTOM WEAR / FARSHI references (if supplied) and record an exhaustive, specific specification in 'productIdentity.bottomWearDetails'. FABRIC / PATTERN DETAIL is NOT authority for bottoms unless that image itself shows the trousers/skirt.
 ${isFarshiSku ? `
 AUTHORITATIVE FARSHI CUT DIRECTIVE:
-A dedicated "BOTTOM WEAR / FARSHI" reference is present in the manifest (or this SKU is designated Farshi).
-The bottom wear in this SKU is AUTHORITATIVELY CLASSIFIED AS "Farshi / Farshi Pajama / Farshi Pants" (NEVER Palazzo).
+A dedicated "BOTTOM WEAR / FARSHI" reference is present in the manifest (or this SKU is designated Farshi / Farsi / Fasi / Farshi Salwar).
+The bottom wear in this SKU is AUTHORITATIVELY CLASSIFIED AS "Farshi / Farshi Pajama / Farshi Pants / Farshi Salwar" (NEVER Palazzo, NEVER generic Salwar).
 Record this structure in bottomWearDetails (classification, waistAndPleating, legVolume, and hemline). Print, colour, motif scale, and length still come from the references. Do not replace this construction with a palazzo, a skirt, or a gathered salwar cuff.
 ${FARSHI_SILHOUETTE_STRUCTURE}
-You MUST record 'productIdentity.bottomWearDetails.classification' as "Farshi / Farshi Pajama / Farshi Pants".
-You are STRICTLY FORBIDDEN from classifying it as Palazzo, and you must NEVER write "NOT Farshi".
+You MUST record 'productIdentity.bottomWearDetails.classification' as "Farshi / Farshi Pajama / Farshi Pants / Farshi Salwar".
+You are STRICTLY FORBIDDEN from classifying it as Palazzo or generic Salwar, and you must NEVER write "NOT Farshi".
 Under negativeConstraints, explicitly state: "NOT palazzo, NOT tubular straight pants, NOT lehenga, NOT skirt, NOT sharara, NOT gharara, NOT churidar, NOT a gathered salwar poncha, NOT an open palazzo hem".
 Do NOT write "NOT tapered" or "NOT gathered into an ankle cuff" for this Farshi. The 4-inch hem taper and the joined 6-inch hem panel are part of the silhouette.
 ` : ""}
 1. EXACT CUT & CLASSIFICATION: Explicitly classify the cut from the worn silhouette in the references, not from a generic ethnic-wear prior:
-   - "Farshi / Farsi / Farshi Pajama / Farshi Pants": Two distinct trouser legs with this construction only: ${FARSHI_SILHOUETTE_STRUCTURE} Length may be ankle-length (clearing the floor to display footwear) or floor-length as the references show. Hem embellishment (lace, print band, or a plain finish) is whatever the references show on that joined hem panel — do not invent lace. Distinct from palazzo (no three-per-side waist pleats and no joined tapered hem panel) and from Sharara (where the flare begins at or below a knee join). When a dedicated BOTTOM WEAR / FARSHI reference is supplied, or the trousers show this pleated waist and joined hem, classify as Farshi / Farshi Pajama / Farshi Pants, NOT palazzo.
+   - "Farshi / Farsi / Farshi Pajama / Farshi Pants / Fasi / Farshi Salwar": Two distinct trouser legs with this construction only: ${FARSHI_SILHOUETTE_STRUCTURE} Length may be ankle-length (clearing the floor to display footwear) or floor-length as the references show. Hem embellishment (lace, print band, or a plain finish) is whatever the references show on that joined hem panel — do not invent lace. Distinct from palazzo (no three-per-side waist pleats and no joined tapered hem panel), from Sharara (where the flare begins at or below a knee join), and from generic salwar (no gathered poncha cuff). When a dedicated BOTTOM WEAR / FARSHI reference is supplied, or the SKU/details mention farshi/farsi/fasi, or the trousers show this pleated waist and joined hem, classify as Farshi / Farshi Pajama / Farshi Pants / Farshi Salwar, NOT palazzo and NOT generic salwar.
    - "Palazzo": Simple standard-width straight or softly flared wide-leg trousers without farshi flared volume, gathers, or architectural flair. If a BOTTOM WEAR / FARSHI reference is attached or flared volume/lace is present, DO NOT classify as Palazzo.
    - "Straight Trousers / Cigarette Pants": Narrow straight tailored cut ending at the ankle, with side slits or plain hem.
    - "Sharara": Fitted from waist to knee, flaring out dramatically from the knee down.
@@ -1722,7 +1733,7 @@ Do NOT write "NOT tapered" or "NOT gathered into an ankle cuff" for this Farshi.
 4. HEMLINE & BORDER FINISH: Document the hem finish actually visible: e.g., "broad 3 to 4 inch horizontal hem band", "sequin lace trim above hem", "plain turned hem", "metallic zari border". Do not invent a hem band or lace. When the cut is Farshi/Farsi, the hemline field must state the 6-inch panel joined to the leg and the 4-inch taper from the upper edge of that panel to its lower edge.
 5. FABRIC, COLOR & MOTIF GEOMETRY: Record bottom-wear fabric, base color, sheen, AND print/patterns as its own geometry - motif shape inventory, physical scale relative to the leg (e.g. "each gold floral is roughly palm-sized, scattered not micro-dotted", or "bold dark chocolate-brown chevron / zigzag print on beige ground stacked vertically across each leg"), density, metallic color, orientation, and hem embellishments (e.g. sequin lace band or contrast border). Example: "dark chocolate-brown on beige ground with bold large-scale chevron zigzag print running across both legs, finished with gold sequin lace above the hem; NOT solid; NOT micro-dots; NOT upper kurta floral". If the kurta is floral and the bottoms have a chevron zigzag or floral boota, those are TWO different treatments - never merge them.
 6. EXPLICIT NEGATIVE CONSTRAINTS (WHAT IT IS NOT):
-   - For Farshi / Farsi pajama / Farshi pants: Explicitly state "NOT palazzo, NOT plain wide-leg, NOT lehenga, NOT tubular straight pants, NOT skirt, NOT dhoti pants, NOT tulip pants, NOT balloon/harem pants, NOT churidar, NOT a gathered salwar poncha, NOT an open straight hem". Do NOT state "NOT tapered at ankle" or "NOT gathered into an ankle cuff" — the Farshi hem is the joined 6-inch panel with the 4-inch taper. Also state "NOT solid/undecorated" when motifs are visible, and "NOT micro-dot/speckle print" when motifs or chevron prints are bold.
+   - For Farshi / Farsi / Fasi pajama / Farshi pants / Farshi salwar: Explicitly state "NOT palazzo, NOT plain wide-leg, NOT lehenga, NOT tubular straight pants, NOT skirt, NOT dhoti pants, NOT tulip pants, NOT balloon/harem pants, NOT churidar, NOT a gathered salwar poncha, NOT an open straight hem". Do NOT state "NOT tapered at ankle" or "NOT gathered into an ankle cuff" — the Farshi hem is the joined 6-inch panel with the 4-inch taper. Also state "NOT solid/undecorated" when motifs are visible, and "NOT micro-dot/speckle print" when motifs or chevron prints are bold.
    - For Palazzo: Explicitly state "NOT lehenga, NOT dhoti pants, NOT tulip pants, NOT tapered at ankle". NEVER state "NOT Farshi" when an image is labeled BOTTOM WEAR / FARSHI.
    - For Straight Pants: Explicitly state "NOT palazzo, NOT flared, NOT dhoti pants, NOT salwar".
 If the SKU is a standalone upper garment (e.g. single kurti, standalone dress, saree), explicitly state "none - standalone garment".
@@ -2012,7 +2023,7 @@ export function mergeVariantColorways(
   const colorModifier = "(?:light|dark|deep|bright|pale|soft|muted|rich|warm|cool|dusty|pastel|vivid|royal|emerald|ruby|sapphire|navy|midnight|sky|powder|steel|forest|bottle|olive|sage|mint|lime|sea|teal|turquoise|mustard|gold|golden|coral|peach|fuchsia|magenta|blush|rose|hot|lavender|lilac|mauve|plum|chocolate|coffee|camel|charcoal|ivory|cream|beige|wine|blood|cherry|burnt)";
   const colorBase = "(?:off-white|off\\s+white|chocolate-brown|ivory|white|ecru|cream|beige|black|blue|navy|red|ruby|maroon|burgundy|wine|green|emerald|olive|sage|mint|teal|turquoise|yellow|mustard|gold|golden|orange|rust|coral|peach|pink|fuchsia|magenta|purple|violet|lavender|lilac|mauve|plum|brown|chocolate|coffee|tan|camel|grey|gray|silver|charcoal)";
   const bottomColorPhrase = `(?:${colorModifier}(?:-[a-z]+)?\\s+){0,2}${colorBase}`;
-  const bottomGarment = "(?:farshi|farsi|pajama|pyjama|palazzo|trousers?|pants?|sharara|gharara|salwar|patiala|churidar|skirt|lehenga|leggings?|dhoti|culottes?|shorts?|bottoms?|bottom\\s+wear)";
+  const bottomGarment = "(?:farshi|farsi|fasi|pajama|pyjama|palazzo|trousers?|pants?|sharara|gharara|salwar|patiala|churidar|skirt|lehenga|leggings?|dhoti|culottes?|shorts?|bottoms?|bottom\\s+wear)";
   const bottomFabric = "(?:crepe|silk|cotton|chanderi|organza|georgette|satin|linen|rayon|viscose|muslin|velvet|chiffon|net|tulle|denim|khadi|cambric|lawn|poplin|brocade|jacquard|modal|tencel|polyester)";
   const hasDominantBottomColor = (input: string, color: string) => {
     const normalized = color.trim();
