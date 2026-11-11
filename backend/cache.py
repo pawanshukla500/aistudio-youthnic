@@ -39,6 +39,10 @@ class ValkeyCacheManager:
         key = f"cache:dna:v2:{org_id}:{sku_id}"
         self.r.set(key, json.dumps(dna_dict), ex=ttl)
 
+    def invalidate_hot_dna(self, org_id: str, sku_id: str):
+        key = f"cache:dna:v2:{org_id}:{sku_id}"
+        self.r.delete(key)
+
     # 2. Reference Manifest & Fingerprint Cache (TTL: 7 days)
     def get_manifest_cache(self, org_id: str, fingerprint: str) -> Optional[Dict[str, Any]]:
         key = f"cache:manifest:{org_id}:{fingerprint}"

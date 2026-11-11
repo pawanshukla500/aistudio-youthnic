@@ -102,7 +102,7 @@ class ProductDNAAgent:
                 explicit_invariants=[
                     "Saree is a continuous unstitched drape paired with fitted blouse and underskirt petticoat. Strictly NO pants, NO palazzos, NO salwars, NO trousers.",
                     "Pose 5 (Detail Frame) must showcase signature pallu artwork or zari border weave, never an accessory hijack.",
-                    "Back view (Pose 3) must strictly mirror back product reference showing blouse back neckline and pallu drape.",
+                    "Back view (Pose 4) must strictly mirror back product reference showing blouse back neckline and pallu drape.",
                 ],
                 prohibited_changes=["trousers", "palazzo", "salwar", "circular_skirt", "floating_hand"],
                 evidence_manifest=[f"IMAGE {i+1}: {r.get('role')}" for i, r in enumerate(references)],

@@ -147,7 +147,7 @@ class ProductDNAV2(BaseModel):
             saree_rules = [
                 "Saree is a continuous unstitched drape paired with fitted blouse and underskirt petticoat. Strictly NO pants, NO palazzos, NO salwars, NO trousers.",
                 "Pose 5 (Detail Frame) must showcase signature pallu artwork or zari border weave, never an accessory hijack.",
-                "Back view (Pose 3) must strictly mirror back product reference showing blouse back neckline and pallu drape.",
+                "Back view (Pose 4) must strictly mirror back product reference showing blouse back neckline and pallu drape.",
             ]
             for r in saree_rules:
                 if r not in self.explicit_invariants:

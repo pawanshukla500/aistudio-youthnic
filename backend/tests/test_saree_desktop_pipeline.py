@@ -16,13 +16,26 @@ DESKTOP_DIR = r"C:\Users\Pawan Shukla\Desktop\Projec Images"
 VALID_ORG_UUID = "7d56360f-2c96-4eb2-923e-f22b7fe36605"
 
 
-def test_desktop_saree_evidence_hashing_and_quarantine():
-    assert os.path.exists(DESKTOP_DIR), f"Desktop directory not found: {DESKTOP_DIR}"
-
-    front_path = os.path.join(DESKTOP_DIR, "Sarees Front.jpeg")
-    back_path = os.path.join(DESKTOP_DIR, "Sarees Back.jpg")
-    ref_path = os.path.join(DESKTOP_DIR, "Refrence images.jpg")
-    detail_path = os.path.join(DESKTOP_DIR, "Sarees product image (1).jpg")
+def test_desktop_saree_evidence_hashing_and_quarantine(tmp_path):
+    if os.path.exists(DESKTOP_DIR):
+        front_path = os.path.join(DESKTOP_DIR, "Sarees Front.jpeg")
+        back_path = os.path.join(DESKTOP_DIR, "Sarees Back.jpg")
+        ref_path = os.path.join(DESKTOP_DIR, "Refrence images.jpg")
+        detail_path = os.path.join(DESKTOP_DIR, "Sarees product image (1).jpg")
+    else:
+        # Fallback fixture for headless CI environments
+        front_path = str(tmp_path / "Sarees_Front.jpeg")
+        back_path = str(tmp_path / "Sarees_Back.jpg")
+        ref_path = str(tmp_path / "Refrence_images.jpg")
+        detail_path = str(tmp_path / "Sarees_detail_1.jpg")
+        for p, b in [
+            (front_path, b"saree_front_sample_bytes_12345"),
+            (back_path, b"saree_back_sample_bytes_12345"),
+            (ref_path, b"style_ref_sample_bytes_12345"),
+            (detail_path, b"saree_detail_sample_bytes_12345"),
+        ]:
+            with open(p, "wb") as f:
+                f.write(b)
 
     assert os.path.exists(front_path), "Front saree image must exist"
     assert os.path.exists(back_path), "Back saree image must exist"
@@ -94,10 +107,11 @@ def test_desktop_saree_evidence_hashing_and_quarantine():
 
 
 def test_saree_dna_extraction_and_invariants():
-    sku_id = "SKU-SAREE-DESKTOP-001"
+    sku_id = "SKU-SAREE-DESKTOP-002"
     sku_name = "Kanjivaram Silk Saree with Rich Gold Zari Pallu"
-    fingerprint = "saree_fingerprint_desktop_123"
+    fingerprint = "saree_fingerprint_desktop_v2_123"
 
+    cache_manager.invalidate_hot_dna(VALID_ORG_UUID, sku_id)
     dna_agent = ProductDNAAgent()
     dna_out = dna_agent.process({
         "organization_id": VALID_ORG_UUID,
@@ -125,7 +139,7 @@ def test_saree_dna_extraction_and_invariants():
     invariants_text = " ".join(dna["explicit_invariants"])
     assert "Strictly NO pants, NO palazzos, NO salwars, NO trousers" in invariants_text
     assert "Pose 5 (Detail Frame) must showcase signature pallu artwork" in invariants_text
-    assert "Back view (Pose 3) must strictly mirror back product reference" in invariants_text
+    assert "Back view (Pose 4) must strictly mirror back product reference" in invariants_text
 
     # Saree architecture validation
     assert dna["saree_details"] is not None

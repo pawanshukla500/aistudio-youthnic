@@ -76,6 +76,7 @@ def save_dna_version(
 
 
 def get_latest_dna_version(org_id: str, sku_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve the latest Product DNA version record for a given organization and SKU."""
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
@@ -94,6 +95,7 @@ def get_latest_dna_version(org_id: str, sku_id: str) -> Optional[Dict[str, Any]]
 
 
 def list_dna_versions(org_id: str, sku_id: str) -> List[Dict[str, Any]]:
+    """List all historical Product DNA versions for a given organization and SKU."""
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
@@ -113,6 +115,7 @@ def list_dna_versions(org_id: str, sku_id: str) -> List[Dict[str, Any]]:
 
 
 def approve_dna_version(org_id: str, sku_id: str, version: int, approved_by: str) -> bool:
+    """Mark a specific Product DNA version as approved and update audit timestamps."""
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
