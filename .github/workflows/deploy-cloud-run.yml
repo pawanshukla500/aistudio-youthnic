@@ -141,7 +141,7 @@ jobs:
       - name: Apply database migrations to Railway Postgres
         if: env.RAILWAY_DATABASE_URL != ''
         run: |
-          supabase db push --db-url "$RAILWAY_DATABASE_URL"
+          supabase db push --yes --db-url "$RAILWAY_DATABASE_URL"
 
   test-and-deploy:
     name: Deploy web app to Cloud Run
