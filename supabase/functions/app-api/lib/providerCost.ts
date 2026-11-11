@@ -56,6 +56,9 @@ export type VisionUsageCost = {
 };
 
 export const IMAGE_TOKEN_RATES: Record<string, ImageTokenRates> = {
+  "gpt-image-2.6-sunburst": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
+  "gpt-image-2.6-flare": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
+  "gpt-image-2.6": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
   "gpt-image-2.5-flare-2026-09-08": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
   "gpt-image-2.5-flare": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
   "gpt-image-2.5-sunburst": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },

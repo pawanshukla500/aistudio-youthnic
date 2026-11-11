@@ -21,10 +21,25 @@ class GenerationRouterAgent:
 
         # Routing decision
         selected_provider = "openai"
-        selected_model = "gpt-image-2.5-flare-2026-09-08"
+        requested_model = state.get("requested_model") or state.get("image_model")
+        valid_openai_models = [
+            "gpt-image-2.6-sunburst",
+            "gpt-image-2.6-flare",
+            "gpt-image-2.6",
+            "gpt-image-2.5-flare-2026-09-08",
+            "gpt-image-2.5-flare",
+            "gpt-image-2.5-sunburst",
+        ]
+        if requested_model in valid_openai_models:
+            selected_model = requested_model
+        else:
+            selected_model = "gpt-image-2.5-flare-2026-09-08"
 
-        # Cost estimation per pose (e.g. $0.04 - $0.08 per image depending on quality)
-        est_cost_per_pose = 0.06
+        # Cost estimation per pose (e.g. $0.06 - $0.08 per image depending on model)
+        if "sunburst" in selected_model:
+            est_cost_per_pose = 0.08
+        else:
+            est_cost_per_pose = 0.06
         poses_count = len(state.get("poses_to_generate", [1, 2, 3, 4, 5, 6]))
         est_total = budget_used + (poses_count * est_cost_per_pose)
 

@@ -30,6 +30,22 @@ class EmbroideryGeometry(BaseModel):
     neckline_relation: str = "none"
 
 
+class SareeArchitecture(BaseModel):
+    drape_style: str = "nivi"
+    pallu_direction: str = "over_left_shoulder"
+    pallu_zari_type: str = "none"
+    pallu_artwork_description: Optional[str] = None
+    border_weave_type: str = "none"
+    border_width_cm: float = 0.0
+    body_butti_type: str = "none"
+    blouse_fabric_coordination: str = "contrast_or_matching"
+    blouse_sleeve_length: str = "elbow_length"
+    blouse_back_neckline: str = "deep_u_or_round"
+    pleat_count_approx: int = 7
+    underskirt_petticoat_type: str = "cotton_or_satin_petticoat"
+    no_trousers_rule: bool = True
+
+
 class BottomWearArchitecture(BaseModel):
     has_bottom_wear: bool = False
     classification: str = "none"
@@ -103,6 +119,9 @@ class ProductDNAV2(BaseModel):
     # Bottom Wear
     bottom_wear: BottomWearArchitecture = Field(default_factory=BottomWearArchitecture)
 
+    # Saree Architecture
+    saree_details: Optional[SareeArchitecture] = None
+
     # Invariants, Quarantine & Uncertainty
     explicit_invariants: List[str] = Field(default_factory=list)
     prohibited_changes: List[str] = Field(default_factory=list)
@@ -116,6 +135,27 @@ class ProductDNAV2(BaseModel):
 
     @model_validator(mode="after")
     def validate_dna_consistency(self) -> "ProductDNAV2":
+        # Saree validation
+        if self.garment_family.lower() == "saree" or "saree" in self.sku_name.lower() or "sari" in self.sku_name.lower():
+            self.garment_family = "saree"
+            self.bottom_wear.has_bottom_wear = False
+            self.bottom_wear.classification = "none"
+            self.bottom_wear.cut_class = "none"
+            self.bottom_wear.two_leg_construction = False
+            self.bottom_wear.joined_hem = False
+
+            saree_rules = [
+                "Saree is a continuous unstitched drape paired with fitted blouse and underskirt petticoat. Strictly NO pants, NO palazzos, NO salwars, NO trousers.",
+                "Pose 5 (Detail Frame) must showcase signature pallu artwork or zari border weave, never an accessory hijack.",
+                "Back view (Pose 3) must strictly mirror back product reference showing blouse back neckline and pallu drape.",
+            ]
+            for r in saree_rules:
+                if r not in self.explicit_invariants:
+                    self.explicit_invariants.append(r)
+            for p in ["trousers", "palazzo", "salwar", "churidar", "jeans"]:
+                if p not in self.prohibited_changes:
+                    self.prohibited_changes.append(p)
+
         # Farshi Salwar validation
         if self.bottom_wear.cut_class == "farshi":
             farshi_rule = "Farshi salwar requires distinct two-leg construction with vertical gathers and joined hem. Never substitute palazzo."
