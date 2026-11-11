@@ -50,6 +50,9 @@ Deno.test("vision registry keeps image generation on approved OpenAI image model
   });
   assertEquals(defaultImageGenerationRoute(), DEFAULT_IMAGE_GENERATION_ROUTE);
   assertEquals(allowedModelsForPurpose("openai", "image_generation"), [
+    "gpt-image-2.6-sunburst",
+    "gpt-image-2.6-flare",
+    "gpt-image-2.6",
     "gpt-image-2.5-flare-2026-09-08",
     "gpt-image-2.5-flare",
     "gpt-image-2.5-sunburst",

@@ -56,6 +56,9 @@ export type VisionUsageCost = {
 };
 
 export const IMAGE_TOKEN_RATES: Record<string, ImageTokenRates> = {
+  "gpt-image-2.6-sunburst": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
+  "gpt-image-2.6-flare": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
+  "gpt-image-2.6": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
   "gpt-image-2.5-flare-2026-09-08": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
   "gpt-image-2.5-flare": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
   "gpt-image-2.5-sunburst": { textInput: 5.0, imageInput: 8.0, imageOutput: 30.0 },
@@ -595,6 +598,9 @@ export function rollupSessionCost(runs: CostRun[], fallbackGenerationUsd = 0): S
 }
 
 export const DEFAULT_ESTIMATED_IMAGE_COST_USD: Record<string, number> = {
+  "gpt-image-2.6-sunburst": 0.18,
+  "gpt-image-2.6-flare": 0.16,
+  "gpt-image-2.6": 0.16,
   "gpt-image-2.5-flare-2026-09-08": 0.16,
   "gpt-image-2.5-flare": 0.16,
   "gpt-image-2.5-sunburst": 0.16,

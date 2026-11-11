@@ -13,10 +13,32 @@ ReferenceRole = Literal[
     "model_identity",
     "style_reference",
     "approved_pose",
+    # Saree specific roles
+    "saree_front_drape",
+    "saree_back_drape",
+    "saree_body_detail",
+    "saree_pallu_spread",
+    "saree_border_tassels",
+    "saree_blouse_front",
+    "saree_blouse_back_piece",
 ]
 
 NON_PRODUCT_ROLES = {"style_reference", "model_identity", "approved_pose"}
-PRODUCT_AUTHORITY_ROLES = {"front", "back", "bottom", "fabric_pattern", "mannequin", "additional_product"}
+PRODUCT_AUTHORITY_ROLES = {
+    "front",
+    "back",
+    "bottom",
+    "fabric_pattern",
+    "mannequin",
+    "additional_product",
+    "saree_front_drape",
+    "saree_back_drape",
+    "saree_body_detail",
+    "saree_pallu_spread",
+    "saree_border_tassels",
+    "saree_blouse_front",
+    "saree_blouse_back_piece",
+}
 
 
 class BoundingBox(BaseModel):

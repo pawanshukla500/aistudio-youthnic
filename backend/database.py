@@ -76,35 +76,46 @@ def save_dna_version(
 
 
 def get_latest_dna_version(org_id: str, sku_id: str) -> Optional[Dict[str, Any]]:
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT * FROM public.product_dna_versions
-                WHERE organization_id = %s AND sku_id = %s
-                ORDER BY version DESC LIMIT 1
-                """,
-                (org_id, sku_id),
-            )
-            return cur.fetchone()
+    """Retrieve the latest Product DNA version record for a given organization and SKU."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT * FROM public.product_dna_versions
+                    WHERE organization_id = %s AND sku_id = %s
+                    ORDER BY version DESC LIMIT 1
+                    """,
+                    (org_id, sku_id),
+                )
+                return cur.fetchone()
+    except Exception as e:
+        logger.warning(f"Could not fetch DNA version from DB: {e}")
+        return None
 
 
 def list_dna_versions(org_id: str, sku_id: str) -> List[Dict[str, Any]]:
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, sku_id, sku_name, version, garment_family, status, approved, approved_by, approved_at, source_fingerprint, created_at
-                FROM public.product_dna_versions
-                WHERE organization_id = %s AND sku_id = %s
-                ORDER BY version DESC
-                """,
-                (org_id, sku_id),
-            )
-            return cur.fetchall()
+    """List all historical Product DNA versions for a given organization and SKU."""
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, sku_id, sku_name, version, garment_family, status, approved, approved_by, approved_at, source_fingerprint, created_at
+                    FROM public.product_dna_versions
+                    WHERE organization_id = %s AND sku_id = %s
+                    ORDER BY version DESC
+                    """,
+                    (org_id, sku_id),
+                )
+                return cur.fetchall()
+    except Exception as e:
+        logger.warning(f"Could not list DNA versions from DB: {e}")
+        return []
 
 
 def approve_dna_version(org_id: str, sku_id: str, version: int, approved_by: str) -> bool:
+    """Mark a specific Product DNA version as approved and update audit timestamps."""
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(

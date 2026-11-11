@@ -63,10 +63,17 @@ class ComputerVisionQAAgent:
         if "style reference clothing" in notes.lower() or "copied reference outfit" in notes.lower():
             style_violation = True
 
-        # Bottom wear check (Farshi vs Palazzo)
+        # Bottom wear check (Farshi vs Palazzo, Saree vs Pants)
         bottom_cut = product_dna.get("bottom_wear", {}).get("cut_class", "")
+        is_saree = product_dna.get("garment_family", "").lower() == "saree"
         bottom_cut_mismatch = False
-        if bottom_cut == "farshi" and pose_type in ["full_front", "angled", "back", "showcase"]:
+
+        if is_saree and pose_type in ["full_front", "angled", "side_seated", "back", "showcase"]:
+            if any(k in notes.lower() for k in ["trousers", "pants", "palazzo", "salwar", "churidar", "jeans"]):
+                bottom_cut_mismatch = True
+                checks["bottom_wear"] = "fail"
+                scores["bottom_wear"] = 40.0
+        elif bottom_cut == "farshi" and pose_type in ["full_front", "angled", "back", "showcase"]:
             if "palazzo" in notes.lower() or "skirt" in notes.lower() or "circular flare" in notes.lower():
                 bottom_cut_mismatch = True
                 checks["bottom_wear"] = "fail"

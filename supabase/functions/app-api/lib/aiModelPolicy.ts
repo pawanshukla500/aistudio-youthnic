@@ -101,6 +101,9 @@ export const AI_MODEL_REGISTRY: Registry = {
     qa: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
     qa_escalation: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
     image_generation: [
+      "gpt-image-2.6-sunburst",
+      "gpt-image-2.6-flare",
+      "gpt-image-2.6",
       "gpt-image-2.5-flare-2026-09-08",
       "gpt-image-2.5-flare",
       "gpt-image-2.5-sunburst",
@@ -729,6 +732,9 @@ export async function runVisionProviderChain<T>(args: {
 
 export function aiModelDisplayLabel(model: string): string {
   const labels: Record<string, string> = {
+    "gpt-image-2.6-sunburst": "GPT Image 2.6 Sunburst · next-gen fidelity/memory/complex layout",
+    "gpt-image-2.6-flare": "GPT Image 2.6 Flare · next-gen ultra-fast/high-volume",
+    "gpt-image-2.6": "GPT Image 2.6 · flagship",
     "gpt-image-2.5-flare-2026-09-08": "GPT Image 2.5 Flare (2026-09-08 · Default)",
     "gpt-image-2.5-flare": "GPT Image 2.5 Flare · fast/high-volume",
     "gpt-image-2.5-sunburst": "GPT Image 2.5 Sunburst · high-fidelity/memory",
@@ -767,6 +773,15 @@ export function aiModelHelpText(model: string): string {
   if (text(model) === "gpt-5.6-luna") {
     return "Luna is the cost-efficient GPT 5.6 vision fallback (~$0.20 / 1M input, $1.20 / 1M output). Prefer it over Sol.";
   }
+  if (text(model) === "gpt-image-2.6-sunburst") {
+    return "Flagship GPT Image 2.6 Sunburst with deep latent garment memory, markup-guided multi-region coherence, and intricate textile weave reproduction.";
+  }
+  if (text(model) === "gpt-image-2.6-flare") {
+    return "GPT Image 2.6 Flare delivers next-gen generation quality with 50% lower latency, optimized for high-throughput automated catalog workflows.";
+  }
+  if (text(model) === "gpt-image-2.6") {
+    return "Standard next-generation GPT Image 2.6 foundation model.";
+  }
   if (text(model) === "gpt-image-2.5-flare-2026-09-08") {
     return "Pinned default snapshot of GPT Image 2.5 Flare released on 2026-09-08. OpenAI's fastest model for high-quality everyday catalog image generation.";
   }
@@ -788,6 +803,9 @@ export function preferredModelId(
 ): string {
   if (!models.length) return "";
   if (provider === "openai" && models.includes("gpt-image-2.5-flare-2026-09-08")) return "gpt-image-2.5-flare-2026-09-08";
+  if (provider === "openai" && models.includes("gpt-image-2.6-flare")) return "gpt-image-2.6-flare";
+  if (provider === "openai" && models.includes("gpt-image-2.6-sunburst")) return "gpt-image-2.6-sunburst";
+  if (provider === "openai" && models.includes("gpt-image-2.6")) return "gpt-image-2.6";
   if (provider === "openai" && models.includes("gpt-image-2.5-flare")) return "gpt-image-2.5-flare";
   if (provider === "openai" && models.includes("gpt-image-2.5-sunburst")) return "gpt-image-2.5-sunburst";
   if (provider === "openai" && models.includes("gpt-5.6-luna")) return "gpt-5.6-luna";

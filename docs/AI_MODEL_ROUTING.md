@@ -131,6 +131,16 @@ See [MEMORY.md](../MEMORY.md) and [AGENTS.md](../AGENTS.md) for core architectur
 Image quality defaults to `medium` (`DEFAULT_IMAGE_QUALITY`); see
 [Generation orchestration](GENERATION_ORCHESTRATION.md).
 
+## Image Generation Models: GPT Image 2.5 and GPT Image 2.6
+
+The generation orchestration pipeline supports OpenAI's latest image generation model families:
+
+- **`gpt-image-2.6-sunburst`**: Flagship precision model with deep latent garment memory, multi-region markup spatial guidance, and microscopic textile weave reproduction. Ideal for intricate zardozi, zari brocades, and complex ethnic draping.
+- **`gpt-image-2.6-flare`**: Next-generation speed-optimized foundation model offering 50% lower generation latency at identical token rates ($5.00/1M text input, $8.00/1M image input, $30.00/1M output), designed for high-volume automated photoshoot pipelines.
+- **`gpt-image-2.6`**: Standard next-generation foundation model.
+- **`gpt-image-2.5-flare-2026-09-08`**: Pinned default snapshot offering high throughput and stable generation consistency.
+- **`gpt-image-2.5-flare`** / **`gpt-image-2.5-sunburst`**: GPT Image 2.5 foundation tiers.
+
 ## Job cost estimation
 
 `estimateJobCostUsd` (`supabase/functions/app-api/lib/providerCost.ts`) computes
