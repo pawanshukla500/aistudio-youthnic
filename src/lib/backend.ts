@@ -12,6 +12,7 @@ export type Id<_Table extends string> = string;
 export type BackendEndpoint = string;
 
 export const api = {
+  dna: { extract: "dna.extract", get: "dna.get", approve: "dna.approve" },
   analysis: { analyzeReferences: "analysis.analyzeReferences" },
   files: { saveReference: "files.saveReference" },
   generation: { queueSku: "generation.queueSku", regeneratePose: "generation.regeneratePose" },

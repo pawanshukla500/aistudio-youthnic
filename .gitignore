@@ -42,5 +42,10 @@ scratch/
 # Test artifacts
 mogra_farshi_verified/
 *.tmp
+.pytest_cache/
+graphify-out/
+__pycache__/
+*.pyc
+
 
 
