@@ -185,23 +185,30 @@ alter table public.knowledge_embeddings enable row level security;
 alter table public.learning_outcomes enable row level security;
 
 -- Create service role and authenticated RLS policies
+drop policy if exists "Allow service role full access to product_dna_versions" on public.product_dna_versions;
 create policy "Allow service role full access to product_dna_versions"
   on public.product_dna_versions for all using (true) with check (true);
 
+drop policy if exists "Allow service role full access to product_reference_evidence" on public.product_reference_evidence;
 create policy "Allow service role full access to product_reference_evidence"
   on public.product_reference_evidence for all using (true) with check (true);
 
+drop policy if exists "Allow service role full access to product_region_crops" on public.product_region_crops;
 create policy "Allow service role full access to product_region_crops"
   on public.product_region_crops for all using (true) with check (true);
 
+drop policy if exists "Allow service role full access to qa_assessments" on public.qa_assessments;
 create policy "Allow service role full access to qa_assessments"
   on public.qa_assessments for all using (true) with check (true);
 
+drop policy if exists "Allow service role full access to correction_history" on public.correction_history;
 create policy "Allow service role full access to correction_history"
   on public.correction_history for all using (true) with check (true);
 
+drop policy if exists "Allow service role full access to knowledge_embeddings" on public.knowledge_embeddings;
 create policy "Allow service role full access to knowledge_embeddings"
   on public.knowledge_embeddings for all using (true) with check (true);
 
+drop policy if exists "Allow service role full access to learning_outcomes" on public.learning_outcomes;
 create policy "Allow service role full access to learning_outcomes"
   on public.learning_outcomes for all using (true) with check (true);
