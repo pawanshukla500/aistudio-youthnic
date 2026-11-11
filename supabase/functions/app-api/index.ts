@@ -8248,6 +8248,51 @@ async function importMigrationArchiveOperation(request: Request, args: JsonRecor
   return { imported: rows.length };
 }
 
+async function dnaExtractOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.manage");
+  const fastApiUrl = Deno.env.get("RAILWAY_SERVICE_FASTAPI_URL") || "fastapi-production-609c2b82.up.railway.app";
+  const endpoint = fastApiUrl.startsWith("http") ? `${fastApiUrl}/api/v1/dna/extract` : `https://${fastApiUrl}/api/v1/dna/extract`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...args, organization_id: workspace.organization.id }),
+  });
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`DNA extraction failed (${response.status}): ${err}`);
+  }
+  return response.json();
+}
+
+async function dnaGetOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.view");
+  const skuId = String(args.skuId || args.sku_id || "");
+  const fastApiUrl = Deno.env.get("RAILWAY_SERVICE_FASTAPI_URL") || "fastapi-production-609c2b82.up.railway.app";
+  const endpoint = fastApiUrl.startsWith("http") ? `${fastApiUrl}/api/v1/dna/${encodeURIComponent(skuId)}?org_id=${workspace.organization.id}` : `https://${fastApiUrl}/api/v1/dna/${encodeURIComponent(skuId)}?org_id=${workspace.organization.id}`;
+  const response = await fetch(endpoint);
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`DNA retrieval failed (${response.status}): ${err}`);
+  }
+  return response.json();
+}
+
+async function dnaApproveOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.approve");
+  const fastApiUrl = Deno.env.get("RAILWAY_SERVICE_FASTAPI_URL") || "fastapi-production-609c2b82.up.railway.app";
+  const endpoint = fastApiUrl.startsWith("http") ? `${fastApiUrl}/api/v1/dna/approve` : `https://${fastApiUrl}/api/v1/dna/approve`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...args, organization_id: workspace.organization.id, approved_by: workspace.user.email }),
+  });
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`DNA approval failed (${response.status}): ${err}`);
+  }
+  return response.json();
+}
+
 const serverPort = Number(Deno.env.get("PORT") || 9000);
 const serverHost = Deno.env.get("BIND_HOST") || "::";
 const appRequestHandler = async (request: Request) => {
@@ -8259,6 +8304,9 @@ const appRequestHandler = async (request: Request) => {
     const operation = String(body.operation || "");
     const args = (body.args && typeof body.args === "object" ? body.args : {}) as JsonRecord;
     const handlers: Record<string, () => Promise<unknown>> = {
+      "dna.extract": () => dnaExtractOperation(request, args),
+      "dna.get": () => dnaGetOperation(request, args),
+      "dna.approve": () => dnaApproveOperation(request, args),
       "studio.analyze": () => analyze(request, args),
       "studio.queue": () => queueGeneration(request, args),
       "jobs.clone": () => cloneJob(request, args),

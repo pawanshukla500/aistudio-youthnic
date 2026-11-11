@@ -1780,6 +1780,179 @@ export type Database = {
         };
         Relationships: [];
       };
+      checkpoint_blobs: {
+        Row: {
+          blob: string | null;
+          channel: string;
+          checkpoint_ns: string;
+          thread_id: string;
+          type: string;
+          version: string;
+        };
+        ComputedFields: never;
+        Insert: {
+          blob?: string | null;
+          channel: string;
+          checkpoint_ns?: string;
+          thread_id: string;
+          type: string;
+          version: string;
+        };
+        Update: {
+          blob?: string | null;
+          channel?: string;
+          checkpoint_ns?: string;
+          thread_id?: string;
+          type?: string;
+          version?: string;
+        };
+        Relationships: [];
+      };
+      checkpoint_migrations: {
+        Row: {
+          v: number;
+        };
+        ComputedFields: never;
+        Insert: {
+          v: number;
+        };
+        Update: {
+          v?: number;
+        };
+        Relationships: [];
+      };
+      checkpoint_writes: {
+        Row: {
+          blob: string;
+          channel: string;
+          checkpoint_id: string;
+          checkpoint_ns: string;
+          idx: number;
+          task_id: string;
+          task_path: string;
+          thread_id: string;
+          type: string | null;
+        };
+        ComputedFields: never;
+        Insert: {
+          blob: string;
+          channel: string;
+          checkpoint_id: string;
+          checkpoint_ns?: string;
+          idx: number;
+          task_id: string;
+          task_path?: string;
+          thread_id: string;
+          type?: string | null;
+        };
+        Update: {
+          blob?: string;
+          channel?: string;
+          checkpoint_id?: string;
+          checkpoint_ns?: string;
+          idx?: number;
+          task_id?: string;
+          task_path?: string;
+          thread_id?: string;
+          type?: string | null;
+        };
+        Relationships: [];
+      };
+      checkpoints: {
+        Row: {
+          checkpoint: NonNullable<Json>;
+          checkpoint_id: string;
+          checkpoint_ns: string;
+          metadata: NonNullable<Json>;
+          parent_checkpoint_id: string | null;
+          thread_id: string;
+          type: string | null;
+        };
+        ComputedFields: never;
+        Insert: {
+          checkpoint: NonNullable<Json>;
+          checkpoint_id: string;
+          checkpoint_ns?: string;
+          metadata?: NonNullable<Json>;
+          parent_checkpoint_id?: string | null;
+          thread_id: string;
+          type?: string | null;
+        };
+        Update: {
+          checkpoint?: NonNullable<Json>;
+          checkpoint_id?: string;
+          checkpoint_ns?: string;
+          metadata?: NonNullable<Json>;
+          parent_checkpoint_id?: string | null;
+          thread_id?: string;
+          type?: string | null;
+        };
+        Relationships: [];
+      };
+      correction_history: {
+        Row: {
+          attempted_action: string;
+          created_at: string;
+          final_approved_asset_id: string | null;
+          generation_id: string;
+          id: string;
+          job_id: string;
+          organization_id: string;
+          pose_index: number;
+          resolution: string;
+          root_cause_stage: string;
+          sku_id: string;
+          source_evidence_id: string | null;
+          specific_mismatch: string;
+        };
+        ComputedFields: never;
+        Insert: {
+          attempted_action: string;
+          created_at?: string;
+          final_approved_asset_id?: string | null;
+          generation_id: string;
+          id?: string;
+          job_id: string;
+          organization_id: string;
+          pose_index: number;
+          resolution?: string;
+          root_cause_stage: string;
+          sku_id: string;
+          source_evidence_id?: string | null;
+          specific_mismatch: string;
+        };
+        Update: {
+          attempted_action?: string;
+          created_at?: string;
+          final_approved_asset_id?: string | null;
+          generation_id?: string;
+          id?: string;
+          job_id?: string;
+          organization_id?: string;
+          pose_index?: number;
+          resolution?: string;
+          root_cause_stage?: string;
+          sku_id?: string;
+          source_evidence_id?: string | null;
+          specific_mismatch?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "correction_history_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "correction_history_source_evidence_id_fkey";
+            columns: ["source_evidence_id"];
+            isOneToOne: false;
+            referencedRelation: "product_reference_evidence";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       event_automation_settings: {
         Row: {
           created_at: string;
@@ -2545,6 +2718,57 @@ export type Database = {
           },
         ];
       };
+      knowledge_embeddings: {
+        Row: {
+          category: string;
+          content: string;
+          created_at: string;
+          embedding: string | null;
+          id: string;
+          is_active: boolean;
+          metadata: NonNullable<Json>;
+          model: string;
+          organization_id: string | null;
+          source_hash: string;
+          sub_category: string | null;
+        };
+        ComputedFields: never;
+        Insert: {
+          category: string;
+          content: string;
+          created_at?: string;
+          embedding?: string | null;
+          id?: string;
+          is_active?: boolean;
+          metadata?: NonNullable<Json>;
+          model?: string;
+          organization_id?: string | null;
+          source_hash: string;
+          sub_category?: string | null;
+        };
+        Update: {
+          category?: string;
+          content?: string;
+          created_at?: string;
+          embedding?: string | null;
+          id?: string;
+          is_active?: boolean;
+          metadata?: NonNullable<Json>;
+          model?: string;
+          organization_id?: string | null;
+          source_hash?: string;
+          sub_category?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_embeddings_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       learning_daily_digests: {
         Row: {
           avg_quality: number | null;
@@ -2602,6 +2826,69 @@ export type Database = {
           },
           {
             foreignKeyName: "learning_daily_digests_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      learning_outcomes: {
+        Row: {
+          approved: boolean;
+          created_at: string;
+          effectiveness_score: number;
+          id: string;
+          is_active: boolean;
+          negative_constraints: string[];
+          organization_id: string;
+          positive_guidance: string;
+          rule_text: string;
+          rule_type: string;
+          sku_id: string | null;
+          success_count: number;
+          trigger_condition: NonNullable<Json>;
+          updated_at: string;
+          usage_count: number;
+        };
+        ComputedFields: never;
+        Insert: {
+          approved?: boolean;
+          created_at?: string;
+          effectiveness_score?: number;
+          id?: string;
+          is_active?: boolean;
+          negative_constraints?: string[];
+          organization_id: string;
+          positive_guidance: string;
+          rule_text: string;
+          rule_type: string;
+          sku_id?: string | null;
+          success_count?: number;
+          trigger_condition?: NonNullable<Json>;
+          updated_at?: string;
+          usage_count?: number;
+        };
+        Update: {
+          approved?: boolean;
+          created_at?: string;
+          effectiveness_score?: number;
+          id?: string;
+          is_active?: boolean;
+          negative_constraints?: string[];
+          organization_id?: string;
+          positive_guidance?: string;
+          rule_text?: string;
+          rule_type?: string;
+          sku_id?: string | null;
+          success_count?: number;
+          trigger_condition?: NonNullable<Json>;
+          updated_at?: string;
+          usage_count?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "learning_outcomes_organization_id_fkey";
             columns: ["organization_id"];
             isOneToOne: false;
             referencedRelation: "organizations";
@@ -3868,6 +4155,184 @@ export type Database = {
           },
         ];
       };
+      product_dna_versions: {
+        Row: {
+          approved: boolean;
+          approved_at: string | null;
+          approved_by: string | null;
+          created_at: string;
+          dna_payload: NonNullable<Json>;
+          garment_family: string;
+          id: string;
+          organization_id: string;
+          sku_id: string;
+          sku_name: string;
+          source_fingerprint: string;
+          status: string;
+          updated_at: string;
+          version: number;
+        };
+        ComputedFields: never;
+        Insert: {
+          approved?: boolean;
+          approved_at?: string | null;
+          approved_by?: string | null;
+          created_at?: string;
+          dna_payload?: NonNullable<Json>;
+          garment_family?: string;
+          id?: string;
+          organization_id: string;
+          sku_id: string;
+          sku_name: string;
+          source_fingerprint: string;
+          status?: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Update: {
+          approved?: boolean;
+          approved_at?: string | null;
+          approved_by?: string | null;
+          created_at?: string;
+          dna_payload?: NonNullable<Json>;
+          garment_family?: string;
+          id?: string;
+          organization_id?: string;
+          sku_id?: string;
+          sku_name?: string;
+          source_fingerprint?: string;
+          status?: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "product_dna_versions_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      product_reference_evidence: {
+        Row: {
+          confidence: number;
+          created_at: string;
+          dimensions: Json | null;
+          download_url: string;
+          id: string;
+          is_authoritative: boolean;
+          metadata: NonNullable<Json>;
+          mime_type: string;
+          organization_id: string;
+          region_type: string | null;
+          role: string;
+          sha256_hash: string;
+          sku_id: string;
+          storage_path: string;
+        };
+        ComputedFields: never;
+        Insert: {
+          confidence?: number;
+          created_at?: string;
+          dimensions?: Json | null;
+          download_url: string;
+          id?: string;
+          is_authoritative?: boolean;
+          metadata?: NonNullable<Json>;
+          mime_type?: string;
+          organization_id: string;
+          region_type?: string | null;
+          role: string;
+          sha256_hash: string;
+          sku_id: string;
+          storage_path: string;
+        };
+        Update: {
+          confidence?: number;
+          created_at?: string;
+          dimensions?: Json | null;
+          download_url?: string;
+          id?: string;
+          is_authoritative?: boolean;
+          metadata?: NonNullable<Json>;
+          mime_type?: string;
+          organization_id?: string;
+          region_type?: string | null;
+          role?: string;
+          sha256_hash?: string;
+          sku_id?: string;
+          storage_path?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "product_reference_evidence_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      product_region_crops: {
+        Row: {
+          bounding_box: NonNullable<Json>;
+          construction_notes: string | null;
+          created_at: string;
+          crop_download_url: string | null;
+          crop_storage_path: string | null;
+          evidence_id: string;
+          id: string;
+          mask_storage_path: string | null;
+          organization_id: string;
+          region_name: string;
+          sku_id: string;
+        };
+        ComputedFields: never;
+        Insert: {
+          bounding_box?: NonNullable<Json>;
+          construction_notes?: string | null;
+          created_at?: string;
+          crop_download_url?: string | null;
+          crop_storage_path?: string | null;
+          evidence_id: string;
+          id?: string;
+          mask_storage_path?: string | null;
+          organization_id: string;
+          region_name: string;
+          sku_id: string;
+        };
+        Update: {
+          bounding_box?: NonNullable<Json>;
+          construction_notes?: string | null;
+          created_at?: string;
+          crop_download_url?: string | null;
+          crop_storage_path?: string | null;
+          evidence_id?: string;
+          id?: string;
+          mask_storage_path?: string | null;
+          organization_id?: string;
+          region_name?: string;
+          sku_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "product_region_crops_evidence_id_fkey";
+            columns: ["evidence_id"];
+            isOneToOne: false;
+            referencedRelation: "product_reference_evidence";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "product_region_crops_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       prompt_patterns: {
         Row: {
           avg_quality: number | null;
@@ -3960,6 +4425,84 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "prompt_versions_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      qa_assessments: {
+        Row: {
+          anatomical_defect_detected: boolean;
+          assessed_by: string;
+          attempt_number: number;
+          checks: NonNullable<Json>;
+          correction_guidance: string | null;
+          created_at: string;
+          failed_checks: string[];
+          generation_id: string;
+          id: string;
+          job_id: string;
+          organization_id: string;
+          outcome: string;
+          overall_score: number;
+          pose_index: number;
+          pose_type: string;
+          product_fidelity_score: number;
+          review_recommended: boolean;
+          scores: NonNullable<Json>;
+          sku_id: string;
+          style_quarantine_violation: boolean;
+        };
+        ComputedFields: never;
+        Insert: {
+          anatomical_defect_detected?: boolean;
+          assessed_by?: string;
+          attempt_number?: number;
+          checks?: NonNullable<Json>;
+          correction_guidance?: string | null;
+          created_at?: string;
+          failed_checks?: string[];
+          generation_id: string;
+          id?: string;
+          job_id: string;
+          organization_id: string;
+          outcome: string;
+          overall_score: number;
+          pose_index: number;
+          pose_type: string;
+          product_fidelity_score: number;
+          review_recommended?: boolean;
+          scores?: NonNullable<Json>;
+          sku_id: string;
+          style_quarantine_violation?: boolean;
+        };
+        Update: {
+          anatomical_defect_detected?: boolean;
+          assessed_by?: string;
+          attempt_number?: number;
+          checks?: NonNullable<Json>;
+          correction_guidance?: string | null;
+          created_at?: string;
+          failed_checks?: string[];
+          generation_id?: string;
+          id?: string;
+          job_id?: string;
+          organization_id?: string;
+          outcome?: string;
+          overall_score?: number;
+          pose_index?: number;
+          pose_type?: string;
+          product_fidelity_score?: number;
+          review_recommended?: boolean;
+          scores?: NonNullable<Json>;
+          sku_id?: string;
+          style_quarantine_violation?: boolean;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "qa_assessments_organization_id_fkey";
             columns: ["organization_id"];
             isOneToOne: false;
             referencedRelation: "organizations";
