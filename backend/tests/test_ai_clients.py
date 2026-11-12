@@ -124,14 +124,13 @@ def test_qa_never_passes_missing_image_without_raw_eval():
     assert "missing_generated_image" in eval_res.failed_checks
 
 
-def test_dna_agent_sets_draft_and_quarantines_style(monkeypatch, tmp_path):
+def test_dna_agent_sets_draft_and_quarantines_style(monkeypatch):
+    import os
+    import tempfile
+
     valid_png = base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
     )
-    front = tmp_path / "front.jpg"
-    front.write_bytes(valid_png)
-    style = tmp_path / "style.jpg"
-    style.write_bytes(valid_png)
 
     seen_roles = []
 
@@ -150,16 +149,28 @@ def test_dna_agent_sets_draft_and_quarantines_style(monkeypatch, tmp_path):
 
     monkeypatch.setattr("agents.dna_agent.invoke_vision_json", fake_vision)
     agent = ProductDNAAgent()
-    out = agent.process({
-        "organization_id": "org_test",
-        "sku_id": "SKU-MOCK-VLM",
-        "sku_name": "Banarasi Red Saree",
-        "source_fingerprint": "fp_mock_1",
-        "references": [
-            {"role": "saree_front_drape", "download_url": f"local://{front}"},
-            {"role": "style_reference", "download_url": f"local://{style}"},
-        ],
-    })
+    with tempfile.TemporaryDirectory(dir=os.path.dirname(__file__)) as fixture_dir:
+        front = os.path.join(fixture_dir, "front.jpg")
+        style = os.path.join(fixture_dir, "style.jpg")
+        with open(front, "wb") as fh:
+            fh.write(valid_png)
+        with open(style, "wb") as fh:
+            fh.write(valid_png)
+
+        from services.ai_clients import load_reference_image
+        assert load_reference_image({"role": "saree_front_drape", "download_url": f"local://{front}"}) is None
+
+        out = agent.process({
+            "organization_id": "org_test",
+            "sku_id": "SKU-MOCK-VLM",
+            "sku_name": "Banarasi Red Saree",
+            "source_fingerprint": "fp_mock_1",
+            "allow_local_references": True,
+            "references": [
+                {"role": "saree_front_drape", "download_url": f"local://{front}"},
+                {"role": "style_reference", "download_url": f"local://{style}"},
+            ],
+        })
     assert seen_roles == ["saree_front_drape"]
     assert out["dna_approved"] is False
     assert out["product_dna"]["status"] == "draft"

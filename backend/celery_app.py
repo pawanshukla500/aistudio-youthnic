@@ -102,7 +102,7 @@ def _finalize_job_progress(job_id: str, org_id: str, sku_id: str):
                     ),
                 )
     if next_status in ("completed", "failed"):
-        cache_manager.release_job_active(org_id, sku_id)
+        cache_manager.release_job_active(org_id, sku_id, expected_job_id=job_id)
 
 
 def _load_sku_reference_payloads(org_id: str, sku_id: str, job_data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -171,7 +171,7 @@ def process_generation_job_task(self, job_id: str, org_id: str, sku_id: str):
                             (str(exc)[:500], job_id),
                         )
             finally:
-                cache_manager.release_job_active(org_id, sku_id)
+                cache_manager.release_job_active(org_id, sku_id, expected_job_id=job_id)
         raise self.retry(exc=exc, countdown=15)
 
 
@@ -180,6 +180,7 @@ def process_pose_generation_task(self, generation_id: str, job_id: str, pose_ind
     """Executes real OpenAI image generation, uploads to Firebase Storage, and triggers CV QA."""
     logger.info(f"Generating pose {pose_index} for gen_id: {generation_id}")
     image_committed = False
+    pose_qa_enabled = True
 
     try:
         with get_db() as conn:
@@ -196,8 +197,13 @@ def process_pose_generation_task(self, generation_id: str, job_id: str, pose_ind
                     (generation_id, job_id),
                 )
                 row = cur.fetchone()
-                if not row or row["status"] == "completed" or row.get("job_status") == "cancelled":
-                    logger.info(f"Pose {pose_index} already completed, missing, or cancelled. Reconciled.")
+                if not row or row.get("job_status") == "cancelled":
+                    logger.info(f"Pose {pose_index} missing or cancelled. Reconciled.")
+                    return {"status": "completed", "generation_id": generation_id}
+                pose_qa_enabled = bool(row.get("pose_qa", True))
+                if row["status"] == "completed":
+                    image_committed = True
+                    _finalize_job_progress(job_id, org_id, sku_id)
                     return {"status": "completed", "generation_id": generation_id}
 
                 # If an image was already committed awaiting QA dispatch, resume QA dispatch without regenerating/re-charging
@@ -211,7 +217,11 @@ def process_pose_generation_task(self, generation_id: str, job_id: str, pose_ind
                     """
                     UPDATE public.session_generations
                     SET status = 'generating', updated_at = now()
-                    WHERE generation_id = %s AND status IN ('pending', 'failed', 'retrying')
+                    WHERE generation_id = %s
+                      AND (
+                        status IN ('pending', 'failed', 'retrying')
+                        OR (status = 'generating' AND updated_at < now() - interval '10 minutes')
+                      )
                     RETURNING generation_id
                     """,
                     (generation_id,),
@@ -299,16 +309,24 @@ def process_pose_generation_task(self, generation_id: str, job_id: str, pose_ind
     except Exception as exc:
         logger.error(f"Error generating pose {pose_index}: {exc}")
         is_terminal = self.request.retries >= self.max_retries
-        pose_status = "qa_pending" if image_committed else ("failed" if is_terminal else "retrying")
-        err_prefix = "QA dispatch pending recovery: " if image_committed else ""
+        if image_committed and not pose_qa_enabled:
+            pose_status = "completed"
+            err_msg = f"Finalization pending recovery: {str(exc)}"[:500]
+        elif image_committed:
+            pose_status = "failed" if is_terminal else "qa_pending"
+            prefix = "QA dispatch failed: " if is_terminal else "QA dispatch pending recovery: "
+            err_msg = f"{prefix}{str(exc)}"[:500]
+        else:
+            pose_status = "failed" if is_terminal else "retrying"
+            err_msg = str(exc)[:500]
         try:
             with get_db() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "UPDATE public.session_generations SET status = %s, error = %s, updated_at = now() WHERE generation_id = %s",
-                        (pose_status, f"{err_prefix}{str(exc)}"[:500], generation_id),
+                        (pose_status, err_msg, generation_id),
                     )
-            if is_terminal and not image_committed:
+            if is_terminal and (not image_committed or pose_qa_enabled):
                 _finalize_job_progress(job_id, org_id, sku_id)
         except Exception:
             pass
@@ -360,24 +378,87 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
             reference_images=refs,
         )
 
-        with get_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT status FROM public.generation_jobs WHERE job_id = %s", (job_id,))
-                latest_job = cur.fetchone()
-        if latest_job and latest_job.get("status") == "cancelled":
-            return {"status": "cancelled", "generation_id": generation_id}
+        expected_attempt = int(row.get("attempt_count") or 0)
+        should_record_learning = False
+        should_dispatch_regen = False
+        action = None
+        guidance = ""
 
-        if evaluation.outcome == "pass" and not evaluation.requires_human_review:
-            with get_db() as conn:
+        with get_db() as conn:
+            with conn.transaction():
                 with conn.cursor() as cur:
                     cur.execute(
-                        """
-                        UPDATE public.session_generations
-                        SET qa_status = %s, qa_payload = %s, status = 'completed', updated_at = now()
-                        WHERE generation_id = %s
-                        """,
-                        (evaluation.outcome, evaluation.model_dump_json(), generation_id),
+                        "SELECT status FROM public.generation_jobs WHERE job_id = %s FOR UPDATE",
+                        (job_id,),
                     )
+                    latest_job = cur.fetchone()
+                    if not latest_job or latest_job.get("status") == "cancelled":
+                        return {"status": "cancelled", "generation_id": generation_id}
+
+                    if evaluation.outcome == "pass" and not evaluation.requires_human_review:
+                        cur.execute(
+                            """
+                            UPDATE public.session_generations
+                            SET qa_status = %s, qa_payload = %s, status = 'completed', updated_at = now()
+                            WHERE generation_id = %s AND status = 'qa_pending' AND attempt_count = %s
+                            RETURNING generation_id
+                            """,
+                            (evaluation.outcome, evaluation.model_dump_json(), generation_id, expected_attempt),
+                        )
+                        if cur.fetchone() is None:
+                            return {"status": "stale_qa_ignored", "generation_id": generation_id}
+                        should_record_learning = True
+                    elif evaluation.outcome == "pass" and evaluation.requires_human_review:
+                        cur.execute(
+                            """
+                            UPDATE public.session_generations
+                            SET qa_status = 'review_recommended', qa_payload = %s, status = 'completed',
+                                approval_status = 'pending', updated_at = now()
+                            WHERE generation_id = %s AND status = 'qa_pending' AND attempt_count = %s
+                            RETURNING generation_id
+                            """,
+                            (evaluation.model_dump_json(), generation_id, expected_attempt),
+                        )
+                        if cur.fetchone() is None:
+                            return {"status": "stale_qa_ignored", "generation_id": generation_id}
+                    else:
+                        action, guidance = correction_agent.decide_action(
+                            pose_index=pose_index,
+                            attempt_count=expected_attempt or 1,
+                            failed_checks=evaluation.failed_checks,
+                            guidance=evaluation.correction_guidance,
+                            anatomical_defect=evaluation.anatomical_defect_detected,
+                            style_violation=evaluation.style_quarantine_violation,
+                        )
+                        if action == "regenerate":
+                            cur.execute(
+                                """
+                                UPDATE public.session_generations
+                                SET qa_status = %s, qa_payload = %s, status = 'retrying', output_url = '',
+                                    regeneration_instructions = %s, updated_at = now()
+                                WHERE generation_id = %s AND status = 'qa_pending' AND attempt_count = %s
+                                RETURNING generation_id
+                                """,
+                                (evaluation.outcome, evaluation.model_dump_json(), guidance, generation_id, expected_attempt),
+                            )
+                            if cur.fetchone() is None:
+                                return {"status": "stale_qa_ignored", "generation_id": generation_id}
+                            should_dispatch_regen = True
+                        else:
+                            cur.execute(
+                                """
+                                UPDATE public.session_generations
+                                SET qa_status = %s, qa_payload = %s, status = 'failed',
+                                    error = %s, updated_at = now()
+                                WHERE generation_id = %s AND status = 'qa_pending' AND attempt_count = %s
+                                RETURNING generation_id
+                                """,
+                                (evaluation.outcome, evaluation.model_dump_json(), guidance[:500], generation_id, expected_attempt),
+                            )
+                            if cur.fetchone() is None:
+                                return {"status": "stale_qa_ignored", "generation_id": generation_id}
+
+        if should_record_learning:
             learning_agent.record_approved_outcome(
                 org_id=org_id,
                 sku_id=sku_id,
@@ -387,27 +468,7 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
                 negative_constraints=dna.get("prohibited_changes") or [],
                 category=str(dna.get("category") or "ethnic/fusion"),
             )
-        elif evaluation.outcome == "pass" and evaluation.requires_human_review:
-            with get_db() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        UPDATE public.session_generations
-                        SET qa_status = 'review_recommended', qa_payload = %s, status = 'completed',
-                            approval_status = 'pending', updated_at = now()
-                        WHERE generation_id = %s
-                        """,
-                        (evaluation.model_dump_json(), generation_id),
-                    )
-        else:
-            action, guidance = correction_agent.decide_action(
-                pose_index=pose_index,
-                attempt_count=int(row.get("attempt_count") or 1),
-                failed_checks=evaluation.failed_checks,
-                guidance=evaluation.correction_guidance,
-                anatomical_defect=evaluation.anatomical_defect_detected,
-                style_violation=evaluation.style_quarantine_violation,
-            )
+        elif action is not None:
             correction_agent.record_correction(
                 org_id=org_id,
                 job_id=job_id,
@@ -418,31 +479,17 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
                 mismatch=", ".join(evaluation.failed_checks or ["qa_rejected"]),
                 action="pose_regeneration" if action == "regenerate" else "human_override",
             )
-            if action == "regenerate":
-                with get_db() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            UPDATE public.session_generations
-                            SET qa_status = %s, qa_payload = %s, status = 'retrying', output_url = '',
-                                regeneration_instructions = %s, updated_at = now()
-                            WHERE generation_id = %s
-                            """,
-                            (evaluation.outcome, evaluation.model_dump_json(), guidance, generation_id),
-                        )
-                process_pose_generation_task.delay(generation_id, job_id, pose_index, org_id, sku_id)
-            else:
-                with get_db() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            UPDATE public.session_generations
-                            SET qa_status = %s, qa_payload = %s, status = 'failed',
-                                error = %s, updated_at = now()
-                            WHERE generation_id = %s
-                            """,
-                            (evaluation.outcome, evaluation.model_dump_json(), guidance[:500], generation_id),
-                        )
+            if should_dispatch_regen:
+                try:
+                    process_pose_generation_task.delay(generation_id, job_id, pose_index, org_id, sku_id)
+                except Exception:
+                    with get_db() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "UPDATE public.session_generations SET status = 'qa_pending', updated_at = now() WHERE generation_id = %s AND status = 'retrying'",
+                                (generation_id,),
+                            )
+                    raise
 
         _finalize_job_progress(job_id, org_id, sku_id)
         return {"status": "qa_evaluated", "outcome": evaluation.outcome, "score": evaluation.overall_score}

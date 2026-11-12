@@ -78,6 +78,7 @@ class ValkeyCacheManager:
             if nx:
                 return False
             self._local_set(key, value, ex=ex)
+            self._pending_deletes.add(key)
             return True
         try:
             self._reconcile_pending()
@@ -91,6 +92,7 @@ class ValkeyCacheManager:
             if nx:
                 return False
             self._local_set(key, value, ex=ex)
+            self._pending_deletes.add(key)
             return True
 
     def _safe_delete(self, *keys: str, defer_invalidation: bool = True):

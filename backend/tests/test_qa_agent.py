@@ -124,3 +124,25 @@ def test_qa_agent_not_free_of_defect_phrase_still_vetoes():
     assert eval_res.bottom_cut_mismatch is True
     assert eval_res.outcome in ("retry", "fail")
 
+
+def test_qa_agent_contrast_conjunctions_still_trigger_veto():
+    assert detect_anatomical_defect("Model has no extra fingers but a third hand appears near the drape") is True
+    agent = ComputerVisionQAAgent()
+    eval_res = agent.evaluate(
+        org_id="org_test",
+        job_id="job_test",
+        generation_id="gen_contrast",
+        sku_id="sku_test",
+        pose_index=1,
+        pose_type="full_front",
+        image_url="http://example.com/image.jpg",
+        product_dna={"garment_family": "saree", "bottom_wear": {"cut_class": "none"}},
+        ai_raw_evaluation={
+            "scores": {"garment_identity": 96.0, "colors": 96.0, "bottom_wear": 95.0},
+            "checks": {"garment_identity": "pass", "colors": "pass", "bottom_wear": "pass"},
+            "notes": "No palazzo visible however wide trousers appear at the hem.",
+        },
+    )
+    assert eval_res.bottom_cut_mismatch is True
+    assert eval_res.outcome in ("retry", "fail")
+

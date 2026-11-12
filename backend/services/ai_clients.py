@@ -89,8 +89,7 @@ def _is_allowed_local_path(local_path: str) -> bool:
     try:
         resolved = os.path.realpath(local_path)
         repo_tests_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "tests"))
-        temp_dir = os.path.realpath(tempfile.gettempdir())
-        allowed_roots = [repo_tests_dir, temp_dir]
+        allowed_roots = [repo_tests_dir]
         desktop_proj = os.path.realpath(r"C:\Users\Pawan Shukla\Desktop\Projec Images")
         if os.path.isdir(desktop_proj):
             allowed_roots.append(desktop_proj)
@@ -205,8 +204,8 @@ def load_reference_image(
     raw_bytes = b""
     try:
         if url.startswith("local://"):
-            if not allow_local and settings.ENV.lower() == "production":
-                logger.warning(f"Blocked local:// image reference in production request for role={role}")
+            if not allow_local:
+                logger.warning(f"Blocked local:// image reference without explicit opt-in for role={role}")
                 return None
             local_path = url[len("local://"):]
             if not _is_allowed_local_path(local_path):
@@ -226,7 +225,7 @@ def load_reference_image(
             if not _is_allowed_org_storage_path(storage_path, organization_id):
                 logger.warning(f"Blocked cross-tenant or invalid storage_path for org={organization_id}")
                 return None
-            raw_bytes = download_bytes(storage_path)
+            raw_bytes = download_bytes(storage_path, max_bytes=MAX_DOWNLOAD_BYTES)
     except Exception as exc:
         logger.debug(f"Could not load bytes for reference role={role}: {exc}")
         return None

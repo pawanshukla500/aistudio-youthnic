@@ -13,6 +13,7 @@ class AgentWorkflowState(TypedDict, total=False):
     source_fingerprint: str
     product_dna: Optional[Dict[str, Any]]
     dna_approved: bool
+    dna_persisted: bool
 
     # Knowledge & Scene Planning
     retrieved_guidance: List[str]

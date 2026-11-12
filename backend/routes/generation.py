@@ -132,7 +132,7 @@ def submit_generation_job(job_req: GenerationJobSubmit = Body(...)) -> Dict[str,
         "sku_name": sku_name,
         "provider": selected_provider,
         "model": selected_model,
-        "total_poses": len(job_req.poses_to_generate),
+        "total_poses": len(poses_to_generate),
     }
 
 
@@ -205,11 +205,14 @@ def regenerate_pose(
                     raise HTTPException(status_code=404, detail="Pose or job not found")
                 if row.get("job_status") == "cancelled":
                     raise HTTPException(status_code=409, detail="Cannot regenerate pose on a cancelled job")
+                if row.get("prev_status") == "generating":
+                    raise HTTPException(status_code=409, detail="Pose generation is already in progress")
 
                 gen_id = row["generation_id"]
                 org_id = row["org_id"]
                 job_data = row.get("job_data") if isinstance(row.get("job_data"), dict) else {}
                 sku_id = str(job_data.get("sku_id") or row["sku_name"])
+                reopened_job = row.get("job_status") in ("completed", "failed")
 
                 cur.execute(
                     """
@@ -238,9 +241,15 @@ def regenerate_pose(
                     (job_id,),
                 )
 
+    acquired_active = False
+    if reopened_job:
+        acquired_active = cache_manager.mark_job_active(org_id, sku_id, job_id)
+
     try:
         process_pose_generation_task.delay(gen_id, job_id, pose_index, org_id, sku_id)
     except Exception:
+        if acquired_active:
+            cache_manager.release_job_active(org_id, sku_id, expected_job_id=job_id)
         try:
             with get_db() as conn:
                 with conn.transaction():

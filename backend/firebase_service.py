@@ -53,10 +53,16 @@ def upload_bytes(storage_path: str, data: bytes, content_type: str = "image/jpeg
     return f"https://firebasestorage.googleapis.com/v0/b/{settings.FIREBASE_STORAGE_BUCKET}/o/{storage_path.replace('/', '%2F')}?alt=media"
 
 
-def download_bytes(storage_path: str) -> bytes:
+def download_bytes(storage_path: str, max_bytes: int = 20 * 1024 * 1024) -> bytes:
     bucket = get_bucket()
     blob = bucket.blob(storage_path)
-    return blob.download_as_bytes()
+    blob.reload()
+    if blob.size is not None and int(blob.size) > max_bytes:
+        raise RuntimeError(f"Firebase object exceeds {max_bytes} byte limit")
+    data = blob.download_as_bytes()
+    if len(data) > max_bytes:
+        raise RuntimeError(f"Firebase object exceeds {max_bytes} byte limit")
+    return data
 
 
 def generate_signed_url(storage_path: str, expiration_seconds: int = 604800) -> str:

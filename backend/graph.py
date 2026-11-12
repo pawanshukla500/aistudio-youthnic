@@ -110,40 +110,37 @@ def build_studio_graph(checkpointer=None):
 
 def _lock_checkpoint_tables(pool) -> None:
     """Enforce RLS and service_role-only access on LangGraph checkpoint tables after saver.setup()."""
-    try:
-        with pool.connection() as conn:
-            conn.execute(
-                """
-                DO $$
-                DECLARE
-                  cp_tbl text;
-                BEGIN
-                  FOREACH cp_tbl IN ARRAY ARRAY[
-                    'checkpoints',
-                    'checkpoint_blobs',
-                    'checkpoint_writes',
-                    'checkpoint_migrations'
-                  ] LOOP
-                    IF EXISTS (
-                      SELECT 1 FROM information_schema.tables
-                      WHERE table_schema = 'public' AND table_name = cp_tbl
-                    ) THEN
-                      EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', cp_tbl);
-                      EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC, anon, authenticated', cp_tbl);
-                      EXECUTE format('GRANT ALL ON public.%I TO service_role', cp_tbl);
-                      EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', cp_tbl || '_service_role_all', cp_tbl);
-                      EXECUTE format(
-                        'CREATE POLICY %I ON public.%I FOR ALL TO service_role USING (true) WITH CHECK (true)',
-                        cp_tbl || '_service_role_all',
-                        cp_tbl
-                      );
-                    END IF;
-                  END LOOP;
-                END $$;
-                """
-            )
-    except Exception as exc:
-        logger.warning(f"Could not apply RLS lockdown to checkpoint tables after setup: {exc}")
+    with pool.connection() as conn:
+        conn.execute(
+            """
+            DO $$
+            DECLARE
+              cp_tbl text;
+            BEGIN
+              FOREACH cp_tbl IN ARRAY ARRAY[
+                'checkpoints',
+                'checkpoint_blobs',
+                'checkpoint_writes',
+                'checkpoint_migrations'
+              ] LOOP
+                IF EXISTS (
+                  SELECT 1 FROM information_schema.tables
+                  WHERE table_schema = 'public' AND table_name = cp_tbl
+                ) THEN
+                  EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', cp_tbl);
+                  EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC, anon, authenticated', cp_tbl);
+                  EXECUTE format('GRANT ALL ON public.%I TO service_role', cp_tbl);
+                  EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', cp_tbl || '_service_role_all', cp_tbl);
+                  EXECUTE format(
+                    'CREATE POLICY %I ON public.%I FOR ALL TO service_role USING (true) WITH CHECK (true)',
+                    cp_tbl || '_service_role_all',
+                    cp_tbl
+                  );
+                END IF;
+              END LOOP;
+            END $$;
+            """
+        )
 
 
 def get_postgres_checkpointer():

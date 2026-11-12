@@ -9,14 +9,19 @@ from services.ai_clients import invoke_vision_json, load_reference_image
 logger = logging.getLogger(__name__)
 
 
+def _trailing_clause(text: str, pos: int) -> str:
+    """Return the immediate preceding clause bounded by punctuation or contrast conjunctions."""
+    prefix = text[max(0, pos - 60):pos].lower()
+    return re.split(r"[.,;!?]|\b(?:but|however|although|though)\b", prefix)[-1]
+
+
 def detect_anatomical_defect(text_feedback: str) -> bool:
     """Regex pattern matching for extra hands, phantom limbs, or duplicate wrists."""
     if not text_feedback:
         return False
     pattern = r"\b(?:(?:three|3|extra|duplicate|phantom|floating|third|missing|detached)\s+(?:[a-z]+\s+)?(?:hands?|arms?|limbs?|wrists?)|(?:severed\s+limb)|(?:extra|fused|malformed|detached|six|6)\s+(?:[a-z]+\s+)?fingers?)\b"
     for match in re.finditer(pattern, text_feedback, re.IGNORECASE):
-        prefix = text_feedback[max(0, match.start() - 60):match.start()].lower()
-        clause = re.split(r"[.,;!?]", prefix)[-1]
+        clause = _trailing_clause(text_feedback, match.start())
         if (
             not re.search(r"\bnot\s+(?:free\s+of|without)\b", clause)
             and re.search(r"\b(?:no|zero|without|neither|never|free\s+of|not)\b", clause)
@@ -32,8 +37,7 @@ def _has_affirmative_term(text: str, terms: List[str]) -> bool:
         return False
     for term in terms:
         for match in re.finditer(rf"\b{re.escape(term)}\b", text, re.IGNORECASE):
-            prefix = text[max(0, match.start() - 60):match.start()].lower()
-            clause = re.split(r"[.,;!?]", prefix)[-1]
+            clause = _trailing_clause(text, match.start())
             if (
                 not re.search(r"\bnot\s+(?:free\s+of|without)\b", clause)
                 and re.search(r"\b(?:no|zero|without|neither|never|not|rather\s+than|instead\s+of|free\s+of)\b", clause)

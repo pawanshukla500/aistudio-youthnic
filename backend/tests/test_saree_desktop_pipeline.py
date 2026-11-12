@@ -89,6 +89,7 @@ def test_desktop_saree_evidence_hashing_and_quarantine(tmp_path):
     evidence_out = evidence_agent.process({
         "organization_id": VALID_ORG_UUID,
         "sku_id": sku_id,
+        "allow_local_references": True,
         "references": raw_references,
     })
 
