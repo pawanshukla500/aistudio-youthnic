@@ -1,5 +1,4 @@
 import base64
-from unittest.mock import MagicMock
 from agents.qa_agent import ComputerVisionQAAgent
 from agents.dna_agent import ProductDNAAgent
 from services.ai_clients import invoke_vision_json, generate_catalog_image, normalize_image_size

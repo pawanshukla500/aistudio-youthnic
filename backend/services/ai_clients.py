@@ -126,8 +126,12 @@ def _download_public_image_bounded(url: str, timeout_s: int = 20) -> bytes:
                 if resp.status_code != 200:
                     return b""
                 content_len = resp.headers.get("content-length")
-                if content_len and int(content_len) > MAX_DOWNLOAD_BYTES:
-                    raise RuntimeError(f"Remote image exceeds {MAX_DOWNLOAD_BYTES} byte limit")
+                if content_len:
+                    try:
+                        if int(content_len) > MAX_DOWNLOAD_BYTES:
+                            raise RuntimeError(f"Remote image exceeds {MAX_DOWNLOAD_BYTES} byte limit")
+                    except ValueError:
+                        pass
                 chunks: List[bytes] = []
                 total = 0
                 for chunk in resp.iter_bytes(chunk_size=65536):

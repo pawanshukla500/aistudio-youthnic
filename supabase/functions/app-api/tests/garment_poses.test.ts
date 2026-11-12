@@ -607,3 +607,19 @@ Deno.test("placeholder N/A sareeTruth on a kurta set never leaks saree_ethnic po
   assertEquals(prompt.includes("GARMENT POSE GRAMMAR (SAREE ETHNIC)"), false);
   assertEquals(prompt.includes("PALLU PLACEMENT"), false);
 });
+
+Deno.test("positiveBottomWearPortion keeps later positive clauses when an earlier negation exists", () => {
+  assertEquals(
+    classifyBottomCut({
+      skuName: "No dupatta, pink kurti with farshi salwar",
+      bottomWearDetails: "No pockets, wide-leg farshi trousers",
+    }),
+    "farshi",
+  );
+  assertEquals(
+    classifyBottomCut({
+      bottomWearDetails: "Palazzo - NOT Farshi, wide straight cylinder",
+    }),
+    "palazzo",
+  );
+});

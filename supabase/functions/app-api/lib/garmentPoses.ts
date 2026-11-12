@@ -172,14 +172,25 @@ export function recordedBottomWearText(productIdentity: unknown): string {
 }
 
 /**
- * The positive half of the recorded specification. "Palazzo, NOT farshi" must
- * classify as palazzo, so everything from the first negation onward is dropped
- * before the garment class is read.
+ * Positive descriptors of the recorded specification. Negated clauses (e.g.
+ * "Palazzo - NOT farshi" or "No dupatta, pink kurti with farshi salwar")
+ * have their negated portion stripped per clause so earlier unrelated negations
+ * don't erase valid bottom descriptors later in the string.
  */
 export function positiveBottomWearPortion(details: string): string {
   if (!details || ABSENT_BOTTOM_WEAR.test(details)) return "";
-  const firstNegative = details.search(/\b(?:not|without|no)\b/i);
-  return (firstNegative === -1 ? details : details.slice(0, firstNegative)).trim();
+  const cleaned = details.replace(
+    /\bwithout\s+(?:a\s+|an\s+|any\s+)?(?:dupatta|stole|scarf|sleeves?|lining|embroidery|pockets?)\b/gi,
+    " ",
+  );
+  const clauses = cleaned.split(/(?:[,;.\n]+|\s+[-–—]+\s+)/);
+  return clauses
+    .map((clause) => {
+      const firstNegative = clause.search(/\b(?:not|never|without|no)\b/i);
+      return (firstNegative === -1 ? clause : clause.slice(0, firstNegative)).trim();
+    })
+    .filter(Boolean)
+    .join(" ");
 }
 
 export function hasBottomWearInAnalysis(productIdentity: unknown): boolean {
@@ -299,7 +310,10 @@ export function detectGarmentPoseFamily(args: {
   const garmentFamily = text(product.garmentFamily ?? product.garment_family).toLowerCase();
   const sareeTruth = objectValue(product.sareeTruth ?? product.saree_truth);
   const sareeBody = objectValue(sareeTruth.body);
-  const sanitizedSareeFabric = text(sareeBody.mainFabric).replace(/\b(?:n\/a|not|non|never|no|without)\b[\s\-–—]*(?:a\s+)?saree\b/gi, "").trim();
+  const sanitizedSareeFabric = text(sareeBody.mainFabric)
+    .replace(/\b(?:n\/a|not|non|never|no|without)\b[\s\-–—]*(?:a\s+)?saree\b/gi, "")
+    .replace(/^(?:n\/a|na|none)\b[\s\-–—:]*/i, "")
+    .trim();
   const category = text(args.category).toLowerCase();
   const notes = joined([args.productDetails, args.skuName]);
   const haystack = joined([

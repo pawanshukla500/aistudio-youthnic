@@ -9,6 +9,22 @@ from services.ai_clients import embed_text
 logger = logging.getLogger(__name__)
 
 
+def _is_compatible_rule(text_to_check: str, garment_family: str, bottom_cut: str) -> bool:
+    lower_rule = text_to_check.lower()
+    positive_clauses = re.sub(
+        r"\b(?:strictly\s+)?(?:no|not|without|never)\b[^.;\n]*",
+        "",
+        lower_rule,
+    )
+    if re.search(r"\b(?:farshi|farsi|fasi)\b", positive_clauses) and bottom_cut != "farshi":
+        return False
+    if garment_family == "saree" and any(tok in positive_clauses for tok in ("palazzo", "sharara", "salwar", "trouser")):
+        return False
+    if garment_family != "saree" and re.search(r"\bsarees?\b|\bsari\b", positive_clauses) and not re.search(r"\bkurt[ia]s?\b", positive_clauses):
+        return False
+    return True
+
+
 class KnowledgeMemoryAgent:
     """Retrieves relevant fashion knowledge base rules, learned patterns,
 
@@ -49,6 +65,7 @@ class KnowledgeMemoryAgent:
                     if m.get("content") and m["content"] not in guidance_rules:
                         guidance_rules.append(m["content"])
 
+            cut_pattern = f"%{bottom_cut}%" if (bottom_cut and bottom_cut not in {"none", "other", "unknown"}) else "%ethnic%"
             with get_db() as conn:
                 with conn.cursor() as cur:
                     if org_id:
@@ -58,9 +75,9 @@ class KnowledgeMemoryAgent:
                             WHERE is_active = true
                               AND (organization_id IS NULL OR organization_id = %s::uuid)
                               AND (category = %s OR category = 'general' OR guidance ILIKE %s)
-                            LIMIT 3
+                            LIMIT 6
                             """,
-                            (org_id, category, f"%{bottom_cut}%" if bottom_cut else "%ethnic%"),
+                            (org_id, category, cut_pattern),
                         )
                     else:
                         cur.execute(
@@ -69,21 +86,22 @@ class KnowledgeMemoryAgent:
                             WHERE is_active = true
                               AND organization_id IS NULL
                               AND (category = %s OR category = 'general' OR guidance ILIKE %s)
-                            LIMIT 3
+                            LIMIT 6
                             """,
-                            (category, f"%{bottom_cut}%" if bottom_cut else "%ethnic%"),
+                            (category, cut_pattern),
                         )
                     rows = cur.fetchall()
                     for r in rows:
-                        if r.get("guidance"):
-                            guidance_rules.append(r["guidance"])
+                        guidance = r.get("guidance")
+                        if guidance and _is_compatible_rule(guidance, garment_family, bottom_cut) and guidance not in guidance_rules:
+                            guidance_rules.append(guidance)
 
                     if org_id:
                         cur.execute(
                             """
                             SELECT rule_text, positive_guidance FROM public.learning_outcomes
                             WHERE is_active = true AND approved = true AND organization_id = %s::uuid
-                            ORDER BY effectiveness_score DESC LIMIT 3
+                            ORDER BY effectiveness_score DESC LIMIT 6
                             """,
                             (org_id,),
                         )
@@ -92,17 +110,8 @@ class KnowledgeMemoryAgent:
                             rule = l.get("positive_guidance") or l.get("rule_text")
                             if not rule:
                                 continue
-                            lower_rule = f"{l.get('rule_text') or ''} {rule}".lower()
-                            positive_clauses = re.sub(
-                                r"\b(?:strictly\s+)?(?:no|not|without|never)\s+(?:pants|palazzos?|shararas?|salwars?|trousers?|bottoms?)\b",
-                                "",
-                                lower_rule,
-                            )
-                            if any(tok in lower_rule for tok in ("farshi", "farsi", "fasi")) and bottom_cut != "farshi":
-                                continue
-                            if garment_family == "saree" and any(tok in positive_clauses for tok in ("palazzo", "sharara", "salwar", "trouser")):
-                                continue
-                            if garment_family != "saree" and "saree" in positive_clauses and "kurti" not in positive_clauses:
+                            combined = f"{l.get('rule_text') or ''} {rule}"
+                            if not _is_compatible_rule(combined, garment_family, bottom_cut):
                                 continue
                             if rule not in guidance_rules:
                                 guidance_rules.append(rule)
