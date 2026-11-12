@@ -434,13 +434,19 @@ export function Admin() {
   const probeAiRoute = useMutation(api.admin.probeAiRoute);
   const syncOpenAiUsage = useAction(api.admin.syncOpenAiUsage);
   const [tab, setTab] = useState<Tab>("users");
-  const { data: workflowOverview } = useQuery(api.workflows.overview, tab === "system" ? {} : "skip") as {
+  const {
+    data: workflowOverview,
+    error: workflowOverviewError,
+    isLoading: workflowOverviewLoading,
+  } = useQuery(api.workflows.overview, tab === "system" ? {} : "skip") as {
     data?: {
       engine?: string;
       checkpointer?: { backend?: string; tables_ready?: boolean; total_checkpoints?: number; total_threads?: number };
       nodes?: string[];
       providers_configured?: Record<string, boolean>;
     };
+    error?: Error | null;
+    isLoading?: boolean;
   };
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -1362,10 +1368,31 @@ export function Admin() {
                     Runs inside Railway FastAPI &amp; celery-worker with durable PostgreSQL checkpoints across steps.
                   </p>
                 </div>
-                <span className={`rounded-full px-3 py-1 text-xs font-bold ${workflowOverview?.checkpointer?.tables_ready ? "bg-success-surface text-success" : "bg-surface-container text-secondary"}`}>
-                  {workflowOverview?.checkpointer?.tables_ready ? "PostgresSaver Active" : "Checking orchestrator…"}
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-bold ${
+                    workflowOverview?.checkpointer?.tables_ready
+                      ? "bg-success-surface text-success"
+                      : workflowOverviewError
+                        ? "bg-rose-50 text-rose-700"
+                        : workflowOverviewLoading
+                          ? "bg-surface-container text-secondary"
+                          : "bg-amber-50 text-amber-800"
+                  }`}
+                >
+                  {workflowOverview?.checkpointer?.tables_ready
+                    ? "PostgresSaver Active"
+                    : workflowOverviewError
+                      ? "Orchestrator Unreachable"
+                      : workflowOverviewLoading
+                        ? "Checking orchestrator…"
+                        : "Checkpointer Not Ready"}
                 </span>
               </div>
+              {workflowOverviewError && (
+                <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-xs text-rose-800">
+                  {workflowOverviewError.message || "Could not load LangGraph orchestrator telemetry."}
+                </div>
+              )}
               {workflowOverview && (
                 <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <div className="rounded-xl bg-surface-container-low p-3">

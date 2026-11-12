@@ -1,4 +1,5 @@
 import logging
+import threading
 from typing import Optional, Dict, Any, List
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -8,7 +9,7 @@ except ImportError:
     PostgresSaver = None
 
 from config import settings
-from database import get_pool, get_db
+from database import get_pool, get_db, get_pool_generation
 from agents.state import AgentWorkflowState
 from agents.supervisor import SupervisorOrchestratorAgent
 
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 supervisor = SupervisorOrchestratorAgent()
 _postgres_checkpointer = None
 _checkpointer_initialized = False
+_checkpointer_pool_gen = -1
+_checkpointer_lock = threading.Lock()
 
 
 def node_inspect_evidence(state: AgentWorkflowState) -> AgentWorkflowState:
@@ -107,18 +110,21 @@ def build_studio_graph(checkpointer=None):
 
 def get_postgres_checkpointer():
     """Return a shared PostgresSaver backed by the PostgreSQL ConnectionPool."""
-    global _postgres_checkpointer, _checkpointer_initialized
+    global _postgres_checkpointer, _checkpointer_initialized, _checkpointer_pool_gen
     if not (PostgresSaver and settings.DATABASE_URL):
         return None
-    if _postgres_checkpointer is None:
+    with _checkpointer_lock:
         pool = get_pool()
-        saver = PostgresSaver(pool)
-        if not _checkpointer_initialized:
-            saver.setup()
-            _checkpointer_initialized = True
-        _postgres_checkpointer = saver
-        logger.info("Initialized pooled PostgresSaver checkpointer for LangGraph")
-    return _postgres_checkpointer
+        gen = get_pool_generation()
+        if _postgres_checkpointer is None or _checkpointer_pool_gen != gen:
+            saver = PostgresSaver(pool)
+            if not _checkpointer_initialized:
+                saver.setup()
+                _checkpointer_initialized = True
+            _postgres_checkpointer = saver
+            _checkpointer_pool_gen = gen
+            logger.info("Initialized pooled PostgresSaver checkpointer for LangGraph")
+        return _postgres_checkpointer
 
 
 def get_compiled_graph():
@@ -133,22 +139,37 @@ def get_compiled_graph():
     return build_studio_graph(checkpointer=checkpointer)
 
 
-def list_workflow_threads(limit: int = 30) -> List[Dict[str, Any]]:
-    """Inspect recent LangGraph checkpointed threads stored in PostgreSQL."""
+def list_workflow_threads(limit: int = 30, organization_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Inspect recent LangGraph checkpointed threads stored in PostgreSQL, optionally scoped to an org."""
     with get_db() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT thread_id,
-                       COUNT(*)::int AS checkpoint_count,
-                       MAX(checkpoint_id) AS latest_checkpoint_id
-                FROM public.checkpoints
-                GROUP BY thread_id
-                ORDER BY MAX(checkpoint_id) DESC
-                LIMIT %s
-                """,
-                (limit,),
-            )
+            if organization_id:
+                cur.execute(
+                    """
+                    SELECT thread_id,
+                           COUNT(*)::int AS checkpoint_count,
+                           MAX(checkpoint_id) AS latest_checkpoint_id
+                    FROM public.checkpoints
+                    WHERE thread_id LIKE %s
+                    GROUP BY thread_id
+                    ORDER BY MAX(checkpoint_id) DESC
+                    LIMIT %s
+                    """,
+                    (f"thread_dna_{organization_id}_%", limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT thread_id,
+                           COUNT(*)::int AS checkpoint_count,
+                           MAX(checkpoint_id) AS latest_checkpoint_id
+                    FROM public.checkpoints
+                    GROUP BY thread_id
+                    ORDER BY MAX(checkpoint_id) DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
             return cur.fetchall()
 
 

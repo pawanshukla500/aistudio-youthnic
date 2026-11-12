@@ -54,6 +54,7 @@ class QAAgentEvaluation(BaseModel):
         # 2. Style reference outfit copied onto model is an automatic hard VETO.
         # 3. Farshi replaced with palazzo or flat skirt is a hard VETO on bottom-visible poses.
         # 4. Critical check score below 90 fails automatic pass.
+        critical_below_90 = any(scores.get(k, 100) < 90 for k in critical_keys)
         is_hard_veto = (
             anatomical_defect
             or style_quarantine_violation
@@ -64,6 +65,9 @@ class QAAgentEvaluation(BaseModel):
 
         if is_hard_veto:
             outcome = "fail" if (anatomical_defect or style_quarantine_violation) else "retry"
+            review = True
+        elif critical_below_90:
+            outcome = "pass" if fidelity_score >= 90 else "retry"
             review = True
         elif fidelity_score >= 95 and avg_score >= 90 and not failed_checks:
             outcome = "pass"

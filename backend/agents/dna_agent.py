@@ -1,4 +1,6 @@
 import logging
+import re
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from models.dna_v2 import (
     ProductDNAV2,
@@ -8,7 +10,7 @@ from models.dna_v2 import (
     SareeArchitecture,
 )
 from models.evidence import PRODUCT_AUTHORITY_ROLES
-from database import get_latest_dna_version, save_dna_version
+from database import get_latest_dna_version, save_dna_version, approve_dna_version
 from cache import cache_manager
 from services.ai_clients import invoke_vision_json, load_reference_image
 
@@ -119,10 +121,10 @@ class ProductDNAAgent:
         family = str(raw.get("garment_family") or ("saree" if is_saree else "kurta_or_kurti_set")).lower()
         is_saree = is_saree or family == "saree"
 
-        pg_raw = raw.get("pattern_geometry") or {}
-        eg_raw = raw.get("embroidery_geometry") or {}
-        bw_raw = raw.get("bottom_wear") or {}
-        sd_raw = raw.get("saree_details") or {}
+        pg_raw = raw.get("pattern_geometry") if isinstance(raw.get("pattern_geometry"), dict) else {}
+        eg_raw = raw.get("embroidery_geometry") if isinstance(raw.get("embroidery_geometry"), dict) else {}
+        bw_raw = raw.get("bottom_wear") if isinstance(raw.get("bottom_wear"), dict) else {}
+        sd_raw = raw.get("saree_details") if isinstance(raw.get("saree_details"), dict) else {}
 
         if is_saree:
             bottom = BottomWearArchitecture(
@@ -149,25 +151,35 @@ class ProductDNAAgent:
             prohibited = list(dict.fromkeys(["trousers", "palazzo", "salwar", "circular_skirt", "floating_hand", *(raw.get("prohibited_changes") or [])]))
         else:
             has_bottom_ref = any(r.get("role") == "bottom" for r in references)
-            is_farshi_hint = any(k in sku_name.lower() for k in ("farshi", "farsi", "fasi"))
-            allowed_cuts = {"farshi", "straight", "palazzo", "sharara", "churidar", "skirt", "none"}
-            cut = str(bw_raw.get("cut_class") or "").lower()
-            if is_farshi_hint:
+            is_farshi_hint = bool(re.search(r"\b(?:farshi|farsi)\b", sku_name.lower()))
+            allowed_cuts = {"farshi", "straight", "palazzo", "sharara", "churidar", "skirt", "unknown", "none"}
+            cut = str(bw_raw.get("cut_class") or "").lower().strip()
+            has_bottom_wear = (
+                bool(bw_raw.get("has_bottom_wear"))
+                if "has_bottom_wear" in bw_raw
+                else (has_bottom_ref or is_farshi_hint or (family == "kurta_or_kurti_set" and cut not in {"", "none"}))
+            )
+            if not has_bottom_wear:
+                cut = "none"
+            elif is_farshi_hint:
                 cut = "farshi"
-            elif cut not in allowed_cuts:
-                cut = "farshi" if has_bottom_ref else "straight"
+            elif cut not in allowed_cuts or not cut:
+                cut = "unknown"
 
             bottom = BottomWearArchitecture(
-                has_bottom_wear=bool(bw_raw.get("has_bottom_wear", True)),
-                classification=str(bw_raw.get("classification") or ("Farshi Salwar" if cut == "farshi" else "Straight Bottom")),
+                has_bottom_wear=has_bottom_wear,
+                classification=str(
+                    bw_raw.get("classification")
+                    or ("Farshi Salwar" if cut == "farshi" else ("none" if not has_bottom_wear else "unknown"))
+                ),
                 cut_class=cut,  # type: ignore[arg-type]
-                two_leg_construction=bool(bw_raw.get("two_leg_construction", True)),
-                waist_structure=str(bw_raw.get("waist_structure") or "unknown"),
-                flare_volume=str(bw_raw.get("flare_volume") or "unknown"),
+                two_leg_construction=bool(bw_raw.get("two_leg_construction", has_bottom_wear)),
+                waist_structure=str(bw_raw.get("waist_structure") or ("unknown" if has_bottom_wear else "none")),
+                flare_volume=str(bw_raw.get("flare_volume") or ("unknown" if has_bottom_wear else "none")),
                 joined_hem=bool(bw_raw.get("joined_hem", cut == "farshi")),
-                hem_trim=str(bw_raw.get("hem_trim") or "unknown"),
-                fabric_color=str(bw_raw.get("fabric_color") or "matching"),
-                print_and_motifs=str(bw_raw.get("print_and_motifs") or "unknown"),
+                hem_trim=str(bw_raw.get("hem_trim") or ("unknown" if has_bottom_wear else "none")),
+                fabric_color=str(bw_raw.get("fabric_color") or ("matching" if has_bottom_wear else "none")),
+                print_and_motifs=str(bw_raw.get("print_and_motifs") or ("unknown" if has_bottom_wear else "none")),
                 prohibited_cuts=["palazzo", "circular_skirt", "lehenga", "sharara_knee_joint"] if cut == "farshi" else [],
             )
             saree_details = None
@@ -216,7 +228,7 @@ class ProductDNAAgent:
             prohibited_changes=prohibited,
             evidence_manifest=[f"IMAGE {i+1}: {r.get('role')}" for i, r in enumerate(references)],
             uncertain_attributes=[str(u) for u in (raw.get("uncertain_attributes") or [])],
-            confidence_score=float(raw.get("confidence_score") or 0.9),
+            confidence_score=max(0.0, min(1.0, float(raw["confidence_score"]) if raw.get("confidence_score") is not None else 0.9)),
             metadata={"analysis_source": "vlm", "provider": provider, "model": model},
         )
 
@@ -276,8 +288,16 @@ class ProductDNAAgent:
             )
 
         has_bottom_ref = any(r.get("role") == "bottom" for r in references)
-        is_farshi_name = any(k in sku_name.lower() for k in ["farshi", "farsi", "fasi"])
-        bottom_cut = "farshi" if (is_farshi_name or has_bottom_ref) else "straight"
+        is_farshi_name = bool(re.search(r"\b(?:farshi|farsi)\b", sku_name.lower()))
+        requested_family = str(state.get("garment_family") or "").strip().lower()
+        garment_family = requested_family if requested_family in {"kurta_or_kurti_set", "ethnic_dress", "western_or_fusion"} else "kurta_or_kurti_set"
+        has_bottom_wear = bool(is_farshi_name or has_bottom_ref or garment_family == "kurta_or_kurti_set")
+        if is_farshi_name:
+            bottom_cut = "farshi"
+        elif has_bottom_wear:
+            bottom_cut = "unknown"
+        else:
+            bottom_cut = "none"
 
         return ProductDNAV2(
             organization_id=org_id,
@@ -287,7 +307,7 @@ class ProductDNAAgent:
             status="draft",
             approved=False,
             source_fingerprint=fingerprint,
-            garment_family="kurta_or_kurti_set",
+            garment_family=garment_family,  # type: ignore[arg-type]
             category=state.get("category", "ethnic/fusion"),
             main_color=state.get("main_color", "unknown"),
             fabric_type=state.get("fabric_type", "unknown"),
@@ -296,25 +316,52 @@ class ProductDNAAgent:
             front_construction="derived strictly from uploaded front image",
             back_construction="derived strictly from direct back evidence",
             bottom_wear=BottomWearArchitecture(
-                has_bottom_wear=True,
-                classification="Farshi Salwar / Farshi Pajama" if bottom_cut == "farshi" else "Straight Trousers",
+                has_bottom_wear=has_bottom_wear,
+                classification="Farshi Salwar / Farshi Pajama" if bottom_cut == "farshi" else ("none" if not has_bottom_wear else "unknown"),
                 cut_class=bottom_cut,  # type: ignore[arg-type]
-                two_leg_construction=True,
-                waist_structure="vertical gathers and pleats from waist down" if bottom_cut == "farshi" else "fitted waistband",
-                flare_volume="wide A-line architectural volume flared to hem" if bottom_cut == "farshi" else "tailored narrow",
+                two_leg_construction=has_bottom_wear,
+                waist_structure="vertical gathers and pleats from waist down" if bottom_cut == "farshi" else ("unknown" if has_bottom_wear else "none"),
+                flare_volume="wide A-line architectural volume flared to hem" if bottom_cut == "farshi" else ("unknown" if has_bottom_wear else "none"),
                 joined_hem=(bottom_cut == "farshi"),
-                hem_trim="border trim derived from bottom reference" if bottom_cut == "farshi" else "clean hem",
-                fabric_color="matching product ground color",
-                print_and_motifs="derived directly from uploaded bottom/front references",
+                hem_trim="border trim derived from bottom reference" if bottom_cut == "farshi" else ("unknown" if has_bottom_wear else "none"),
+                fabric_color="matching product ground color" if has_bottom_wear else "none",
+                print_and_motifs="derived directly from uploaded bottom/front references" if has_bottom_wear else "none",
                 prohibited_cuts=["palazzo", "circular_skirt", "lehenga", "sharara_knee_joint"] if bottom_cut == "farshi" else [],
             ),
             explicit_invariants=KURTI_BASELINE_INVARIANTS,
             prohibited_changes=["palazzo", "circular_skirt", "plain_flat_bottom", "floating_hand"] if bottom_cut == "farshi" else ["floating_hand"],
             evidence_manifest=[f"IMAGE {i+1}: {r.get('role')}" for i, r in enumerate(references)],
-            uncertain_attributes=["main_color", "fabric_type", "neckline", "sleeve_type"],
+            uncertain_attributes=["main_color", "fabric_type", "neckline", "sleeve_type", *( ["bottom_cut"] if bottom_cut == "unknown" else [] )],
             confidence_score=0.5,
             metadata={"analysis_source": "heuristic_offline"},
         )
+
+    def _sync_reuse_approval(
+        self,
+        org_id: str,
+        sku_id: str,
+        payload: Dict[str, Any],
+        version: int,
+        db_approved: bool,
+        auto_approve: bool,
+    ) -> Dict[str, Any]:
+        is_approved = bool(db_approved or payload.get("approved", False))
+        synced = {
+            **payload,
+            "version": int(version or payload.get("version") or 1),
+            "approved": is_approved,
+            "status": "approved" if is_approved else str(payload.get("status") or "draft"),
+        }
+        if auto_approve and not is_approved and synced["version"] >= 1:
+            try:
+                if approve_dna_version(org_id, sku_id, synced["version"], "auto_workflow"):
+                    synced["approved"] = True
+                    synced["status"] = "approved"
+                    synced["approved_by"] = "auto_workflow"
+                    synced["approved_at"] = datetime.now(timezone.utc).isoformat()
+            except Exception as exc:
+                logger.warning(f"Failed auto-approving reused DNA v{synced['version']} for {sku_id}: {exc}")
+        return synced
 
     def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
         org_id = state["organization_id"]
@@ -322,34 +369,64 @@ class ProductDNAAgent:
         sku_name = state.get("sku_name", sku_id)
         fingerprint = state.get("source_fingerprint", "unhashed")
         force_refresh = bool(state.get("force_refresh", False))
+        auto_approve = bool(state.get("auto_approve", False))
+        allow_local = bool(state.get("allow_local_references", False))
 
-        # 1. Check Valkey Hot Cache (skip if force_refresh)
+        # 1. Check Valkey Hot Cache (skip if force_refresh or heuristic fallback)
         if not force_refresh:
             cached_dna = cache_manager.get_hot_dna(org_id, sku_id)
-            if cached_dna and cached_dna.get("source_fingerprint") == fingerprint:
+            if (
+                cached_dna
+                and cached_dna.get("source_fingerprint") == fingerprint
+                and (cached_dna.get("metadata") or {}).get("analysis_source") != "heuristic_offline"
+            ):
+                synced = self._sync_reuse_approval(
+                    org_id, sku_id, cached_dna,
+                    int(cached_dna.get("version") or 1),
+                    bool(cached_dna.get("approved", False)),
+                    auto_approve,
+                )
+                if synced.get("approved") != cached_dna.get("approved"):
+                    cache_manager.set_hot_dna(org_id, sku_id, synced)
                 logger.info(f"Reusing Valkey cached Product DNA for SKU {sku_id}")
                 return {
-                    "product_dna": cached_dna,
-                    "dna_approved": bool(cached_dna.get("approved", False)),
+                    "product_dna": synced,
+                    "dna_approved": bool(synced.get("approved", False)),
                 }
 
-        # 2. Check PostgreSQL for matching fingerprint
+        # 2. Check PostgreSQL for matching fingerprint (never reuse heuristic_offline rows)
         if not force_refresh:
             db_dna_row = get_latest_dna_version(org_id, sku_id)
             if db_dna_row:
                 dna_payload = db_dna_row.get("dna_payload", {})
-                if isinstance(dna_payload, dict) and db_dna_row.get("source_fingerprint") == fingerprint:
-                    logger.info(f"Reusing Postgres Product DNA v{db_dna_row.get('version')} for SKU {sku_id}")
-                    cache_manager.set_hot_dna(org_id, sku_id, dna_payload)
+                src_mode = (dna_payload.get("metadata") or {}).get("analysis_source") if isinstance(dna_payload, dict) else None
+                if (
+                    isinstance(dna_payload, dict)
+                    and db_dna_row.get("source_fingerprint") == fingerprint
+                    and src_mode != "heuristic_offline"
+                ):
+                    row_ver = int(db_dna_row.get("version") or dna_payload.get("version") or 1)
+                    synced = self._sync_reuse_approval(
+                        org_id, sku_id, dna_payload,
+                        row_ver,
+                        bool(db_dna_row.get("approved", False)),
+                        auto_approve,
+                    )
+                    logger.info(f"Reusing Postgres Product DNA v{row_ver} for SKU {sku_id}")
+                    cache_manager.set_hot_dna(org_id, sku_id, synced)
                     return {
-                        "product_dna": dna_payload,
-                        "dna_approved": bool(db_dna_row.get("approved", False)),
+                        "product_dna": synced,
+                        "dna_approved": bool(synced.get("approved", False)),
                     }
 
         # 3. Filter strictly to AUTHORITATIVE product references (Style Quarantine!)
         references = state.get("references", [])
         auth_refs = [r for r in references if r.get("role", "additional_product") in PRODUCT_AUTHORITY_ROLES]
-        loaded_images = [img for r in auth_refs if (img := load_reference_image(r)) is not None]
+        loaded_images = [
+            img
+            for r in auth_refs
+            if (img := load_reference_image(r, allow_local=allow_local, organization_id=org_id)) is not None
+        ]
 
         is_saree = (
             any(k in sku_name.lower() for k in ["saree", "sari"])
@@ -359,21 +436,25 @@ class ProductDNAAgent:
 
         dna: Optional[ProductDNAV2] = None
         if loaded_images:
-            prompt = _build_dna_extraction_prompt(sku_name, str(state.get("category") or "ethnic/fusion"), auth_refs)
-            vlm_res = invoke_vision_json(prompt, loaded_images, purpose="product_truth")
-            if vlm_res and isinstance(vlm_res.get("data"), dict):
-                dna = self._build_from_vlm(
-                    raw=vlm_res["data"],
-                    org_id=org_id,
-                    sku_id=sku_id,
-                    sku_name=sku_name,
-                    fingerprint=fingerprint,
-                    is_saree=is_saree,
-                    references=references,
-                    provider=vlm_res["provider"],
-                    model=vlm_res["model"],
-                )
+            try:
+                prompt = _build_dna_extraction_prompt(sku_name, str(state.get("category") or "ethnic/fusion"), auth_refs)
+                vlm_res = invoke_vision_json(prompt, loaded_images, purpose="product_truth")
+                if vlm_res and isinstance(vlm_res.get("data"), dict):
+                    dna = self._build_from_vlm(
+                        raw=vlm_res["data"],
+                        org_id=org_id,
+                        sku_id=sku_id,
+                        sku_name=sku_name,
+                        fingerprint=fingerprint,
+                        is_saree=is_saree,
+                        references=references,
+                        provider=vlm_res["provider"],
+                        model=vlm_res["model"],
+                    )
+            except Exception as exc:
+                logger.warning(f"Vision DNA extraction failed for {sku_id}, falling back to draft heuristic: {exc}")
 
+        is_heuristic = dna is None
         if dna is None:
             dna = self._build_offline_heuristic(
                 org_id=org_id,
@@ -385,14 +466,15 @@ class ProductDNAAgent:
                 state=state,
             )
 
-        auto_approve = bool(state.get("auto_approve", False))
-        if auto_approve:
+        if auto_approve and not is_heuristic:
             dna.approved = True
             dna.status = "approved"
             dna.approved_by = "auto_workflow"
+            dna.approved_at = datetime.now(timezone.utc)
 
-        dna_dict = dna.model_dump()
+        dna_dict = dna.model_dump(mode="json")
 
+        persisted = False
         try:
             ver = save_dna_version(
                 org_id=org_id,
@@ -405,11 +487,17 @@ class ProductDNAAgent:
                 approved_by=dna.approved_by,
             )
             dna_dict["version"] = ver
-            cache_manager.set_hot_dna(org_id, sku_id, dna_dict)
+            persisted = True
+            if not is_heuristic:
+                cache_manager.set_hot_dna(org_id, sku_id, dna_dict)
         except Exception as e:
-            logger.warning(f"Could not persist DNA version in DB: {e}")
+            logger.error(f"Could not persist DNA version in DB for {sku_id}: {e}")
+            dna_dict["approved"] = False
+            dna_dict["status"] = "draft"
+            dna_dict["persisted"] = False
 
         return {
             "product_dna": dna_dict,
-            "dna_approved": bool(dna_dict.get("approved", False)),
+            "dna_approved": bool(dna_dict.get("approved", False) and persisted),
+            "dna_persisted": persisted,
         }

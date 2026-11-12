@@ -12,12 +12,12 @@ async def verify_internal_secret(
     """Enforce internal shared-secret authentication on /api/v1/* orchestration routes."""
     expected = (settings.INTERNAL_API_SECRET or "").strip()
     if not expected:
-        if settings.ENV.lower() == "production":
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Internal API authentication secret is not configured.",
-            )
-        return True
+        if settings.INTERNAL_API_AUTH_BYPASS and settings.ENV.lower() != "production":
+            return True
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Internal API authentication secret is not configured.",
+        )
 
     candidate = (x_internal_secret or "").strip()
     if not candidate and authorization:
@@ -31,3 +31,4 @@ async def verify_internal_secret(
             detail="Invalid or missing internal API authentication secret.",
         )
     return True
+

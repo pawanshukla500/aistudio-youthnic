@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, Ban, Check, CheckCircle2, ChevronRight, History as HistoryIcon, Images, Loader2, Sparkles, Wand2, X } from "lucide-react";
-import { api, useAction, useMutation, useQuery, type Id } from "../../lib/backend";
+import { api, useAction, useMutation, useQuery, type Id, type ProductDnaExtractResult, type ProductDnaSummary } from "../../lib/backend";
 import { Button } from "@/components/ui/button";
 import { ActionDialog } from "../../components/ui/ActionDialog";
 import { useWorkspace } from "../../lib/WorkspaceContext";
@@ -19,6 +19,7 @@ import { generationDeliveryProgress } from "../../lib/generationProgress";
 import type {
   OutputOptions,
   ProductReferenceRole,
+  ReferenceRole,
   StudioAnalysis,
   StudioPose,
   StudioReference,
@@ -190,6 +191,19 @@ function validateFile(file: File) {
   return "";
 }
 
+export interface StudioDnaState {
+  skuId: string;
+  sourceKey: string;
+  version?: number;
+  approved?: boolean;
+  threadId?: string;
+  persisted?: boolean;
+  approving?: boolean;
+  extracting?: boolean;
+  error?: string | null;
+  productDna?: ProductDnaSummary | null;
+}
+
 export function Studio() {
   const { organization, user } = useWorkspace();
   const analyzeReferences = useAction(api.analysis.analyzeReferences);
@@ -198,7 +212,20 @@ export function Studio() {
   const updateStylingPlan = useMutation(api.styling.updateSessionPlan);
   const queueSku = useMutation(api.generation.queueSku);
   const cancelJob = useMutation(api.jobs.cancel);
-  const [dnaState, setDnaState] = useState<{ version?: number; approved?: boolean; threadId?: string; approving?: boolean } | null>(null);
+  const [dnaState, setDnaState] = useState<StudioDnaState | null>(null);
+  const lastDnaParamsRef = useRef<{
+    skuId: string;
+    skuName: string;
+    category: string;
+    sourceKey: string;
+    references: Array<{
+      role: ReferenceRole;
+      downloadUrl?: string;
+      storagePath?: string;
+      hash?: string;
+      mimeType?: string;
+    }>;
+  } | null>(null);
 
   const [productReferences, setProductReferences] = useState<Partial<Record<ProductReferenceRole, StudioReference>>>({});
   const [styleReferences, setStyleReferences] = useState<StudioReference[]>([]);
@@ -350,6 +377,7 @@ export function Studio() {
   const markAnalysisStale = () => {
     analysisRequestRef.current += 1;
     setAnalysisSourceKey(null);
+    setDnaState(null);
   };
 
   const updateText = (setter: (value: string) => void, value: string) => {
@@ -525,10 +553,11 @@ export function Studio() {
       if (analysisRequestRef.current !== requestId || latestAnalysisKeyRef.current !== sourceKey) return;
       setAnalysis(result);
       setPoses(result.posePlan);
-      void extractDna({
-        sku_id: effectiveSkuId,
-        sku_name: effectiveSkuName,
+      const dnaParams = {
+        skuId: effectiveSkuId,
+        skuName: effectiveSkuName,
         category,
+        sourceKey,
         references: uploaded.map((reference) => ({
           role: reference.role,
           downloadUrl: reference.downloadUrl,
@@ -536,18 +565,9 @@ export function Studio() {
           hash: reference.hash,
           mimeType: reference.file.type,
         })),
-        force_refresh: forceRefresh,
-      })
-        .then((dnaRes: any) => {
-          if (analysisRequestRef.current === requestId && dnaRes?.product_dna) {
-            setDnaState({
-              version: Number(dnaRes.product_dna.version || 1),
-              approved: Boolean(dnaRes.product_dna.approved),
-              threadId: dnaRes.thread_id,
-            });
-          }
-        })
-        .catch(() => undefined);
+      };
+      lastDnaParamsRef.current = dnaParams;
+      void runDnaExtraction(dnaParams, requestId, forceRefresh);
       const detectedSaree = result.productIdentity.garmentFamily?.trim().toLowerCase() === "saree";
       if (detectedSaree && !isSareeCategory) {
         promoteDetectedSareeReferences();
@@ -590,20 +610,86 @@ export function Studio() {
     }
   };
 
+  const runDnaExtraction = async (
+    params: NonNullable<typeof lastDnaParamsRef.current>,
+    requestId: number,
+    forceRefresh = false,
+  ) => {
+    setDnaState({
+      skuId: params.skuId,
+      sourceKey: params.sourceKey,
+      extracting: true,
+      error: null,
+    });
+    try {
+      const dnaRes = (await extractDna({
+        sku_id: params.skuId,
+        sku_name: params.skuName,
+        category: params.category,
+        references: params.references,
+        force_refresh: forceRefresh,
+      })) as ProductDnaExtractResult;
+      if (analysisRequestRef.current !== requestId) return;
+      if (dnaRes?.product_dna) {
+        setDnaState({
+          skuId: params.skuId,
+          sourceKey: params.sourceKey,
+          version: Number(dnaRes.product_dna.version || 1),
+          approved: Boolean(dnaRes.product_dna.approved),
+          threadId: dnaRes.thread_id,
+          persisted: dnaRes.persisted,
+          productDna: dnaRes.product_dna,
+          extracting: false,
+          error: null,
+        });
+      } else {
+        setDnaState({
+          skuId: params.skuId,
+          sourceKey: params.sourceKey,
+          extracting: false,
+          error: "Product DNA V2 response was empty.",
+        });
+      }
+    } catch (reason) {
+      if (analysisRequestRef.current !== requestId) return;
+      setDnaState({
+        skuId: params.skuId,
+        sourceKey: params.sourceKey,
+        extracting: false,
+        error: reason instanceof Error ? reason.message : "Product DNA V2 extraction failed.",
+      });
+    }
+  };
+
+  const handleRetryDnaExtraction = () => {
+    const params = lastDnaParamsRef.current;
+    if (!params || params.sourceKey !== analysisInputKey) {
+      void runAnalysis(analysisInputKey, false, true);
+      return;
+    }
+    const requestId = analysisRequestRef.current;
+    void runDnaExtraction(params, requestId, true);
+  };
+
   const handleImprovePosePlan = () => {
     if (autoAnalyzeTimerRef.current) clearTimeout(autoAnalyzeTimerRef.current);
     void runAnalysis(analysisInputKey, false, true);
   };
 
   const handleApproveDna = async () => {
-    if (!effectiveSkuId || !dnaState?.version) return;
-    setDnaState((cur) => (cur ? { ...cur, approving: true } : cur));
+    if (!dnaState || !dnaState.version || dnaState.skuId !== effectiveSkuId || dnaState.sourceKey !== analysisInputKey || analysisIsStale) {
+      setNotice({ tone: "error", text: "Product DNA changed or is stale. Re-analyze before approving." });
+      return;
+    }
+    const targetSkuId = dnaState.skuId;
+    const targetVersion = dnaState.version;
+    setDnaState((cur) => (cur && cur.skuId === targetSkuId && cur.version === targetVersion ? { ...cur, approving: true } : cur));
     try {
-      await approveDna({ sku_id: effectiveSkuId, version: dnaState.version });
-      setDnaState((cur) => (cur ? { ...cur, approved: true, approving: false } : cur));
-      setNotice({ tone: "success", text: `Product DNA V2 v${dnaState.version} approved and locked as immutable product truth.` });
+      await approveDna({ sku_id: targetSkuId, version: targetVersion });
+      setDnaState((cur) => (cur && cur.skuId === targetSkuId && cur.version === targetVersion ? { ...cur, approved: true, approving: false } : cur));
+      setNotice({ tone: "success", text: `Product DNA V2 v${targetVersion} approved and locked as immutable product truth.` });
     } catch (reason) {
-      setDnaState((cur) => (cur ? { ...cur, approving: false } : cur));
+      setDnaState((cur) => (cur && cur.skuId === targetSkuId && cur.version === targetVersion ? { ...cur, approving: false } : cur));
       setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not approve Product DNA V2." });
     }
   };
@@ -658,6 +744,7 @@ export function Studio() {
         referenceIds: analysis.referenceIds || allReferences.map((reference) => reference.uploadedId).filter(Boolean) as Id<"productReferences">[],
         poses,
       });
+      analysisRequestRef.current += 1;
       allReferences.forEach((reference) => URL.revokeObjectURL(reference.previewUrl));
       setProductReferences({});
       setStyleReferences([]);
@@ -667,6 +754,8 @@ export function Studio() {
       setPoses(basePoses);
       setAnalysis(null);
       setAnalysisSourceKey(null);
+      setDnaState(null);
+      lastDnaParamsRef.current = null;
       setSkuId("");
       setSkuName("");
       setProductDetails("");
@@ -1099,8 +1188,10 @@ export function Studio() {
             current={analysisIsCurrent}
             onAnalyze={handleAnalyze}
             onImprovePosePlan={handleImprovePosePlan}
+            dnaCurrent={Boolean(dnaState && dnaState.skuId === effectiveSkuId && dnaState.sourceKey === analysisInputKey)}
             dnaState={dnaState}
             onApproveDna={handleApproveDna}
+            onRetryDna={handleRetryDnaExtraction}
             sceneDirection={sceneDirectionValue}
             onSceneDirectionChange={(value) => updateText(setSceneDirectionNote, value)}
             garmentSummary={garmentSummaryValue}

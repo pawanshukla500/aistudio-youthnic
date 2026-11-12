@@ -71,6 +71,13 @@ class SupervisorOrchestratorAgent:
         qa_map[pose_idx] = eval_res.model_dump()
 
         if eval_res.outcome == "pass":
+            if eval_res.requires_human_review:
+                return {
+                    "qa_evaluations": qa_map,
+                    "correction_decision": "human_review",
+                    "requires_human_review": True,
+                    "status": "human_review_required",
+                }
             return {
                 "qa_evaluations": qa_map,
                 "correction_decision": "pass",
@@ -133,5 +140,6 @@ class SupervisorOrchestratorAgent:
             rule_text=f"Verified catalog generation for {dna.get('sku_name', state.get('sku_id'))} ({bottom_cut})",
             positive_guidance="; ".join(dna.get("explicit_invariants") or []),
             negative_constraints=dna.get("prohibited_changes") or [],
+            category=str(dna.get("category") or "ethnic/fusion"),
         )
         return {"status": "completed"}

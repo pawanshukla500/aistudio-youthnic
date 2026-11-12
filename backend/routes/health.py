@@ -10,36 +10,36 @@ START_TIME = time.time()
 
 
 @router.get("/health")
-async def health_check() -> Dict[str, Any]:
+def health_check() -> Dict[str, Any]:
     db_status = "healthy"
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
-    except Exception as e:
-        db_status = f"unhealthy: {e}"
+    except Exception:
+        db_status = "unhealthy"
 
     valkey_status = "healthy"
     try:
         r = get_valkey()
         if not r.ping():
             valkey_status = "unresponsive"
-    except Exception as e:
-        valkey_status = f"unhealthy: {e}"
+    except Exception:
+        valkey_status = "unhealthy"
 
     firebase_status = "healthy"
     try:
         b = get_bucket()
         if not b.name:
             firebase_status = "bucket_not_configured"
-    except Exception as e:
-        firebase_status = f"unhealthy: {e}"
+    except Exception:
+        firebase_status = "unhealthy"
 
     langgraph_status: Dict[str, Any] = {"backend": "memory", "tables_ready": False}
     try:
         langgraph_status = get_checkpointer_metrics()
-    except Exception as e:
-        langgraph_status = {"backend": "memory", "tables_ready": False, "error": str(e)}
+    except Exception:
+        langgraph_status = {"backend": "memory", "tables_ready": False, "error": "unavailable"}
 
     overall = "healthy" if (db_status == "healthy" and valkey_status == "healthy") else "degraded"
 
@@ -56,5 +56,5 @@ async def health_check() -> Dict[str, Any]:
 
 
 @router.get("/readiness")
-async def readiness_check() -> Dict[str, Any]:
+def readiness_check() -> Dict[str, Any]:
     return {"status": "ready"}

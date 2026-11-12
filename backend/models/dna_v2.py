@@ -49,7 +49,7 @@ class SareeArchitecture(BaseModel):
 class BottomWearArchitecture(BaseModel):
     has_bottom_wear: bool = False
     classification: str = "none"
-    cut_class: Literal["farshi", "straight", "palazzo", "sharara", "churidar", "skirt", "none"] = "none"
+    cut_class: Literal["farshi", "straight", "palazzo", "sharara", "churidar", "skirt", "unknown", "none"] = "none"
     two_leg_construction: bool = True
     waist_structure: str = "standard"
     flare_volume: str = "standard"

@@ -13,12 +13,25 @@ def detect_anatomical_defect(text_feedback: str) -> bool:
     """Regex pattern matching for extra hands, phantom limbs, or duplicate wrists."""
     if not text_feedback:
         return False
-    pattern = r"\b(?:(?:three|3|extra|duplicate|phantom|floating|third)\s+(?:hands?|arms?|limbs?|wrists?)|(?:severed\s+limb)|(?:extra|fused|malformed|six|6)\s+fingers)\b"
+    pattern = r"\b(?:(?:three|3|extra|duplicate|phantom|floating|third|missing|detached)\s+(?:[a-z]+\s+)?(?:hands?|arms?|limbs?|wrists?)|(?:severed\s+limb)|(?:extra|fused|malformed|detached|six|6)\s+(?:[a-z]+\s+)?fingers?)\b"
     for match in re.finditer(pattern, text_feedback, re.IGNORECASE):
         prefix = text_feedback[max(0, match.start() - 60):match.start()].lower()
-        if re.search(r"\b(?:no|zero|without|neither|never|free\s+of)\b[^.;!?]*$", prefix):
+        if re.search(r"\b(?:no|zero|without|neither|never|free\s+of|not)\b[^.,;!?]*$", prefix):
             continue
         return True
+    return False
+
+
+def _has_affirmative_term(text: str, terms: List[str]) -> bool:
+    """Check if any forbidden garment term appears affirmatively (not negated in the same clause)."""
+    if not text:
+        return False
+    for term in terms:
+        for match in re.finditer(rf"\b{re.escape(term)}\b", text, re.IGNORECASE):
+            prefix = text[max(0, match.start() - 50):match.start()].lower()
+            if re.search(r"\b(?:no|zero|without|neither|never|not|rather\s+than|instead\s+of|free\s+of)\b[^.,;!?]*$", prefix):
+                continue
+            return True
     return False
 
 
@@ -79,26 +92,54 @@ class ComputerVisionQAAgent:
         image_url: str,
         product_dna: Dict[str, Any],
         reference_images: Optional[List[Dict[str, Any]]],
+        org_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        generated_img = load_reference_image({"role": f"generated_pose_{pose_index}", "download_url": image_url})
+        generated_img = load_reference_image(
+            {"role": f"generated_pose_{pose_index}", "download_url": image_url},
+            organization_id=org_id,
+        )
         if not generated_img:
             return {"_missing_image": True}
 
         images = [generated_img]
+        style_refs: List[Dict[str, Any]] = []
         for ref in (reference_images or []):
             role = str(ref.get("role") or "")
             if role in PRODUCT_AUTHORITY_ROLES:
-                loaded_ref = load_reference_image(ref)
+                loaded_ref = load_reference_image(ref, organization_id=org_id)
                 if loaded_ref:
                     images.append(loaded_ref)
-            if len(images) >= 5:
+            elif role == "style_reference":
+                style_refs.append(ref)
+            if len(images) >= 4:
                 break
+        if style_refs and len(images) < 5:
+            loaded_style = load_reference_image(style_refs[0], organization_id=org_id)
+            if loaded_style:
+                images.append(loaded_style)
 
         prompt = _build_qa_prompt(pose_index, pose_type, product_dna)
-        res = invoke_vision_json(prompt, images, purpose="qa")
-        if res and isinstance(res.get("data"), dict):
-            return res["data"]
-        return None
+        try:
+            res = invoke_vision_json(prompt, images, purpose="qa")
+        except Exception as exc:
+            logger.warning(f"Live VLM QA provider invocation failed: {exc}")
+            return None
+        if not res or not isinstance(res.get("data"), dict):
+            return None
+        data = res["data"]
+        raw_scores = data.get("scores")
+        raw_checks = data.get("checks")
+        if not isinstance(raw_scores, dict) or not raw_scores or not isinstance(raw_checks, dict):
+            logger.warning("Live VLM QA returned incomplete payload without valid scores/checks")
+            return None
+        for k, v in raw_scores.items():
+            try:
+                num = float(v)
+                if not (0.0 <= num <= 100.0):
+                    return None
+            except (TypeError, ValueError):
+                return None
+        return data
 
     def evaluate(
         self,
@@ -129,7 +170,9 @@ class ComputerVisionQAAgent:
                 )
                 return evaluation
 
-            live_result = self._run_live_vlm_qa(pose_index, pose_type, image_url, product_dna, reference_images)
+            live_result = self._run_live_vlm_qa(
+                pose_index, pose_type, image_url, product_dna, reference_images, org_id=org_id
+            )
             if live_result and live_result.get("_missing_image"):
                 return QAAgentEvaluation(
                     overall_score=0.0,
@@ -139,6 +182,7 @@ class ComputerVisionQAAgent:
                     failed_checks=["unreadable_generated_image"],
                     review_recommended=True,
                     outcome="retry",
+                    requires_human_review=True,
                     correction_guidance="Could not download generated image for QA comparison.",
                 )
             if live_result is None:
@@ -150,51 +194,63 @@ class ComputerVisionQAAgent:
                     failed_checks=["qa_vision_unavailable"],
                     review_recommended=True,
                     outcome="retry",
+                    requires_human_review=True,
                     correction_guidance="No Vision LLM provider succeeded for automated CV QA; escalate or retry.",
                 )
             ai_data = live_result
 
-        scores = {k: float(v) for k, v in (ai_data.get("scores") or {
-            "model_face": 96.0,
-            "face_realism": 95.0,
-            "garment_identity": 98.0,
-            "colors": 97.0,
-            "fabric_texture": 95.0,
-            "print_pattern": 96.0,
-            "pattern_geometry": 95.0,
-            "embroidery_geometry": 96.0,
-            "bottom_wear": 97.0,
-            "front_back_design": 96.0,
-            "styling_continuity": 98.0,
-            "pose_requirement": 97.0,
-        }).items()}
-        checks = dict(ai_data.get("checks") or {k: "pass" for k in scores.keys()})
-
+        raw_scores = ai_data.get("scores")
         notes = str(ai_data.get("notes") or ai_data.get("reason") or "")
         anatomical_defect = detect_anatomical_defect(notes) or bool(ai_data.get("anatomical_defect", False))
 
         style_violation = bool(ai_data.get("style_quarantine_violation", False))
-        if "style reference clothing" in notes.lower() or "copied reference outfit" in notes.lower():
+        if _has_affirmative_term(notes, ["style reference clothing", "copied reference outfit"]):
             style_violation = True
 
         bottom_cut = (product_dna.get("bottom_wear") or {}).get("cut_class", "")
         is_saree = str(product_dna.get("garment_family", "")).lower() == "saree"
         bottom_cut_mismatch = False
+        pose_hijack = pose_type == "closeup" and _has_affirmative_term(notes, ["dupatta focus", "accessory hijack"])
+
+        if isinstance(raw_scores, dict) and raw_scores:
+            scores = {k: float(v) for k, v in raw_scores.items()}
+            checks = dict(ai_data.get("checks") or {k: ("pass" if float(v) >= 90 else "fail") for k, v in scores.items()})
+        elif anatomical_defect or style_violation or pose_hijack or bool(ai_data.get("bottom_cut_mismatch")) or (
+            is_saree and _has_affirmative_term(notes, ["trousers", "pants", "palazzo", "salwar", "churidar", "jeans"])
+        ) or (
+            bottom_cut == "farshi" and _has_affirmative_term(notes, ["palazzo", "skirt", "circular flare"])
+        ):
+            # Explicit hard-veto fixture/override without scores dict
+            scores = {"garment_identity": 40.0 if (anatomical_defect or style_violation) else 80.0, "bottom_wear": 45.0}
+            checks = {"garment_identity": "fail" if (anatomical_defect or style_violation) else "pass", "bottom_wear": "pass"}
+        else:
+            # Fail closed when scores are absent or malformed
+            return QAAgentEvaluation(
+                overall_score=0.0,
+                product_fidelity_score=0.0,
+                scores={"garment_identity": 0.0},
+                checks={"garment_identity": "fail"},
+                failed_checks=["unverified_qa_payload"],
+                review_recommended=True,
+                outcome="retry",
+                requires_human_review=True,
+                correction_guidance=notes or "Incomplete QA scores payload; cannot approve without verified scores.",
+            )
 
         if is_saree and pose_type in ["full_front", "angled", "side_seated", "back", "showcase"]:
-            if any(k in notes.lower() for k in ["trousers", "pants", "palazzo", "salwar", "churidar", "jeans"]):
+            if _has_affirmative_term(notes, ["trousers", "pants", "palazzo", "salwar", "churidar", "jeans"]):
                 bottom_cut_mismatch = True
                 checks["bottom_wear"] = "fail"
                 scores["bottom_wear"] = min(float(scores.get("bottom_wear", 40.0)), 40.0)
         elif bottom_cut == "farshi" and pose_type in ["full_front", "angled", "back", "showcase"]:
-            if "palazzo" in notes.lower() or "skirt" in notes.lower() or "circular flare" in notes.lower():
+            if _has_affirmative_term(notes, ["palazzo", "skirt", "circular flare"]):
                 bottom_cut_mismatch = True
                 checks["bottom_wear"] = "fail"
                 scores["bottom_wear"] = min(float(scores.get("bottom_wear", 55.0)), 55.0)
 
         pose_failed = False
         if pose_type == "closeup":
-            if "dupatta focus" in notes.lower() or "accessory hijack" in notes.lower():
+            if _has_affirmative_term(notes, ["dupatta focus", "accessory hijack"]):
                 pose_failed = True
                 checks["pose_requirement"] = "fail"
                 scores["pose_requirement"] = min(float(scores.get("pose_requirement", 50.0)), 50.0)

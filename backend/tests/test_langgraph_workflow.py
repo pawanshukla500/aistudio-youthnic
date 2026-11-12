@@ -10,7 +10,7 @@ def test_studio_workflow_execution():
     initial_state = {
         "organization_id": "7d56360f-2c96-4eb2-923e-f22b7fe36605",
         "sku_id": "T62-Peppa-Purple",
-        "sku_name": "T62-Peppa-Purple",
+        "sku_name": "T62-Peppa-Purple Farshi Set",
         "references": [
             {"role": "front", "downloadUrl": "https://example.com/front.jpg", "hash": "h1"},
             {"role": "back", "downloadUrl": "https://example.com/back.jpg", "hash": "h2"},
@@ -29,7 +29,7 @@ def test_studio_workflow_execution():
 
     # 2. Product DNA was extracted
     assert final_state["product_dna"] is not None
-    assert final_state["product_dna"]["sku_name"] == "T62-Peppa-Purple"
+    assert final_state["product_dna"]["sku_name"] == "T62-Peppa-Purple Farshi Set"
     assert final_state["product_dna"]["bottom_wear"]["cut_class"] == "farshi"
 
     # 3. Knowledge Memory was retrieved

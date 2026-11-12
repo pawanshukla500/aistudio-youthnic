@@ -14,6 +14,8 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("INTERNAL_API_SECRET", "CATALOG_WORKER_SECRET"),
     )
+    INTERNAL_API_AUTH_BYPASS: bool = False
+    CORS_ORIGINS: str = "*"
 
     # PostgreSQL / Supabase (populated via environment variables)
     DATABASE_URL: str = Field(

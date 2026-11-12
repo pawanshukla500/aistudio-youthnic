@@ -22,21 +22,42 @@ class LearningOptimizationAgent:
         rule_text: str,
         positive_guidance: str,
         negative_constraints: List[str],
+        category: str = "ethnic/fusion",
     ):
         try:
             with get_db() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        INSERT INTO public.learning_outcomes (
-                            organization_id, sku_id, rule_type, rule_text,
-                            positive_guidance, negative_constraints, effectiveness_score,
-                            usage_count, success_count, is_active, approved
-                        ) VALUES (%s, %s, %s, %s, %s, %s, 1.0, 1, 1, true, true)
-                        ON CONFLICT DO NOTHING
+                        SELECT id FROM public.learning_outcomes
+                        WHERE organization_id = %s AND sku_id IS NOT DISTINCT FROM %s AND rule_type = %s AND rule_text = %s
+                        LIMIT 1
                         """,
-                        (org_id, sku_id, rule_type, rule_text, positive_guidance, negative_constraints),
+                        (org_id, sku_id, rule_type, rule_text),
                     )
+                    existing = cur.fetchone()
+                    if existing:
+                        cur.execute(
+                            """
+                            UPDATE public.learning_outcomes
+                            SET success_count = success_count + 1,
+                                usage_count = usage_count + 1,
+                                updated_at = now()
+                            WHERE id = %s
+                            """,
+                            (existing["id"],),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO public.learning_outcomes (
+                                organization_id, sku_id, rule_type, rule_text,
+                                positive_guidance, negative_constraints, effectiveness_score,
+                                usage_count, success_count, is_active, approved
+                            ) VALUES (%s, %s, %s, %s, %s, %s, 1.0, 1, 1, true, true)
+                            """,
+                            (org_id, sku_id, rule_type, rule_text, positive_guidance, negative_constraints),
+                        )
                     logger.info(f"Recorded approved learning rule for {sku_id}: {rule_type}")
 
                     emb_content = f"{rule_type}: {rule_text}. Guidance: {positive_guidance}"
@@ -48,10 +69,11 @@ class LearningOptimizationAgent:
                             INSERT INTO public.knowledge_embeddings (
                                 organization_id, category, sub_category, content, embedding, source_hash, metadata
                             ) VALUES (%s, %s, %s, %s, %s::vector, %s, %s)
+                            ON CONFLICT DO NOTHING
                             """,
                             (
                                 org_id,
-                                "ethnic/fusion",
+                                category or "ethnic/fusion",
                                 rule_type,
                                 emb_content,
                                 vec,

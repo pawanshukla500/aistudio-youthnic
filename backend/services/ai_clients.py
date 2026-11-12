@@ -1,10 +1,15 @@
 import base64
 import io
+import ipaddress
 import json
 import logging
 import os
+import posixpath
 import re
-from typing import Any, Dict, List, Optional, Tuple
+import socket
+import time
+from typing import Any, Dict, List, Optional
+from urllib.parse import urljoin, urlparse
 import httpx
 from PIL import Image
 from langchain_core.messages import HumanMessage
@@ -18,6 +23,89 @@ logger = logging.getLogger(__name__)
 
 MAX_IMAGE_PROMPT_CHARS = 30000
 MAX_REFERENCE_DIM = 1536
+MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
+
+
+def _safe_resp_json(resp: httpx.Response) -> Dict[str, Any]:
+    if not resp.content:
+        return {}
+    try:
+        parsed = resp.json()
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _is_safe_public_url(raw_url: str) -> bool:
+    try:
+        parsed = urlparse(raw_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return False
+        host = parsed.hostname.strip().lower()
+        if host in {"localhost", "metadata.google.internal"}:
+            return False
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        if not infos:
+            return False
+        for info in infos:
+            addr_str = info[4][0]
+            ip = ipaddress.ip_address(addr_str.split("%")[0])
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+                or ip.is_unspecified
+            ):
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def _is_allowed_org_storage_path(storage_path: str, organization_id: Optional[str]) -> bool:
+    cleaned = storage_path.strip().lstrip("/")
+    if not cleaned or "\\" in cleaned or ".." in cleaned.split("/"):
+        return False
+    normalized = posixpath.normpath(cleaned)
+    if normalized.startswith("../") or normalized == "..":
+        return False
+    if not organization_id:
+        return True
+    org = organization_id.strip()
+    if normalized.startswith(f"organizations/{org}/") or normalized.startswith(f"evidence_crops/{org}/") or normalized.startswith(f"{org}/"):
+        return True
+    if re.match(rf"^users/[^/]+/organizations/{re.escape(org)}/", normalized):
+        return True
+    return False
+
+
+def _download_public_image_bounded(url: str, timeout_s: int = 20) -> bytes:
+    current = url
+    with httpx.Client(timeout=timeout_s, follow_redirects=False) as client:
+        for _ in range(4):
+            if not _is_safe_public_url(current):
+                raise RuntimeError(f"Blocked untrusted/non-public image URL host: {urlparse(current).hostname}")
+            with client.stream("GET", current) as resp:
+                if 300 <= resp.status_code < 400 and resp.headers.get("location"):
+                    current = urljoin(current, resp.headers["location"])
+                    continue
+                if resp.status_code != 200:
+                    return b""
+                content_len = resp.headers.get("content-length")
+                if content_len and int(content_len) > MAX_DOWNLOAD_BYTES:
+                    raise RuntimeError(f"Remote image exceeds {MAX_DOWNLOAD_BYTES} byte limit")
+                chunks: List[bytes] = []
+                total = 0
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    total += len(chunk)
+                    if total > MAX_DOWNLOAD_BYTES:
+                        raise RuntimeError(f"Remote image stream exceeded {MAX_DOWNLOAD_BYTES} byte limit")
+                    chunks.append(chunk)
+                return b"".join(chunks)
+    return b""
 
 
 def parse_json_payload(raw_text: str) -> Dict[str, Any]:
@@ -72,8 +160,13 @@ def _extract_responses_text(data: Dict[str, Any]) -> str:
     return ""
 
 
-def load_reference_image(ref: Dict[str, Any], timeout_s: int = 20) -> Optional[Dict[str, Any]]:
-    """Fetch reference bytes cleanly from local://, Firebase Storage, or HTTPS URL."""
+def load_reference_image(
+    ref: Dict[str, Any],
+    timeout_s: int = 20,
+    allow_local: bool = False,
+    organization_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Fetch reference bytes cleanly from trusted HTTPS URL, org-scoped Firebase Storage, or local test fixtures."""
     url = str(ref.get("download_url") or ref.get("downloadUrl") or "").strip()
     storage_path = str(ref.get("storage_path") or ref.get("storagePath") or "").strip()
     role = str(ref.get("role") or "additional_product").strip()
@@ -81,18 +174,23 @@ def load_reference_image(ref: Dict[str, Any], timeout_s: int = 20) -> Optional[D
     raw_bytes = b""
     try:
         if url.startswith("local://"):
+            if not allow_local and settings.ENV.lower() == "production":
+                logger.warning(f"Blocked local:// image reference in production request for role={role}")
+                return None
             local_path = url[len("local://"):]
-            if os.path.exists(local_path):
+            if (allow_local or settings.ENV.lower() != "production") and os.path.exists(local_path):
                 with open(local_path, "rb") as fh:
-                    raw_bytes = fh.read()
+                    raw_bytes = fh.read(MAX_DOWNLOAD_BYTES + 1)
+                if len(raw_bytes) > MAX_DOWNLOAD_BYTES:
+                    return None
         elif url.startswith("http://") or url.startswith("https://"):
             # Skip mock placeholder hosts during offline tests quickly
             if "example.com" not in url and not url.startswith("https://mock/"):
-                with httpx.Client(timeout=timeout_s, follow_redirects=True) as client:
-                    resp = client.get(url)
-                    if resp.status_code == 200 and resp.content:
-                        raw_bytes = resp.content
+                raw_bytes = _download_public_image_bounded(url, timeout_s=timeout_s)
         if not raw_bytes and storage_path and not storage_path.startswith("desktop/"):
+            if not _is_allowed_org_storage_path(storage_path, organization_id):
+                logger.warning(f"Blocked cross-tenant or invalid storage_path for org={organization_id}")
+                return None
             raw_bytes = download_bytes(storage_path)
     except Exception as exc:
         logger.debug(f"Could not load bytes for reference role={role}: {exc}")
@@ -161,13 +259,14 @@ def _meta_vision_json(prompt: str, images: List[Dict[str, Any]], timeout_s: int 
                         "max_output_tokens": 8192,
                     },
                 )
-            data = resp.json() if resp.content else {}
+            data = _safe_resp_json(resp)
             if resp.status_code >= 400:
                 msg = str((data.get("error") or {}).get("message") or data.get("message") or f"Meta HTTP {resp.status_code}")
                 last_err = RuntimeError(msg)
                 if resp.status_code == 404 or "not found" in msg.lower() or "not available" in msg.lower():
                     continue
-                raise last_err
+                cache_manager.record_provider_result("meta", False, msg)
+                break
 
             text = _extract_responses_text(data)
             parsed = parse_json_payload(text)
@@ -183,6 +282,7 @@ def _meta_vision_json(prompt: str, images: List[Dict[str, Any]], timeout_s: int 
         except Exception as exc:
             last_err = exc
             cache_manager.record_provider_result("meta", False, str(exc))
+            break
     raise RuntimeError(f"Meta vision call failed: {last_err}")
 
 
@@ -256,7 +356,7 @@ def _gemini_vision_json(prompt: str, images: List[Dict[str, Any]], timeout_s: in
                 "generationConfig": {"responseMimeType": "application/json"},
             },
         )
-    data = resp.json() if resp.content else {}
+    data = _safe_resp_json(resp)
     if resp.status_code >= 400:
         msg = str((data.get("error") or {}).get("message") or f"Gemini HTTP {resp.status_code}")
         raise RuntimeError(msg)
@@ -291,23 +391,31 @@ def invoke_vision_json(
     if not (has_meta or has_openai or has_gemini):
         return None
 
+    deadline = time.monotonic() + float(max(30, settings.VISION_TIMEOUT_SECONDS))
     errors: List[str] = []
+
     if has_meta:
+        remaining = deadline - time.monotonic()
+        meta_timeout = int(max(10, min(25, remaining)))
         try:
-            return _meta_vision_json(prompt, images, timeout_s=min(25, settings.VISION_TIMEOUT_SECONDS))
+            return _meta_vision_json(prompt, images, timeout_s=meta_timeout)
         except Exception as exc:
             logger.warning(f"Primary Meta vision ({purpose}) failed: {exc}")
             errors.append(f"meta: {exc}")
 
     if has_openai:
-        for model_name, effort in (("gpt-5.6-luna", "high"), ("gpt-5.6-terra", "low")):
+        for model_name, default_effort in (("gpt-5.6-luna", "high"), ("gpt-5.6-terra", "low")):
+            remaining = deadline - time.monotonic()
+            if remaining < 5:
+                break
+            effort = "low" if (model_name == "gpt-5.6-luna" and remaining < 60) else default_effort
             try:
                 return _langchain_openai_vision_json(
                     prompt,
                     images,
                     model=model_name,
                     reasoning_effort=effort,
-                    timeout_s=settings.VISION_TIMEOUT_SECONDS,
+                    timeout_s=int(max(10, remaining)),
                 )
             except Exception as exc:
                 logger.warning(f"OpenAI fallback {model_name} ({purpose}) failed: {exc}")
@@ -315,12 +423,14 @@ def invoke_vision_json(
                 errors.append(f"{model_name}: {exc}")
 
     if has_gemini:
-        try:
-            return _gemini_vision_json(prompt, images, timeout_s=settings.VISION_TIMEOUT_SECONDS)
-        except Exception as exc:
-            logger.warning(f"Gemini fallback ({purpose}) failed: {exc}")
-            cache_manager.record_provider_result("gemini", False, str(exc))
-            errors.append(f"gemini: {exc}")
+        remaining = deadline - time.monotonic()
+        if remaining >= 5:
+            try:
+                return _gemini_vision_json(prompt, images, timeout_s=int(max(10, remaining)))
+            except Exception as exc:
+                logger.warning(f"Gemini fallback ({purpose}) failed: {exc}")
+                cache_manager.record_provider_result("gemini", False, str(exc))
+                errors.append(f"gemini: {exc}")
 
     raise RuntimeError("All configured vision providers failed: " + " | ".join(errors))
 
@@ -398,8 +508,26 @@ def generate_catalog_image(
 
     headers = {"Authorization": f"Bearer {api_key}"}
     if refs:
+        # Prioritize primary garment truth refs ahead of auxiliary refs within OpenAI's 8-image limit
+        priority = {
+            "front": 0, "saree_front_drape": 0,
+            "back": 1, "saree_back_drape": 1,
+            "bottom": 2, "saree_pallu_spread": 2,
+            "fabric_pattern": 3, "saree_body_detail": 3, "saree_border_tassels": 3,
+            "mannequin": 4, "saree_blouse_front": 4, "saree_blouse_back_piece": 4,
+            "model_identity": 5, "style_reference": 6,
+        }
+        ordered_refs = sorted(refs, key=lambda r: priority.get(str(r.get("role") or ""), 7))[:8]
+        role_map_lines = [
+            f"- image[{idx}]: role={r.get('role', 'reference')} ({'STYLE BACKDROP ONLY - NEVER COPY CLOTHING' if r.get('role') == 'style_reference' else 'AUTHORITATIVE GARMENT/IDENTITY'})"
+            for idx, r in enumerate(ordered_refs)
+        ]
+        bounded_prompt = (
+            "REFERENCE INDEX MAP:\n" + "\n".join(role_map_lines) + "\n\n" + (prompt or "")
+        )[:MAX_IMAGE_PROMPT_CHARS]
+
         files = []
-        for idx, ref in enumerate(refs[:8], start=1):
+        for idx, ref in enumerate(ordered_refs, start=1):
             fname = f"{idx:02d}_{ref.get('role', 'ref')}_{ref.get('filename', 'img.jpg')}"
             files.append(("image[]", (fname, ref["bytes"], ref.get("mime_type", "image/jpeg"))))
         form_data: Dict[str, Any] = {
@@ -427,11 +555,11 @@ def generate_catalog_image(
                 },
             )
 
-    payload = resp.json() if resp.content else {}
+    payload = _safe_resp_json(resp)
     if resp.status_code >= 400:
         err_obj = payload.get("error") or {}
         err_msg = str(err_obj.get("message") or payload.get("message") or f"OpenAI Image HTTP {resp.status_code}")
-        cache_manager.record_provider_result("openai_images", False, err_msg)
+        cache_manager.record_provider_result("openai", False, err_msg)
         raise RuntimeError(f"OpenAI image generation failed ({resp.status_code}): {err_msg}")
 
     items = payload.get("data") or []
@@ -439,17 +567,21 @@ def generate_catalog_image(
     if first.get("b64_json"):
         img_bytes = base64.b64decode(first["b64_json"])
     elif first.get("url"):
-        with httpx.Client(timeout=60) as client:
-            dl = client.get(first["url"])
-            dl.raise_for_status()
-            img_bytes = dl.content
+        img_bytes = _download_public_image_bounded(first["url"], timeout_s=60)
     else:
         raise RuntimeError("OpenAI image API returned no image payload")
 
-    mime_type = "image/jpeg" if img_bytes[:2] == b"\xff\xd8" else "image/png"
+    mime_type = "image/jpeg"
+    try:
+        with Image.open(io.BytesIO(img_bytes)) as out_img:
+            fmt = (out_img.format or "JPEG").upper()
+            mime_type = "image/png" if fmt == "PNG" else "image/webp" if fmt == "WEBP" else "image/jpeg"
+    except Exception:
+        if img_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+            mime_type = "image/png"
     usage = payload.get("usage")
     cost_usd = estimate_image_cost_usd(model, usage)
-    cache_manager.record_provider_result("openai_images", True)
+    cache_manager.record_provider_result("openai", True)
     return {
         "image_bytes": img_bytes,
         "mime_type": mime_type,
@@ -472,3 +604,4 @@ def embed_text(text: str) -> Optional[List[float]]:
     except Exception as exc:
         logger.warning(f"Embedding generation failed: {exc}")
         return None
+

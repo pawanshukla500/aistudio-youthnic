@@ -1,7 +1,8 @@
 import json
 import logging
 import time
-from typing import Optional, Any, Dict
+import uuid
+from typing import Optional, Any, Dict, Tuple, Set
 from contextlib import contextmanager
 import redis
 
@@ -29,7 +30,9 @@ class ValkeyCacheManager:
     def __init__(self):
         self.r = get_valkey()
         self._offline_until = 0.0
-        self._local_fallback: Dict[str, str] = {}
+        self._local_fallback: Dict[str, Tuple[str, Optional[float]]] = {}
+        self._pending_deletes: Set[str] = set()
+        self._pending_sets: Dict[str, Tuple[str, Optional[int]]] = {}
 
     def _is_offline(self) -> bool:
         return time.time() < self._offline_until
@@ -38,36 +41,84 @@ class ValkeyCacheManager:
         self._offline_until = time.time() + 15.0
         logger.debug(f"Valkey unreachable, temporarily using local fallback: {err}")
 
+    def _local_get(self, key: str) -> Optional[str]:
+        entry = self._local_fallback.get(key)
+        if not entry:
+            return None
+        val, expires_at = entry
+        if expires_at is not None and time.time() >= expires_at:
+            self._local_fallback.pop(key, None)
+            return None
+        return val
+
+    def _local_set(self, key: str, value: str, ex: Optional[int] = None):
+        expires_at = (time.time() + ex) if ex is not None else None
+        self._local_fallback[key] = (value, expires_at)
+
+    def _reconcile_pending(self):
+        """Flush offline deletes/writes to Redis before trusting Redis reads again."""
+        if not self._pending_deletes and not self._pending_sets:
+            return
+        if self._pending_deletes:
+            keys = list(self._pending_deletes)
+            self.r.delete(*keys)
+            self._pending_deletes.clear()
+        if self._pending_sets:
+            for k, (val, ex) in list(self._pending_sets.items()):
+                self.r.set(k, val, ex=ex)
+                self._pending_sets.pop(k, None)
+
     def _safe_get(self, key: str) -> Optional[str]:
         if self._is_offline():
-            return self._local_fallback.get(key)
+            return self._local_get(key)
         try:
+            self._reconcile_pending()
             return self.r.get(key)
         except Exception as e:
             self._mark_offline(e)
-            return self._local_fallback.get(key)
+            return self._local_get(key)
 
     def _safe_set(self, key: str, value: str, ex: Optional[int] = None, nx: bool = False) -> bool:
-        if nx and key in self._local_fallback:
-            return False
-        self._local_fallback[key] = value
         if self._is_offline():
+            if nx and self._local_get(key) is not None:
+                return False
+            self._local_set(key, value, ex=ex)
+            self._pending_deletes.discard(key)
+            if not nx:
+                self._pending_sets[key] = (value, ex)
             return True
         try:
-            return bool(self.r.set(key, value, ex=ex, nx=nx))
+            self._reconcile_pending()
+            acquired = bool(self.r.set(key, value, ex=ex, nx=nx))
+            if acquired:
+                self._local_set(key, value, ex=ex)
+                self._pending_deletes.discard(key)
+                self._pending_sets.pop(key, None)
+            return acquired
         except Exception as e:
             self._mark_offline(e)
+            if nx and self._local_get(key) is not None:
+                return False
+            self._local_set(key, value, ex=ex)
+            self._pending_deletes.discard(key)
+            if not nx:
+                self._pending_sets[key] = (value, ex)
             return True
 
     def _safe_delete(self, *keys: str):
         for k in keys:
             self._local_fallback.pop(k, None)
+            self._pending_sets.pop(k, None)
+        if not keys:
+            return
         if self._is_offline():
+            self._pending_deletes.update(keys)
             return
         try:
-            if keys:
-                self.r.delete(*keys)
+            self._reconcile_pending()
+            self.r.delete(*keys)
         except Exception as e:
+            self._pending_deletes.update(keys)
             self._mark_offline(e)
 
     # 1. Hot Product DNA Cache (TTL: 24h, invalidated on DNA update)
@@ -140,12 +191,13 @@ class ValkeyCacheManager:
     def is_job_active(self, org_id: str, sku_id: str) -> bool:
         key = f"lock:active_job:{org_id}:{sku_id}"
         if self._is_offline():
-            return key in self._local_fallback
+            return self._local_get(key) is not None
         try:
+            self._reconcile_pending()
             return bool(self.r.exists(key))
         except Exception as e:
             self._mark_offline(e)
-            return key in self._local_fallback
+            return self._local_get(key) is not None
 
     def mark_job_active(self, org_id: str, sku_id: str, job_id: str, ttl: int = 1800) -> bool:
         key = f"lock:active_job:{org_id}:{sku_id}"
@@ -179,12 +231,16 @@ def distributed_lock(lock_key: str, timeout_seconds: int = 60, retry_delay: floa
     full_key = f"lock:{lock_key}"
     end_time = time.time() + timeout_seconds
     acquired = False
-    token = str(time.time())
+    token = str(uuid.uuid4())
 
     try:
         while time.time() < end_time:
-            if r.set(full_key, token, nx=True, ex=timeout_seconds):
-                acquired = True
+            try:
+                if r.set(full_key, token, nx=True, ex=timeout_seconds):
+                    acquired = True
+                    break
+            except Exception as e:
+                logger.warning(f"Redis lock acquisition error for {lock_key}: {e}")
                 break
             time.sleep(retry_delay)
 
@@ -201,7 +257,10 @@ def distributed_lock(lock_key: str, timeout_seconds: int = 60, retry_delay: floa
                 return 0
             end
             """
-            r.eval(lua, 1, full_key, token)
+            try:
+                r.eval(lua, 1, full_key, token)
+            except Exception as e:
+                logger.warning(f"Failed releasing distributed lock {full_key}: {e}")
 
 
 cache_manager = ValkeyCacheManager()

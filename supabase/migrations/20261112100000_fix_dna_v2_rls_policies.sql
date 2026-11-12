@@ -35,31 +35,85 @@ end $$;
 
 create policy product_dna_versions_select_current_org on public.product_dna_versions
   for select to authenticated
-  using (organization_id = (select private.current_organization_id()));
+  using (
+    organization_id = (select private.current_organization_id())
+    and (select private.has_permission('planning.view'))
+  );
 
 create policy product_reference_evidence_select_current_org on public.product_reference_evidence
   for select to authenticated
-  using (organization_id = (select private.current_organization_id()));
+  using (
+    organization_id = (select private.current_organization_id())
+    and (select private.has_permission('planning.view'))
+  );
 
 create policy product_region_crops_select_current_org on public.product_region_crops
   for select to authenticated
-  using (organization_id = (select private.current_organization_id()));
+  using (
+    organization_id = (select private.current_organization_id())
+    and (select private.has_permission('planning.view'))
+  );
 
 create policy qa_assessments_select_current_org on public.qa_assessments
   for select to authenticated
-  using (organization_id = (select private.current_organization_id()));
+  using (
+    organization_id = (select private.current_organization_id())
+    and (select private.has_permission('planning.view'))
+  );
 
 create policy correction_history_select_current_org on public.correction_history
   for select to authenticated
-  using (organization_id = (select private.current_organization_id()));
+  using (
+    organization_id = (select private.current_organization_id())
+    and (select private.has_permission('planning.view'))
+  );
 
 create policy learning_outcomes_select_current_org on public.learning_outcomes
   for select to authenticated
-  using (organization_id = (select private.current_organization_id()));
+  using (
+    organization_id = (select private.current_organization_id())
+    and (select private.has_permission('planning.view'))
+  );
 
 create policy knowledge_embeddings_select_current_org on public.knowledge_embeddings
   for select to authenticated
   using (
-    organization_id is null
-    or organization_id = (select private.current_organization_id())
+    (
+      organization_id is null
+      or organization_id = (select private.current_organization_id())
+    )
+    and (select private.has_permission('planning.view'))
   );
+
+-- Deduplication unique index on knowledge_embeddings (org + source_hash + category)
+create unique index if not exists idx_knowledge_embeddings_org_source_hash
+  on public.knowledge_embeddings (coalesce(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), category, source_hash);
+
+-- Lock down LangGraph checkpoint tables in public schema if already created by PostgresSaver
+do $$
+declare
+  cp_tbl text;
+begin
+  foreach cp_tbl in array array[
+    'checkpoints',
+    'checkpoint_blobs',
+    'checkpoint_writes',
+    'checkpoint_migrations'
+  ] loop
+    if exists (
+      select 1 from information_schema.tables
+      where table_schema = 'public' and table_name = cp_tbl
+    ) then
+      execute format('alter table public.%I enable row level security', cp_tbl);
+      execute format('revoke all on public.%I from public, anon, authenticated', cp_tbl);
+      execute format('grant all on public.%I to service_role', cp_tbl);
+      execute format('drop policy if exists %I on public.%I', cp_tbl || '_service_role_all', cp_tbl);
+      execute format(
+        'create policy %I on public.%I for all to service_role using (true) with check (true)',
+        cp_tbl || '_service_role_all',
+        cp_tbl
+      );
+    end if;
+  end loop;
+end $$;
+

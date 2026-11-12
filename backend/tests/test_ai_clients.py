@@ -162,3 +162,20 @@ def test_dna_agent_sets_draft_and_quarantines_style(monkeypatch, tmp_path):
     assert out["product_dna"]["status"] == "draft"
     assert out["product_dna"]["main_color"] == "ruby red"
     assert out["product_dna"]["metadata"]["analysis_source"] == "vlm"
+
+
+def test_ssrf_and_storage_path_tenant_guards():
+    from services.ai_clients import _is_safe_public_url, _is_allowed_org_storage_path
+
+    assert _is_safe_public_url("http://127.0.0.1:8080/secret") is False
+    assert _is_safe_public_url("http://169.254.169.254/latest/meta-data/") is False
+    assert _is_safe_public_url("http://10.0.0.5/internal") is False
+    assert _is_safe_public_url("https://8.8.8.8/image.jpg") is True
+
+    org_id = "7d56360f-2c96-4eb2-923e-f22b7fe36605"
+    other_org = "11111111-2222-3333-4444-555555555555"
+    assert _is_allowed_org_storage_path(f"organizations/{org_id}/catalog/front.jpg", org_id) is True
+    assert _is_allowed_org_storage_path(f"users/u1/organizations/{org_id}/front.jpg", org_id) is True
+    assert _is_allowed_org_storage_path(f"organizations/{other_org}/catalog/front.jpg", org_id) is False
+    assert _is_allowed_org_storage_path(f"organizations/{org_id}/../{other_org}/front.jpg", org_id) is False
+

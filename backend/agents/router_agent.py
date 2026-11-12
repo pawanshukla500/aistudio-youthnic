@@ -35,11 +35,15 @@ class GenerationRouterAgent:
         else:
             selected_model = "gpt-image-2.5-flare-2026-09-08"
 
-        # Cost estimation per pose (e.g. $0.06 - $0.08 per image depending on model)
-        if "sunburst" in selected_model:
-            est_cost_per_pose = 0.08
+        # Cost estimation per pose aligned with ai_clients.estimate_image_cost_usd
+        if "2.6-sunburst" in selected_model:
+            est_cost_per_pose = 0.18
+        elif "2.6" in selected_model:
+            est_cost_per_pose = 0.16
+        elif "2.5-sunburst" in selected_model:
+            est_cost_per_pose = 0.12
         else:
-            est_cost_per_pose = 0.06
+            est_cost_per_pose = 0.08
         poses_count = len(state.get("poses_to_generate", [1, 2, 3, 4, 5, 6]))
         est_total = budget_used + (poses_count * est_cost_per_pose)
 

@@ -50,10 +50,16 @@ class ProductEvidenceAgent:
                 org_id=org_id,
                 evidence_id=evidence_id,
                 sku_id=sku_id,
-                region_label=f"{role}_detail_crop",
-                bbox={"x1": x1, "y1": y1, "x2": x2, "y2": y2, "width": w, "height": h},
+                region_name=f"{role}_detail_crop",
+                bounding_box={
+                    "x": round(x1 / w, 4),
+                    "y": round(y1 / h, 4),
+                    "width": round((x2 - x1) / w, 4),
+                    "height": round((y2 - y1) / h, 4),
+                },
                 crop_storage_path=crop_path,
-                crop_url=crop_url,
+                crop_download_url=crop_url,
+                construction_notes=f"Auto-cropped {role} primary detail region",
             )
         except Exception as exc:
             logger.debug(f"Region crop creation skipped for {role}: {exc}")
@@ -62,6 +68,7 @@ class ProductEvidenceAgent:
         org_id = state["organization_id"]
         sku_id = state["sku_id"]
         raw_references = state.get("references", [])
+        allow_local = bool(state.get("allow_local_references", False))
 
         validated_references: List[Dict[str, Any]] = []
         hash_parts: List[str] = []
@@ -71,7 +78,11 @@ class ProductEvidenceAgent:
             url = str(ref.get("downloadUrl") or ref.get("download_url") or "")
             storage_path = str(ref.get("storagePath") or ref.get("storage_path") or "")
 
-            loaded = load_reference_image({"role": role, "download_url": url, "storage_path": storage_path})
+            loaded = load_reference_image(
+                {"role": role, "download_url": url, "storage_path": storage_path},
+                allow_local=allow_local,
+                organization_id=org_id,
+            )
             raw_hash = ref.get("hash") or ref.get("sha256_hash")
             dimensions = ref.get("dimensions") or {}
             mime_type = str(ref.get("mimeType") or ref.get("mime_type") or "image/jpeg")

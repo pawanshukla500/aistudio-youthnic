@@ -11,6 +11,41 @@ import { ANALYSIS_RUN_KINDS, GENERATION_RUN_KIND, QA_RUN_KIND, attributeJobCostR
 export type Id<_Table extends string> = string;
 export type BackendEndpoint = string;
 
+export interface ProductDnaSummary {
+  version: number;
+  approved: boolean;
+  status?: string;
+  garment_family?: string;
+  main_color?: string;
+  fabric_type?: string;
+  bottom_wear?: {
+    has_bottom_wear?: boolean;
+    cut_class?: string;
+  };
+  invariants?: string[];
+  prohibited_changes?: string[];
+  confidence?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ProductDnaExtractResult {
+  thread_id?: string;
+  persisted?: boolean;
+  product_dna?: ProductDnaSummary | null;
+}
+
+export interface WorkflowOverviewResult {
+  engine?: string;
+  checkpointer?: {
+    backend?: string;
+    tables_ready?: boolean;
+    total_checkpoints?: number;
+    total_threads?: number;
+  };
+  nodes?: string[];
+  providers_configured?: Record<string, boolean>;
+}
+
 export const api = {
   dna: { extract: "dna.extract", get: "dna.get", approve: "dna.approve" },
   workflows: { overview: "workflows.overview", checkpoints: "workflows.checkpoints" },
