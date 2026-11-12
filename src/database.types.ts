@@ -3633,33 +3633,39 @@ export type Database = {
       organizations: {
         Row: {
           created_at: string;
+          credits: number;
           id: string;
           is_primary: boolean;
           legacy_convex_id: string | null;
           name: string;
           settings: NonNullable<Json>;
           slug: string;
+          trial_credits_allocated: number;
           updated_at: string;
         };
         ComputedFields: never;
         Insert: {
           created_at?: string;
+          credits?: number;
           id?: string;
           is_primary?: boolean;
           legacy_convex_id?: string | null;
           name: string;
           settings?: NonNullable<Json>;
           slug: string;
+          trial_credits_allocated?: number;
           updated_at?: string;
         };
         Update: {
           created_at?: string;
+          credits?: number;
           id?: string;
           is_primary?: boolean;
           legacy_convex_id?: string | null;
           name?: string;
           settings?: NonNullable<Json>;
           slug?: string;
+          trial_credits_allocated?: number;
           updated_at?: string;
         };
         Relationships: [];
@@ -5146,7 +5152,20 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      app_consume_seller_credit: {
+        Args: {
+          p_org_id: string;
+        };
+        Returns: boolean;
+      };
       app_current_workspace: { Args: Record<PropertyKey, never>; Returns: Json };
+      app_enroll_seller: {
+        Args: {
+          contact_email?: string | null;
+          store_name: string;
+        };
+        Returns: Json;
+      };
       claim_due_catalog_batch: {
         Args: Record<PropertyKey, never>;
         Returns: {

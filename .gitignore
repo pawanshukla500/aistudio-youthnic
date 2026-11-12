@@ -35,6 +35,7 @@ supabase/.temp/
 
 # Scratch files
 scratch/
+.scratch_skills/
 
 # IDE Agent configuration
 .agents/

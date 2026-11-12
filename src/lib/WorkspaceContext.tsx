@@ -3,9 +3,16 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { useFirebaseAuth } from "./FirebaseAuthContext";
 import { supabase } from "./supabase";
 import { getErrorMessage } from "./errors";
+import { SellerOnboarding } from "../features/auth/SellerOnboarding";
 
 export type WorkspaceValue = {
-  organization: Record<string, any> & { _id: string; id: string; name: string };
+  organization: Record<string, any> & {
+    _id: string;
+    id: string;
+    name: string;
+    credits?: number;
+    trial_credits_allocated?: number;
+  };
   user: Record<string, any> & { _id: string; id: string; email: string; displayName: string };
   membership: Record<string, any> & { _id: string };
   roles: Array<Record<string, any> & { _id: string; id: string; name: string; slug: string }>;
@@ -80,7 +87,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }
   if (workspace === undefined) return <LoadingWorkspace label="Loading your Supabase workspace…" />;
   if (!value) {
-    return <div className="grid min-h-screen place-items-center bg-background p-6"><div className="max-w-md rounded-2xl border border-outline-variant bg-white p-6 text-center shadow-sm"><h1 className="text-lg font-bold text-on-surface">No active workspace access</h1><p className="mt-2 text-sm leading-6 text-secondary">This Firebase account is valid but has no active Supabase organization membership. Ask an administrator to enable access.</p><button onClick={() => void signOut()} className="mt-5 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white">Sign out</button></div></div>;
+    return <SellerOnboarding user={firebaseUser} onEnrolled={(enrolled) => setWorkspace(enrolled)} onSignOut={signOut} />;
   }
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

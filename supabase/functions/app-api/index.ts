@@ -911,7 +911,14 @@ async function workspaceFor(request: Request, permission?: string) {
   const { data, error } = await client.rpc("app_current_workspace");
   if (error || !data) throw new Error("Your Firebase session is not linked to an active Supabase workspace.");
   const workspace = data as {
-    organization: { id: string; name: string; slug: string };
+    organization: {
+      id: string;
+      name: string;
+      slug: string;
+      settings?: JsonRecord;
+      credits?: number;
+      trial_credits_allocated?: number;
+    };
     member: { id: string; firebase_uid: string; email: string; display_name: string };
     user: { id: string; firebaseUid: string; email: string; name: string };
     permissions: string[];
@@ -2218,6 +2225,16 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     queuedReferences,
     isSareeReferenceSet(queuedReferences, queuedGarmentFamily) ? "saree" : queuedGarmentFamily,
   );
+  const orgSettings = workspace.organization.settings as JsonRecord | undefined;
+  const isExternalSeller = orgSettings?.seller_type === "external";
+  if (isExternalSeller) {
+    const { data: credited, error: creditErr } = await service.rpc("app_consume_seller_credit", {
+      p_org_id: workspace.organization.id,
+    });
+    if (creditErr || !credited) {
+      throw new Error("You have reached your 5 free photoshoot trial limit (0 credits remaining). Contact sales or upgrade your account to generate more photoshoots.");
+    }
+  }
   const imageGenerationPolicy = await resolveImageGenerationPolicy(workspace.organization.id);
   const requestedModel = String(args.model || "").trim();
   let model = imageGenerationPolicy.model;
@@ -2289,6 +2306,11 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     findActiveRun: activeRunForSession,
   });
   if (raceWinner) {
+    if (isExternalSeller) {
+      await service.from("organizations").update({
+        credits: typeof workspace.organization.credits === "number" ? workspace.organization.credits : 5,
+      }).eq("id", workspace.organization.id);
+    }
     scheduleBackground(kickWorker());
     return raceWinner;
   }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Ban, Check, CheckCircle2, ChevronRight, History as HistoryIcon, Images, Loader2, Sparkles, Wand2, X } from "lucide-react";
+import { AlertTriangle, Ban, Check, CheckCircle2, ChevronRight, History as HistoryIcon, Images, Loader2, Sparkles, Store, Wand2, X } from "lucide-react";
 import { api, useAction, useMutation, useQuery, type Id, type ProductDnaExtractResult, type ProductDnaSummary } from "../../lib/backend";
 import { Button } from "@/components/ui/button";
 import { ActionDialog } from "../../components/ui/ActionDialog";
@@ -206,6 +206,7 @@ export interface StudioDnaState {
 
 export function Studio() {
   const { organization, user } = useWorkspace();
+  const isExternalSeller = (organization.settings as Record<string, any> | undefined)?.seller_type === "external";
   const analyzeReferences = useAction(api.analysis.analyzeReferences);
   const extractDna = useMutation(api.dna.extract);
   const approveDna = useMutation(api.dna.approve);
@@ -793,7 +794,7 @@ export function Studio() {
       {/* Studio Header Bar */}
       <header className="mb-6 flex flex-col justify-between gap-4 rounded-3xl border border-outline-variant/40 bg-white p-5 shadow-xs sm:flex-row sm:items-center">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="grid h-7 w-7 place-items-center rounded-lg bg-soft-blush text-primary">
               <Wand2 className="h-4 w-4" />
             </span>
@@ -801,6 +802,20 @@ export function Studio() {
             <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-bold text-emerald-700 border border-emerald-200">
               6-Pose Engine Active
             </span>
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-0.5 text-[10px] font-bold text-primary">
+              <Store className="h-3 w-3" />
+              <span>{organization.name}</span>
+            </div>
+            {isExternalSeller ? (
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-0.5 text-[10px] font-medium text-secondary">
+                <Sparkles className="h-3 w-3 text-amber-500" />
+                <span>
+                  {typeof organization.credits === "number" && organization.credits > 0
+                    ? `${organization.credits} ${organization.credits === 1 ? "Shoot" : "Shoots"} Free`
+                    : "Trial Expired"} · $1.00 High / +$0.50 QA
+                </span>
+              </div>
+            ) : null}
           </div>
           <h1 className="mt-1 font-manrope text-2xl sm:text-[28px] font-bold tracking-tight text-on-surface">
             Catalog Photoshoot Production
