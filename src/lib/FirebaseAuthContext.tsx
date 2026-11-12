@@ -1,10 +1,12 @@
 // oxlint-disable react/only-export-components -- provider and hooks intentionally share the auth contract.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  createUserWithEmailAndPassword,
   onIdTokenChanged,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   type User,
+  type UserCredential,
 } from "firebase/auth";
 import { firebaseAuth } from "./firebase";
 
@@ -12,6 +14,7 @@ type FirebaseAuthValue = {
   user: User | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string) => Promise<UserCredential>;
   signOut: () => Promise<void>;
 };
 
@@ -29,8 +32,11 @@ export function FirebaseAuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async (email: string, password: string) => {
     await signInWithEmailAndPassword(firebaseAuth, email.trim().toLowerCase(), password);
   }, []);
+  const signUp = useCallback(async (email: string, password: string) => {
+    return createUserWithEmailAndPassword(firebaseAuth, email.trim().toLowerCase(), password);
+  }, []);
   const signOut = useCallback(() => firebaseSignOut(firebaseAuth), []);
-  const value = useMemo(() => ({ user, isLoading, signIn, signOut }), [isLoading, signIn, signOut, user]);
+  const value = useMemo(() => ({ user, isLoading, signIn, signUp, signOut }), [isLoading, signIn, signUp, signOut, user]);
 
   return <FirebaseAuthContext.Provider value={value}>{children}</FirebaseAuthContext.Provider>;
 }

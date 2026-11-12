@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Bell, BookOpen, Calendar as CalendarIcon, CalendarDays, ChevronLeft, ChevronRight, History, LayoutDashboard, Loader2, LogOut, Menu, Pencil, Shield, Wand2, X } from "lucide-react";
+import { Bell, BookOpen, Calendar as CalendarIcon, CalendarDays, ChevronLeft, History, LayoutDashboard, Loader2, LogOut, Menu, Pencil, Shield, Sparkles, Store, Wand2, X } from "lucide-react";
 import { api, useMutation, useQuery } from "../../lib/backend";
 import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
 import { useWorkspace } from "../../lib/WorkspaceContext";
@@ -15,6 +15,8 @@ export function Layout() {
   const unread = notifications?.filter((notification) => !notification.readAt).length || 0;
   const can = (permission: string) => isAdmin || permissions.includes(permission);
   const canAdmin = isAdmin || permissions.some((permission) => permission.startsWith("admin."));
+  const isExternalSeller = (organization.settings as Record<string, any> | undefined)?.seller_type === "external";
+  const credits = organization.credits;
 
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -87,9 +89,19 @@ export function Layout() {
         </div>
 
         {(!collapsed || mobileNavOpen) && (
-          <div className="mx-4 rounded-xl border border-outline-variant/50 bg-surface-container-low p-3">
-            <p className="truncate text-xs font-bold text-on-surface">{organization.name}</p>
-            <p className="mt-1 truncate text-[10px] text-secondary">Secure production workspace</p>
+          <div className="mx-4 rounded-xl border border-outline-variant/50 bg-surface-container-low p-3 shadow-sm">
+            <div className="flex items-center gap-2">
+              <Store className="h-4 w-4 shrink-0 text-primary" />
+              <p className="truncate text-xs font-bold text-on-surface">{organization.name}</p>
+            </div>
+            <div className="mt-2 flex items-center justify-between border-t border-outline-variant/40 pt-2 text-[10px] text-secondary">
+              <span>{isExternalSeller ? "Trial Credits:" : "Operational Balance:"}</span>
+              <span className="font-bold text-primary">
+                {isExternalSeller
+                  ? typeof credits === "number" && credits > 0 ? `${credits} ${credits === 1 ? "shoot" : "shoots"}` : "Trial Expired"
+                  : typeof credits === "number" ? `${credits} shoots` : "Active"}
+              </span>
+            </div>
           </div>
         )}
 
@@ -164,11 +176,31 @@ export function Layout() {
       </aside>
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background">
         <header className="flex h-16 shrink-0 items-center justify-between border-b border-outline-variant/50 bg-surface-container-lowest px-4 sm:px-6 lg:px-8">
-          <div className="flex min-w-0 items-center gap-2 text-xs text-secondary">
+          <div className="flex min-w-0 items-center gap-2.5">
             <button onClick={() => setMobileNavOpen(true)} className="mr-1 rounded-lg p-2 text-secondary hover:bg-surface-container lg:hidden" aria-label="Open navigation"><Menu className="h-5 w-5" /></button>
-            <span>{organization.name}</span>
-            <ChevronRight className="h-3.5 w-3.5" />
-            <span className="font-semibold text-on-surface">Production workspace</span>
+            <div className="flex items-center gap-2 rounded-xl border border-outline-variant/50 bg-surface-container-low px-3 py-1.5 shadow-sm">
+              <Store className="h-4 w-4 shrink-0 text-primary" />
+              <span className="truncate max-w-[140px] sm:max-w-[240px] text-xs font-bold text-on-surface">{organization.name}</span>
+              <span className="hidden sm:inline-block rounded-md bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary">Store</span>
+            </div>
+            {isExternalSeller ? (
+              <div className="hidden md:flex items-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-1.5 text-xs">
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                <span className="font-semibold text-on-surface">
+                  {typeof credits === "number" && credits > 0
+                    ? `${credits} ${credits === 1 ? "Shoot" : "Shoots"} Free`
+                    : "Trial Expired"}
+                </span>
+                <span className="border-l border-outline-variant/50 pl-2 text-[10px] text-secondary font-medium">
+                  $1.00 High · +$0.50 QA
+                </span>
+              </div>
+            ) : (
+              <div className="hidden md:flex items-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-1.5 text-xs">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="font-semibold text-on-surface">Enterprise Production Atelier</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <NavLink to="/notifications" title="Notifications" aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`} className="relative rounded-xl p-2 text-secondary transition hover:bg-surface-container hover:text-primary">
