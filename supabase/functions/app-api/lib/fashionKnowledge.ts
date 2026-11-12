@@ -83,11 +83,24 @@ function isCategoryKurtiOrDupattaKnowledge(row: FashionKnowledgeRow) {
   return DUPATTA_STYLING_TOPICS.has(topic) && Boolean(text(row.guidance));
 }
 
+function isFarshiConstructionRule(row: FashionKnowledgeRow) {
+  const topic = text(row.topic).toLowerCase();
+  const tags = tagsOf(row.tags);
+  if (topic === "top_only" || tags.includes("top_only")) return false;
+  const hay = haystack(row);
+  if (FARSHI_RE.test(hay)) return true;
+  const positiveGuidance = text(row.guidance)
+    .replace(/\bnon-?(?:farshi|farsi|fasi)\b/gi, "")
+    .replace(/\b(?:never|not|no|without)\s+(?:apply|use|render|substitute)\s+(?:the\s+)?(?:farshi|farsi|fasi)\b/gi, "");
+  return FARSHI_RE.test(positiveGuidance);
+}
+
 function rank(row: FashionKnowledgeRow, bottomCutClass: string) {
   const textAll = `${haystack(row)} ${text(row.guidance)}`;
-  const isFarshiRow = FARSHI_RE.test(textAll);
+  const positiveForCutMatch = textAll.replace(/\bnon-?(?:farshi|farsi|fasi)\b/gi, "").toLowerCase();
+  const isFarshiRow = isFarshiConstructionRule(row);
   const farshiBoost = isFarshiRow && (!bottomCutClass || bottomCutClass === "farshi") ? 1_000 : 0;
-  const cutMatchBoost = bottomCutClass && textAll.toLowerCase().includes(bottomCutClass.replace("_", " ")) ? 500 : 0;
+  const cutMatchBoost = bottomCutClass && positiveForCutMatch.includes(bottomCutClass.replace("_", " ")) ? 500 : 0;
   const priority = Number(row.priority);
   return farshiBoost + cutMatchBoost + (Number.isFinite(priority) ? priority : 0);
 }
@@ -105,9 +118,11 @@ export function selectFashionKnowledgeGuidance(
   const eligible = rows.filter((row) => {
     if (!isActive(row) || !orgAllowed(row, organizationId)) return false;
     if (isSaree) return isSareeKnowledge(row);
-    const isFarshiRow = FARSHI_RE.test(`${haystack(row)} ${text(row.guidance)}`);
+    const topic = text(row.topic).toLowerCase();
+    const isFarshiRow = isFarshiConstructionRule(row);
     if (forbidFarshi && isFarshiRow) return false;
-    if (cutClass === "none" && text(row.topic).toLowerCase() === "bottom_wear") return false;
+    if (cutClass === "none" && topic === "bottom_wear") return false;
+    if (topic === "top_only" && cutClass && cutClass !== "none" && cutClass !== "other") return false;
     return isBottomCutPrintKnowledge(row) || isCategoryKurtiOrDupattaKnowledge(row);
   }).sort((left, right) => {
     const delta = rank(right, cutClass) - rank(left, cutClass);

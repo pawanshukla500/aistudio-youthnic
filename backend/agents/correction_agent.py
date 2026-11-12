@@ -48,9 +48,13 @@ class CorrectionAgent:
                     "side-joint pleats, and a narrower 6-inch joined hem panel tapering 4 inches inward from the upper hem seam. "
                     "Do not produce wide-open palazzo or circular skirt."
                 )
-            elif normalized_cut in {"saree", "none"} and "trouser" in str(guidance or "").lower():
+            elif normalized_cut == "saree":
                 instructions.append(
                     "BOTTOM WEAR SILHOUETTE FIX: Maintain continuous unstitched saree drape with zero trousers or palazzos."
+                )
+            elif normalized_cut == "none":
+                instructions.append(
+                    "BOTTOM WEAR SILHOUETTE FIX: Remove any invented matching bottom wear; keep a standalone top-only garment with plain neutral styling trousers."
                 )
             else:
                 cut_label = normalized_cut or "uploaded"

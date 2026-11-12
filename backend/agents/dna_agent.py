@@ -185,7 +185,7 @@ class ProductDNAAgent:
                 cut = "farshi"
             elif cut in explicit_non_farshi:
                 cut = cut
-            elif has_bottom_ref and cut in {"", "unknown", "none"}:
+            elif has_bottom_ref and cut == "none":
                 cut = "farshi"
             elif cut not in allowed_cuts or not cut:
                 cut = "unknown"
@@ -193,7 +193,7 @@ class ProductDNAAgent:
             bottom = BottomWearArchitecture(
                 has_bottom_wear=has_bottom_wear,
                 classification=str(
-                    bw_raw.get("classification")
+                    (cut.title() if cut in explicit_non_farshi else bw_raw.get("classification"))
                     or ("Farshi Salwar" if cut == "farshi" else ("none" if not has_bottom_wear else cut.title()))
                 ),
                 cut_class=cut,  # type: ignore[arg-type]

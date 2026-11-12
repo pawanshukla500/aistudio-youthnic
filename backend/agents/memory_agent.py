@@ -92,11 +92,16 @@ class KnowledgeMemoryAgent:
                             if not rule:
                                 continue
                             lower_rule = f"{l.get('rule_text') or ''} {rule}".lower()
+                            positive_clauses = re.sub(
+                                r"\b(?:strictly\s+)?(?:no|not|without|never)\s+(?:pants|palazzos?|shararas?|salwars?|trousers?|bottoms?)\b",
+                                "",
+                                lower_rule,
+                            )
                             if any(tok in lower_rule for tok in ("farshi", "farsi", "fasi")) and bottom_cut != "farshi":
                                 continue
-                            if garment_family == "saree" and any(tok in lower_rule for tok in ("palazzo", "sharara", "salwar", "trouser")):
+                            if garment_family == "saree" and any(tok in positive_clauses for tok in ("palazzo", "sharara", "salwar", "trouser")):
                                 continue
-                            if garment_family != "saree" and "saree" in lower_rule and "kurti" not in lower_rule:
+                            if garment_family != "saree" and "saree" in positive_clauses and "kurti" not in positive_clauses:
                                 continue
                             if rule not in guidance_rules:
                                 guidance_rules.append(rule)

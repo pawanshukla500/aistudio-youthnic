@@ -357,7 +357,7 @@ export function compactFullPromptSafely(prompt: string): string {
   compacted = compactPromptBlock(
     compacted,
     "\nLOCKED PRODUCT - MUST NOT CHANGE:\n",
-    ["\nGARMENT TRUTH CONTRACT"],
+    ["\nSAREE TRUTH", "\nSAREE REAR TRUTH", "\nGARMENT TRUTH CONTRACT"],
     2_200,
   );
   compacted = compactPromptBlock(
@@ -1217,16 +1217,16 @@ export function composeGenerationPrompt(args: {
     String(product.accessoriesIncluded || ""),
     String(styling?.ornaments || ""),
     String(args.productDetails || ""),
-    String(directedCreative.suggestedAccessories || ""),
   ]
-    .flatMap((text) => text.split(/[;\n.!?]+/))
+    .flatMap((text) => text.split(/[,;\n.!?]+/))
     .map((clause) => clause.trim())
     .filter((clause) => (
       clause.length > 0 &&
-      !/\b(?:no|not|without|never(?:\s+add)?|absent|missing|excluded|excludes)\b/i.test(clause) &&
+      /\b(?:dupatta|stole|chunni|odhani)\b/i.test(clause) &&
+      !/\b(?:no|not|without|never(?:\s+add)?|absent|missing|excluded|excludes|optional|Optional)\b/i.test(clause) &&
       !/\b(?:dupatta|stole|chunni|odhani|scarf|shawl)\s*:\s*none\b/i.test(clause)
     ));
-  const hasDupatta = !isSareeShoot && positiveDupattaClauses.some((clause) => /\b(?:dupatta|stole|chunni|odhani)\b/i.test(clause));
+  const hasDupatta = !isSareeShoot && positiveDupattaClauses.length > 0;
   const dupattaLock = hasDupatta
     ? isTrueBack || args.pose.id === "back"
       ? `\nDUPATTA DRAPE & FIDELITY LOCK (REAR VIEW):\n- Include the uploaded dupatta/stole from the product references (exact fabric weight, colour/ombré gradient, motif scale, and border/gota lace trim), draped cleanly forward over both forearms/elbows or held lightly in front so 100% of the rear garment neckline, closures, and back panel stay completely unobstructed.\n`

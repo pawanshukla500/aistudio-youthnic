@@ -18,7 +18,7 @@ WHERE purpose = 'image_generation'
 
 UPDATE public.fashion_knowledge_base
 SET
-  guidance = $farshi$Farshi / farsi salwar features TWO DISTINCT TROUSER LEGS with high/mid-rise elasticated or fitted waist, three waist pleats per side, and one large pleat at each side-seam joint. The hem is quite narrow from the waist side: a separate 6-inch joined hem panel is seamed onto each leg with a 4-inch inward taper from the upper hem seam to the lower ankle opening (4 inches narrower at bottom than upper hem seam). It is NOT an open wide-leg palazzo, NOT a circular lehenga/skirt, NOT dhoti, and NOT a gathered salwar poncha. Preserve exact bottom color and large-scale print motifs from FRONT/BACK/MANNEQUIN/BOTTOM references. NEVER apply this tapered Farshi construction to palazzo, sharara, gharara, straight trousers, or salwar cuts.$farshi$,
+  guidance = $farshi$Farshi ONLY: 2 trouser legs, narrow hem from waist side, 6-inch joined hem panel tapering 4 inches inward from upper hem seam, waist & side-joint pleats. Copy bottom color & print verbatim; never palazzo, lehenga, or poncha. Never apply to non-Farshi cuts.$farshi$,
   updated_at = now()
 WHERE organization_id IS NULL
   AND title = 'Farshi / farsi pajama cut and print lock'
@@ -32,7 +32,7 @@ SELECT
   'saree',
   'saree_drape',
   'Gen-Z saree drape and editorial pose discipline',
-  $saree$Present sarees with contemporary Gen-Z editorial poise: clean fluid Nivi shoulder drape or exact uploaded drape family, crisp evenly stacked vertical waist pleats, exact pallu starting boundary and motif scale, and equal-width upper/lower borders. Vary stances gracefully across hero front, 3/4 turn, relaxed seated editorial, true rear blouse/pallu view, macro pallu/zari craft crop, and flowing motion showcase. Strictly continuous unstitched saree drape — zero trousers, palazzos, or duplicate pallus.$saree$,
+  $saree$Gen-Z saree poise: fluid Nivi/uploaded drape, crisp stacked waist pleats, exact pallu boundary & equal borders. Vary poses cleanly (hero front, 3/4 turn, seated editorial, true rear blouse/pallu, macro craft, motion showcase). Unstitched drape only — zero trousers or duplicate pallus.$saree$,
   ARRAY['saree', 'genz', 'drape', 'pallu', 'pleats']::text[],
   85,
   'seed',
@@ -52,7 +52,7 @@ SELECT
   'kurta_or_kurti_set',
   'dupatta_drape',
   'Multi-piece kurti set dupatta detection and rear clearance',
-  $dupatta$Always inspect mannequin/flat-lay, additional_product, front, and back uploads for a folded or draped dupatta/stole. When present, preserve exact fabric weight, ombré color transition, motifs, and edge gota/lace trim across every frame; drape it gracefully over one forearm/shoulder in front/angled poses leaving neckline craft and bottom-wear cut visible, and sweep it forward over both arms/elbows on pose 3 (true back) so the rear neckline and closures are 100% unobstructed. Never let a secondary dupatta hijack Pose 5 when primary garment craft exists.$dupatta$,
+  $dupatta$Scan mannequin/flat-lay, additional_product, front & back for dupatta/stole. Render exact fabric, ombré colors, motifs & gota trim across all frames; drape forward over both arms on Pose 3 back view so rear neckline stays 100% clear. Keep Pose 5 on primary kurti craft.$dupatta$,
   ARRAY['dupatta', 'kurti_set', 'mannequin', 'back_pose', 'styling']::text[],
   82,
   'seed',
@@ -72,7 +72,7 @@ SELECT
   'kurta_or_kurti_set',
   'top_only',
   'Standalone top-only kurti proportion and non-set rule',
-  $toponly$When product references prove a standalone kurti/top without bottom wear, keep bottom wear explicitly unbranded, plain solid neutral styling trousers (never copy kurti color, print, embroidery, or border onto bottoms and never apply Farshi rules). Vary poses organically to showcase neckline, fit, sleeve cut, hem length, and front/back craftsmanship.$toponly$,
+  $toponly$Standalone top-only kurti: pair ONLY with plain solid neutral styling trousers; never copy top print, embroidery, or color onto bottoms, and apply non-Farshi straight/relaxed styling only. Vary poses to highlight neckline, sleeves, length & primary craft.$toponly$,
   ARRAY['top_only', 'kurti', 'standalone', 'proportion']::text[],
   80,
   'seed',
@@ -83,4 +83,14 @@ WHERE NOT EXISTS (
     AND title = 'Standalone top-only kurti proportion and non-set rule'
     AND topic = 'top_only'
 );
+
+UPDATE public.learning_outcomes
+SET
+  trigger_condition = COALESCE(trigger_condition, '{}'::jsonb) || jsonb_build_object('garment_family', 'kurta_or_kurti_set', 'bottom_cut', 'farshi'),
+  updated_at = now()
+WHERE COALESCE(trigger_condition->>'bottom_cut', '') = ''
+  AND (
+    rule_text ~* '\y(farshi|farsi|fasi)\y'
+    OR positive_guidance ~* '\y(farshi|farsi|fasi)\y|4-?inch.*taper|6-?inch joined hem'
+  );
 

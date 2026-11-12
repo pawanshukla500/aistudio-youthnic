@@ -1,5 +1,5 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { selectReusableLearningRules } from "../lib/learningRules.ts";
+import { selectApprovedLearningOutcomes, selectReusableLearningRules } from "../lib/learningRules.ts";
 
 const context = {
   organizationId: "org-a",
@@ -126,4 +126,38 @@ Deno.test("selection deduplicates rule IDs and bounds both rule count and prompt
   assertEquals(result.ruleIds.length, 3);
   assertEquals(result.guidance.length <= 120, true);
   assertEquals(result.guidance.includes("duplicate must not appear"), false);
+});
+
+Deno.test("learning outcomes isolate unscoped 4-inch taper and Farshi rules away from palazzo shoots", () => {
+  const rows = [
+    {
+      id: "unscoped-taper",
+      organization_id: "org-a",
+      sku_id: "OLD-SKU",
+      rule_type: "bottom_wear_preservation",
+      rule_text: "Preserve 6-inch joined hem panel",
+      trigger_condition: {},
+      positive_guidance: "Hem must show a 4-inch inward taper from upper hem seam.",
+      is_active: true,
+      approved: true,
+    },
+    {
+      id: "palazzo-ok",
+      organization_id: "org-a",
+      sku_id: "PAL-01",
+      rule_type: "bottom_wear_preservation",
+      rule_text: "Verified palazzo silhouette",
+      trigger_condition: { garment_family: "kurta_or_kurti_set", bottom_cut: "palazzo" },
+      positive_guidance: "Preserve wide uniform straight palazzo opening.",
+      is_active: true,
+      approved: true,
+    },
+  ];
+  const palazzo = selectApprovedLearningOutcomes(rows, {
+    organizationId: "org-a",
+    garmentFamily: "kurta_or_kurti_set",
+    bottomCutClass: "palazzo",
+  });
+  assertEquals(palazzo.ids, ["palazzo-ok"]);
+  assertEquals(palazzo.guidance.includes("4-inch inward taper"), false);
 });

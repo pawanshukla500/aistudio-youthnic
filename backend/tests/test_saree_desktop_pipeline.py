@@ -357,7 +357,45 @@ def test_farshi_taper_rule_isolated_from_non_farshi_and_top_only():
     ca = CorrectionAgent()
     _, palazzo_fix = ca.decide_action(1, 1, ["bottom_wear"], "bottom wrong", False, False, bottom_cut="palazzo")
     _, farshi_fix = ca.decide_action(1, 1, ["bottom_wear"], "bottom wrong", False, False, bottom_cut="farshi")
+    _, top_only_fix = ca.decide_action(1, 1, ["bottom_wear"], "Remove invented matching trousers", False, False, bottom_cut="none")
     assert "palazzo" in palazzo_fix.lower()
     assert "farshi" not in palazzo_fix.lower()
     assert "4 inches inward" not in palazzo_fix.lower()
     assert "4 inches inward" in farshi_fix.lower()
+    assert "standalone" in top_only_fix.lower()
+    assert "saree drape" not in top_only_fix.lower()
+
+    # Negative-Farshi classification string & unresolved cut stay isolated
+    neg_farshi_dna = dna_agent._build_from_vlm(
+        raw={
+            "garment_family": "kurta_or_kurti_set",
+            "main_color": "ivory",
+            "bottom_wear": {"has_bottom_wear": True, "cut_class": "palazzo", "classification": "Palazzo, not Farshi"},
+        },
+        org_id=VALID_ORG_UUID,
+        sku_id="PALAZZO-NEG",
+        sku_name="IVORY-PALAZZO",
+        fingerprint="fp-pal-neg",
+        is_saree=False,
+        references=[{"role": "front"}, {"role": "bottom"}],
+        provider="meta",
+        model="muse-spark-1.2-contributor",
+    )
+    assert neg_farshi_dna.bottom_wear.cut_class == "palazzo"
+
+    unknown_dna = dna_agent._build_from_vlm(
+        raw={
+            "garment_family": "kurta_or_kurti_set",
+            "main_color": "ivory",
+            "bottom_wear": {"has_bottom_wear": True, "cut_class": "unknown"},
+        },
+        org_id=VALID_ORG_UUID,
+        sku_id="UNKNOWN-01",
+        sku_name="IVORY-SET",
+        fingerprint="fp-unk",
+        is_saree=False,
+        references=[{"role": "front"}, {"role": "bottom"}],
+        provider="meta",
+        model="muse-spark-1.2-contributor",
+    )
+    assert unknown_dna.bottom_wear.cut_class == "unknown"

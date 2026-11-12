@@ -249,9 +249,16 @@ export function selectApprovedLearningOutcomes(
 
     const guidanceRaw = text(row?.positive_guidance) || text(row?.rule_text);
     const lower = `${text(row?.rule_text)} ${guidanceRaw}`.toLowerCase();
-    if (isSaree && (/\b(farshi|farsi|fasi|palazzo|sharara|salwar|trouser)\b/i.test(lower))) continue;
+    const isFarshiOutcome = /\b(farshi|farsi|fasi)\b|4-?inch.*taper|taper.*4\s*inch|6-?inch joined hem|narrow from the waist/i.test(lower);
+    if (isSaree && /\b(farshi|farsi|fasi|palazzo|sharara|salwar|trouser)\b/i.test(lower)) continue;
     if (!isSaree && /\bsaree\b/i.test(lower) && !/\bkurti|kurta\b/i.test(lower)) continue;
-    if (/\b(farshi|farsi|fasi)\b/i.test(lower) && (isSaree || !bottomCut || FAMILY_NON_FARSHI.has(bottomCut))) continue;
+    if (isFarshiOutcome && (isSaree || !bottomCut || FAMILY_NON_FARSHI.has(bottomCut))) continue;
+    if (!triggerCut && bottomCut && bottomCut !== "other" && bottomCut !== "none") {
+      const cutToken = bottomCut.split("_")[0];
+      if (/\b(palazzo|sharara|gharara|churidar|salwar|trouser|skirt)\b/i.test(lower) && !lower.includes(cutToken)) {
+        continue;
+      }
+    }
 
     const compacted = compactGuidance(guidanceRaw, MAX_REUSABLE_RULE_GUIDANCE_CHARS);
     if (!compacted) continue;

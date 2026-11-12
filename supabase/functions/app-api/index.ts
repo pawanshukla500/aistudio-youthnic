@@ -2464,8 +2464,9 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
             : isTopOnlyKurti
               ? "Present standalone top-only kurti with neutral plain styling trousers; never invent a matching set."
               : "Preserve exact uploaded garment silhouette, length, and plain neutral styling coordination; never invent matching lower pieces.";
-      const allPosesCompleted = poses.length > 0 && poses.every((pose) => String(pose.status || "") === "completed");
-      const shouldAutoApprove = verifiedQualityScore >= 92 && allPosesCompleted;
+      const allPosesVerified = poses.length > 0 && completed === poses.length &&
+        poses.every((pose) => ["automatically_verified", "human_approved"].includes(String(pose.qa_status || "")));
+      const shouldAutoApprove = verifiedQualityScore >= 92 && allPosesVerified;
       const { data: existingRule, error: existingRuleError } = await service.from("learning_outcomes")
         .select("id,usage_count,success_count,effectiveness_score,approved")
         .eq("organization_id", String(job.org_id))
@@ -2827,7 +2828,16 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     skuName: String(variant?.sku_name), productDetails: String(variant?.product_description || ""), category,
     modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
     housePreferences: await stylingPreferenceBrief(orgId, category),
-    fashionKnowledge: await fashionKnowledgeBrief(orgId, category),
+    fashionKnowledge: await fashionKnowledgeBrief(
+      orgId,
+      category,
+      "",
+      explicitBottomCutHint(
+        settings.bottomWear ?? settings.bottomWearMode,
+        variant?.product_description,
+        variant?.sku_name,
+      ),
+    ),
     analysisLearning: await analysisLearningBrief(orgId, category),
     showcaseFeedback: await showcaseFeedbackBrief(orgId, category),
   }) });

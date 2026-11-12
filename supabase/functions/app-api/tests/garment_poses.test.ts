@@ -555,3 +555,34 @@ Deno.test("negative dupatta clauses and top-only mode do not emit dupatta or Far
   assertEquals(topOnlyPrompt.includes("DUPATTA DRAPE & FIDELITY LOCK"), false);
   assertEquals(topOnlyPrompt.includes("taper of 4 inches from the upper hem"), false);
 });
+
+Deno.test("comma-separated dupatta exclusion preserves dupatta lock while suggestedAccessories alone does not fake uploaded dupatta", () => {
+  const promptWithNoEarrings = composeGenerationPrompt({
+    skuName: "DUPATTA-COMMA-TEST",
+    productDetails: "Pink embroidered kurti set",
+    pose: pose("full_front", 1) as never,
+    session: {
+      category: "kurti set",
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        accessoriesIncluded: "Pink ombré dupatta, no earrings",
+      },
+    },
+    references: [{ role: "front" }, { role: "mannequin" }],
+  });
+  assertEquals(promptWithNoEarrings.includes("DUPATTA DRAPE & FIDELITY LOCK"), true);
+
+  const promptSuggestedOnly = composeGenerationPrompt({
+    skuName: "NO-UPLOADED-DUPATTA",
+    productDetails: "Standalone yellow kurti",
+    bottomWearMode: "top_only",
+    pose: pose("full_front", 1) as never,
+    session: {
+      category: "kurti",
+      productIdentity: { garmentFamily: "kurta_or_kurti_set" },
+      creativeDirection: { suggestedAccessories: "Optional stole styling if desired" },
+    },
+    references: [{ role: "front" }],
+  });
+  assertEquals(promptSuggestedOnly.includes("DUPATTA DRAPE & FIDELITY LOCK"), false);
+});
