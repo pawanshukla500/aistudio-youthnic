@@ -103,6 +103,7 @@ export function AnalysisProfile({
     version?: number;
     approved?: boolean;
     threadId?: string;
+    persisted?: boolean;
     approving?: boolean;
     extracting?: boolean;
     error?: string | null;
@@ -188,7 +189,11 @@ export function AnalysisProfile({
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 <span>Extracting Product DNA V2…</span>
               </span>
-            ) : dnaCurrent && dnaState?.error ? (
+            ) : dnaCurrent && (
+              dnaState?.error ||
+              dnaState?.persisted === false ||
+              dnaState?.productDna?.metadata?.analysis_source === "heuristic_offline"
+            ) ? (
               <button
                 type="button"
                 onClick={onRetryDna}
@@ -217,9 +222,17 @@ export function AnalysisProfile({
             ) : null}
           </div>
 
-          {dnaCurrent && dnaState?.error && (
+          {dnaCurrent && (
+            dnaState?.error ||
+            dnaState?.persisted === false ||
+            dnaState?.productDna?.metadata?.analysis_source === "heuristic_offline"
+          ) && (
             <div className="rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-xs text-rose-800">
-              <strong className="font-bold">Product DNA V2 warning:</strong> {dnaState.error}
+              <strong className="font-bold">Product DNA V2 warning:</strong>{" "}
+              {dnaState?.error ||
+                (dnaState?.persisted === false
+                  ? "Draft could not be persisted to PostgreSQL; retry extraction before approving."
+                  : "Vision providers returned an offline fallback draft; retry extraction before locking product truth.")}
             </div>
           )}
 
@@ -230,7 +243,7 @@ export function AnalysisProfile({
                   Product DNA V2 v{dnaState.version} {dnaState.approved ? "(Approved & Locked)" : "(Draft — Review before locking)"}
                 </span>
                 <span className="text-[11px] font-medium text-emerald-800">
-                  Confidence: {Math.round((Number(dnaState.productDna.confidence) || 0) * 100)}%
+                  Confidence: {Math.round((Number(dnaState.productDna.confidence_score) || 0) * 100)}%
                 </span>
               </div>
               <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-secondary">
@@ -241,9 +254,9 @@ export function AnalysisProfile({
                   <span>Bottom: <strong className="text-on-surface">{dnaState.productDna.bottom_wear.cut_class}</strong></span>
                 )}
               </div>
-              {dnaState.productDna.invariants && dnaState.productDna.invariants.length > 0 && (
+              {dnaState.productDna.explicit_invariants && dnaState.productDna.explicit_invariants.length > 0 && (
                 <p className="mt-1.5 text-[11px] text-emerald-900/80">
-                  Invariants: {dnaState.productDna.invariants.slice(0, 3).join(" · ")}
+                  Invariants: {dnaState.productDna.explicit_invariants.slice(0, 3).join(" · ")}
                 </p>
               )}
             </div>

@@ -85,6 +85,15 @@ create policy knowledge_embeddings_select_current_org on public.knowledge_embedd
     and (select private.has_permission('planning.view'))
   );
 
+-- Deduplicate existing rows before creating the unique index on knowledge_embeddings
+delete from public.knowledge_embeddings a
+using public.knowledge_embeddings b
+where a.ctid < b.ctid
+  and coalesce(a.organization_id, '00000000-0000-0000-0000-000000000000'::uuid) =
+      coalesce(b.organization_id, '00000000-0000-0000-0000-000000000000'::uuid)
+  and a.category = b.category
+  and a.source_hash = b.source_hash;
+
 -- Deduplication unique index on knowledge_embeddings (org + source_hash + category)
 create unique index if not exists idx_knowledge_embeddings_org_source_hash
   on public.knowledge_embeddings (coalesce(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), category, source_hash);

@@ -16,7 +16,11 @@ def detect_anatomical_defect(text_feedback: str) -> bool:
     pattern = r"\b(?:(?:three|3|extra|duplicate|phantom|floating|third|missing|detached)\s+(?:[a-z]+\s+)?(?:hands?|arms?|limbs?|wrists?)|(?:severed\s+limb)|(?:extra|fused|malformed|detached|six|6)\s+(?:[a-z]+\s+)?fingers?)\b"
     for match in re.finditer(pattern, text_feedback, re.IGNORECASE):
         prefix = text_feedback[max(0, match.start() - 60):match.start()].lower()
-        if re.search(r"\b(?:no|zero|without|neither|never|free\s+of|not)\b[^.,;!?]*$", prefix):
+        clause = re.split(r"[.,;!?]", prefix)[-1]
+        if (
+            not re.search(r"\bnot\s+(?:free\s+of|without)\b", clause)
+            and re.search(r"\b(?:no|zero|without|neither|never|free\s+of|not)\b", clause)
+        ):
             continue
         return True
     return False
@@ -28,8 +32,12 @@ def _has_affirmative_term(text: str, terms: List[str]) -> bool:
         return False
     for term in terms:
         for match in re.finditer(rf"\b{re.escape(term)}\b", text, re.IGNORECASE):
-            prefix = text[max(0, match.start() - 50):match.start()].lower()
-            if re.search(r"\b(?:no|zero|without|neither|never|not|rather\s+than|instead\s+of|free\s+of)\b[^.,;!?]*$", prefix):
+            prefix = text[max(0, match.start() - 60):match.start()].lower()
+            clause = re.split(r"[.,;!?]", prefix)[-1]
+            if (
+                not re.search(r"\bnot\s+(?:free\s+of|without)\b", clause)
+                and re.search(r"\b(?:no|zero|without|neither|never|not|rather\s+than|instead\s+of|free\s+of)\b", clause)
+            ):
                 continue
             return True
     return False
@@ -102,6 +110,7 @@ class ComputerVisionQAAgent:
             return {"_missing_image": True}
 
         images = [generated_img]
+        authority_count = 0
         style_refs: List[Dict[str, Any]] = []
         for ref in (reference_images or []):
             role = str(ref.get("role") or "")
@@ -109,10 +118,14 @@ class ComputerVisionQAAgent:
                 loaded_ref = load_reference_image(ref, organization_id=org_id)
                 if loaded_ref:
                     images.append(loaded_ref)
+                    authority_count += 1
             elif role == "style_reference":
                 style_refs.append(ref)
             if len(images) >= 4:
                 break
+        if authority_count == 0:
+            logger.warning("No authoritative product reference images loaded for live VLM QA")
+            return None
         if style_refs and len(images) < 5:
             loaded_style = load_reference_image(style_refs[0], organization_id=org_id)
             if loaded_style:
@@ -129,8 +142,14 @@ class ComputerVisionQAAgent:
         data = res["data"]
         raw_scores = data.get("scores")
         raw_checks = data.get("checks")
-        if not isinstance(raw_scores, dict) or not raw_scores or not isinstance(raw_checks, dict):
-            logger.warning("Live VLM QA returned incomplete payload without valid scores/checks")
+        required_keys = {"garment_identity", "colors", "bottom_wear"}
+        if (
+            not isinstance(raw_scores, dict)
+            or not isinstance(raw_checks, dict)
+            or not required_keys.issubset(raw_scores.keys())
+            or not required_keys.issubset(raw_checks.keys())
+        ):
+            logger.warning("Live VLM QA returned incomplete critical scores/checks")
             return None
         for k, v in raw_scores.items():
             try:

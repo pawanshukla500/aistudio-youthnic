@@ -58,6 +58,7 @@ def extract_product_dna(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         "product_dna": dna,
         "dna_approved": bool(final_state.get("dna_approved", False)),
         "dna_persisted": bool(final_state.get("dna_persisted", True)),
+        "persisted": bool(final_state.get("dna_persisted", True)),
         "pose_plans_count": len(final_state.get("pose_plans", [])),
     }
 

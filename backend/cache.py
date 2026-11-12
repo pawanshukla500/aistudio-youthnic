@@ -56,17 +56,12 @@ class ValkeyCacheManager:
         self._local_fallback[key] = (value, expires_at)
 
     def _reconcile_pending(self):
-        """Flush offline deletes/writes to Redis before trusting Redis reads again."""
-        if not self._pending_deletes and not self._pending_sets:
+        """Flush offline cache invalidations to Redis before trusting Redis reads again."""
+        if not self._pending_deletes:
             return
-        if self._pending_deletes:
-            keys = list(self._pending_deletes)
-            self.r.delete(*keys)
-            self._pending_deletes.clear()
-        if self._pending_sets:
-            for k, (val, ex) in list(self._pending_sets.items()):
-                self.r.set(k, val, ex=ex)
-                self._pending_sets.pop(k, None)
+        keys = list(self._pending_deletes)
+        self.r.delete(*keys)
+        self._pending_deletes.clear()
 
     def _safe_get(self, key: str) -> Optional[str]:
         if self._is_offline():
@@ -80,12 +75,9 @@ class ValkeyCacheManager:
 
     def _safe_set(self, key: str, value: str, ex: Optional[int] = None, nx: bool = False) -> bool:
         if self._is_offline():
-            if nx and self._local_get(key) is not None:
+            if nx:
                 return False
             self._local_set(key, value, ex=ex)
-            self._pending_deletes.discard(key)
-            if not nx:
-                self._pending_sets[key] = (value, ex)
             return True
         try:
             self._reconcile_pending()
@@ -93,32 +85,29 @@ class ValkeyCacheManager:
             if acquired:
                 self._local_set(key, value, ex=ex)
                 self._pending_deletes.discard(key)
-                self._pending_sets.pop(key, None)
             return acquired
         except Exception as e:
             self._mark_offline(e)
-            if nx and self._local_get(key) is not None:
+            if nx:
                 return False
             self._local_set(key, value, ex=ex)
-            self._pending_deletes.discard(key)
-            if not nx:
-                self._pending_sets[key] = (value, ex)
             return True
 
-    def _safe_delete(self, *keys: str):
+    def _safe_delete(self, *keys: str, defer_invalidation: bool = True):
         for k in keys:
             self._local_fallback.pop(k, None)
-            self._pending_sets.pop(k, None)
         if not keys:
             return
         if self._is_offline():
-            self._pending_deletes.update(keys)
+            if defer_invalidation:
+                self._pending_deletes.update(keys)
             return
         try:
             self._reconcile_pending()
             self.r.delete(*keys)
         except Exception as e:
-            self._pending_deletes.update(keys)
+            if defer_invalidation:
+                self._pending_deletes.update(keys)
             self._mark_offline(e)
 
     # 1. Hot Product DNA Cache (TTL: 24h, invalidated on DNA update)
@@ -191,21 +180,31 @@ class ValkeyCacheManager:
     def is_job_active(self, org_id: str, sku_id: str) -> bool:
         key = f"lock:active_job:{org_id}:{sku_id}"
         if self._is_offline():
-            return self._local_get(key) is not None
+            return True
         try:
             self._reconcile_pending()
             return bool(self.r.exists(key))
         except Exception as e:
             self._mark_offline(e)
-            return self._local_get(key) is not None
+            return True
 
     def mark_job_active(self, org_id: str, sku_id: str, job_id: str, ttl: int = 1800) -> bool:
         key = f"lock:active_job:{org_id}:{sku_id}"
         return self._safe_set(key, job_id, nx=True, ex=ttl)
 
-    def release_job_active(self, org_id: str, sku_id: str):
+    def release_job_active(self, org_id: str, sku_id: str, expected_job_id: Optional[str] = None):
         key = f"lock:active_job:{org_id}:{sku_id}"
-        self._safe_delete(key)
+        self._local_fallback.pop(key, None)
+        if self._is_offline():
+            return
+        try:
+            if expected_job_id:
+                lua = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
+                self.r.eval(lua, 1, key, expected_job_id)
+            else:
+                self.r.delete(key)
+        except Exception as e:
+            self._mark_offline(e)
 
     # 7. Invalidation
     def invalidate_sku_cache(self, org_id: str, sku_id: str):

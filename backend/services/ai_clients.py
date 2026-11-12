@@ -7,6 +7,7 @@ import os
 import posixpath
 import re
 import socket
+import tempfile
 import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
@@ -36,33 +37,35 @@ def _safe_resp_json(resp: httpx.Response) -> Dict[str, Any]:
         return {}
 
 
-def _is_safe_public_url(raw_url: str) -> bool:
+def _resolve_safe_public_ip(raw_url: str) -> Optional[str]:
     try:
         parsed = urlparse(raw_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            return False
+            return None
         host = parsed.hostname.strip().lower()
         if host in {"localhost", "metadata.google.internal"}:
-            return False
+            return None
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
         if not infos:
-            return False
+            return None
+        chosen_ip: Optional[str] = None
         for info in infos:
-            addr_str = info[4][0]
-            ip = ipaddress.ip_address(addr_str.split("%")[0])
-            if (
-                ip.is_private
-                or ip.is_loopback
-                or ip.is_link_local
-                or ip.is_reserved
-                or ip.is_multicast
-                or ip.is_unspecified
-            ):
-                return False
-        return True
+            addr_str = info[4][0].split("%")[0]
+            ip = ipaddress.ip_address(addr_str)
+            if getattr(ip, "ipv4_mapped", None):
+                ip = ip.ipv4_mapped
+            if not ip.is_global or ip.is_multicast:
+                return None
+            if chosen_ip is None:
+                chosen_ip = str(ip)
+        return chosen_ip
     except Exception:
-        return False
+        return None
+
+
+def _is_safe_public_url(raw_url: str) -> bool:
+    return _resolve_safe_public_ip(raw_url) is not None
 
 
 def _is_allowed_org_storage_path(storage_path: str, organization_id: Optional[str]) -> bool:
@@ -72,8 +75,8 @@ def _is_allowed_org_storage_path(storage_path: str, organization_id: Optional[st
     normalized = posixpath.normpath(cleaned)
     if normalized.startswith("../") or normalized == "..":
         return False
-    if not organization_id:
-        return True
+    if not organization_id or not organization_id.strip():
+        return False
     org = organization_id.strip()
     if normalized.startswith(f"organizations/{org}/") or normalized.startswith(f"evidence_crops/{org}/") or normalized.startswith(f"{org}/"):
         return True
@@ -82,13 +85,41 @@ def _is_allowed_org_storage_path(storage_path: str, organization_id: Optional[st
     return False
 
 
+def _is_allowed_local_path(local_path: str) -> bool:
+    try:
+        resolved = os.path.realpath(local_path)
+        repo_tests_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "tests"))
+        temp_dir = os.path.realpath(tempfile.gettempdir())
+        allowed_roots = [repo_tests_dir, temp_dir]
+        desktop_proj = os.path.realpath(r"C:\Users\Pawan Shukla\Desktop\Projec Images")
+        if os.path.isdir(desktop_proj):
+            allowed_roots.append(desktop_proj)
+        return any(
+            resolved == root or resolved.startswith(root + os.sep)
+            for root in allowed_roots
+        )
+    except Exception:
+        return False
+
+
 def _download_public_image_bounded(url: str, timeout_s: int = 20) -> bytes:
     current = url
     with httpx.Client(timeout=timeout_s, follow_redirects=False) as client:
         for _ in range(4):
-            if not _is_safe_public_url(current):
+            pinned_ip = _resolve_safe_public_ip(current)
+            if not pinned_ip:
                 raise RuntimeError(f"Blocked untrusted/non-public image URL host: {urlparse(current).hostname}")
-            with client.stream("GET", current) as resp:
+            parsed = urlparse(current)
+            host = (parsed.hostname or "").strip()
+            netloc = parsed.netloc
+            formatted_ip = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
+            ip_netloc = f"{formatted_ip}:{parsed.port}" if parsed.port else formatted_ip
+            pinned_url = parsed._replace(netloc=ip_netloc).geturl()
+            headers = {"Host": netloc} if netloc else {}
+            req = client.build_request("GET", pinned_url, headers=headers)
+            if parsed.scheme == "https" and host:
+                req.extensions["sni_hostname"] = host
+            with client.send(req, stream=True) as resp:
                 if 300 <= resp.status_code < 400 and resp.headers.get("location"):
                     current = urljoin(current, resp.headers["location"])
                     continue
@@ -178,8 +209,12 @@ def load_reference_image(
                 logger.warning(f"Blocked local:// image reference in production request for role={role}")
                 return None
             local_path = url[len("local://"):]
-            if (allow_local or settings.ENV.lower() != "production") and os.path.exists(local_path):
-                with open(local_path, "rb") as fh:
+            if not _is_allowed_local_path(local_path):
+                logger.warning(f"Blocked local:// path outside allowed fixtures directory for role={role}")
+                return None
+            real_local_path = os.path.realpath(local_path)
+            if os.path.isfile(real_local_path):
+                with open(real_local_path, "rb") as fh:
                     raw_bytes = fh.read(MAX_DOWNLOAD_BYTES + 1)
                 if len(raw_bytes) > MAX_DOWNLOAD_BYTES:
                     return None
@@ -214,8 +249,9 @@ def load_reference_image(
                 raw_bytes = buf.getvalue()
                 mime = "image/jpeg"
                 width, height = resized.size
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(f"Rejected unreadable or non-image payload for role={role}: {exc}")
+        return None
 
     return {
         "role": role,
@@ -568,6 +604,8 @@ def generate_catalog_image(
         img_bytes = base64.b64decode(first["b64_json"])
     elif first.get("url"):
         img_bytes = _download_public_image_bounded(first["url"], timeout_s=60)
+        if not img_bytes:
+            raise RuntimeError("OpenAI image URL download returned no bytes")
     else:
         raise RuntimeError("OpenAI image API returned no image payload")
 

@@ -17,6 +17,18 @@ from services.ai_clients import invoke_vision_json, load_reference_image
 logger = logging.getLogger(__name__)
 
 
+def _coerce_confidence(value: Any, default: float = 0.9) -> float:
+    if value is None:
+        return default
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return default
+    if num > 1.0:
+        num = num / 100.0
+    return max(0.0, min(1.0, num))
+
+
 SAREE_BASELINE_INVARIANTS = [
     "Saree is a continuous unstitched drape paired with fitted blouse and underskirt petticoat. Strictly NO pants, NO palazzos, NO salwars, NO trousers.",
     "Pose 5 (Detail Frame) must showcase signature pallu artwork or zari border weave, never an accessory hijack.",
@@ -228,7 +240,7 @@ class ProductDNAAgent:
             prohibited_changes=prohibited,
             evidence_manifest=[f"IMAGE {i+1}: {r.get('role')}" for i, r in enumerate(references)],
             uncertain_attributes=[str(u) for u in (raw.get("uncertain_attributes") or [])],
-            confidence_score=max(0.0, min(1.0, float(raw["confidence_score"]) if raw.get("confidence_score") is not None else 0.9)),
+            confidence_score=_coerce_confidence(raw.get("confidence_score")),
             metadata={"analysis_source": "vlm", "provider": provider, "model": model},
         )
 
@@ -437,7 +449,7 @@ class ProductDNAAgent:
         dna: Optional[ProductDNAV2] = None
         if loaded_images:
             try:
-                prompt = _build_dna_extraction_prompt(sku_name, str(state.get("category") or "ethnic/fusion"), auth_refs)
+                prompt = _build_dna_extraction_prompt(sku_name, str(state.get("category") or "ethnic/fusion"), loaded_images)
                 vlm_res = invoke_vision_json(prompt, loaded_images, purpose="product_truth")
                 if vlm_res and isinstance(vlm_res.get("data"), dict):
                     dna = self._build_from_vlm(

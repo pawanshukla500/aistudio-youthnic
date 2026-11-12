@@ -566,8 +566,6 @@ export function Studio() {
           mimeType: reference.file.type,
         })),
       };
-      lastDnaParamsRef.current = dnaParams;
-      void runDnaExtraction(dnaParams, requestId, forceRefresh);
       const detectedSaree = result.productIdentity.garmentFamily?.trim().toLowerCase() === "saree";
       if (detectedSaree && !isSareeCategory) {
         promoteDetectedSareeReferences();
@@ -576,6 +574,8 @@ export function Studio() {
         const missingEvidence = result.sareeEvidenceIssues?.join(", ") || "fully spread pallu";
         setNotice({ tone: "success", text: `Saree detected. Front and rear references were preserved; now confirm or upload: ${missingEvidence}. Gemini will reanalyse before generation.` });
       } else {
+        lastDnaParamsRef.current = dnaParams;
+        void runDnaExtraction(dnaParams, requestId, forceRefresh);
         setAnalysisSourceKey(sourceKey);
         setNotice({ tone: "success", text: "Authoritative product identity, creative direction, and the six-pose shoot plan are ready." });
       }
@@ -677,8 +677,19 @@ export function Studio() {
   };
 
   const handleApproveDna = async () => {
-    if (!dnaState || !dnaState.version || dnaState.skuId !== effectiveSkuId || dnaState.sourceKey !== analysisInputKey || analysisIsStale) {
-      setNotice({ tone: "error", text: "Product DNA changed or is stale. Re-analyze before approving." });
+    if (
+      !dnaState ||
+      !dnaState.version ||
+      dnaState.persisted === false ||
+      dnaState.productDna?.metadata?.analysis_source === "heuristic_offline" ||
+      dnaState.skuId !== effectiveSkuId ||
+      dnaState.sourceKey !== analysisInputKey ||
+      analysisIsStale
+    ) {
+      setNotice({
+        tone: "error",
+        text: "Product DNA must be freshly extracted by Vision AI and persisted before locking as product truth.",
+      });
       return;
     }
     const targetSkuId = dnaState.skuId;

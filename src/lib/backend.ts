@@ -22,9 +22,9 @@ export interface ProductDnaSummary {
     has_bottom_wear?: boolean;
     cut_class?: string;
   };
-  invariants?: string[];
+  explicit_invariants?: string[];
   prohibited_changes?: string[];
-  confidence?: number;
+  confidence_score?: number;
   metadata?: Record<string, unknown>;
 }
 

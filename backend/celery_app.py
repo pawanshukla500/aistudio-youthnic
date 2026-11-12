@@ -211,10 +211,14 @@ def process_pose_generation_task(self, generation_id: str, job_id: str, pose_ind
                     """
                     UPDATE public.session_generations
                     SET status = 'generating', updated_at = now()
-                    WHERE generation_id = %s
+                    WHERE generation_id = %s AND status IN ('pending', 'failed', 'retrying')
+                    RETURNING generation_id
                     """,
                     (generation_id,),
                 )
+                if cur.fetchone() is None:
+                    logger.info(f"Pose {pose_index} ({generation_id}) already claimed by another worker.")
+                    return {"status": "already_claimed", "generation_id": generation_id}
 
         dna = cache_manager.get_hot_dna(org_id, sku_id)
         if not dna:
@@ -295,15 +299,16 @@ def process_pose_generation_task(self, generation_id: str, job_id: str, pose_ind
     except Exception as exc:
         logger.error(f"Error generating pose {pose_index}: {exc}")
         is_terminal = self.request.retries >= self.max_retries
-        pose_status = "failed" if is_terminal else ("qa_pending" if image_committed else "retrying")
+        pose_status = "qa_pending" if image_committed else ("failed" if is_terminal else "retrying")
+        err_prefix = "QA dispatch pending recovery: " if image_committed else ""
         try:
             with get_db() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "UPDATE public.session_generations SET status = %s, error = %s, updated_at = now() WHERE generation_id = %s",
-                        (pose_status, str(exc)[:500], generation_id),
+                        (pose_status, f"{err_prefix}{str(exc)}"[:500], generation_id),
                     )
-            if is_terminal:
+            if is_terminal and not image_committed:
                 _finalize_job_progress(job_id, org_id, sku_id)
         except Exception:
             pass
@@ -320,7 +325,7 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT g.output_url, g.pose_type, g.attempt_count, j.job_data
+                    SELECT g.output_url, g.pose_type, g.attempt_count, g.status AS pose_status, j.status AS job_status, j.job_data
                     FROM public.session_generations g
                     JOIN public.generation_jobs j ON j.session_id = g.session_id
                     WHERE g.generation_id = %s AND j.job_id = %s
@@ -330,6 +335,8 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
                 row = cur.fetchone()
         if not row:
             return {"status": "missing_pose", "generation_id": generation_id}
+        if row.get("job_status") == "cancelled":
+            return {"status": "cancelled", "generation_id": generation_id}
 
         dna = cache_manager.get_hot_dna(org_id, sku_id)
         if not dna:
@@ -352,6 +359,13 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
             product_dna=dna,
             reference_images=refs,
         )
+
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT status FROM public.generation_jobs WHERE job_id = %s", (job_id,))
+                latest_job = cur.fetchone()
+        if latest_job and latest_job.get("status") == "cancelled":
+            return {"status": "cancelled", "generation_id": generation_id}
 
         if evaluation.outcome == "pass" and not evaluation.requires_human_review:
             with get_db() as conn:

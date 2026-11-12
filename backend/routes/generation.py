@@ -29,6 +29,10 @@ def submit_generation_job(job_req: GenerationJobSubmit = Body(...)) -> Dict[str,
     sku_id = job_req.sku_id
     sku_name = job_req.sku_name
 
+    poses_to_generate = [int(p) for p in job_req.poses_to_generate if 1 <= int(p) <= 6]
+    if not poses_to_generate:
+        raise HTTPException(status_code=400, detail="poses_to_generate must include at least one valid pose index (1-6).")
+
     # Check for duplicate active job
     if cache_manager.is_job_active(org_id, sku_id):
         raise HTTPException(
@@ -36,14 +40,17 @@ def submit_generation_job(job_req: GenerationJobSubmit = Body(...)) -> Dict[str,
             detail=f"An active generation job is already running for SKU {sku_name}. Wait for completion."
         )
 
-    route_out = _router_agent.process({
-        "requested_model": job_req.requested_model,
-        "quality": job_req.quality,
-        "poses_to_generate": job_req.poses_to_generate,
-    })["provider_route"]
+    try:
+        route_out = _router_agent.process({
+            "requested_model": job_req.requested_model,
+            "quality": job_req.quality,
+            "poses_to_generate": poses_to_generate,
+        })["provider_route"]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     selected_provider = route_out["image_provider"]
     selected_model = route_out["image_model"]
-    est_cost = round(float(route_out["est_cost_per_pose"]) * len(job_req.poses_to_generate), 4)
+    est_cost = round(float(route_out["est_cost_per_pose"]) * len(poses_to_generate), 4)
 
     dna_row = get_latest_dna_version(org_id, sku_id)
     product_dna = (dna_row or {}).get("dna_payload") or {"sku_name": sku_name}
@@ -73,7 +80,7 @@ def submit_generation_job(job_req: GenerationJobSubmit = Body(...)) -> Dict[str,
                         ) VALUES (%s, %s, %s, %s, 'queued', %s, 0, 0, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
-                            job_id, org_id, sku_name, session_id, len(job_req.poses_to_generate),
+                            job_id, org_id, sku_name, session_id, len(poses_to_generate),
                             selected_provider, selected_model, job_req.quality, job_req.pose_qa,
                             job_req.aspect_ratio, job_req.image_size,
                             json.dumps(job_req.model_dump()), est_cost
@@ -89,7 +96,7 @@ def submit_generation_job(job_req: GenerationJobSubmit = Body(...)) -> Dict[str,
                         ("Garment Feature Showcase", "showcase"),
                     ]
 
-                    for idx in job_req.poses_to_generate:
+                    for idx in poses_to_generate:
                         p_plan = planned_by_idx.get(idx) or {}
                         p_title = p_plan.get("title") or (pose_titles[idx - 1][0] if idx <= len(pose_titles) else "Custom Pose")
                         p_type = p_plan.get("pose_type") or (pose_titles[idx - 1][1] if idx <= len(pose_titles) else "custom")
@@ -106,7 +113,7 @@ def submit_generation_job(job_req: GenerationJobSubmit = Body(...)) -> Dict[str,
 
         process_generation_job_task.delay(job_id, org_id, sku_id)
     except Exception:
-        cache_manager.release_job_active(org_id, sku_id)
+        cache_manager.release_job_active(org_id, sku_id, expected_job_id=job_id)
         try:
             with get_db() as conn:
                 with conn.cursor() as cur:
@@ -183,20 +190,26 @@ def regenerate_pose(
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT g.generation_id, j.org_id, j.sku_name, j.session_id
+                    SELECT g.generation_id, g.status AS prev_status, g.attempt_count, g.output_url,
+                           g.storage_path, g.qa_status, g.qa_payload, g.approval_status, g.error,
+                           j.org_id, j.sku_name, j.session_id, j.status AS job_status, j.completed_at, j.job_data
                     FROM public.session_generations g
                     JOIN public.generation_jobs j ON j.session_id = g.session_id
                     WHERE j.job_id = %s AND g.pose_index = %s
+                    FOR UPDATE
                     """,
                     (job_id, pose_index),
                 )
                 row = cur.fetchone()
                 if not row:
                     raise HTTPException(status_code=404, detail="Pose or job not found")
+                if row.get("job_status") == "cancelled":
+                    raise HTTPException(status_code=409, detail="Cannot regenerate pose on a cancelled job")
 
                 gen_id = row["generation_id"]
                 org_id = row["org_id"]
-                sku_id = row["sku_name"]
+                job_data = row.get("job_data") if isinstance(row.get("job_data"), dict) else {}
+                sku_id = str(job_data.get("sku_id") or row["sku_name"])
 
                 cur.execute(
                     """
@@ -204,6 +217,10 @@ def regenerate_pose(
                     SET status = 'pending',
                         attempt_count = 0,
                         output_url = '',
+                        storage_path = '',
+                        qa_status = 'pending',
+                        qa_payload = NULL,
+                        approval_status = 'pending',
                         error = '',
                         regeneration_instructions = %s,
                         updated_at = now()
@@ -224,6 +241,47 @@ def regenerate_pose(
     try:
         process_pose_generation_task.delay(gen_id, job_id, pose_index, org_id, sku_id)
     except Exception:
+        try:
+            with get_db() as conn:
+                with conn.transaction():
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE public.session_generations
+                            SET status = %s,
+                                attempt_count = %s,
+                                output_url = %s,
+                                storage_path = %s,
+                                qa_status = %s,
+                                qa_payload = %s,
+                                approval_status = %s,
+                                error = %s,
+                                updated_at = now()
+                            WHERE generation_id = %s
+                            """,
+                            (
+                                row.get("prev_status") or "completed",
+                                int(row.get("attempt_count") or 0),
+                                row.get("output_url") or "",
+                                row.get("storage_path") or "",
+                                row.get("qa_status"),
+                                json.dumps(row["qa_payload"]) if isinstance(row.get("qa_payload"), (dict, list)) else row.get("qa_payload"),
+                                row.get("approval_status"),
+                                row.get("error") or "",
+                                gen_id,
+                            ),
+                        )
+                        cur.execute(
+                            """
+                            UPDATE public.generation_jobs
+                            SET status = %s,
+                                completed_at = %s
+                            WHERE job_id = %s AND status <> 'cancelled'
+                            """,
+                            (row.get("job_status"), row.get("completed_at"), job_id),
+                        )
+        except Exception:
+            pass
         raise HTTPException(status_code=503, detail="Failed to enqueue pose regeneration worker")
 
     return {

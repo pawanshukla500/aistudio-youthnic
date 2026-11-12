@@ -103,3 +103,24 @@ def test_qa_agent_negated_bottom_terms_do_not_trigger_veto():
     assert eval_res.bottom_cut_mismatch is False
     assert eval_res.outcome == "pass"
 
+
+def test_qa_agent_not_free_of_defect_phrase_still_vetoes():
+    agent = ComputerVisionQAAgent()
+    eval_res = agent.evaluate(
+        org_id="org_test",
+        job_id="job_test",
+        generation_id="gen_not_free_of",
+        sku_id="sku_test",
+        pose_index=1,
+        pose_type="full_front",
+        image_url="http://example.com/image.jpg",
+        product_dna={"garment_family": "saree", "bottom_wear": {"cut_class": "none"}},
+        ai_raw_evaluation={
+            "scores": {"garment_identity": 96.0, "colors": 96.0, "bottom_wear": 95.0},
+            "checks": {"garment_identity": "pass", "colors": "pass", "bottom_wear": "pass"},
+            "notes": "Bottom area is not free of trousers under the drape.",
+        },
+    )
+    assert eval_res.bottom_cut_mismatch is True
+    assert eval_res.outcome in ("retry", "fail")
+

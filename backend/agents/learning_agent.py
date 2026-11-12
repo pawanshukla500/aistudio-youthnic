@@ -40,12 +40,14 @@ class LearningOptimizationAgent:
                         cur.execute(
                             """
                             UPDATE public.learning_outcomes
-                            SET success_count = success_count + 1,
+                            SET positive_guidance = %s,
+                                negative_constraints = %s,
+                                success_count = success_count + 1,
                                 usage_count = usage_count + 1,
                                 updated_at = now()
                             WHERE id = %s
                             """,
-                            (existing["id"],),
+                            (positive_guidance, negative_constraints, existing["id"]),
                         )
                     else:
                         cur.execute(
@@ -63,13 +65,17 @@ class LearningOptimizationAgent:
                     emb_content = f"{rule_type}: {rule_text}. Guidance: {positive_guidance}"
                     vec = embed_text(emb_content)
                     if vec:
-                        src_hash = hashlib.sha256(f"{org_id}:{sku_id}:{emb_content}".encode()).hexdigest()
+                        src_hash = hashlib.sha256(f"{org_id}:{sku_id}:{rule_type}:{rule_text}".encode()).hexdigest()
                         cur.execute(
                             """
                             INSERT INTO public.knowledge_embeddings (
                                 organization_id, category, sub_category, content, embedding, source_hash, metadata
                             ) VALUES (%s, %s, %s, %s, %s::vector, %s, %s)
-                            ON CONFLICT DO NOTHING
+                            ON CONFLICT (coalesce(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), category, source_hash)
+                            DO UPDATE SET
+                                content = EXCLUDED.content,
+                                embedding = EXCLUDED.embedding,
+                                metadata = EXCLUDED.metadata
                             """,
                             (
                                 org_id,
