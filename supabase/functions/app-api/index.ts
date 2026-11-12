@@ -1471,17 +1471,19 @@ async function metaResponsesVisionJson(
       const data = await response.json().catch(() => ({})) as JsonRecord;
       if (!response.ok) {
         const providerError = data.error as JsonRecord | undefined;
+        const rawErrText = String(providerError?.message || data.message || data.detail || "");
+        const rawErrCode = String(providerError?.code || providerError?.type || "");
         lastError = visionProviderError({ ...route, model: modelCandidate }, {
           status: response.status,
-          message: String(providerError?.message || data.message || `Meta Muse Spark vision request failed (${response.status}).`),
-          code: String(providerError?.code || providerError?.type || ""),
+          message: rawErrText || `Meta Muse Spark vision request failed (${response.status}).`,
+          code: rawErrCode,
         });
-        // If 404 or model not found, try sibling model if one remains
-        if (
-          (response.status === 404 || /not found|not available/i.test(String(providerError?.message || data.message || ""))) &&
-          modelCandidate === modelCandidates[0] &&
-          modelCandidates.length > 1
-        ) {
+        const isModelUnavailable =
+          (lastError instanceof VisionProviderError && lastError.failure.code === "provider_unavailable") ||
+          response.status === 404 ||
+          /not found|not available|does not exist|model_not_found|unsupported\s+model|model\s+(?:is\s+)?unsupported/i.test(`${rawErrCode} ${rawErrText}`);
+        // If 404 or model not available, try sibling model if one remains
+        if (isModelUnavailable && modelCandidate === modelCandidates[0] && modelCandidates.length > 1) {
           break; // break inputVariants loop to try the sibling candidate
         }
         if (response.status === 400 && input === inputVariants[0]) continue;
