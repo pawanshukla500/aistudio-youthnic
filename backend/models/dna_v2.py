@@ -132,6 +132,7 @@ class ProductDNAV2(BaseModel):
     uncertain_attributes: List[str] = Field(default_factory=list)
     confidence_score: float = Field(default=0.95, ge=0.0, le=1.0)
     evidence_manifest: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_dna_consistency(self) -> "ProductDNAV2":

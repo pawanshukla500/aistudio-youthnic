@@ -1,6 +1,9 @@
+import hashlib
+import json
 import logging
 from typing import Dict, Any, List
 from database import get_db
+from services.ai_clients import embed_text
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,27 @@ class LearningOptimizationAgent:
                         (org_id, sku_id, rule_type, rule_text, positive_guidance, negative_constraints),
                     )
                     logger.info(f"Recorded approved learning rule for {sku_id}: {rule_type}")
+
+                    emb_content = f"{rule_type}: {rule_text}. Guidance: {positive_guidance}"
+                    vec = embed_text(emb_content)
+                    if vec:
+                        src_hash = hashlib.sha256(f"{org_id}:{sku_id}:{emb_content}".encode()).hexdigest()
+                        cur.execute(
+                            """
+                            INSERT INTO public.knowledge_embeddings (
+                                organization_id, category, sub_category, content, embedding, source_hash, metadata
+                            ) VALUES (%s, %s, %s, %s, %s::vector, %s, %s)
+                            """,
+                            (
+                                org_id,
+                                "ethnic/fusion",
+                                rule_type,
+                                emb_content,
+                                vec,
+                                src_hash,
+                                json.dumps({"sku_id": sku_id, "negative_constraints": negative_constraints}),
+                            ),
+                        )
         except Exception as e:
             logger.warning(f"Could not record learning outcome: {e}")
 

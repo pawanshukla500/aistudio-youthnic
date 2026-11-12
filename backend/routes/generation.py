@@ -1,13 +1,22 @@
 import uuid
 import json
 from typing import Dict, Any, List
-from fastapi import APIRouter, HTTPException, Body, Query
+from fastapi import APIRouter, HTTPException, Body, Query, Depends
+from auth import verify_internal_secret
 from models.generation import GenerationJobSubmit, GenerationJobStatus, PoseGenerationRecord
-from database import get_db
+from database import get_db, get_latest_dna_version
 from cache import cache_manager
+from agents.router_agent import GenerationRouterAgent
+from agents.pose_planning_agent import CreativePosePlanningAgent
 from celery_app import process_generation_job_task, process_pose_generation_task
 
-router = APIRouter(prefix="/api/v1/generation", tags=["Generation Orchestration"])
+router = APIRouter(
+    prefix="/api/v1/generation",
+    tags=["Generation Orchestration"],
+    dependencies=[Depends(verify_internal_secret)],
+)
+_router_agent = GenerationRouterAgent()
+_pose_planner = CreativePosePlanningAgent()
 
 
 @router.post("/submit")
@@ -27,6 +36,20 @@ async def submit_generation_job(job_req: GenerationJobSubmit = Body(...)) -> Dic
             detail=f"An active generation job is already running for SKU {sku_name}. Wait for completion."
         )
 
+    route_out = _router_agent.process({
+        "requested_model": job_req.requested_model,
+        "quality": job_req.quality,
+        "poses_to_generate": job_req.poses_to_generate,
+    })["provider_route"]
+    selected_provider = route_out["image_provider"]
+    selected_model = route_out["image_model"]
+    est_cost = round(float(route_out["est_cost_per_pose"]) * len(job_req.poses_to_generate), 4)
+
+    dna_row = get_latest_dna_version(org_id, sku_id)
+    product_dna = (dna_row or {}).get("dna_payload") or {"sku_name": sku_name}
+    planned = _pose_planner.process({"product_dna": product_dna}).get("pose_plans", [])
+    planned_by_idx = {int(p["pose_number"]): p for p in planned}
+
     job_id = f"job_{uuid.uuid4()}"
     session_id = f"session_{uuid.uuid4()}"
 
@@ -37,14 +60,15 @@ async def submit_generation_job(job_req: GenerationJobSubmit = Body(...)) -> Dic
                 """
                 INSERT INTO public.generation_jobs (
                     job_id, org_id, sku_name, session_id, status, total_poses,
-                    completed_poses, failed_poses, quality, pose_qa, aspect_ratio, image_size,
+                    completed_poses, failed_poses, provider, model, quality, pose_qa, aspect_ratio, image_size,
                     job_data, estimated_cost_usd
-                ) VALUES (%s, %s, %s, %s, 'queued', %s, 0, 0, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, 'queued', %s, 0, 0, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     job_id, org_id, sku_name, session_id, len(job_req.poses_to_generate),
-                    job_req.quality, job_req.pose_qa, job_req.aspect_ratio, job_req.image_size,
-                    json.dumps(job_req.model_dump()), 0.36
+                    selected_provider, selected_model, job_req.quality, job_req.pose_qa,
+                    job_req.aspect_ratio, job_req.image_size,
+                    json.dumps(job_req.model_dump()), est_cost
                 ),
             )
 
@@ -59,15 +83,18 @@ async def submit_generation_job(job_req: GenerationJobSubmit = Body(...)) -> Dic
             ]
 
             for idx in job_req.poses_to_generate:
-                p_title, p_type = pose_titles[idx - 1] if idx <= len(pose_titles) else ("Custom Pose", "custom")
+                p_plan = planned_by_idx.get(idx) or {}
+                p_title = p_plan.get("title") or (pose_titles[idx - 1][0] if idx <= len(pose_titles) else "Custom Pose")
+                p_type = p_plan.get("pose_type") or (pose_titles[idx - 1][1] if idx <= len(pose_titles) else "custom")
+                p_prompt = str(p_plan.get("prompt") or "")
                 gen_id = f"gen_{uuid.uuid4()}"
                 cur.execute(
                     """
                     INSERT INTO public.session_generations (
-                        session_id, generation_id, pose_index, title, pose_type, status, attempt_count
-                    ) VALUES (%s, %s, %s, %s, %s, 'pending', 0)
+                        session_id, generation_id, pose_index, title, pose_type, full_prompt, instructions, status, attempt_count
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending', 0)
                     """,
-                    (session_id, gen_id, idx, p_title, p_type),
+                    (session_id, gen_id, idx, p_title, p_type, p_prompt, job_req.extra_instructions or ""),
                 )
 
     # Mark active in cache
@@ -76,8 +103,7 @@ async def submit_generation_job(job_req: GenerationJobSubmit = Body(...)) -> Dic
     # Dispatch Celery background task
     try:
         process_generation_job_task.delay(job_id, org_id, sku_id)
-    except Exception as e:
-        # Fallback if Celery broker offline: still queued in DB
+    except Exception:
         pass
 
     return {
@@ -85,6 +111,8 @@ async def submit_generation_job(job_req: GenerationJobSubmit = Body(...)) -> Dic
         "job_id": job_id,
         "session_id": session_id,
         "sku_name": sku_name,
+        "provider": selected_provider,
+        "model": selected_model,
         "total_poses": len(job_req.poses_to_generate),
     }
 

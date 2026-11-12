@@ -2,7 +2,9 @@ import logging
 import re
 from typing import Dict, Any, List, Optional
 from models.qa import QAAgentEvaluation
+from models.evidence import PRODUCT_AUTHORITY_ROLES
 from database import save_qa_assessment
+from services.ai_clients import invoke_vision_json, load_reference_image
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +22,83 @@ def detect_anatomical_defect(text_feedback: str) -> bool:
     return False
 
 
+def _build_qa_prompt(pose_index: int, pose_type: str, product_dna: Dict[str, Any]) -> str:
+    family = product_dna.get("garment_family", "kurta_or_kurti_set")
+    bottom_cut = (product_dna.get("bottom_wear") or {}).get("cut_class", "straight")
+    main_color = product_dna.get("main_color", "unknown")
+    invariants = "; ".join(product_dna.get("explicit_invariants") or [])
+    return f"""You are a strict AI Fashion Photography Computer Vision QA Auditor.
+IMAGE 1 is the GENERATED catalog image for Pose {pose_index} ({pose_type}).
+Remaining images are the AUTHORITATIVE PRODUCT REFERENCES for SKU "{product_dna.get('sku_name', '')}" (family={family}, main_color={main_color}, bottom_cut={bottom_cut}).
+Invariants: {invariants}
+
+Evaluate strictly:
+1. ANATOMY: Does the model have strictly exactly 2 arms and 2 hands connected naturally? Any extra/third/floating hand or 6 fingers is an immediate defect.
+2. PRODUCT FIDELITY: Does color, fabric, pattern/butti geometry, neckline, and embroidery match authoritative product references?
+3. BOTTOM WEAR: For Saree -> unstitched drape ONLY, zero trousers/palazzos. For Farshi -> two-leg pleated salwar with joined hem (not tubular palazzo or circular skirt).
+4. POSE 5 ({pose_type}): If closeup, does it frame primary garment craft rather than secondary dupatta/accessory hijack?
+5. STYLE QUARANTINE: Did the model copy clothing from a backdrop/style reference instead of the uploaded product?
+
+Reply with STRICT JSON only:
+{{
+  "scores": {{
+    "model_face": 0-100,
+    "face_realism": 0-100,
+    "garment_identity": 0-100,
+    "colors": 0-100,
+    "fabric_texture": 0-100,
+    "print_pattern": 0-100,
+    "pattern_geometry": 0-100,
+    "embroidery_geometry": 0-100,
+    "bottom_wear": 0-100,
+    "front_back_design": 0-100,
+    "styling_continuity": 0-100,
+    "pose_requirement": 0-100
+  }},
+  "checks": {{
+    "model_face": "pass"|"fail",
+    "garment_identity": "pass"|"fail",
+    "colors": "pass"|"fail",
+    "bottom_wear": "pass"|"fail",
+    "front_back_design": "pass"|"fail",
+    "pose_requirement": "pass"|"fail"
+  }},
+  "anatomical_defect": true|false,
+  "style_quarantine_violation": true|false,
+  "notes": "detailed objective visual findings and any defect explanation"
+}}"""
+
+
 class ComputerVisionQAAgent:
-    """Rigorous region-based visual QA evaluator with anatomical veto and style quarantine enforcement."""
+    """Rigorous region-based visual QA evaluator with VLM comparison, anatomical veto, and style quarantine enforcement."""
+
+    def _run_live_vlm_qa(
+        self,
+        pose_index: int,
+        pose_type: str,
+        image_url: str,
+        product_dna: Dict[str, Any],
+        reference_images: Optional[List[Dict[str, Any]]],
+    ) -> Optional[Dict[str, Any]]:
+        generated_img = load_reference_image({"role": f"generated_pose_{pose_index}", "download_url": image_url})
+        if not generated_img:
+            return {"_missing_image": True}
+
+        images = [generated_img]
+        for ref in (reference_images or []):
+            role = str(ref.get("role") or "")
+            if role in PRODUCT_AUTHORITY_ROLES:
+                loaded_ref = load_reference_image(ref)
+                if loaded_ref:
+                    images.append(loaded_ref)
+            if len(images) >= 5:
+                break
+
+        prompt = _build_qa_prompt(pose_index, pose_type, product_dna)
+        res = invoke_vision_json(prompt, images, purpose="qa")
+        if res and isinstance(res.get("data"), dict):
+            return res["data"]
+        return None
 
     def evaluate(
         self,
@@ -34,11 +111,50 @@ class ComputerVisionQAAgent:
         image_url: str,
         product_dna: Dict[str, Any],
         ai_raw_evaluation: Optional[Dict[str, Any]] = None,
+        reference_images: Optional[List[Dict[str, Any]]] = None,
     ) -> QAAgentEvaluation:
-        ai_data = ai_raw_evaluation or {}
+        ai_data: Dict[str, Any] = ai_raw_evaluation if ai_raw_evaluation is not None else {}
 
-        # Default scores baseline
-        scores = ai_data.get("scores", {
+        if ai_raw_evaluation is None:
+            if not image_url:
+                evaluation = QAAgentEvaluation(
+                    overall_score=0.0,
+                    product_fidelity_score=0.0,
+                    scores={"garment_identity": 0.0, "pose_requirement": 0.0},
+                    checks={"garment_identity": "fail", "pose_requirement": "fail"},
+                    failed_checks=["missing_generated_image"],
+                    review_recommended=True,
+                    outcome="retry",
+                    correction_guidance="Generated pose image URL missing; regenerate frame before QA.",
+                )
+                return evaluation
+
+            live_result = self._run_live_vlm_qa(pose_index, pose_type, image_url, product_dna, reference_images)
+            if live_result and live_result.get("_missing_image"):
+                return QAAgentEvaluation(
+                    overall_score=0.0,
+                    product_fidelity_score=0.0,
+                    scores={"garment_identity": 0.0},
+                    checks={"garment_identity": "fail"},
+                    failed_checks=["unreadable_generated_image"],
+                    review_recommended=True,
+                    outcome="retry",
+                    correction_guidance="Could not download generated image for QA comparison.",
+                )
+            if live_result is None:
+                return QAAgentEvaluation(
+                    overall_score=0.0,
+                    product_fidelity_score=0.0,
+                    scores={"garment_identity": 0.0},
+                    checks={"garment_identity": "fail"},
+                    failed_checks=["qa_vision_unavailable"],
+                    review_recommended=True,
+                    outcome="retry",
+                    correction_guidance="No Vision LLM provider succeeded for automated CV QA; escalate or retry.",
+                )
+            ai_data = live_result
+
+        scores = {k: float(v) for k, v in (ai_data.get("scores") or {
             "model_face": 96.0,
             "face_realism": 95.0,
             "garment_identity": 98.0,
@@ -51,43 +167,39 @@ class ComputerVisionQAAgent:
             "front_back_design": 96.0,
             "styling_continuity": 98.0,
             "pose_requirement": 97.0,
-        })
-        checks = ai_data.get("checks", {k: "pass" for k in scores.keys()})
+        }).items()}
+        checks = dict(ai_data.get("checks") or {k: "pass" for k in scores.keys()})
 
-        # Behavioral checks
-        notes = ai_data.get("notes", "") or ai_data.get("reason", "")
-        anatomical_defect = detect_anatomical_defect(notes) or ai_data.get("anatomical_defect", False)
+        notes = str(ai_data.get("notes") or ai_data.get("reason") or "")
+        anatomical_defect = detect_anatomical_defect(notes) or bool(ai_data.get("anatomical_defect", False))
 
-        # Style reference quarantine check
-        style_violation = ai_data.get("style_quarantine_violation", False)
+        style_violation = bool(ai_data.get("style_quarantine_violation", False))
         if "style reference clothing" in notes.lower() or "copied reference outfit" in notes.lower():
             style_violation = True
 
-        # Bottom wear check (Farshi vs Palazzo, Saree vs Pants)
-        bottom_cut = product_dna.get("bottom_wear", {}).get("cut_class", "")
-        is_saree = product_dna.get("garment_family", "").lower() == "saree"
+        bottom_cut = (product_dna.get("bottom_wear") or {}).get("cut_class", "")
+        is_saree = str(product_dna.get("garment_family", "")).lower() == "saree"
         bottom_cut_mismatch = False
 
         if is_saree and pose_type in ["full_front", "angled", "side_seated", "back", "showcase"]:
             if any(k in notes.lower() for k in ["trousers", "pants", "palazzo", "salwar", "churidar", "jeans"]):
                 bottom_cut_mismatch = True
                 checks["bottom_wear"] = "fail"
-                scores["bottom_wear"] = 40.0
+                scores["bottom_wear"] = min(float(scores.get("bottom_wear", 40.0)), 40.0)
         elif bottom_cut == "farshi" and pose_type in ["full_front", "angled", "back", "showcase"]:
             if "palazzo" in notes.lower() or "skirt" in notes.lower() or "circular flare" in notes.lower():
                 bottom_cut_mismatch = True
                 checks["bottom_wear"] = "fail"
-                scores["bottom_wear"] = 55.0
+                scores["bottom_wear"] = min(float(scores.get("bottom_wear", 55.0)), 55.0)
 
-        # Pose 5 check: primary garment focus
         pose_failed = False
         if pose_type == "closeup":
             if "dupatta focus" in notes.lower() or "accessory hijack" in notes.lower():
                 pose_failed = True
                 checks["pose_requirement"] = "fail"
-                scores["pose_requirement"] = 50.0
+                scores["pose_requirement"] = min(float(scores.get("pose_requirement", 50.0)), 50.0)
 
-        guidance = notes if (anatomical_defect or style_violation or bottom_cut_mismatch or pose_failed) else "Approved listing grade"
+        guidance = notes if (anatomical_defect or style_violation or bottom_cut_mismatch or pose_failed or any(v == "fail" for v in checks.values())) else (notes or "Approved listing grade")
 
         evaluation = QAAgentEvaluation.evaluate_gates(
             scores=scores,
@@ -99,7 +211,6 @@ class ComputerVisionQAAgent:
             guidance=guidance,
         )
 
-        # Persist assessment in DB
         try:
             save_qa_assessment(
                 org_id=org_id,
@@ -120,6 +231,6 @@ class ComputerVisionQAAgent:
                 correction_guidance=evaluation.correction_guidance,
             )
         except Exception as e:
-            logger.warning(f"Could not persist QA assessment in DB: {e}")
+            logger.warning(f"Could not save QA assessment to DB: {e}")
 
         return evaluation

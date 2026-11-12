@@ -16,6 +16,8 @@ _pool: Optional[ConnectionPool] = None
 
 def get_pool() -> ConnectionPool:
     global _pool
+    if not settings.DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is not configured.")
     if _pool is None or _pool.closed:
         _pool = ConnectionPool(
             conninfo=settings.DATABASE_URL,
@@ -258,3 +260,57 @@ def search_knowledge_embeddings(
                     (category, category, limit),
                 )
             return cur.fetchall()
+
+
+def save_region_crop(
+    org_id: str,
+    evidence_id: str,
+    sku_id: str,
+    region_label: str,
+    bbox: Dict[str, int],
+    crop_storage_path: str,
+    crop_url: str,
+) -> str:
+    """Persist an extracted garment region crop linked to source evidence."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO public.product_region_crops (
+                    organization_id, evidence_id, sku_id, region_label,
+                    bbox, crop_storage_path, crop_url
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    org_id,
+                    evidence_id,
+                    sku_id,
+                    region_label,
+                    json.dumps(bbox),
+                    crop_storage_path,
+                    crop_url,
+                ),
+            )
+            row = cur.fetchone()
+            return str(row["id"]) if row else ""
+
+
+def get_checkpointer_metrics() -> Dict[str, Any]:
+    """Inspect PostgresSaver checkpoint tables and thread counts."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*)::int AS total_checkpoints,
+                       COUNT(DISTINCT thread_id)::int AS total_threads
+                FROM public.checkpoints
+                """
+            )
+            row = cur.fetchone() or {"total_checkpoints": 0, "total_threads": 0}
+            return {
+                "backend": "postgresql",
+                "tables_ready": True,
+                "total_checkpoints": int(row["total_checkpoints"]),
+                "total_threads": int(row["total_threads"]),
+            }

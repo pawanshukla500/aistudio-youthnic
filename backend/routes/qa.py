@@ -1,9 +1,14 @@
 from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, Depends
+from auth import verify_internal_secret
 from agents.qa_agent import ComputerVisionQAAgent
 from database import get_db
 
-router = APIRouter(prefix="/api/v1/qa", tags=["Computer Vision QA"])
+router = APIRouter(
+    prefix="/api/v1/qa",
+    tags=["Computer Vision QA"],
+    dependencies=[Depends(verify_internal_secret)],
+)
 qa_agent = ComputerVisionQAAgent()
 
 
@@ -29,6 +34,7 @@ async def evaluate_image_qa(payload: Dict[str, Any] = Body(...)) -> Dict[str, An
         image_url=image_url,
         product_dna=dna,
         ai_raw_evaluation=payload.get("ai_raw_evaluation"),
+        reference_images=payload.get("references"),
     )
 
     return {

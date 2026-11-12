@@ -44,3 +44,38 @@ def test_studio_workflow_execution():
     # 5. Route generation selected
     assert "provider_route" in final_state
     assert final_state["provider_route"]["image_provider"] == "openai"
+
+    # 6. Checkpoints persisted step-by-step in thread history
+    history = list(graph.get_state_history(config))
+    assert len(history) >= 5
+
+    # 7. QA failure -> correction_required / regeneration conditional branch
+    regen_state = graph.invoke(
+        {
+            **initial_state,
+            "qa_pose_index": 1,
+            "qa_pose_type": "full_front",
+            "ai_raw_evaluation": {"notes": "Rendered as tubular palazzo instead of pleated farshi salwar"},
+        },
+        config={"configurable": {"thread_id": "thread_test_regen_002"}},
+    )
+    assert regen_state["correction_decision"] == "regenerate"
+    assert regen_state["status"] == "regeneration_scheduled"
+    assert len(regen_state["corrections"]) == 1
+
+    # 8. QA pass -> learning recorded & completed
+    pass_state = graph.invoke(
+        {
+            **initial_state,
+            "qa_pose_index": 1,
+            "qa_pose_type": "full_front",
+            "ai_raw_evaluation": {
+                "scores": {"garment_identity": 98.0, "bottom_wear": 97.0},
+                "checks": {"garment_identity": "pass", "bottom_wear": "pass"},
+            },
+        },
+        config={"configurable": {"thread_id": "thread_test_pass_003"}},
+    )
+    assert pass_state["correction_decision"] == "pass"
+    assert pass_state["status"] == "completed"
+

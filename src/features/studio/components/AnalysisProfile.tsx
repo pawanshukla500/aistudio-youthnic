@@ -79,6 +79,8 @@ export function AnalysisProfile({
   current,
   onAnalyze,
   onImprovePosePlan,
+  dnaState,
+  onApproveDna,
   sceneDirection,
   onSceneDirectionChange,
   garmentSummary,
@@ -91,6 +93,8 @@ export function AnalysisProfile({
   current: boolean;
   onAnalyze: () => void;
   onImprovePosePlan: () => void;
+  dnaState?: { version?: number; approved?: boolean; threadId?: string; approving?: boolean } | null;
+  onApproveDna?: () => void;
   sceneDirection: string;
   onSceneDirectionChange: (value: string) => void;
   garmentSummary: string;
@@ -164,6 +168,24 @@ export function AnalysisProfile({
               <Aperture className="h-4 w-4 text-primary" />
               <span>Optimize 6-Pose Plan</span>
             </button>
+            {dnaState?.version ? (
+              dnaState.approved ? (
+                <span className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>Product DNA v{dnaState.version} Locked</span>
+                </span>
+              ) : onApproveDna ? (
+                <button
+                  type="button"
+                  onClick={onApproveDna}
+                  disabled={dnaState.approving}
+                  className="flex items-center gap-1.5 rounded-xl border border-emerald-600/30 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  {dnaState.approving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                  <span>Approve Product DNA v{dnaState.version}</span>
+                </button>
+              ) : null
+            ) : null}
           </div>
 
           {/* Director's notes: Scene direction */}

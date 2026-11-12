@@ -6,7 +6,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from database import get_pool
 from cache import get_valkey
-from routes import dna_router, generation_router, qa_router, memory_router, health_router
+from graph import get_postgres_checkpointer
+from routes import (
+    dna_router,
+    generation_router,
+    qa_router,
+    memory_router,
+    health_router,
+    workflow_router,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,10 +27,12 @@ logger = logging.getLogger("youthnic-studio-orchestrator")
 async def lifespan(app: FastAPI):
     logger.info("Initializing Youthnic AI Studio Orchestration Backend...")
     try:
-        pool = get_pool()
+        get_pool()
         logger.info("PostgreSQL connection pool initialized.")
+        get_postgres_checkpointer()
+        logger.info("LangGraph PostgresSaver checkpointer verified.")
     except Exception as e:
-        logger.error(f"Failed to initialize PostgreSQL pool: {e}")
+        logger.error(f"Failed to initialize PostgreSQL pool/checkpointer: {e}")
 
     try:
         r = get_valkey()
@@ -44,11 +54,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Youthnic AI Fashion Studio Orchestrator",
     version="2.0.0",
-    description="Agentic Multi-Agent AI Fashion Photography Orchestrator with Product DNA V2 and CV QA",
+    description="Agentic Multi-Agent AI Fashion Photography Orchestrator with Product DNA V2, LangGraph Postgres Checkpointing, and CV QA",
     lifespan=lifespan,
 )
 
-# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -57,12 +66,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount API Routers
 app.include_router(health_router)
 app.include_router(dna_router)
 app.include_router(generation_router)
 app.include_router(qa_router)
 app.include_router(memory_router)
+app.include_router(workflow_router)
 
 
 @app.get("/")
@@ -71,6 +80,7 @@ async def root():
         "service": "Youthnic AI Fashion Studio Orchestration API",
         "version": "2.0.0",
         "status": "online",
+        "engines": ["langgraph", "langchain", "celery", "pgvector", "valkey"],
         "docs": "/docs",
     }
 

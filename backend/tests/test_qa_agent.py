@@ -63,3 +63,4 @@ def test_qa_agent_veto_on_farshi_palazzo_substitution():
     assert eval_res.bottom_cut_mismatch is True
     assert eval_res.outcome == "retry"
     assert eval_res.scores["bottom_wear"] < 60.0
+

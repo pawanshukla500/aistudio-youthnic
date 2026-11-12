@@ -1,10 +1,15 @@
 from typing import Dict, Any, List
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Depends
+from auth import verify_internal_secret
 from database import search_knowledge_embeddings
 from agents.learning_agent import LearningOptimizationAgent
 from agents.correction_agent import CorrectionAgent
 
-router = APIRouter(prefix="/api/v1/memory", tags=["Knowledge & Memory"])
+router = APIRouter(
+    prefix="/api/v1/memory",
+    tags=["Knowledge & Memory"],
+    dependencies=[Depends(verify_internal_secret)],
+)
 learning_agent = LearningOptimizationAgent()
 correction_agent = CorrectionAgent()
 
@@ -56,3 +61,4 @@ async def record_user_feedback(payload: Dict[str, Any] = Body(...)) -> Dict[str,
     )
 
     return {"status": "feedback_recorded", "promoted_rule_type": rule_type}
+

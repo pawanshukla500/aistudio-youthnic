@@ -65,3 +65,26 @@ def test_qa_evaluate_endpoint():
     data = response.json()
     assert data["status"] == "evaluated"
     assert data["outcome"] == "pass"
+
+
+def test_internal_api_auth_enforcement(monkeypatch):
+    from config import settings
+
+    monkeypatch.setattr(settings, "INTERNAL_API_SECRET", "super_secret_test_token")
+
+    # Public health endpoints must stay reachable without internal auth
+    assert client.get("/health").status_code == 200
+    assert client.get("/readiness").status_code == 200
+
+    # Protected /api/v1/* endpoints reject missing or wrong secret
+    assert client.get("/api/v1/workflows/overview").status_code == 401
+    assert client.get("/api/v1/workflows/overview", headers={"x-internal-secret": "wrong"}).status_code == 401
+
+    # Valid secret succeeds via header or Bearer token
+    ok_res = client.get("/api/v1/workflows/overview", headers={"x-internal-secret": "super_secret_test_token"})
+    assert ok_res.status_code == 200
+    assert ok_res.json()["engine"] == "langgraph"
+
+    bearer_res = client.get("/api/v1/workflows/overview", headers={"Authorization": "Bearer super_secret_test_token"})
+    assert bearer_res.status_code == 200
+

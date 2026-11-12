@@ -193,9 +193,12 @@ function validateFile(file: File) {
 export function Studio() {
   const { organization, user } = useWorkspace();
   const analyzeReferences = useAction(api.analysis.analyzeReferences);
+  const extractDna = useMutation(api.dna.extract);
+  const approveDna = useMutation(api.dna.approve);
   const updateStylingPlan = useMutation(api.styling.updateSessionPlan);
   const queueSku = useMutation(api.generation.queueSku);
   const cancelJob = useMutation(api.jobs.cancel);
+  const [dnaState, setDnaState] = useState<{ version?: number; approved?: boolean; threadId?: string; approving?: boolean } | null>(null);
 
   const [productReferences, setProductReferences] = useState<Partial<Record<ProductReferenceRole, StudioReference>>>({});
   const [styleReferences, setStyleReferences] = useState<StudioReference[]>([]);
@@ -522,6 +525,29 @@ export function Studio() {
       if (analysisRequestRef.current !== requestId || latestAnalysisKeyRef.current !== sourceKey) return;
       setAnalysis(result);
       setPoses(result.posePlan);
+      void extractDna({
+        sku_id: effectiveSkuId,
+        sku_name: effectiveSkuName,
+        category,
+        references: uploaded.map((reference) => ({
+          role: reference.role,
+          downloadUrl: reference.downloadUrl,
+          storagePath: reference.storagePath,
+          hash: reference.hash,
+          mimeType: reference.file.type,
+        })),
+        force_refresh: forceRefresh,
+      })
+        .then((dnaRes: any) => {
+          if (analysisRequestRef.current === requestId && dnaRes?.product_dna) {
+            setDnaState({
+              version: Number(dnaRes.product_dna.version || 1),
+              approved: Boolean(dnaRes.product_dna.approved),
+              threadId: dnaRes.thread_id,
+            });
+          }
+        })
+        .catch(() => undefined);
       const detectedSaree = result.productIdentity.garmentFamily?.trim().toLowerCase() === "saree";
       if (detectedSaree && !isSareeCategory) {
         promoteDetectedSareeReferences();
@@ -567,6 +593,19 @@ export function Studio() {
   const handleImprovePosePlan = () => {
     if (autoAnalyzeTimerRef.current) clearTimeout(autoAnalyzeTimerRef.current);
     void runAnalysis(analysisInputKey, false, true);
+  };
+
+  const handleApproveDna = async () => {
+    if (!effectiveSkuId || !dnaState?.version) return;
+    setDnaState((cur) => (cur ? { ...cur, approving: true } : cur));
+    try {
+      await approveDna({ sku_id: effectiveSkuId, version: dnaState.version });
+      setDnaState((cur) => (cur ? { ...cur, approved: true, approving: false } : cur));
+      setNotice({ tone: "success", text: `Product DNA V2 v${dnaState.version} approved and locked as immutable product truth.` });
+    } catch (reason) {
+      setDnaState((cur) => (cur ? { ...cur, approving: false } : cur));
+      setNotice({ tone: "error", text: reason instanceof Error ? reason.message : "Could not approve Product DNA V2." });
+    }
   };
 
   const runAnalysisRef = useRef(runAnalysis);
@@ -1060,6 +1099,8 @@ export function Studio() {
             current={analysisIsCurrent}
             onAnalyze={handleAnalyze}
             onImprovePosePlan={handleImprovePosePlan}
+            dnaState={dnaState}
+            onApproveDna={handleApproveDna}
             sceneDirection={sceneDirectionValue}
             onSceneDirectionChange={(value) => updateText(setSceneDirectionNote, value)}
             garmentSummary={garmentSummaryValue}

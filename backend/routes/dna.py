@@ -1,11 +1,16 @@
 from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, Depends
+from auth import verify_internal_secret
 from models.dna_v2 import ProductDNAV2
 from database import get_latest_dna_version, list_dna_versions, approve_dna_version
 from graph import get_compiled_graph
 from cache import cache_manager
 
-router = APIRouter(prefix="/api/v1/dna", tags=["Product DNA V2"])
+router = APIRouter(
+    prefix="/api/v1/dna",
+    tags=["Product DNA V2"],
+    dependencies=[Depends(verify_internal_secret)],
+)
 
 
 @router.post("/extract")
@@ -20,22 +25,28 @@ async def extract_product_dna(payload: Dict[str, Any] = Body(...)) -> Dict[str, 
         raise HTTPException(status_code=400, detail="sku_id is required")
 
     graph = get_compiled_graph()
+    thread_id = f"thread_dna_{org_id}_{sku_id}"
     initial_state = {
         "organization_id": org_id,
         "sku_id": sku_id,
         "sku_name": sku_name,
         "references": references,
-        "main_color": payload.get("main_color", "royal_purple"),
+        "category": payload.get("category", "ethnic/fusion"),
+        "garment_family": payload.get("garment_family", ""),
+        "main_color": payload.get("main_color", "unknown"),
+        "force_refresh": bool(payload.get("force_refresh", False)),
+        "auto_approve": bool(payload.get("auto_approve", False)),
         "poses_to_generate": [1, 2, 3, 4, 5, 6],
     }
 
-    config = {"configurable": {"thread_id": f"thread_dna_{org_id}_{sku_id}"}}
+    config = {"configurable": {"thread_id": thread_id}}
     final_state = graph.invoke(initial_state, config=config)
     dna = final_state.get("product_dna", {})
 
     return {
         "status": "success",
         "sku_id": sku_id,
+        "thread_id": thread_id,
         "product_dna": dna,
         "pose_plans_count": len(final_state.get("pose_plans", [])),
     }

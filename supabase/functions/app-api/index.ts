@@ -8256,14 +8256,30 @@ async function importMigrationArchiveOperation(request: Request, args: JsonRecor
   return { imported: rows.length };
 }
 
+function fastApiBaseUrl() {
+  const raw = (Deno.env.get("RAILWAY_SERVICE_FASTAPI_URL") || "fastapi-production-609c2b82.up.railway.app").trim().replace(/\/+$/, "");
+  return raw.startsWith("http://") || raw.startsWith("https://") ? raw : `https://${raw}`;
+}
+
+function fastApiHeaders(includeJson = true): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (includeJson) headers["Content-Type"] = "application/json";
+  const secret = Deno.env.get("CATALOG_WORKER_SECRET")?.trim();
+  if (secret) headers["x-internal-secret"] = secret;
+  return headers;
+}
+
 async function dnaExtractOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
-  const fastApiUrl = Deno.env.get("RAILWAY_SERVICE_FASTAPI_URL") || "fastapi-production-609c2b82.up.railway.app";
-  const endpoint = fastApiUrl.startsWith("http") ? `${fastApiUrl}/api/v1/dna/extract` : `https://${fastApiUrl}/api/v1/dna/extract`;
-  const response = await fetch(endpoint, {
+  const response = await fetch(`${fastApiBaseUrl()}/api/v1/dna/extract`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...args, organization_id: workspace.organization.id }),
+    headers: fastApiHeaders(true),
+    body: JSON.stringify({
+      ...args,
+      sku_id: String(args.sku_id || args.skuId || ""),
+      sku_name: String(args.sku_name || args.skuName || args.sku_id || args.skuId || "Garment"),
+      organization_id: workspace.organization.id,
+    }),
   });
   if (!response.ok) {
     const err = await response.text();
@@ -8275,9 +8291,10 @@ async function dnaExtractOperation(request: Request, args: JsonRecord) {
 async function dnaGetOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.view");
   const skuId = String(args.skuId || args.sku_id || "");
-  const fastApiUrl = Deno.env.get("RAILWAY_SERVICE_FASTAPI_URL") || "fastapi-production-609c2b82.up.railway.app";
-  const endpoint = fastApiUrl.startsWith("http") ? `${fastApiUrl}/api/v1/dna/${encodeURIComponent(skuId)}?org_id=${workspace.organization.id}` : `https://${fastApiUrl}/api/v1/dna/${encodeURIComponent(skuId)}?org_id=${workspace.organization.id}`;
-  const response = await fetch(endpoint);
+  const response = await fetch(
+    `${fastApiBaseUrl()}/api/v1/dna/${encodeURIComponent(skuId)}?org_id=${encodeURIComponent(workspace.organization.id)}`,
+    { headers: fastApiHeaders(false) },
+  );
   if (!response.ok) {
     const err = await response.text();
     throw new Error(`DNA retrieval failed (${response.status}): ${err}`);
@@ -8287,16 +8304,48 @@ async function dnaGetOperation(request: Request, args: JsonRecord) {
 
 async function dnaApproveOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.approve");
-  const fastApiUrl = Deno.env.get("RAILWAY_SERVICE_FASTAPI_URL") || "fastapi-production-609c2b82.up.railway.app";
-  const endpoint = fastApiUrl.startsWith("http") ? `${fastApiUrl}/api/v1/dna/approve` : `https://${fastApiUrl}/api/v1/dna/approve`;
-  const response = await fetch(endpoint, {
+  const response = await fetch(`${fastApiBaseUrl()}/api/v1/dna/approve`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...args, organization_id: workspace.organization.id, approved_by: workspace.user.email }),
+    headers: fastApiHeaders(true),
+    body: JSON.stringify({
+      ...args,
+      sku_id: String(args.sku_id || args.skuId || ""),
+      organization_id: workspace.organization.id,
+      approved_by: workspace.user.email,
+    }),
   });
   if (!response.ok) {
     const err = await response.text();
     throw new Error(`DNA approval failed (${response.status}): ${err}`);
+  }
+  return response.json();
+}
+
+async function workflowsOverviewOperation(request: Request) {
+  await workspaceFor(request, "planning.view");
+  const response = await fetch(`${fastApiBaseUrl()}/api/v1/workflows/overview`, {
+    headers: fastApiHeaders(false),
+  });
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Workflow overview failed (${response.status}): ${err}`);
+  }
+  return response.json();
+}
+
+async function workflowCheckpointsOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "planning.view");
+  const skuId = String(args.skuId || args.sku_id || "");
+  const threadId = String(args.threadId || args.thread_id || (skuId ? `thread_dna_${workspace.organization.id}_${skuId}` : ""));
+  const path = threadId
+    ? `/api/v1/workflows/checkpoints/${encodeURIComponent(threadId)}`
+    : "/api/v1/workflows/threads";
+  const response = await fetch(`${fastApiBaseUrl()}${path}`, {
+    headers: fastApiHeaders(false),
+  });
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Workflow checkpoints failed (${response.status}): ${err}`);
   }
   return response.json();
 }
@@ -8315,6 +8364,8 @@ const appRequestHandler = async (request: Request) => {
       "dna.extract": () => dnaExtractOperation(request, args),
       "dna.get": () => dnaGetOperation(request, args),
       "dna.approve": () => dnaApproveOperation(request, args),
+      "workflows.overview": () => workflowsOverviewOperation(request),
+      "workflows.checkpoints": () => workflowCheckpointsOperation(request, args),
       "studio.analyze": () => analyze(request, args),
       "studio.queue": () => queueGeneration(request, args),
       "jobs.clone": () => cloneJob(request, args),

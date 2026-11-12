@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, Any, List
 from database import search_knowledge_embeddings, get_db
+from services.ai_clients import embed_text
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +20,16 @@ class KnowledgeMemoryAgent:
 
         guidance_rules: List[str] = []
 
-        # 1. Fetch category guidance from DB
+        # 1. Fetch category guidance & pgvector embeddings from DB
         try:
+            query_text = f"{garment_family} {category} {bottom_cut} {dna.get('main_color', '')}".strip()
+            vec = embed_text(query_text)
+            if vec:
+                vec_matches = search_knowledge_embeddings(category=category, query_embedding=vec, limit=3)
+                for m in vec_matches:
+                    if m.get("content") and m["content"] not in guidance_rules:
+                        guidance_rules.append(m["content"])
+
             with get_db() as conn:
                 with conn.cursor() as cur:
                     # Query active fashion knowledge base
