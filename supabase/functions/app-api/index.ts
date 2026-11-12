@@ -8372,7 +8372,7 @@ async function warmFastApiProductDna(input: {
             role: ref.role,
             downloadUrl: ref.downloadUrl,
             storagePath: ref.storagePath,
-            hash: ref.sha256,
+            hash: ref.hash,
             mimeType: ref.mimeType,
           })),
           force_refresh: false,
