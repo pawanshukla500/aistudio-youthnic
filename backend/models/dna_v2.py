@@ -1,3 +1,4 @@
+import re
 from typing import List, Dict, Optional, Literal, Any
 from pydantic import BaseModel, Field, model_validator
 
@@ -137,7 +138,7 @@ class ProductDNAV2(BaseModel):
     @model_validator(mode="after")
     def validate_dna_consistency(self) -> "ProductDNAV2":
         # Saree validation
-        if self.garment_family.lower() == "saree" or "saree" in self.sku_name.lower() or "sari" in self.sku_name.lower():
+        if self.garment_family.lower() == "saree" or bool(re.search(r"\b(?:sarees?|sari)\b", self.sku_name.lower())):
             self.garment_family = "saree"
             self.bottom_wear.has_bottom_wear = False
             self.bottom_wear.classification = "none"

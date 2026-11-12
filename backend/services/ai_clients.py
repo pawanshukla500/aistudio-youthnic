@@ -118,15 +118,20 @@ def _download_public_image_bounded(url: str, timeout_s: int = 20) -> bytes:
             req = client.build_request("GET", pinned_url, headers=headers)
             if parsed.scheme == "https" and host:
                 req.extensions["sni_hostname"] = host
-            with client.send(req, stream=True) as resp:
+            resp = client.send(req, stream=True)
+            try:
                 if 300 <= resp.status_code < 400 and resp.headers.get("location"):
                     current = urljoin(current, resp.headers["location"])
                     continue
                 if resp.status_code != 200:
                     return b""
                 content_len = resp.headers.get("content-length")
-                if content_len and int(content_len) > MAX_DOWNLOAD_BYTES:
-                    raise RuntimeError(f"Remote image exceeds {MAX_DOWNLOAD_BYTES} byte limit")
+                if content_len:
+                    try:
+                        if int(content_len) > MAX_DOWNLOAD_BYTES:
+                            raise RuntimeError(f"Remote image exceeds {MAX_DOWNLOAD_BYTES} byte limit")
+                    except ValueError:
+                        pass
                 chunks: List[bytes] = []
                 total = 0
                 for chunk in resp.iter_bytes(chunk_size=65536):
@@ -135,6 +140,8 @@ def _download_public_image_bounded(url: str, timeout_s: int = 20) -> bytes:
                         raise RuntimeError(f"Remote image stream exceeded {MAX_DOWNLOAD_BYTES} byte limit")
                     chunks.append(chunk)
                 return b"".join(chunks)
+            finally:
+                resp.close()
     return b""
 
 

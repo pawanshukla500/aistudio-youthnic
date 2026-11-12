@@ -54,7 +54,7 @@ CRITICAL RULES:
 1. Extract ONLY attributes visibly proven in these authoritative product images. Any attribute not clearly visible must be marked "unknown" (never guess or invent back details from front images).
 2. Scan ALL uploaded product slots (including mannequin/flat-lay and additional_product) for an included dupatta, stole, or shawl; record it if shown, while keeping top-only kurtis strictly top-only ("has_bottom_wear": false, "cut_class": "none").
 3. For Sarees: preserve drape style, pallu artwork, zari border width/weave, body butti, blouse neckline/sleeves, and enforce no trousers/pants.
-4. For Farshi Salwars ONLY: preserve two-leg construction, waist pleats + side-joint pleats, narrow hem relative to waist fullness, and 6-inch joined hem panel tapering 4 inches inward from upper hem seam. Never apply Farshi taper rules to non-Farshi cuts (palazzo, sharara, churidar, straight trouser, skirt).
+4. For Farshi Salwars ONLY: classify as "farshi" whenever the SKU/notes name farshi/farsi/fasi OR the bottom-wear photo shows waist/hip-yoke pleats plus a distinct ~5-7 inch horizontal joined hem cuff/panel separated by a horizontal seam, gota, piping, or lace joint above the ankle (even on a flatlay where cuff stripes reverse angle or taper softly). For Farshi, preserve two-leg construction, waist pleats + side-joint pleats, narrow hem relative to waist fullness, and a 6-inch joined hem panel tapering 4 inches inward from upper hem seam. Never apply Farshi taper rules to unbroken plain palazzos, shararas, churidars, straight trousers, or skirts.
 
 Reply with STRICT JSON only matching this schema:
 {{
@@ -175,9 +175,13 @@ class ProductDNAAgent:
             explicit_non_farshi = {"straight", "palazzo", "sharara", "churidar", "skirt"}
             cut = str(bw_raw.get("cut_class") or "").lower().strip()
             has_bottom_wear = (
-                bool(bw_raw.get("has_bottom_wear"))
-                if "has_bottom_wear" in bw_raw
-                else (has_bottom_ref or is_farshi_hint or (family == "kurta_or_kurti_set" and cut not in {"", "none"}))
+                has_bottom_ref
+                or is_farshi_hint
+                or (
+                    bool(bw_raw.get("has_bottom_wear"))
+                    if "has_bottom_wear" in bw_raw
+                    else (family == "kurta_or_kurti_set" and cut not in {"", "none"})
+                )
             )
             if not has_bottom_wear:
                 cut = "none"
@@ -190,17 +194,26 @@ class ProductDNAAgent:
             elif cut not in allowed_cuts or not cut:
                 cut = "unknown"
 
+            raw_classification = str(bw_raw.get("classification") or "").strip()
+            if not has_bottom_wear:
+                classification = "none"
+            elif cut == "farshi":
+                classification = raw_classification if re.search(r"\b(?:farshi|farsi)\b", raw_classification, re.I) else "Farshi Salwar"
+            elif cut in explicit_non_farshi:
+                classification = cut.title()
+            else:
+                classification = raw_classification or cut.title()
+
+            raw_two_leg = bw_raw.get("two_leg_construction")
+            raw_joined_hem = bw_raw.get("joined_hem")
             bottom = BottomWearArchitecture(
                 has_bottom_wear=has_bottom_wear,
-                classification=str(
-                    (cut.title() if cut in explicit_non_farshi else bw_raw.get("classification"))
-                    or ("Farshi Salwar" if cut == "farshi" else ("none" if not has_bottom_wear else cut.title()))
-                ),
+                classification=classification,
                 cut_class=cut,  # type: ignore[arg-type]
-                two_leg_construction=bool(bw_raw.get("two_leg_construction", has_bottom_wear and cut != "skirt")),
+                two_leg_construction=bool(raw_two_leg) if raw_two_leg is not None else (has_bottom_wear and cut != "skirt"),
                 waist_structure=str(bw_raw.get("waist_structure") or ("unknown" if has_bottom_wear else "none")),
                 flare_volume=str(bw_raw.get("flare_volume") or ("unknown" if has_bottom_wear else "none")),
-                joined_hem=bool(bw_raw.get("joined_hem", cut == "farshi")),
+                joined_hem=bool(raw_joined_hem) if raw_joined_hem is not None else (cut == "farshi"),
                 hem_trim=str(bw_raw.get("hem_trim") or ("unknown" if has_bottom_wear else "none")),
                 fabric_color=str(bw_raw.get("fabric_color") or ("matching" if has_bottom_wear else "none")),
                 print_and_motifs=str(bw_raw.get("print_and_motifs") or ("unknown" if has_bottom_wear else "none")),
@@ -461,7 +474,7 @@ class ProductDNAAgent:
         ]
 
         is_saree = (
-            any(k in sku_name.lower() for k in ["saree", "sari"])
+            bool(re.search(r"\b(?:sarees?|sari)\b", sku_name.lower()))
             or any("saree" in str(r.get("role", "")).lower() for r in references)
             or str(state.get("garment_family", "")).lower() == "saree"
         )

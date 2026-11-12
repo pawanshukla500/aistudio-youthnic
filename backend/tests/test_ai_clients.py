@@ -1,5 +1,4 @@
 import base64
-from unittest.mock import MagicMock
 from agents.qa_agent import ComputerVisionQAAgent
 from agents.dna_agent import ProductDNAAgent
 from services.ai_clients import invoke_vision_json, generate_catalog_image, normalize_image_size
@@ -198,4 +197,46 @@ def test_ssrf_and_storage_path_tenant_guards():
 
     from services.ai_clients import _is_allowed_local_path
     assert _is_allowed_local_path("/etc/passwd") is False
+
+
+def test_download_public_image_bounded_streams_without_context_manager(monkeypatch):
+    from services.ai_clients import _download_public_image_bounded
+
+    closed = {"flag": False}
+
+    class NonContextResponse:
+        status_code = 200
+        headers = {"content-length": "6"}
+
+        def iter_bytes(self, chunk_size=65536):
+            yield b"img"
+            yield b"123"
+
+        def close(self):
+            closed["flag"] = True
+
+    class FakeHttpClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def build_request(self, method, url, headers=None):
+            class Req:
+                extensions = {}
+            return Req()
+
+        def send(self, req, stream=True):
+            return NonContextResponse()
+
+    monkeypatch.setattr("services.ai_clients._resolve_safe_public_ip", lambda url: "93.184.216.34")
+    monkeypatch.setattr("services.ai_clients.httpx.Client", FakeHttpClient)
+
+    out = _download_public_image_bounded("https://firebasestorage.googleapis.com/v0/b/test/o/img.jpg?alt=media")
+    assert out == b"img123"
+    assert closed["flag"] is True
 
