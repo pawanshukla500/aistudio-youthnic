@@ -36,6 +36,19 @@ Deno.test("vision cost subtracts cached tokens and uses Luna public rates", () =
   assertEquals(calculated.costSource, "estimated_public_rates_2026-07");
 });
 
+Deno.test("vision cost calculates GPT 6.1 Terra rates and cached tokens", () => {
+  const calculated = extractVisionUsageAndCost({
+    usage: {
+      prompt_tokens: 12000,
+      completion_tokens: 800,
+      prompt_tokens_details: { cached_tokens: 2000 },
+    },
+  }, "openai", "gpt-6.1-terra");
+  assertEquals(calculated.cachedTok, 2000);
+  assertAlmostEquals(calculated.costUsd, (10000 * 1.25 + 2000 * 0.125 + 800 * 5.00) / 1_000_000, 1e-8);
+  assertEquals(calculated.costSource, "estimated_public_rates_2026-11");
+});
+
 Deno.test("vision cost calculates Meta Muse Spark Contributor low rates and cached tokens", () => {
   const calculated12 = extractVisionUsageAndCost({
     usage: {

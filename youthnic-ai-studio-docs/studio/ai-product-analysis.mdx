@@ -5,7 +5,7 @@ description: "How Youthnic AI Studio's multi-modal vision engine decomposes uplo
 
 # AI Product Analysis
 
-Before generating a photoshoot, Youthnic AI Studio runs **AI Product Analysis** (`analyzeGarment`). This process extracts geometric, structural, textile, and color features from your uploaded references, building a technical fashion specification that guides the generative models.
+Before generating a photoshoot, Youthnic AI Studio runs **AI Product Analysis** (`studio.analyze` + Product DNA V2 via LangGraph/FastAPI). Using **Meta Muse Spark (`high` thinking)** with **OpenAI GPT 6.1 Terra (`high` thinking)** fallback, it extracts geometric, structural, textile, and color features from your uploaded references (while strictly quarantining style-reference clothing) to build an immutable technical fashion profile and 6-pose choreography.
 
 ```mermaid
 graph TD

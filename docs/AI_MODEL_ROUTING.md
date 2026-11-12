@@ -5,9 +5,7 @@ Which model does which job, who decides, and what happens when a model fails.
 ## The rule
 
 **The models saved in Administration → AI models are the models that run.** Code never
-inserts another model ahead of them, never swaps one for another, never drops one from
-the chain, and never rewrites the saved policy. When there is no saved policy, the
-defaults below apply.
+inserts another model ahead of them or swaps one saved model for another. When `product_truth` uses Meta primary + OpenAI fallback, `resolveVisionPolicy` appends a secondary OpenAI safety-net (`GPT 5.6 Luna` or `GPT 6.1 Terra`) at the end of the fallback chain for reliability. When there is no saved policy, the defaults below apply.
 
 Earlier versions broke this rule in several ways, and none of them may come back:
 
@@ -34,9 +32,9 @@ can be saved or called.
 ## Order and fallback
 
 For a vision purpose, the chain is `[primary, ...fallbacks]` as saved or resolved
-(`productTruthRouteChain`). When Meta Muse Spark is primary and OpenAI Luna is the first fallback,
-the system automatically wires OpenAI GPT-5.6 Terra as the third fallback safety net so that
-Terra's expensive compute is only tapped if both low-cost models fail. Administration refuses to
+(`productTruthRouteChain`). When Meta Muse Spark is primary and OpenAI GPT 6.1 Terra is the
+first fallback for `product_truth`, the system also wires OpenAI GPT 5.6 Luna as secondary safety
+net (or GPT 6.1 Terra when Luna is saved as first fallback). Administration refuses to
 save a fallback identical to the primary ("Choose a different fallback provider or model."). If an older
 stored row has an identical primary and fallback route, it deduplicates to avoid redundant retries.
 
@@ -60,13 +58,9 @@ message naming the secret (`META_MODEL_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_K
 ## Reasoning effort for product analysis
 
 Product analysis is one large multimodal JSON call that must finish inside Studio's 180s wait.
-Heavy models (Terra, Flash, Sol, Muse Spark) run at **low** reasoning (or the provider's lowest
-supported level) to fit that budget. Explicit "none" or "minimal" is preserved. OpenAI Luna
-is lightweight and cost-efficient (~$0.20 / $1.20 per 1M tokens); when explicitly configured
-with **high** thinking as primary, it preserves high thinking to provide thorough chain-of-thought
-reasoning across scene, styling, and 6-pose plans without timing out. When any hop runs under
-a tight fallback deadline (`timeoutMs < 60s`), thinking is dynamically clamped to **low**
-(`clampProductTruthHopThinking`) to ensure it answers in 10-15s and never starves subsequent fallbacks.
+- **Meta Muse Spark** (`muse-spark-1.2-contributor` / `1.3-contributor` / `1.3` / `1.2`), **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra`), and **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna`) preserve **high** thinking (`clampProductTruthThinking`) during `product_truth` analysis & pose planning for deep chain-of-thought reasoning across garment construction, Farshi/saree drape taxonomy, styling, and 6-pose choreography.
+- Legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, `gemini-*`) run at **low** reasoning (or lowest supported level; explicit `"none"` or `"minimal"` is preserved; Qwen runs with thinking off).
+- When any hop runs under an emergency tight deadline (`timeoutMs < 60s`), thinking is dynamically clamped to **low** (`clampProductTruthHopThinking`) to avoid timeout cascades while still letting Meta/Terra run at `high` under standard failover budgets.
 QA keeps its saved reasoning, except that Gemini Flash models run at low.
 
 ## Time budget (product analysis)
@@ -122,9 +116,9 @@ OpenAI and Meta Muse Spark vision calls support dual protocols. The first protoc
 
 | Purpose | Primary | Fallback |
 | --- | --- | --- |
-| `product_truth` | Meta `muse-spark-1.2-contributor` (low), or OpenAI `gpt-5.6-luna` when Meta key is not set | Hop 1: OpenAI `gpt-5.6-luna` (high thinking) · Hop 2: OpenAI `gpt-5.6-terra` (low) |
-| `qa` | OpenAI `gpt-5.6-luna` | OpenAI `gpt-5.6-terra` |
-| `image_generation` | OpenAI `gpt-image-2.5-flare-2026-09-08` | — |
+| `product_truth` | Meta `muse-spark-1.2-contributor` (`high`), or OpenAI `gpt-6.1-terra` (`high`) when Meta key is not set | Hop 1: OpenAI `gpt-6.1-terra` (`high`) · Hop 2: OpenAI `gpt-5.6-luna` (`high`/`low`) |
+| `qa` | Meta `muse-spark-1.2-contributor` (`low`) or OpenAI `gpt-5.6-luna` | OpenAI `gpt-5.6-luna` / `gpt-6.1-terra` |
+| `image_generation` | OpenAI `gpt-image-2.6-sunburst` | — |
 
 See [MEMORY.md](../MEMORY.md) and [AGENTS.md](../AGENTS.md) for core architectural memory and PR 131 product truth contracts.
 

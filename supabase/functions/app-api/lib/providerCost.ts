@@ -78,6 +78,7 @@ export const GEMINI_PRICING: Record<string, VisionTokenRates> = {
 };
 
 export const OPENAI_VISION_PRICING: Record<string, VisionTokenRates> = {
+  "gpt-6.1-terra": { input: 1.25, output: 5.00, cached: 0.125, version: "2026-11", source: "openai_standard_gpt61_terra" },
   "gpt-5.6-luna": { input: 0.20, output: 1.20, cached: 0.02, version: "2026-07", source: "openai_standard_luna" },
   "gpt-5.6-sol": { input: 2.50, output: 10.00, cached: 0.25, version: "2025-01", source: "openai_standard_sol" },
   "gpt-5.6-terra": { input: 1.25, output: 5.00, cached: 0.125, version: "2025-01", source: "openai_standard_terra" },

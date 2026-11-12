@@ -51,8 +51,43 @@ def test_meta_muse_spark_sibling_retry_uses_canonical_input(monkeypatch):
     assert result is not None
     assert result["provider"] == "meta"
     assert result["model"] == "muse-spark-1.3-contributor"
+    assert result["reasoning"] == "high"
     assert calls[0]["json"]["input"][0]["role"] == "user"
-    assert calls[0]["json"]["reasoning"] == {"effort": "low"}
+    assert calls[0]["json"]["reasoning"] == {"effort": "high"}
+
+
+def test_invoke_vision_json_falls_back_to_gpt61_terra_high_for_analysis(monkeypatch):
+    monkeypatch.setattr(settings, "META_MODEL_API_KEY", "meta_test_key")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test-key")
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
+
+    def fail_meta(*args, **kwargs):
+        raise RuntimeError("Meta unavailable")
+
+    openai_calls = []
+
+    def fake_openai(prompt, images, model="gpt-5.6-luna", reasoning_effort="high", timeout_s=60):
+        openai_calls.append((model, reasoning_effort))
+        return {
+            "provider": "openai",
+            "model": model,
+            "reasoning": reasoning_effort,
+            "data": {"garment_family": "kurti_set"},
+        }
+
+    monkeypatch.setattr("services.ai_clients._meta_vision_json", fail_meta)
+    monkeypatch.setattr("services.ai_clients._langchain_openai_vision_json", fake_openai)
+
+    result = invoke_vision_json(
+        "Extract kurti DNA",
+        [{"role": "front_product", "mime_type": "image/jpeg", "base64": "YWJj"}],
+        purpose="product_truth",
+    )
+    assert result is not None
+    assert result["provider"] == "openai"
+    assert result["model"] == "gpt-6.1-terra"
+    assert result["reasoning"] == "high"
+    assert openai_calls == [("gpt-6.1-terra", "high")]
 
 
 def test_generate_catalog_image_gpt_2_6_multipart_and_size(monkeypatch):

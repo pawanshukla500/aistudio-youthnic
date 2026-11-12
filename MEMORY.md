@@ -7,18 +7,19 @@ This file is the **Canonical Core Memory** for the Youthnic AI Fashion Studio co
 ## 1. Vision Model Routing & Zero-Fallback Architecture
 
 ### 1.1 Model Topology & Hierarchy
-Visual product truth extraction and scene planning rely on a cost-effective, high-accuracy multi-tier hierarchy:
-1. **Primary Vision Model:** **Meta Muse Spark 1.2 Contributor** (`muse-spark-1.2-contributor:low`)
-   - Low cost (~$0.02 - $0.05 / 1M tokens), high multimodal acuity for fashion and fabric analysis.
-   - Enforced reasoning effort: `"low"` (or `"minimal"`). High reasoning is prohibited on Meta vision calls because it exceeds hop timeouts.
+Visual product truth extraction, category learning, and 6-pose scene planning rely on a deep-reasoning, high-reliability multi-tier hierarchy:
+1. **Primary Vision Model:** **Meta Muse Spark** (`muse-spark-1.2-contributor:high` or `muse-spark-1.3-contributor:high`; standard `muse-spark-1.3:high` when training opt-out is required)
+   - Runs at **`high` thinking** (`reasoning: { effort: "high" }`) during `product_truth` analysis & pose planning for deep visual garment extraction and Gen-Z / ethnic pose choreography (~6–12s typical live execution).
+   - Image QA (`qa`) continues running at `"low"` for sub-second-to-few-second turnaround.
 2. **In-Provider Sibling Fallback (Zero-Drop Recovery):**
    - If `muse-spark-1.2-contributor` returns HTTP 404 or model unavailable in a specific region or account tier, the system **automatically retries** with `muse-spark-1.3-contributor` (and vice-versa for 1.3 to 1.2) within the same Meta provider execution before ever declaring a provider failure.
    - This ensures transient model version differences never cause a drop-out to secondary providers.
-3. **Primary Fallback (Hop 1):** **OpenAI GPT-5.6 Luna** (`gpt-5.6-luna:high`)
-   - Preserves high reasoning when hop budget permits (>= 60s) for deep chain-of-thought analysis across scene, styling, and 6-pose plans.
-   - Automatically clamped to `low` (`clampProductTruthHopThinking`) when the remaining hop slice is under 60s to ensure fast, reliable answers in 10-15s without timing out.
-4. **Safety Net (Hop 2):** **OpenAI GPT-5.6 Terra** (`gpt-5.6-terra:low`)
-   - Final safety net; only invoked if both low-cost primary and secondary models fail.
+3. **Primary Fallback (Hop 1):** **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra:high`)
+   - First fallback for `product_truth` analysis & pose planning, preserving **`high`** reasoning (`reasoning: { effort: "high" }` on Responses / `reasoning_effort: "high"` on Chat Completions; clamped to `low` only when `< 60s` remains in Edge budget or `< 15s` in FastAPI).
+4. **Safety Net (Hop 2+):** **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna:high`/`low`) -> Legacy **GPT 5.6 Terra** (`gpt-5.6-terra:low`) -> **Google Gemini 3.8 Flash** (`gemini-3.8-flash:low`)
+   - Secondary safety nets invoked only if primary and Hop 1 fail.
+5. **Default Image Generation Model:** **`gpt-image-2.6-sunburst`**
+   - Default flagship model across Studio, Catalog batches, FastAPI LangGraph nodes, and `organization_ai_model_policies` (`image_generation`), producing 3:4 2K (`1536x2048`) images at `medium` default quality (overrideable per shoot).
 
 ### 1.2 Meta Responses API Protocol Rules
 - **Multimodal Endpoint:** `https://api.meta.ai/v1/responses` is the sole multimodal endpoint for Meta Muse Spark.
@@ -69,13 +70,24 @@ Visual product truth extraction and scene planning rely on a cost-effective, hig
   - Product fidelity, colors, prints, embroidery, and styling.
   - Photoshoot backdrop set, architecture, lighting, and camera grading.
 
+### 2.5 Cut-Isolated Garment & Style Learning Architecture
+- **Farshi / Farsi Salwar Isolation:** When an uploaded garment's `bottom_cut` or `garment_family` is explicitly `farshi` / `farsi`, preserve authentic two-leg separated volume, gathered waist pleats, upper-hem narrowing toward the waist side, a **4-inch taper from the upper hem**, and continuous bottom border geometry. **Never** leak Farshi geometry rules onto non-Farshi bottoms (regular salwar, palazzo, sharara, gharara, straight pants).
+- **Category-Specific Visual Intelligence:**
+  - **Sarees:** Detect weave, pallu vs. body vs. border patterns, blouse contrast, and Gen-Z editorial draping silhouettes from uploaded product & reference photos without inventiveness.
+  - **Top-Only Kurtis vs. Multi-Piece Kurti Sets:** Keep `top_only` kurtis free of hallucinated coordinating bottoms unless `outfit_includes_bottom_wear` is active; coordinate top + bottom + dupatta draping across all 6 poses when multi-piece references are uploaded.
+
 ---
 
-## 3. Deployment, Testing & Verification Invariants
+## 3. Agentic Backend, Tooling & Verification Invariants
 
-1. **Pure AI Model Policy:** `supabase/functions/app-api/lib/aiModelPolicy.ts` must remain pure (no database queries, no network fetches, no environment reads). Tenant resolution and database interaction belong in `index.ts`.
-2. **Automated Test Gate:** All 249+ Deno tests (`cmd.exe /c npx --yes deno test -A supabase/functions/app-api/tests/`) and web build (`cmd.exe /c npm run build`) must pass cleanly before any code is merged into `main`.
-3. **Workflow Vigilance:** Any pull request merged into `main` triggers automated CI/CD deployment pipelines:
-   - Cloud Run web application deployment (`Deploy web app to Cloud Run`).
-   - Edge Functions deployment to Supabase/Railway.
-   Always monitor GitHub Actions workflow runs to green completion.
+1. **Mandatory Agent Tooling (`/ponytail` + `/graphify`):**
+   - Every agent editing code in this repo **must** use **`/ponytail`** (`full`) every time (check callers first, smallest complete change, preserve error handling/validation, add targeted tests, disclose unrun checks/risks).
+   - Every agent accessing this repo **must** use **`/graphify`** by default: query `graphify-out/graph.json` / `GRAPH_REPORT.md` first for codebase discovery and update `graphify-out/` incrementally (`/graphify . --update`) after edits.
+2. **Pure AI Model Policy:** `supabase/functions/app-api/lib/aiModelPolicy.ts` must remain pure (no database queries, no network fetches, no environment reads). Tenant resolution and database interaction belong in `index.ts`.
+3. **LangGraph + FastAPI + Valkey Microservices (`backend/`):**
+   - `FastAPI` runs the LangGraph state graph (`AsyncPostgresSaver` checkpoints + Product DNA V2 immutable versions) alongside `celery-worker` and `Valkey` on Railway (`AI Studio App`). Internal Edge-to-FastAPI traffic uses `INTERNAL_API_SECRET` / `CATALOG_WORKER_SECRET` and internal networking (`http://fastapi.railway.internal:8000`) with scale-to-zero idle posture (`sleepApplication: true` in `railway.toml`).
+4. **Automated Test Gate:** All Deno tests (`node $npxCli deno test -A supabase/functions/app-api/tests/`), Python backend tests (`$env:PYTHONPATH="backend"; python -m pytest backend/tests/ -q`), linter (`npm run lint`), and web build (`npm run build`) must pass cleanly before merging into `main`.
+5. **Workflow Vigilance:** Any pull request merged into `main` triggers automated CI/CD deployment pipelines:
+   - `Validate application` + `Deploy Supabase database and Edge Function` (`supabase/functions/app-api` + migrations).
+   - `Deploy web app to Cloud Run` + Railway auto-deploys (`functions`, `FastAPI`, `celery-worker`).
+   Always monitor GitHub Actions & Railway deployments to green/SUCCESS completion.

@@ -5,9 +5,9 @@ description: "Choose the primary and fallback AI model for product analysis, ima
 
 # AI Routing & Model Policies
 
-Youthnic AI Studio runs **exactly the models you choose** in **Administration → AI models**.
+Youthnic AI Studio runs **the models you choose** in **Administration → AI models**.
 For each job you pick a primary model and, where supported, a fallback. The studio tries
-the primary first and the fallback second. It never adds, swaps or removes a model on its own.
+the primary first and the fallback second (and appends a secondary OpenAI safety-net at the end when Meta + OpenAI are paired for Product Truth resilience). It never puts another model ahead of your primary choice.
 
 ```mermaid
 graph LR
@@ -33,7 +33,7 @@ provider** and choose the fallback's provider, model and thinking.
 
 [SCREENSHOT REQUIRED:
 Page: Administration → AI models
-Exact State: Product truth & pose planning card with Primary OpenAI GPT 5.6 Terra and fallback Meta Muse Spark 1.3 Contributor, both CONFIGURED.
+Exact State: Product truth & pose planning card with Primary Meta Muse Spark 1.2 Contributor (High thinking) and fallback OpenAI GPT 6.1 Terra (High thinking), both CONFIGURED.
 Exact UI Section: Primary provider and fallback settings.
 Recommended Crop: 760x560
 Recommended Dimensions: 760x560
@@ -55,11 +55,7 @@ If the request itself is invalid, for example a rejected image, the fallback is 
 A different model would not fix the product photos.
 
 <Note>
-**Thinking for product analysis runs at Low** for heavy models (Terra, Flash, Sol, Muse Spark),
-or the lowest level the model supports (explicit "none" or "minimal" is preserved; Qwen runs with thinking off).
-OpenAI Luna is lightweight and cost-efficient; when configured with **High** thinking as primary, it preserves high thinking
-for deep reasoning across scene, styling, and 6-pose plans without timing out. Under tight fallback budgets (< 60s), thinking
-is clamped to **Low** so fallbacks return in 10-15s and avoid timeout cascades.
+**High thinking is enabled for deep Product Truth & Pose Planning** on Meta Muse Spark (`muse-spark-1.2-contributor` / `1.3-contributor` / `1.3` / `1.2`), OpenAI **GPT 6.1 Terra** (`gpt-6.1-terra`), and OpenAI Luna (`gpt-5.6-luna`). Legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, Gemini Flash) run at **Low** (explicit "none" or "minimal" is preserved; Qwen runs with thinking off). Only if a chain falls into an emergency tight deadline (`< 60s` remaining) is thinking dynamically clamped to **Low** so fallbacks still finish without timing out.
 </Note>
 
 ---

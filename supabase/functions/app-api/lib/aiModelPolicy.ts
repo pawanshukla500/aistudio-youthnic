@@ -97,9 +97,9 @@ export const AI_MODEL_REGISTRY: Registry = {
     ],
   },
   openai: {
-    product_truth: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
-    qa: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
-    qa_escalation: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+    product_truth: ["gpt-6.1-terra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+    qa: ["gpt-6.1-terra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+    qa_escalation: ["gpt-6.1-terra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
     image_generation: [
       "gpt-image-2.6-sunburst",
       "gpt-image-2.6-flare",
@@ -239,18 +239,24 @@ export function defaultThinkingLevel(
 ): AiThinkingLevel {
   const allowed = allowedThinkingLevels(route, purpose, options);
   if (purpose === "image_generation") return "none";
-  // Product-truth analysis is a large structured vision call. Default OpenAI
-  // and Gemini Flash thinking to low so a missing org reasoning value cannot
-  // silently select high/medium and miss the Edge timeout.
+  // Product-truth analysis uses high thinking for Meta Muse Spark and OpenAI
+  // GPT 6.1 Terra for deeper garment truth + pose planning; other vision models
+  // default to low when omitted so legacy routes stay safely within Edge time.
   if (purpose === "product_truth") {
     const provider = text(route.provider);
+    const model = text(route.model);
+    if ((provider === "meta" || model === "gpt-6.1-terra") && allowed.includes("high")) return "high";
     if (provider === "openai" && allowed.includes("low")) return "low";
     if (allowed.includes("low")) return "low";
     if (allowed.includes("medium")) return "medium";
   }
   if (allowed.includes("none")) return "none";
   if (purpose === "qa") {
-    return allowed.includes("medium") ? "medium" : allowed[0];
+    return allowed.includes("low")
+      ? "low"
+      : allowed.includes("medium")
+      ? "medium"
+      : allowed[0];
   }
   return allowed.includes("high") ? "high" : allowed[0];
 }
@@ -262,13 +268,13 @@ export function defaultThinkingLevel(
 export const FAST_PRODUCT_TRUTH_ROUTE = {
   provider: "meta",
   model: "muse-spark-1.3",
-  thinkingLevel: "low",
+  thinkingLevel: "high",
 } as const satisfies NormalizedAiModelRoute;
 
 export const FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE = {
   provider: "meta",
   model: "muse-spark-1.2-contributor",
-  thinkingLevel: "low",
+  thinkingLevel: "high",
 } as const satisfies NormalizedAiModelRoute;
 
 export const FAST_PRODUCT_TRUTH_GEMINI_ROUTE = {
@@ -291,8 +297,8 @@ export const LUNA_HIGH_THINKING_VISION_ROUTE = {
 
 export const OPENAI_TERRA_VISION_ROUTE = {
   provider: "openai",
-  model: "gpt-5.6-terra",
-  thinkingLevel: "low",
+  model: "gpt-6.1-terra",
+  thinkingLevel: "high",
 } as const satisfies NormalizedAiModelRoute;
 
 /**
@@ -349,7 +355,11 @@ export function clampProductTruthThinking(route: NormalizedAiModelRoute): AiThin
   if (route.thinkingLevel === "minimal" && allowed.includes("minimal")) return "minimal";
   // Luna is fast and cost-efficient. When explicitly configured with high thinking
   // for deep reasoning across scene, styling, and 6-pose plans, preserve high thinking.
-  if (route.model === "gpt-5.6-luna" && route.thinkingLevel === "high" && allowed.includes("high")) {
+  if (
+    route.thinkingLevel === "high" &&
+    allowed.includes("high") &&
+    (route.provider === "meta" || route.model === "gpt-6.1-terra" || route.model === "gpt-5.6-luna")
+  ) {
     return "high";
   }
   if (allowed.includes("low")) return "low";
@@ -742,6 +752,7 @@ export function aiModelDisplayLabel(model: string): string {
     "gpt-image-1.5": "GPT Image 1.5",
     "gpt-image-1": "GPT Image 1",
     "gpt-image-1-mini": "GPT Image 1 Mini",
+    "gpt-6.1-terra": "GPT 6.1 Terra · flagship high-reasoning fallback",
     "gpt-5.6-luna": "GPT 5.6 Luna · cost-efficient",
     "gpt-5.6-terra": "GPT 5.6 Terra",
     "gpt-5.6-sol": "GPT 5.6 Sol · expensive",
@@ -766,6 +777,9 @@ export function aiModelHelpText(model: string): string {
   }
   if (text(model) === "muse-spark-1.3" || text(model) === "muse-spark-1.2") {
     return "Standard Muse Spark does not train on your data. About $1.25 / 1M input and $4.25 / 1M output.";
+  }
+  if (text(model) === "gpt-6.1-terra") {
+    return "GPT 6.1 Terra runs high-reasoning vision analysis & pose planning as primary fallback (~$1.25 / 1M input, $5.00 / 1M output).";
   }
   if (text(model) === "gpt-5.6-sol") {
     return "Sol is the expensive GPT 5.6 flagship. Prefer Luna for fallback vision.";
@@ -808,6 +822,7 @@ export function preferredModelId(
   if (provider === "openai" && models.includes("gpt-image-2.6")) return "gpt-image-2.6";
   if (provider === "openai" && models.includes("gpt-image-2.5-flare")) return "gpt-image-2.5-flare";
   if (provider === "openai" && models.includes("gpt-image-2.5-sunburst")) return "gpt-image-2.5-sunburst";
+  if (provider === "openai" && models.includes("gpt-6.1-terra")) return "gpt-6.1-terra";
   if (provider === "openai" && models.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
   if (provider === "meta" && models.includes("muse-spark-1.2-contributor")) return "muse-spark-1.2-contributor";
   if (provider === "meta" && models.includes("muse-spark-1.3-contributor")) return "muse-spark-1.3-contributor";

@@ -270,7 +270,13 @@ def load_reference_image(
     }
 
 
-def _meta_vision_json(prompt: str, images: List[Dict[str, Any]], timeout_s: int = 25) -> Dict[str, Any]:
+def _meta_vision_json(
+    prompt: str,
+    images: List[Dict[str, Any]],
+    timeout_s: int = 60,
+    effort: str = "high",
+    deadline: Optional[float] = None,
+) -> Dict[str, Any]:
     api_key = (settings.META_MODEL_API_KEY or "").strip()
     if not api_key:
         raise RuntimeError("META_MODEL_API_KEY is not configured")
@@ -286,8 +292,13 @@ def _meta_vision_json(prompt: str, images: List[Dict[str, Any]], timeout_s: int 
 
     last_err: Optional[Exception] = None
     for model_name in ("muse-spark-1.2-contributor", "muse-spark-1.3-contributor"):
+        remaining = (deadline - time.monotonic()) if deadline is not None else float(timeout_s)
+        if remaining < 5:
+            last_err = last_err or RuntimeError("Meta vision deadline exhausted before retry")
+            break
+        per_call_timeout = int(max(5, min(float(timeout_s), remaining)))
         try:
-            with httpx.Client(timeout=timeout_s) as client:
+            with httpx.Client(timeout=per_call_timeout) as client:
                 resp = client.post(
                     "https://api.meta.ai/v1/responses",
                     headers={
@@ -297,8 +308,8 @@ def _meta_vision_json(prompt: str, images: List[Dict[str, Any]], timeout_s: int 
                     json={
                         "model": model_name,
                         "input": [{"role": "user", "content": content_items}],
-                        "reasoning": {"effort": "low"},
-                        "max_output_tokens": 8192,
+                        "reasoning": {"effort": effort},
+                        "max_output_tokens": 16384,
                     },
                 )
             data = _safe_resp_json(resp)
@@ -318,13 +329,15 @@ def _meta_vision_json(prompt: str, images: List[Dict[str, Any]], timeout_s: int 
             return {
                 "provider": "meta",
                 "model": model_name,
-                "reasoning": "low",
+                "reasoning": effort,
                 "data": parsed,
             }
         except Exception as exc:
             last_err = exc
             cache_manager.record_provider_result("meta", False, str(exc))
             break
+    if last_err is not None:
+        cache_manager.record_provider_result("meta", False, str(last_err))
     raise RuntimeError(f"Meta vision call failed: {last_err}")
 
 
@@ -388,7 +401,7 @@ def _gemini_vision_json(prompt: str, images: List[Dict[str, Any]], timeout_s: in
         parts.append({"inline_data": {"mime_type": img["mime_type"], "data": img["base64"]}})
     parts.append({"text": prompt})
 
-    model_name = "gemini-2.5-flash"
+    model_name = "gemini-3.8-flash"
     with httpx.Client(timeout=timeout_s) as client:
         resp = client.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
@@ -422,7 +435,7 @@ def invoke_vision_json(
     images: List[Dict[str, Any]],
     purpose: str = "product_truth",
 ) -> Optional[Dict[str, Any]]:
-    """Call Meta Muse Spark primary -> LangChain ChatOpenAI Luna/Terra -> Gemini.
+    """Call Meta Muse Spark (high for analysis/pose_planning) -> GPT 6.1 Terra (high) / Luna -> Gemini.
 
     Returns None ONLY when no provider keys are configured (offline tests).
     """
@@ -433,24 +446,42 @@ def invoke_vision_json(
     if not (has_meta or has_openai or has_gemini):
         return None
 
+    is_analysis = purpose in ("product_truth", "pose_planning")
+    meta_effort = "high" if is_analysis else "low"
     deadline = time.monotonic() + float(max(30, settings.VISION_TIMEOUT_SECONDS))
     errors: List[str] = []
 
     if has_meta:
         remaining = deadline - time.monotonic()
-        meta_timeout = int(max(10, min(25, remaining)))
+        meta_cap = 60 if is_analysis else 25
+        meta_timeout = int(max(12, min(meta_cap, remaining)))
+        meta_deadline = min(deadline, time.monotonic() + float(meta_timeout))
         try:
-            return _meta_vision_json(prompt, images, timeout_s=meta_timeout)
+            return _meta_vision_json(
+                prompt,
+                images,
+                timeout_s=meta_timeout,
+                effort=meta_effort,
+                deadline=meta_deadline,
+            )
         except Exception as exc:
             logger.warning(f"Primary Meta vision ({purpose}) failed: {exc}")
             errors.append(f"meta: {exc}")
 
     if has_openai:
-        for model_name, default_effort in (("gpt-5.6-luna", "high"), ("gpt-5.6-terra", "low")):
+        openai_candidates = (
+            (("gpt-6.1-terra", "high"), ("gpt-5.6-luna", "high"), ("gpt-5.6-terra", "low"))
+            if is_analysis
+            else (("gpt-5.6-luna", "low"), ("gpt-6.1-terra", "low"))
+        )
+        for model_name, default_effort in openai_candidates:
             remaining = deadline - time.monotonic()
             if remaining < 5:
                 break
-            effort = "low" if (model_name == "gpt-5.6-luna" and remaining < 60) else default_effort
+            if model_name in ("gpt-6.1-terra", "gpt-5.6-luna") and default_effort == "high" and remaining < 60:
+                effort = "low"
+            else:
+                effort = default_effort
             try:
                 return _langchain_openai_vision_json(
                     prompt,

@@ -108,6 +108,7 @@ function formatModelName(model?: string | null): string {
     "muse-spark-1.3-contributor": "Meta Muse Spark 1.3",
     "muse-spark-1.3": "Meta Muse Spark 1.3",
     "muse-spark-1.2": "Meta Muse Spark 1.2",
+    "gpt-6.1-terra": "GPT 6.1 Terra",
     "gpt-5.6-luna": "GPT 5.6 Luna",
     "gpt-5.6-terra": "GPT 5.6 Terra",
     "gpt-5.6-sol": "GPT 5.6 Sol",
@@ -1834,7 +1835,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                       {job.analysisProvider ? `${job.analysisProvider[0].toUpperCase()}${job.analysisProvider.slice(1)}` : "Meta Muse Spark"}
                     </span>
                     <span className="mt-0.5 block text-[11px] text-secondary">
-                      Thinking Effort: <strong className="text-on-surface">{job.analysisThinking || "Low (Fast analysis)"}</strong>
+                      Thinking Effort: <strong className="text-on-surface">{job.analysisThinking || "High"}</strong>
                     </span>
                   </div>
                 </div>
@@ -1848,7 +1849,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     </span>
                   )}
                   <span className="rounded-md bg-white px-2 py-0.5 text-[10px] text-secondary border border-outline-variant/30">
-                    Fallback: OpenAI GPT 5.6 Luna enabled
+                    Fallback: OpenAI GPT 6.1 Terra (High)
                   </span>
                 </div>
               </div>

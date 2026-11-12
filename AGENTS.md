@@ -25,21 +25,41 @@ This document establishes operational requirements, architectural constraints, a
 
 ## 2. Vision Model Calling & Zero-Fallback Protocol
 
-When interacting with vision pipelines (`supabase/functions/app-api/`):
-- **Primary Route:** Meta Muse Spark 1.2 Contributor (`muse-spark-1.2-contributor:low`) is the default primary when `META_MODEL_API_KEY` is present.
+When interacting with vision pipelines (`supabase/functions/app-api/` and `backend/services/ai_clients.py`):
+- **Primary Route (Analysis & Pose Planning):** Meta Muse Spark (`muse-spark-1.2-contributor:high` or `muse-spark-1.3-contributor:high`, or standard `muse-spark-1.3:high` / `1.2:high`) is the default primary when `META_MODEL_API_KEY` is present, running with **`high` thinking** (`reasoning: { effort: "high" }`).
 - **Payload Schema:** Always send `input: [{ role: "user", content: [...] }]` to `https://api.meta.ai/v1/responses`. Do not send `{ type: "message" }`.
-- **Reasoning Effort:** Clamped to `low` or `minimal` on Meta to ensure execution inside 15-25 seconds and prevent hop timeouts.
+- **Reasoning Effort:** Meta Muse Spark, OpenAI `gpt-6.1-terra`, and `gpt-5.6-luna` preserve **`high`** thinking during `product_truth` analysis & pose planning (`clampProductTruthThinking`), only clamping down to `low` under emergency tight hop budgets (`< 60s`). Image QA (`qa`) runs at `low` for speed.
 - **In-Provider Sibling Retry:** If `muse-spark-1.2-contributor` returns 404/not available, transparently retry `muse-spark-1.3-contributor` (and vice-versa) before falling back.
-- **Fallback Chain:** Hop 1 is OpenAI Luna (`gpt-5.6-luna:high`), Hop 2 is OpenAI Terra (`gpt-5.6-terra:low`).
+- **Fallback Chain:** Hop 1 is **OpenAI GPT 6.1 Terra (`gpt-6.1-terra:high`)** for analysis & pose planning fallback, Hop 2 is OpenAI GPT 5.6 Luna (`gpt-5.6-luna:high`/`low`), then Gemini Flash (`gemini-3.8-flash`).
+- **Default Image Generation Model:** **`gpt-image-2.6-sunburst`** (3:4, 2K / `1536x2048`, default `medium` quality unless overridden).
+- **Garment Construction Isolation:** Preserve Farshi/Farsi two-leg architecture and 4-inch upper-hem taper strictly on `farshi` SKUs only—never bleed Farshi geometry rules onto non-Farshi bottoms.
 
 ---
 
-## 3. Engineering & Workflow Standards
+## 3. Mandatory Core Agent Workflows (`/ponytail` & `/graphify`)
 
-1. **Pure Policy Layer:** `supabase/functions/app-api/lib/aiModelPolicy.ts` must remain pure (no database queries, no network fetches, no environment reads).
+Every AI agent accessing or modifying this repository **MUST** follow these two workflows by default:
+
+1. **`/ponytail` Always-On Code Discipline (Mandatory on Every Code Change):**
+   - Inspect real callers first (`git grep`) before changing interfaces, signatures, or shared helpers.
+   - Deliver the **smallest complete change** that solves the full problem—no speculative abstractions, redundant wrappers, or silent fallbacks.
+   - Keep existing validation, tenant isolation, and error handling intact; preserve unrelated comments/docstrings.
+   - Leave concise unit tests for non-trivial behavior changes and summarize any skipped checks or residual risks in the final report.
+2. **`/graphify` Default Knowledge Graph Usage:**
+   - Query `graphify-out/graph.json` and `graphify-out/GRAPH_REPORT.md` **first** when navigating architecture or tracing multi-file dependencies across TypeScript, Deno, React, and Python instead of reading entire directories blindly.
+   - Run `/graphify . --update` after completing code or documentation edits so `graphify-out/` stays current for subsequent agents.
+
+---
+
+## 4. Architecture & Verification Standards
+
+1. **Dual-Service Backend Architecture (`Railway` project `AI Studio App`):**
+   - **Edge Gateway (`supabase/functions/app-api/`):** `functions` service handling auth, `organization_ai_model_policies`, image generation jobs, Firebase Storage proxying, and orchestration delegation. Keep `supabase/functions/app-api/lib/aiModelPolicy.ts` pure (no DB queries, network fetches, or env reads).
+   - **LangGraph Agentic Service (`backend/`):** `FastAPI` + `celery-worker` services backed by Supabase Postgres (`AsyncPostgresSaver` checkpoints, Product DNA V2 immutable versions) and `Valkey` (cache + Celery broker), providing `/api/v1/dna/extract`, `/api/v1/studio/generate`, `/api/v1/qa/evaluate`, and `/health`.
 2. **Atomic Commits & Verification:**
-   - Run full Deno tests: `cmd.exe /c npx --yes deno test -A supabase/functions/app-api/tests/`
-   - Run web build: `cmd.exe /c npm run build`
+   - Deno checks & tests: `node $npxCli deno check --frozen supabase/functions/app-api/index.ts` and `node $npxCli deno test -A supabase/functions/app-api/tests/` (using full `test:catalog-workflow` list before push).
+   - Python backend tests: `$env:PYTHONPATH = "backend"; python -m pytest backend/tests/ -q`.
+   - Frontend lint & build (also regenerates `src/features/docs/docsData.ts`): `node $npmCli run lint` and `node $npmCli run build`.
    - Never push or merge changes that break existing tests.
-3. **Workflow Monitoring:**
-   - When pull requests are merged into `main`, actively monitor the resulting GitHub Actions workflow until green completion.
+3. **Workflow & PR Governance:**
+   - Run pre-commit CodeRabbit (`code-reviewer`), fix findings on PRs, squash-merge into `main`, and actively monitor GitHub Actions (`Validate application`, `Deploy Supabase database and Edge Function`, `Deploy web app to Cloud Run`) and Railway deployments (`functions`, `FastAPI`, `celery-worker`) until green completion.

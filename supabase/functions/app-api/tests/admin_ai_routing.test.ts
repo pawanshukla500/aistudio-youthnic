@@ -14,6 +14,7 @@ const registry: AdminAiRegistryEntry[] = [
     provider: "openai",
     configured: true,
     models: [
+      { id: "gpt-6.1-terra", label: "GPT 6.1 Terra", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "medium", "high"] },
       { id: "gpt-5.6-luna", label: "GPT 5.6 Luna", purposes: ["product_truth", "qa"], thinkingLevels: ["none", "low"] },
       { id: "gpt-5.6-sol", label: "GPT 5.6 Sol", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "high"] },
       { id: "gpt-image-2.6-sunburst", label: "GPT Image 2.6 Sunburst", purposes: ["image_generation"], thinkingLevels: ["none"] },
@@ -28,10 +29,10 @@ const registry: AdminAiRegistryEntry[] = [
     provider: "meta",
     configured: true,
     models: [
-      { id: "muse-spark-1.3", label: "Muse Spark 1.3", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "max"] },
-      { id: "muse-spark-1.2", label: "Muse Spark 1.2", purposes: ["product_truth", "qa"], thinkingLevels: ["low"] },
-      { id: "muse-spark-1.3-contributor", label: "Contributor 1.3", purposes: ["product_truth", "qa"], thinkingLevels: ["low"] },
-      { id: "muse-spark-1.2-contributor", label: "Contributor 1.2", purposes: ["product_truth", "qa"], thinkingLevels: ["low"] },
+      { id: "muse-spark-1.3", label: "Muse Spark 1.3", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "high", "max"] },
+      { id: "muse-spark-1.2", label: "Muse Spark 1.2", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "high"] },
+      { id: "muse-spark-1.3-contributor", label: "Contributor 1.3", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "high"] },
+      { id: "muse-spark-1.2-contributor", label: "Contributor 1.2", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "high"] },
     ],
   },
 ];
@@ -39,7 +40,7 @@ const registry: AdminAiRegistryEntry[] = [
 Deno.test("fallback model lists stay on the selected provider", () => {
   assertEquals(
     modelsForProviderPurpose(registry, "openai", "product_truth").map((model) => model.id),
-    ["gpt-5.6-luna", "gpt-5.6-sol"],
+    ["gpt-6.1-terra", "gpt-5.6-luna", "gpt-5.6-sol"],
   );
   assertEquals(
     modelsForProviderPurpose(registry, "openai", "product_truth").some((model) => model.id.startsWith("gemini-")),
@@ -47,9 +48,11 @@ Deno.test("fallback model lists stay on the selected provider", () => {
   );
 });
 
-Deno.test("preferred vision models are Muse Spark Contributor and Luna, not Sol or Terra", () => {
+Deno.test("preferred vision models are Muse Spark Contributor and GPT 6.1 Terra, falling back to Luna", () => {
   assertEquals(preferredModelId("meta", registry.find((entry) => entry.provider === "meta")!.models), "muse-spark-1.2-contributor");
-  assertEquals(preferredModelId("openai", modelsForProviderPurpose(registry, "openai", "product_truth")), "gpt-5.6-luna");
+  const openAiModels = modelsForProviderPurpose(registry, "openai", "product_truth");
+  assertEquals(preferredModelId("openai", openAiModels), "gpt-6.1-terra");
+  assertEquals(preferredModelId("openai", openAiModels.filter((model) => model.id !== "gpt-6.1-terra")), "gpt-5.6-luna");
 });
 
 Deno.test("OpenAI fallback cannot keep a Gemini model id", () => {
@@ -64,11 +67,11 @@ Deno.test("OpenAI fallback cannot keep a Gemini model id", () => {
     fallbackThinking: "medium",
   }, registry);
   assertEquals(coerced.fallbackProvider, "openai");
-  assertEquals(coerced.fallbackModel, "gpt-5.6-luna");
+  assertEquals(coerced.fallbackModel, "gpt-6.1-terra");
   assertEquals(coerced.repairRequired, true);
 });
 
-Deno.test("product truth routing prefers Meta Muse Spark as primary and OpenAI Luna as fallback when both are configured", () => {
+Deno.test("product truth routing prefers Meta Muse Spark as primary and OpenAI GPT 6.1 Terra as fallback when both are configured", () => {
   const primary = preferredConfiguredProvider(registry, "product_truth");
   assertEquals(primary?.provider, "meta");
   assertEquals(
@@ -82,7 +85,7 @@ Deno.test("product truth routing prefers Meta Muse Spark as primary and OpenAI L
   assertEquals(fallback?.provider, "openai");
   assertEquals(
     preferredModelId("openai", modelsForProviderPurpose(registry, "openai", "product_truth")),
-    "gpt-5.6-luna",
+    "gpt-6.1-terra",
   );
 });
 
@@ -93,7 +96,7 @@ Deno.test("preferred image generation model is 2.6 Sunburst over Flare and legac
   );
 });
 
-Deno.test("product truth policy coercion defaults Meta thinking to low and preserves Luna high thinking", () => {
+Deno.test("product truth policy coercion preserves Meta high and GPT 6.1 Terra high thinking", () => {
   const metaPolicy = coerceAdminAiPolicy({
     purpose: "product_truth",
     primaryProvider: "meta",
@@ -101,7 +104,7 @@ Deno.test("product truth policy coercion defaults Meta thinking to low and prese
     primaryThinking: "high",
     fallbackEnabled: true,
     fallbackProvider: "openai",
-    fallbackModel: "gpt-5.6-luna",
+    fallbackModel: "gpt-6.1-terra",
     fallbackThinking: "high",
   }, [
     ...registry.filter((r) => r.provider !== "openai"),
@@ -109,12 +112,13 @@ Deno.test("product truth policy coercion defaults Meta thinking to low and prese
       provider: "openai",
       configured: true,
       models: [
+        { id: "gpt-6.1-terra", label: "GPT 6.1 Terra", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "high"] },
         { id: "gpt-5.6-luna", label: "GPT 5.6 Luna", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "high"] },
       ],
     },
   ]);
-  // Meta in product_truth is coerced to low to agree with server runtime clamp
-  assertEquals(metaPolicy.primaryThinking, "low");
-  // Luna in product_truth preserves high thinking
+  // Meta and GPT 6.1 Terra preserve high thinking in product_truth
+  assertEquals(metaPolicy.primaryThinking, "high");
+  assertEquals(metaPolicy.fallbackModel, "gpt-6.1-terra");
   assertEquals(metaPolicy.fallbackThinking, "high");
 });
