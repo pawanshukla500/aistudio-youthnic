@@ -2227,6 +2227,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
   );
   const orgSettings = workspace.organization.settings as JsonRecord | undefined;
   const isExternalSeller = orgSettings?.seller_type === "external";
+  let creditDeducted = false;
   if (isExternalSeller) {
     const { data: credited, error: creditErr } = await service.rpc("app_consume_seller_credit", {
       p_org_id: workspace.organization.id,
@@ -2234,134 +2235,148 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     if (creditErr || !credited) {
       throw new Error("You have reached your 5 free photoshoot trial limit (0 credits remaining). Contact sales or upgrade your account to generate more photoshoots.");
     }
+    creditDeducted = true;
   }
-  const imageGenerationPolicy = await resolveImageGenerationPolicy(workspace.organization.id);
-  const requestedModel = String(args.model || "").trim();
-  let model = imageGenerationPolicy.model;
-  if (requestedModel) {
-    try {
-      // Validate against the organization's own provider, not a hard-coded one:
-      // that is the allow-list the Studio picker is served, so a model offered
-      // there is a model this path accepts instead of silently discarding.
-      const validated = assertAllowedAiModelRoute({
-        provider: imageGenerationPolicy.provider,
-        model: requestedModel,
-        thinkingLevel: "none",
-      }, "image_generation");
-      model = validated.model;
-    } catch {
-      model = imageGenerationPolicy.model;
+  try {
+    const imageGenerationPolicy = await resolveImageGenerationPolicy(workspace.organization.id);
+    const requestedModel = String(args.model || "").trim();
+    let model = imageGenerationPolicy.model;
+    if (requestedModel) {
+      try {
+        // Validate against the organization's own provider, not a hard-coded one:
+        // that is the allow-list the Studio picker is served, so a model offered
+        // there is a model this path accepts instead of silently discarding.
+        const validated = assertAllowedAiModelRoute({
+          provider: imageGenerationPolicy.provider,
+          model: requestedModel,
+          thinkingLevel: "none",
+        }, "image_generation");
+        model = validated.model;
+      } catch {
+        model = imageGenerationPolicy.model;
+      }
     }
-  }
-  const quality = ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : DEFAULT_IMAGE_QUALITY;
-  // Presentation choice, not product truth: the analysis still records what the
-  // references prove, and "auto" keeps the two in sync.
-  const bottomWearMode = normalizeBottomWearMode(args.bottomWear ?? args.bottomWearMode);
-  const jobId = `job_${crypto.randomUUID()}`;
-  const now = new Date().toISOString();
-  const jobData = {
-    skuId: String(args.skuId || sessionData.skuId || session.planning_request_id),
-    skuName: String(args.skuName || sessionData.skuName || "Untitled studio product"),
-    productDetails: String(args.productDetails || sessionData.productDetails || ""), category: String(args.category || sessionData.category || "ethnic/fusion"),
-    backgroundStyle: String(args.backgroundStyle || ""), modelIdentityDirection: String(args.modelIdentity || ""),
-    references: sessionData.references || [], analysisFingerprint: session.analysis_fingerprint,
-    imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
-    requestedModel: String(args.model || "").trim() || null,
-    bottomWearMode,
-  };
-  const adminRates = await currentAdminRates();
-  const analysisCostUsd = await analysisCostUsdFor({
-    organizationId: workspace.organization.id,
-    sessionId,
-    planningRequestId: String(session.planning_request_id || ""),
-  });
-  const jobRow = {
-    job_id: jobId, user_id: workspace.user.firebaseUid, user_email: workspace.user.email, org_id: workspace.organization.id,
-    status: "queued", readiness_status: "ready", readiness_reasons: [], sku_name: jobData.skuName, session_id: sessionId, job_data: jobData,
-    planning_request_id: session.planning_request_id, total_poses: enabled.length, provider: imageGenerationPolicy.provider, model,
-    aspect_ratio: String(args.aspectRatio || "3:4"), image_size: String(args.imageSize || "2K"), quality,
-    pose_qa: Boolean(args.poseQa),
-    estimated_cost_usd: estimateJobCostUsd({
-      posesCount: enabled.length,
-      imageModel: model,
-      quality,
-      poseQa: Boolean(args.poseQa),
-      analysisCostUsd,
-      adminRates,
-    }),
-    actual_cost_usd: Number(analysisCostUsd || 0), created_at: now, updated_at: now,
-  };
-  const poseRows = enabled.map((pose, index) => ({
-    session_id: sessionId, generation_id: `${jobId}:pose:${index + 1}`, pose_index: index + 1,
-    title: pose.title, pose_type: pose.id, instructions: pose.prompt, status: "queued", attempt_count: 0,
-    generation_data: { ...pose, poseNumber: index + 1, jobId },
-  }));
-  // Two submits can both clear the check above and race to here; the partial
-  // unique index refuses the loser and this turns that into the winning run
-  // rather than a raw constraint error. A pose set that fails to insert throws,
-  // because a job with nothing to generate cannot report that itself.
-  const raceWinner = await claimGenerationRun({
-    insertJob: () => service.from("generation_jobs").insert(jobRow),
-    insertPoses: () => service.from("session_generations").insert(poseRows),
-    findActiveRun: activeRunForSession,
-  });
-  if (raceWinner) {
-    if (isExternalSeller) {
-      await service.from("organizations").update({
-        credits: typeof workspace.organization.credits === "number" ? workspace.organization.credits : 5,
-      }).eq("id", workspace.organization.id);
-    }
-    scheduleBackground(kickWorker());
-    return raceWinner;
-  }
-
-  // After the rows exist, so a work item never points at a job whose poses
-  // failed to land.
-  if (session.planning_request_id) {
-    await service.from("catalog_work_items").update({
-      generation_job_id: jobId,
-      catalog_session_id: sessionId,
-      generation_status: "queued",
-      generation_started_at: now
-    }).eq("planning_request_id", session.planning_request_id);
-  }
-  const sessionUpdate = service.from("catalog_sessions").update({
-    job_id: jobId,
-    status: "generating",
-    updated_at: now,
-    session_data: {
-      ...sessionData,
-      skuId: jobData.skuId,
-      skuName: jobData.skuName,
-      productDetails: jobData.productDetails,
-      category: jobData.category,
-      // "Auto from references" keeps the concrete set the analysis described;
-      // only an explicit background choice replaces it.
-      creativeDirection: applyRequestedBackground(sessionData.creativeDirection, jobData.backgroundStyle),
-      modelIdentity: {
-        ...(sessionData.modelIdentity as Record<string, unknown> || {}),
-        direction: jobData.modelIdentityDirection,
-      },
-      posePlan: enabled,
-      bottomWearMode,
+    const quality = ["low", "medium", "high"].includes(String(args.quality)) ? String(args.quality) : DEFAULT_IMAGE_QUALITY;
+    // Presentation choice, not product truth: the analysis still records what the
+    // references prove, and "auto" keeps the two in sync.
+    const bottomWearMode = normalizeBottomWearMode(args.bottomWear ?? args.bottomWearMode);
+    const jobId = `job_${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    const jobData = {
+      skuId: String(args.skuId || sessionData.skuId || session.planning_request_id),
+      skuName: String(args.skuName || sessionData.skuName || "Untitled studio product"),
+      productDetails: String(args.productDetails || sessionData.productDetails || ""), category: String(args.category || sessionData.category || "ethnic/fusion"),
+      backgroundStyle: String(args.backgroundStyle || ""), modelIdentityDirection: String(args.modelIdentity || ""),
+      references: sessionData.references || [], analysisFingerprint: session.analysis_fingerprint,
       imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
-      generationMemory: sessionGenerationMemory(sessionData, {
-        creativeDirection: applyRequestedBackground(sessionData.creativeDirection, jobData.backgroundStyle),
-        bottomWearMode,
-        referenceFingerprint: String(session.reference_hash || ""),
+      requestedModel: String(args.model || "").trim() || null,
+      bottomWearMode,
+    };
+    const adminRates = await currentAdminRates();
+    const analysisCostUsd = await analysisCostUsdFor({
+      organizationId: workspace.organization.id,
+      sessionId,
+      planningRequestId: String(session.planning_request_id || ""),
+    });
+    const jobRow = {
+      job_id: jobId, user_id: workspace.user.firebaseUid, user_email: workspace.user.email, org_id: workspace.organization.id,
+      status: "queued", readiness_status: "ready", readiness_reasons: [], sku_name: jobData.skuName, session_id: sessionId, job_data: jobData,
+      planning_request_id: session.planning_request_id, total_poses: enabled.length, provider: imageGenerationPolicy.provider, model,
+      aspect_ratio: String(args.aspectRatio || "3:4"), image_size: String(args.imageSize || "2K"), quality,
+      pose_qa: Boolean(args.poseQa),
+      estimated_cost_usd: estimateJobCostUsd({
+        posesCount: enabled.length,
+        imageModel: model,
+        quality,
+        poseQa: Boolean(args.poseQa),
+        analysisCostUsd,
+        adminRates,
       }),
+      actual_cost_usd: Number(analysisCostUsd || 0), created_at: now, updated_at: now,
+    };
+    const poseRows = enabled.map((pose, index) => ({
+      session_id: sessionId, generation_id: `${jobId}:pose:${index + 1}`, pose_index: index + 1,
+      title: pose.title, pose_type: pose.id, instructions: pose.prompt, status: "queued", attempt_count: 0,
+      generation_data: { ...pose, poseNumber: index + 1, jobId },
+    }));
+    // Two submits can both clear the check above and race to here; the partial
+    // unique index refuses the loser and this turns that into the winning run
+    // rather than a raw constraint error. A pose set that fails to insert throws,
+    // because a job with nothing to generate cannot report that itself.
+    const raceWinner = await claimGenerationRun({
+      insertJob: () => service.from("generation_jobs").insert(jobRow),
+      insertPoses: () => service.from("session_generations").insert(poseRows),
+      findActiveRun: activeRunForSession,
+    });
+    if (raceWinner) {
+      if (creditDeducted) {
+        await service.rpc("app_refund_seller_credit", { p_org_id: workspace.organization.id });
+        creditDeducted = false;
+      }
+      scheduleBackground(kickWorker());
+      return raceWinner;
     }
-  }).eq("session_id", sessionId).then((res) => { if (res.error) throw new Error(res.error.message); return res; });
 
-  const updates: PromiseLike<any>[] = [sessionUpdate];
-  if (session.planning_request_id) {
-    updates.push(
-      service.from("planning_requests").update({ status: "generating", generation_status: "queued", generation_job_id: jobId, queued_at: now, updated_at: now }).eq("id", session.planning_request_id).then((res) => { if (res.error) throw new Error(res.error.message); return res; })
-    );
+    // Job and poses claimed; do not refund on subsequent session state updates
+    creditDeducted = false;
+
+    // After the rows exist, so a work item never points at a job whose poses
+    // failed to land.
+    if (session.planning_request_id) {
+      await service.from("catalog_work_items").update({
+        generation_job_id: jobId,
+        catalog_session_id: sessionId,
+        generation_status: "queued",
+        generation_started_at: now
+      }).eq("planning_request_id", session.planning_request_id);
+    }
+    const sessionUpdate = service.from("catalog_sessions").update({
+      job_id: jobId,
+      status: "generating",
+      updated_at: now,
+      session_data: {
+        ...sessionData,
+        skuId: jobData.skuId,
+        skuName: jobData.skuName,
+        productDetails: jobData.productDetails,
+        category: jobData.category,
+        // "Auto from references" keeps the concrete set the analysis described;
+        // only an explicit background choice replaces it.
+        creativeDirection: applyRequestedBackground(sessionData.creativeDirection, jobData.backgroundStyle),
+        modelIdentity: {
+          ...(sessionData.modelIdentity as Record<string, unknown> || {}),
+          direction: jobData.modelIdentityDirection,
+        },
+        posePlan: enabled,
+        bottomWearMode,
+        imageGenerationPolicy: imageGenerationPolicySnapshot(imageGenerationPolicy),
+        generationMemory: sessionGenerationMemory(sessionData, {
+          creativeDirection: applyRequestedBackground(sessionData.creativeDirection, jobData.backgroundStyle),
+          bottomWearMode,
+          referenceFingerprint: String(session.reference_hash || ""),
+        }),
+      }
+    }).eq("session_id", sessionId).then((res) => { if (res.error) throw new Error(res.error.message); return res; });
+
+    const updates: PromiseLike<any>[] = [sessionUpdate];
+    if (session.planning_request_id) {
+      updates.push(
+        service.from("planning_requests").update({ status: "generating", generation_status: "queued", generation_job_id: jobId, queued_at: now, updated_at: now }).eq("id", session.planning_request_id).then((res) => { if (res.error) throw new Error(res.error.message); return res; })
+      );
+    }
+    await Promise.all(updates);
+    scheduleBackground(kickWorker());
+    return { success: true, jobId, provider: imageGenerationPolicy.provider, model };
+  } catch (err) {
+    if (creditDeducted) {
+      try {
+        await service.rpc("app_refund_seller_credit", { p_org_id: workspace.organization.id });
+      } catch (refundErr) {
+        console.error("Failed to refund credit during generation failure:", refundErr);
+      }
+    }
+    throw err;
   }
-  await Promise.all(updates);
-  scheduleBackground(kickWorker());
-  return { success: true, jobId, provider: imageGenerationPolicy.provider, model };
 }
 
 async function nextJob(args: JsonRecord) {

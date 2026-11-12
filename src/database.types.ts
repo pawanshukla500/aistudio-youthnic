@@ -5166,6 +5166,12 @@ export type Database = {
         };
         Returns: Json;
       };
+      app_refund_seller_credit: {
+        Args: {
+          p_org_id: string;
+        };
+        Returns: undefined;
+      };
       claim_due_catalog_batch: {
         Args: Record<PropertyKey, never>;
         Returns: {

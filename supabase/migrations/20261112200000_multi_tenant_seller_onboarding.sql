@@ -45,6 +45,9 @@ begin
     raise exception 'Authentication required to enroll a seller organization.';
   end if;
 
+  -- Advisory lock keyed by firebase_uid to serialize concurrent enrollment attempts for the same user
+  perform pg_advisory_xact_lock(hashtext(v_firebase_uid));
+
   v_clean_name := trim(both from store_name);
   if length(v_clean_name) < 2 then
     raise exception 'Store name must be at least 2 characters long.';
@@ -74,8 +77,12 @@ begin
     v_slug := v_base_slug || '-' || substr(md5((v_counter + random())::text || clock_timestamp()::text), 1, 6);
   end loop;
 
-  -- Determine contact email
-  v_email := lower(trim(both from coalesce(nullif(contact_email, ''), v_firebase_uid || '@seller.youthnic.com')));
+  -- Determine contact email: prioritize verified email from token claims, falling back to contact_email
+  v_email := lower(trim(both from coalesce(
+    nullif(auth.jwt() ->> 'email', ''),
+    nullif(contact_email, ''),
+    v_firebase_uid || '@seller.youthnic.com'
+  )));
 
   -- 1. Create Organization with 5 Free Trial Credits and transparent pricing metadata
   insert into public.organizations (
@@ -121,13 +128,29 @@ begin
     '{"catalog_assignments_in_app": true, "catalog_handoff_email": true}'::jsonb
   ) returning id into v_new_member_id;
 
-  -- 3. Assign Admin Role
-  select id into v_admin_role_id from public.roles where slug = 'admin' limit 1;
-  if v_admin_role_id is not null then
-    insert into public.member_roles (member_id, role_id)
-    values (v_new_member_id, v_admin_role_id)
-    on conflict do nothing;
-  end if;
+  -- 3. Create Tenant-Scoped Admin Role and Assign All Permissions
+  insert into public.roles (
+    organization_id,
+    name,
+    slug,
+    description,
+    is_system
+  ) values (
+    v_new_org_id,
+    'Administrator',
+    'admin',
+    'Full administrative access to the seller studio workspace.',
+    true
+  ) returning id into v_admin_role_id;
+
+  insert into public.role_permissions (role_id, permission_id)
+  select v_admin_role_id, id
+  from public.permissions
+  on conflict do nothing;
+
+  insert into public.member_roles (member_id, role_id)
+  values (v_new_member_id, v_admin_role_id)
+  on conflict do nothing;
 
   -- 4. Seed default AI Model Policies (Meta High primary, GPT 6.1 Terra High fallback, Sunburst generator)
   insert into public.organization_ai_model_policies (
@@ -155,16 +178,22 @@ begin
       organization_id,
       category,
       topic,
-      rules,
-      context_data,
+      title,
+      guidance,
+      tags,
+      priority,
+      source,
       is_active
     )
     select
       v_new_org_id,
       category,
       topic,
-      rules,
-      context_data,
+      title,
+      guidance,
+      tags,
+      priority,
+      'seed',
       is_active
     from public.fashion_knowledge_base
     where organization_id = v_primary_org_id
@@ -201,3 +230,21 @@ $$;
 
 revoke all on function public.app_consume_seller_credit(uuid) from public, anon;
 grant execute on function public.app_consume_seller_credit(uuid) to service_role;
+
+-- 4. Atomic Credit Refund Helper for Rollback on Failed Dispatches
+create or replace function public.app_refund_seller_credit(p_org_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = pg_catalog, public
+as $$
+begin
+  update public.organizations
+  set credits = credits + 1,
+      updated_at = now()
+  where id = p_org_id;
+end;
+$$;
+
+revoke all on function public.app_refund_seller_credit(uuid) from public, anon;
+grant execute on function public.app_refund_seller_credit(uuid) to service_role;
