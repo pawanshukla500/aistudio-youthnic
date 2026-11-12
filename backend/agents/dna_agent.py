@@ -200,7 +200,8 @@ class ProductDNAAgent:
             positive_hem_trim = re.sub(r"\b(?:no|not|without|never)\b[^.;,\n]*", "", hem_trim_text)
             has_farshi_panel_seam = (
                 joined_hem_flag
-                and bool(re.search(r"\b(?:4|5|6|7|8)[-\s]*inch\b|hem\s*panel|lower\s*panel|joined\s*panel|horizontal\s*(?:joint|seam)\b", positive_hem_trim))
+                and bool(re.search(r"\b(?:4|5|6|7|8)[-\s]*(?:inch(?:es)?|in)\b", positive_hem_trim))
+                and bool(re.search(r"(?:hem|lower|joined|ankle)\s*panel|horizontal\s*(?:joint|seam)\b|separating\s+[^.;,\n]*panel", positive_hem_trim))
                 and not has_neg_farshi
             )
             if has_bottom_wear and cut in {"palazzo", "unknown", ""} and has_farshi_panel_seam:

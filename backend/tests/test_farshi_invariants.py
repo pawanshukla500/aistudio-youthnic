@@ -95,3 +95,33 @@ def test_vlm_unbroken_palazzo_stays_palazzo():
     )
     assert dna.bottom_wear.cut_class == "palazzo"
     assert dna.bottom_wear.classification == "Palazzo"
+
+
+def test_vlm_narrow_one_inch_joined_panel_stays_palazzo():
+    from agents.dna_agent import ProductDNAAgent
+
+    agent = ProductDNAAgent()
+    dna = agent._build_from_vlm(
+        org_id="org_test",
+        sku_id="sku_palazzo_1in",
+        sku_name="Blush Kurti Palazzo",
+        provider="meta",
+        model="muse-spark-1.2-contributor",
+        references=[{"role": "front"}, {"role": "bottom"}],
+        fingerprint="fp_palazzo_1in",
+        raw={
+            "garment_family": "kurta_or_kurti_set",
+            "main_color": "blush pink",
+            "bottom_wear": {
+                "has_bottom_wear": True,
+                "classification": "Palazzo",
+                "cut_class": "palazzo",
+                "two_leg_construction": True,
+                "joined_hem": True,
+                "hem_trim": "1-inch joined hem panel with lace trim",
+            },
+        },
+        is_saree=False,
+    )
+    assert dna.bottom_wear.cut_class == "palazzo"
+    assert dna.bottom_wear.classification == "Palazzo"

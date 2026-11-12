@@ -1481,7 +1481,7 @@ async function metaResponsesVisionJson(
         const isModelUnavailable =
           (lastError instanceof VisionProviderError && lastError.failure.code === "provider_unavailable") ||
           response.status === 404 ||
-          /not found|not available|does not exist|model_not_found|unsupported/i.test(`${rawErrCode} ${rawErrText}`);
+          /not found|not available|does not exist|model_not_found|unsupported\s+model|model\s+(?:is\s+)?unsupported/i.test(`${rawErrCode} ${rawErrText}`);
         // If 404 or model not available, try sibling model if one remains
         if (isModelUnavailable && modelCandidate === modelCandidates[0] && modelCandidates.length > 1) {
           break; // break inputVariants loop to try the sibling candidate
