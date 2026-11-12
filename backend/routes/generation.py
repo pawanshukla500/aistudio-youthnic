@@ -1,8 +1,13 @@
+import logging
+import os
+import time
 import uuid
 import json
 from typing import Dict, Any, List
+import httpx
 from fastapi import APIRouter, HTTPException, Body, Query, Depends
 from auth import verify_internal_secret
+from config import settings
 from models.generation import GenerationJobSubmit, GenerationJobStatus, PoseGenerationRecord
 from database import get_db, get_latest_dna_version
 from cache import cache_manager
@@ -10,6 +15,7 @@ from agents.router_agent import GenerationRouterAgent
 from agents.pose_planning_agent import CreativePosePlanningAgent
 from celery_app import process_generation_job_task, process_pose_generation_task
 
+logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/api/v1/generation",
     tags=["Generation Orchestration"],
@@ -17,6 +23,36 @@ router = APIRouter(
 )
 _router_agent = GenerationRouterAgent()
 _pose_planner = CreativePosePlanningAgent()
+
+
+def wake_celery_worker() -> bool:
+    """Wake the on-demand Celery supervisor if running on Railway or explicitly configured."""
+    url = (settings.CELERY_WORKER_WAKE_URL or "").strip()
+    if not url and (os.environ.get("RAILWAY_ENVIRONMENT_ID") or os.environ.get("RAILWAY_PROJECT_ID")):
+        url = "http://celery-worker.railway.internal:8080/wake"
+    elif url == "http://celery-worker.railway.internal:8080/wake" and not (
+        os.environ.get("RAILWAY_ENVIRONMENT_ID") or os.environ.get("RAILWAY_PROJECT_ID")
+    ):
+        return False
+    if not url:
+        return False
+
+    headers: Dict[str, str] = {}
+    if settings.INTERNAL_API_SECRET:
+        headers["x-internal-secret"] = settings.INTERNAL_API_SECRET
+
+    for attempt in range(2):
+        try:
+            resp = httpx.post(url, headers=headers, timeout=5.0)
+            if resp.status_code < 400:
+                return True
+            logger.warning("Celery worker wake returned %s on attempt %s", resp.status_code, attempt + 1)
+        except Exception as exc:
+            logger.debug("Celery worker wake attempt %s failed: %s", attempt + 1, exc)
+        if attempt == 0:
+            time.sleep(1.0)
+    logger.warning("Unable to wake Celery worker at %s after retries; queued task remains in Valkey.", url)
+    return False
 
 
 @router.post("/submit")
@@ -54,7 +90,15 @@ def submit_generation_job(job_req: GenerationJobSubmit = Body(...)) -> Dict[str,
 
     dna_row = get_latest_dna_version(org_id, sku_id)
     product_dna = (dna_row or {}).get("dna_payload") or {"sku_name": sku_name}
-    planned = _pose_planner.process({"product_dna": product_dna}).get("pose_plans", [])
+    planned = _pose_planner.process(
+        {
+            "organization_id": org_id,
+            "sku_id": sku_id,
+            "source_fingerprint": (dna_row or {}).get("source_fingerprint", ""),
+            "extra_instructions": job_req.extra_instructions or "",
+            "product_dna": product_dna,
+        }
+    ).get("pose_plans", [])
     planned_by_idx = {int(p["pose_number"]): p for p in planned}
 
     job_id = f"job_{uuid.uuid4()}"
@@ -112,6 +156,7 @@ def submit_generation_job(job_req: GenerationJobSubmit = Body(...)) -> Dict[str,
                         )
 
         process_generation_job_task.delay(job_id, org_id, sku_id)
+        wake_celery_worker()
     except Exception:
         cache_manager.release_job_active(org_id, sku_id, expected_job_id=job_id)
         try:
@@ -242,12 +287,20 @@ def regenerate_pose(
                 )
 
     acquired_active = False
-    if reopened_job:
-        acquired_active = cache_manager.mark_job_active(org_id, sku_id, job_id)
-
+    conflict_active = False
     try:
+        if reopened_job:
+            acquired_active = cache_manager.mark_job_active(org_id, sku_id, job_id)
+            if not acquired_active:
+                conflict_active = True
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Another active generation job is already running for SKU {sku_id}.",
+                )
+
         process_pose_generation_task.delay(gen_id, job_id, pose_index, org_id, sku_id)
-    except Exception:
+        wake_celery_worker()
+    except Exception as exc:
         if acquired_active:
             cache_manager.release_job_active(org_id, sku_id, expected_job_id=job_id)
         try:
@@ -291,6 +344,8 @@ def regenerate_pose(
                         )
         except Exception:
             pass
+        if conflict_active and isinstance(exc, HTTPException):
+            raise exc
         raise HTTPException(status_code=503, detail="Failed to enqueue pose regeneration worker")
 
     return {

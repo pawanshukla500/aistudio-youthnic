@@ -4,8 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
-from database import get_pool
-from cache import get_valkey
+from database import close_pool, get_pool
+from cache import get_valkey, reset_valkey
 from graph import get_postgres_checkpointer
 from routes import (
     dna_router,
@@ -37,18 +37,17 @@ async def lifespan(app: FastAPI):
     try:
         r = get_valkey()
         r.ping()
+        reset_valkey()
         logger.info("Valkey connection verified.")
     except Exception as e:
+        reset_valkey()
         logger.error(f"Failed to connect to Valkey: {e}")
 
     yield
 
     logger.info("Shutting down Youthnic AI Studio Orchestrator...")
-    try:
-        pool = get_pool()
-        pool.close()
-    except Exception:
-        pass
+    reset_valkey()
+    close_pool()
 
 
 app = FastAPI(

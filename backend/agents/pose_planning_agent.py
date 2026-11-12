@@ -1,5 +1,8 @@
+import hashlib
+import json
 import logging
 from typing import Dict, Any, List
+from cache import cache_manager
 from models.generation import PoseDefinition, PoseType
 
 logger = logging.getLogger(__name__)
@@ -13,6 +16,8 @@ class CreativePosePlanningAgent:
 
     def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
         dna = state.get("product_dna", {})
+        org_id = str(state.get("organization_id") or "")
+        sku_id = str(state.get("sku_id") or dna.get("sku_id") or "")
         sku_name = dna.get("sku_name", "Garment")
         main_color = dna.get("main_color", "primary")
         fabric_type = dna.get("fabric_type", "fabric")
@@ -20,16 +25,49 @@ class CreativePosePlanningAgent:
         bottom_cut = dna.get("bottom_wear", {}).get("cut_class", "straight")
         is_farshi = bottom_cut == "farshi"
 
-        scene_desc = (
+        dna_sig = hashlib.sha256(
+            json.dumps(
+                {
+                    "dna": dna,
+                    "source_fingerprint": state.get("source_fingerprint", ""),
+                    "extra": state.get("extra_instructions", ""),
+                },
+                sort_keys=True,
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()[:20]
+
+        default_scene_desc = (
             "Set in an elegant high-end fashion studio photoshoot. Warm soft ambient lighting, clean architectural set, "
             "subtle editorial shadows. Strictly copy the photoshoot room and lighting from the style reference, "
             "but completely quarantine and ignore the clothing worn in that reference."
         )
-
-        model_desc = (
+        default_model_desc = (
             "Professional adult Indian fashion model with realistic natural facial features, elegant poise, "
             "and strictly exactly two arms and two hands connected to visible forearms."
         )
+
+        scene_desc = default_scene_desc
+        model_desc = default_model_desc
+        if org_id and sku_id:
+            cached_scene = (
+                cache_manager.get_scene_lock(org_id, sku_id)
+                if not state.get("force_refresh")
+                else None
+            )
+            if cached_scene and cached_scene.get("dna_sig") == dna_sig:
+                scene_desc = str(cached_scene.get("description") or default_scene_desc)
+                model_desc = str(cached_scene.get("model_description") or default_model_desc)
+            else:
+                cache_manager.set_scene_lock(
+                    org_id,
+                    sku_id,
+                    {
+                        "description": scene_desc,
+                        "model_description": model_desc,
+                        "dna_sig": dna_sig,
+                    },
+                )
 
         if is_saree:
             saree_arch = dna.get("saree_details", {}) or {}
@@ -226,6 +264,16 @@ class CreativePosePlanningAgent:
                 ),
             },
         ]
+
+        if org_id and sku_id:
+            for pose in poses:
+                pose_num = int(pose["pose_number"])
+                if not state.get("force_refresh"):
+                    cached_prompt = cache_manager.get_compiled_prompt(org_id, sku_id, pose_num, dna_sig)
+                    if cached_prompt:
+                        pose["prompt"] = cached_prompt
+                        continue
+                cache_manager.set_compiled_prompt(org_id, sku_id, pose_num, dna_sig, str(pose["prompt"]))
 
         return {
             "pose_plans": poses,

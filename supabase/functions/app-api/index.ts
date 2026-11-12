@@ -5,6 +5,7 @@ import { deleteFirebaseObject, downloadFirebaseObject, uploadFirebaseObject, cre
 import { claimGenerationRun, queueReuseResponse } from "../../../src/lib/generationRuns.ts";
 import { deliveredVersionTiming, stampPoseTiming } from "../../../src/lib/poseVersions.ts";
 import { applyRequestedBackground } from "./lib/sceneLock.ts";
+import { fetchFastApiWithRetry } from "./lib/fastApiClient.ts";
 import {
   ANALYSIS_VERSION,
   CONSISTENCY_RULES,
@@ -5327,10 +5328,11 @@ async function analyzeCatalogVariant(
   onAttempt?: (attempt: VisionHopAttempt) => Promise<void>,
 ) {
   const settings = (batch.generation_settings || {}) as JsonRecord;
+  const orgId = String(batch.organization_id || "");
   const category = catalogVariantCategory(batch, variant);
   const memory = (batch.catalog_memory || {}) as JsonRecord;
   const baseAnalysis = memory.baseAnalysis as ReturnType<typeof normalizeAnalysis> | undefined;
-  const policy = suppliedPolicy || await resolveVisionPolicy(String(batch.organization_id), { purpose: "product_truth", garmentFamily: category });
+  const policy = suppliedPolicy || await resolveVisionPolicy(orgId, { purpose: "product_truth", garmentFamily: category });
 
   // OPTIMIZATION: If the catalog batch already has an analyzed base product,
   // do not waste tokens re-analyzing the identical cut, silhouette, structure, and pose plan.
@@ -5394,30 +5396,85 @@ async function analyzeCatalogVariant(
     }
   }
 
-  // Full base analysis for the first SKU in the batch
-  const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), String(batch.organization_id), category);
-  const manifest: Array<{ number: number; role: string }> = [];
-  const parts: JsonRecord[] = [];
-  loaded.forEach((reference, index) => {
-    manifest.push({ number: index + 1, role: roleLabel(reference.role) });
-    parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
+  // Full base analysis for the first SKU in the batch (check persistent analysis_cache first)
+  const [housePreferences, fashionKnowledge, analysisLearning, showcaseFeedback] = await Promise.all([
+    stylingPreferenceBrief(orgId, category),
+    fashionKnowledgeBrief(orgId, category),
+    analysisLearningBrief(orgId, category),
+    showcaseFeedbackBrief(orgId, category, String(asBaseAnalysisGarmentFamily(batch))),
+  ]);
+  const policyFingerprint = visionPolicyFingerprint(policy);
+  const cHash = productHash({
+    skuName: variant.sku_name,
+    productDetails: variant.product_description || "",
+    category,
+    bottomWear: settings.bottomWear ?? settings.bottomWearMode ?? "",
+    modelDirection: settings.modelDirection || "",
+    sceneDirection: settings.sceneDirection || "",
   });
-  parts.push({ text: buildCombinedAnalysisPrompt({
-    skuName: String(variant.sku_name), productDetails: String(variant.product_description || ""), category,
-    modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
-    housePreferences: await stylingPreferenceBrief(String(batch.organization_id), category),
-    fashionKnowledge: await fashionKnowledgeBrief(String(batch.organization_id), category),
-    analysisLearning: await analysisLearningBrief(String(batch.organization_id), category),
-    showcaseFeedback: await showcaseFeedbackBrief(
-      String(batch.organization_id),
-      category,
-      String(asBaseAnalysisGarmentFamily(batch)),
-    ),
-  }) });
-  const result = await visionJson(policy, parts, { onAttempt });
-  const normalized = normalizeAnalysis(result.json, category, {
-    bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
-  });
+  const rHash = referenceHash(references);
+  const catalogCacheKey = `${cHash}:${rHash}:${ANALYSIS_VERSION}:${policyFingerprint}:${smallHash(housePreferences)}:${smallHash(fashionKnowledge)}:${smallHash(analysisLearning)}:${smallHash(showcaseFeedback)}`;
+  const forceRefresh = settings.forceRefresh === true;
+
+  let normalized: ReturnType<typeof normalizeAnalysis> | null = null;
+  let usedPolicy = policy;
+  let attempts: VisionHopAttempt[] = [];
+  let usage: unknown = {};
+
+  if (!forceRefresh && orgId) {
+    const { data: cached, error: cachedError } = await service
+      .from("analysis_cache")
+      .select("payload")
+      .eq("org_key", orgId)
+      .eq("cache_kind", "catalog_product_analysis")
+      .eq("cache_key", catalogCacheKey)
+      .gt("expires_at", new Date().toISOString())
+      .maybeSingle();
+    if (!cachedError && cached?.payload) {
+      normalized = normalizeAnalysis(cached.payload as JsonRecord, category, {
+        bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+      });
+    }
+  }
+
+  if (!normalized) {
+    const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, category);
+    const manifest: Array<{ number: number; role: string }> = [];
+    const parts: JsonRecord[] = [];
+    loaded.forEach((reference, index) => {
+      manifest.push({ number: index + 1, role: roleLabel(reference.role) });
+      parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
+    });
+    parts.push({ text: buildCombinedAnalysisPrompt({
+      skuName: String(variant.sku_name), productDetails: String(variant.product_description || ""), category,
+      modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
+      housePreferences,
+      fashionKnowledge,
+      analysisLearning,
+      showcaseFeedback,
+    }) });
+    const result = await visionJson(policy, parts, { onAttempt });
+    normalized = normalizeAnalysis(result.json, category, {
+      bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+    });
+    usedPolicy = result.policy;
+    attempts = result.attempts;
+    usage = result.raw.usageMetadata || result.raw.usage || {};
+
+    if (orgId) {
+      await service.from("analysis_cache").upsert({
+        organization_id: orgId,
+        org_key: orgId,
+        cache_kind: "catalog_product_analysis",
+        cache_key: catalogCacheKey,
+        sku_name: String(variant.sku_name || ""),
+        product_category: category,
+        payload: normalized,
+        expires_at: new Date(Date.now() + 3 * 365 * 86400_000).toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "org_key,cache_kind,cache_key" });
+    }
+  }
 
   // Store baseAnalysis into catalog_memory so subsequent SKUs reuse it
   try {
@@ -5436,11 +5493,22 @@ async function analyzeCatalogVariant(
     console.error("Could not save baseAnalysis in catalog memory:", errorMessage(err));
   }
 
+  // Sync catalog base SKU into FastAPI Product DNA V2 & LangGraph Valkey/PostgresSaver caches (best-effort)
+  await warmFastApiProductDna({
+    organizationId: orgId,
+    skuId: String(variant.sku_name || variant.id || ""),
+    skuName: String(variant.sku_name || "Catalog Variant"),
+    category,
+    garmentFamily: String(normalized.productIdentity.garmentFamily || category),
+    mainColor: String(normalized.productIdentity.mainColor || ""),
+    references,
+  });
+
   return {
     normalized: applyCatalogMemory(batch, normalized),
-    policy: result.policy,
-    attempts: result.attempts,
-    usage: result.raw.usageMetadata || result.raw.usage,
+    policy: usedPolicy,
+    attempts,
+    usage,
     isColorwayDelta: false,
   };
 }
@@ -8273,6 +8341,51 @@ function fastApiHeaders(includeJson = true): Record<string, string> {
   return headers;
 }
 
+async function warmFastApiProductDna(input: {
+  organizationId: string;
+  skuId: string;
+  skuName: string;
+  category?: string;
+  garmentFamily?: string;
+  mainColor?: string;
+  references: ReferenceInput[];
+}): Promise<void> {
+  const secret = Deno.env.get("CATALOG_WORKER_SECRET")?.trim();
+  if (!secret || !input.organizationId || !input.skuId) return;
+  try {
+    const response = await fetchFastApiWithRetry({
+      baseUrl: fastApiBaseUrl(),
+      path: "/api/v1/dna/extract",
+      maxRetries: 1,
+      timeoutMs: 25_000,
+      init: {
+        method: "POST",
+        headers: fastApiHeaders(true),
+        body: JSON.stringify({
+          organization_id: input.organizationId,
+          sku_id: input.skuId,
+          sku_name: input.skuName,
+          category: input.category,
+          garment_family: input.garmentFamily,
+          main_color: input.mainColor,
+          references: input.references.map((ref) => ({
+            role: ref.role,
+            downloadUrl: ref.downloadUrl,
+            storagePath: ref.storagePath,
+            hash: ref.sha256,
+            mimeType: ref.mimeType,
+          })),
+          force_refresh: false,
+          auto_approve: false,
+        }),
+      },
+    });
+    await response.body?.cancel().catch(() => {});
+  } catch (err) {
+    console.warn("Best-effort FastAPI Product DNA warm skipped:", errorMessage(err));
+  }
+}
+
 async function dnaExtractOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.manage");
   const canApprove = workspace.isAdmin || workspace.permissions.includes("planning.approve");
@@ -8304,10 +8417,14 @@ async function dnaExtractOperation(request: Request, args: JsonRecord) {
   if (typeof args.garment_family === "string" && args.garment_family.trim()) payload.garment_family = args.garment_family.trim();
   if (typeof args.main_color === "string" && args.main_color.trim()) payload.main_color = args.main_color.trim();
 
-  const response = await fetch(`${fastApiBaseUrl()}/api/v1/dna/extract`, {
-    method: "POST",
-    headers: fastApiHeaders(true),
-    body: JSON.stringify(payload),
+  const response = await fetchFastApiWithRetry({
+    baseUrl: fastApiBaseUrl(),
+    path: "/api/v1/dna/extract",
+    init: {
+      method: "POST",
+      headers: fastApiHeaders(true),
+      body: JSON.stringify(payload),
+    },
   });
   if (!response.ok) {
     const err = await response.text();
@@ -8318,11 +8435,15 @@ async function dnaExtractOperation(request: Request, args: JsonRecord) {
 
 async function dnaGetOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.view");
-  const skuId = String(args.skuId || args.sku_id || "");
-  const response = await fetch(
-    `${fastApiBaseUrl()}/api/v1/dna/${encodeURIComponent(skuId)}?org_id=${encodeURIComponent(workspace.organization.id)}`,
-    { headers: fastApiHeaders(false) },
-  );
+  const skuId = String(args.skuId || args.sku_id || "").trim();
+  if (!skuId) {
+    throw new Error("skuId is required for DNA retrieval.");
+  }
+  const response = await fetchFastApiWithRetry({
+    baseUrl: fastApiBaseUrl(),
+    path: `/api/v1/dna/${encodeURIComponent(skuId)}?org_id=${encodeURIComponent(workspace.organization.id)}`,
+    init: { headers: fastApiHeaders(false) },
+  });
   if (!response.ok) {
     const err = await response.text();
     throw new Error(`DNA retrieval failed (${response.status}): ${err}`);
@@ -8332,15 +8453,19 @@ async function dnaGetOperation(request: Request, args: JsonRecord) {
 
 async function dnaApproveOperation(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.approve");
-  const response = await fetch(`${fastApiBaseUrl()}/api/v1/dna/approve`, {
-    method: "POST",
-    headers: fastApiHeaders(true),
-    body: JSON.stringify({
-      ...args,
-      sku_id: String(args.sku_id || args.skuId || ""),
-      organization_id: workspace.organization.id,
-      approved_by: workspace.user.email,
-    }),
+  const response = await fetchFastApiWithRetry({
+    baseUrl: fastApiBaseUrl(),
+    path: "/api/v1/dna/approve",
+    init: {
+      method: "POST",
+      headers: fastApiHeaders(true),
+      body: JSON.stringify({
+        ...args,
+        sku_id: String(args.sku_id || args.skuId || ""),
+        organization_id: workspace.organization.id,
+        approved_by: workspace.user.email,
+      }),
+    },
   });
   if (!response.ok) {
     const err = await response.text();
@@ -8351,8 +8476,10 @@ async function dnaApproveOperation(request: Request, args: JsonRecord) {
 
 async function workflowsOverviewOperation(request: Request) {
   await workspaceFor(request, "planning.view");
-  const response = await fetch(`${fastApiBaseUrl()}/api/v1/workflows/overview`, {
-    headers: fastApiHeaders(false),
+  const response = await fetchFastApiWithRetry({
+    baseUrl: fastApiBaseUrl(),
+    path: "/api/v1/workflows/overview",
+    init: { headers: fastApiHeaders(false) },
   });
   if (!response.ok) {
     const err = await response.text();
@@ -8372,8 +8499,10 @@ async function workflowCheckpointsOperation(request: Request, args: JsonRecord) 
   const path = threadId
     ? `/api/v1/workflows/checkpoints/${encodeURIComponent(threadId)}?${orgQuery}`
     : `/api/v1/workflows/threads?${orgQuery}`;
-  const response = await fetch(`${fastApiBaseUrl()}${path}`, {
-    headers: fastApiHeaders(false),
+  const response = await fetchFastApiWithRetry({
+    baseUrl: fastApiBaseUrl(),
+    path,
+    init: { headers: fastApiHeaders(false) },
   });
   if (!response.ok) {
     const err = await response.text();

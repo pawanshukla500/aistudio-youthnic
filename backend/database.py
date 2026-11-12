@@ -23,15 +23,36 @@ def get_pool() -> ConnectionPool:
         raise RuntimeError("DATABASE_URL is not configured.")
     with _pool_lock:
         if _pool is None or _pool.closed:
+            # Zero idle connections + fast idle reap + disabled TCP keepalives
+            # allow Railway Postgres/FastAPI/worker services to enter sleep mode.
             _pool = ConnectionPool(
                 conninfo=settings.DATABASE_URL,
-                min_size=2,
+                min_size=0,
                 max_size=15,
+                max_idle=60.0,
+                reconnect_timeout=60.0,
                 open=True,
-                kwargs={"autocommit": True, "row_factory": dict_row},
+                kwargs={
+                    "autocommit": True,
+                    "row_factory": dict_row,
+                    "keepalives": 0,
+                    "connect_timeout": 10,
+                },
             )
             _pool_generation += 1
     return _pool
+
+
+def close_pool() -> None:
+    """Close shared PostgreSQL pool cleanly so idle processes hold zero open sockets."""
+    global _pool
+    with _pool_lock:
+        if _pool is not None and not _pool.closed:
+            try:
+                _pool.close()
+            except Exception:
+                pass
+        _pool = None
 
 
 def get_pool_generation() -> int:

@@ -20,8 +20,13 @@ class Settings(BaseSettings):
     # PostgreSQL / Supabase (populated via environment variables)
     DATABASE_URL: str = Field(
         default="",
-        validation_alias=AliasChoices("DATABASE_URL", "POSTGRES_PRIVATE_URL", "POSTGRES_URL"),
+        validation_alias=AliasChoices("POSTGRES_PRIVATE_URL", "DATABASE_URL", "POSTGRES_URL"),
     )
+    CELERY_WORKER_WAKE_URL: str = Field(
+        default="http://celery-worker.railway.internal:8080/wake",
+        validation_alias=AliasChoices("CELERY_WORKER_WAKE_URL", "WORKER_WAKE_URL"),
+    )
+    WORKER_IDLE_SHUTDOWN_SECONDS: int = 120
     SUPABASE_URL: str = "https://envoy-production-37ba.up.railway.app"
     SUPABASE_SERVICE_ROLE_KEY: str = ""
 
