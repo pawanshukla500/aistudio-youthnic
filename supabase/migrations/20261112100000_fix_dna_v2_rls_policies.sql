@@ -110,18 +110,27 @@ begin
     'checkpoint_migrations'
   ] loop
     if exists (
-      select 1 from information_schema.tables
-      where table_schema = 'public' and table_name = cp_tbl
+      select 1 from pg_tables
+      where schemaname = 'public' and tablename = cp_tbl
     ) then
-      execute format('alter table public.%I enable row level security', cp_tbl);
-      execute format('revoke all on public.%I from public, anon, authenticated', cp_tbl);
-      execute format('grant all on public.%I to service_role', cp_tbl);
-      execute format('drop policy if exists %I on public.%I', cp_tbl || '_service_role_all', cp_tbl);
-      execute format(
-        'create policy %I on public.%I for all to service_role using (true) with check (true)',
-        cp_tbl || '_service_role_all',
-        cp_tbl
-      );
+      begin
+        execute format('alter table public.%I enable row level security', cp_tbl);
+        execute format('revoke all on public.%I from public, anon, authenticated', cp_tbl);
+        execute format('grant all on public.%I to service_role', cp_tbl);
+        execute format('drop policy if exists %I on public.%I', cp_tbl || '_service_role_all', cp_tbl);
+        execute format(
+          'create policy %I on public.%I for all to service_role using (true) with check (true)',
+          cp_tbl || '_service_role_all',
+          cp_tbl
+        );
+      exception when insufficient_privilege then
+        if not exists (
+          select 1 from pg_tables
+          where schemaname = 'public' and tablename = cp_tbl and rowsecurity = true
+        ) then
+          raise;
+        end if;
+      end;
     end if;
   end loop;
 end $$;
