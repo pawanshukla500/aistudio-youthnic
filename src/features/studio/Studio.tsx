@@ -782,6 +782,7 @@ export function Studio() {
           : "Generation submitted successfully. Studio is ready for your next product.",
         jobId: result.jobId,
       });
+      window.dispatchEvent(new Event("workspace-refresh"));
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not queue generation." });
     } finally {
