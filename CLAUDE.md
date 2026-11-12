@@ -4,7 +4,7 @@ Six-pose fashion catalog photoshoots generated from product references.
 
 - **Frontend:** React + Vite (`src/`).
 - **Edge Gateway:** Deno Supabase Edge Function `supabase/functions/app-api/`, running on Railway (`functions`).
-- **Agentic Workflow Backend:** Python FastAPI + LangGraph (`AsyncPostgresSaver`) + Celery (`backend/`), running on Railway (`FastAPI`, `celery-worker`) with `Valkey` cache/broker.
+- **Agentic Workflow Backend:** Python FastAPI + LangGraph (`PostgresSaver`) + Celery (`backend/`), running on Railway (`FastAPI`, `celery-worker`) with `Valkey` cache/broker.
 - **Database:** Postgres migrations in `supabase/migrations/`.
 - **Auth:** Firebase.
 - **Knowledge Graph:** `/graphify` index at `graphify-out/graph.json` and `graphify-out/GRAPH_REPORT.md`.
@@ -21,7 +21,7 @@ Six-pose fashion catalog photoshoots generated from product references.
    planning (`product_truth`), the standard chain routes through Meta Muse Spark (`muse-spark-1.2-contributor` / `muse-spark-1.3-contributor` with **`high` thinking**) as primary,
    OpenAI GPT 6.1 Terra (`gpt-6.1-terra` with **`high` thinking**) as first fallback,
    and OpenAI GPT 5.6 Luna (`gpt-5.6-luna`) / Gemini Flash (`gemini-3.8-flash`) as secondary safety nets. Do not add arbitrary unapproved
-   models or bypass the established chain. High reasoning is preserved for Meta Muse Spark, GPT 6.1 Terra, and GPT 5.6 Luna during analysis and pose planning (`clampProductTruthThinking`), only clamping to `low` under emergency tight hop budgets (`< 60s`), while legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, `gemini-*`) run at `low` (explicit `none`/`minimal` preserved; Qwen thinking off). Image QA runs at `low`. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
+   models or bypass the established chain. High reasoning is preserved for Meta Muse Spark, GPT 6.1 Terra, and GPT 5.6 Luna during analysis and pose planning (`clampProductTruthThinking`), only clamping to `low` under emergency tight remaining budgets (`< 60s` in Edge `app-api` or FastAPI `invoke_vision_json`), while legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, `gemini-*`) run at `low` (explicit `none`/`minimal` preserved; Qwen thinking off). Image QA runs at `low`. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
 2. **Product references are the truth (PR 131).** Generated images must take clothing EXCLUSIVELY
    from uploaded product references. The outfit/clothing shown in the STYLE REFERENCE image is 100% DISCARDED and QUARANTINED.
    Style reference is strictly the authority for backdrop, room architecture, flooring, and lighting. Copy the room only: do not copy the pose, the outfit, or objects in the hands.

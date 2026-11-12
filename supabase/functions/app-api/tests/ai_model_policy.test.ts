@@ -1125,4 +1125,13 @@ Deno.test("runVisionProviderChain clamps fallback thinking for product truth in 
   assertEquals(result.attempts[1].thinkingLevel, "low");
 });
 
+Deno.test("defaultThinkingLevel prefers low for OpenAI QA routes when thinking is omitted", () => {
+  assertEquals(defaultThinkingLevel({ provider: "openai", model: "gpt-5.6-luna" }, "qa"), "low");
+  assertEquals(defaultThinkingLevel({ provider: "openai", model: "gpt-6.1-terra" }, "qa"), "low");
+  assertEquals(
+    assertAllowedAiModelRoute({ provider: "openai", model: "gpt-5.6-luna", thinkingLevel: "none" }, "qa").thinkingLevel,
+    "none",
+  );
+});
+
 

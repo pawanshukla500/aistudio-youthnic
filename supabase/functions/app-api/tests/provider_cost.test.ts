@@ -45,7 +45,7 @@ Deno.test("vision cost calculates GPT 6.1 Terra rates and cached tokens", () => 
     },
   }, "openai", "gpt-6.1-terra");
   assertEquals(calculated.cachedTok, 2000);
-  assertAlmostEquals(calculated.costUsd, (10000 * 1.25 + 2000 * 0.125 + 800 * 5.00) / 1_000_000, 1e-8);
+  assertAlmostEquals(calculated.costUsd, (10000 * 1.00 + 2000 * 0.05 + 800 * 5.00) / 1_000_000, 1e-8);
   assertEquals(calculated.costSource, "estimated_public_rates_2026-11");
 });
 

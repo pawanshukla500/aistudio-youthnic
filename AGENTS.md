@@ -28,7 +28,7 @@ This document establishes operational requirements, architectural constraints, a
 When interacting with vision pipelines (`supabase/functions/app-api/` and `backend/services/ai_clients.py`):
 - **Primary Route (Analysis & Pose Planning):** Meta Muse Spark (`muse-spark-1.2-contributor:high` or `muse-spark-1.3-contributor:high`, or standard `muse-spark-1.3:high` / `1.2:high`) is the default primary when `META_MODEL_API_KEY` is present, running with **`high` thinking** (`reasoning: { effort: "high" }`).
 - **Payload Schema:** Always send `input: [{ role: "user", content: [...] }]` to `https://api.meta.ai/v1/responses`. Do not send `{ type: "message" }`.
-- **Reasoning Effort:** Meta Muse Spark, OpenAI `gpt-6.1-terra`, and `gpt-5.6-luna` preserve **`high`** thinking during `product_truth` analysis & pose planning (`clampProductTruthThinking`), only clamping down to `low` under emergency tight hop budgets (`< 60s`). Image QA (`qa`) runs at `low` for speed.
+- **Reasoning Effort:** Meta Muse Spark, OpenAI `gpt-6.1-terra`, and `gpt-5.6-luna` preserve **`high`** thinking during `product_truth` analysis & pose planning (`clampProductTruthThinking` in `app-api`, `invoke_vision_json` in FastAPI), clamping down to `low` only under emergency tight remaining budgets (`< 60s` in Edge or FastAPI). Image QA (`qa`) runs at `low` for speed.
 - **In-Provider Sibling Retry:** If `muse-spark-1.2-contributor` returns 404/not available, transparently retry `muse-spark-1.3-contributor` (and vice-versa) before falling back.
 - **Fallback Chain:** Hop 1 is **OpenAI GPT 6.1 Terra (`gpt-6.1-terra:high`)** for analysis & pose planning fallback, Hop 2 is OpenAI GPT 5.6 Luna (`gpt-5.6-luna:high`/`low`), then Gemini Flash (`gemini-3.8-flash`).
 - **Default Image Generation Model:** **`gpt-image-2.6-sunburst`** (3:4, 2K / `1536x2048`, default `medium` quality unless overridden).
@@ -55,7 +55,7 @@ Every AI agent accessing or modifying this repository **MUST** follow these two 
 
 1. **Dual-Service Backend Architecture (`Railway` project `AI Studio App`):**
    - **Edge Gateway (`supabase/functions/app-api/`):** `functions` service handling auth, `organization_ai_model_policies`, image generation jobs, Firebase Storage proxying, and orchestration delegation. Keep `supabase/functions/app-api/lib/aiModelPolicy.ts` pure (no DB queries, network fetches, or env reads).
-   - **LangGraph Agentic Service (`backend/`):** `FastAPI` + `celery-worker` services backed by Supabase Postgres (`AsyncPostgresSaver` checkpoints, Product DNA V2 immutable versions) and `Valkey` (cache + Celery broker), providing `/api/v1/dna/extract`, `/api/v1/studio/generate`, `/api/v1/qa/evaluate`, and `/health`.
+   - **LangGraph Agentic Service (`backend/`):** `FastAPI` + `celery-worker` services backed by Supabase Postgres (`PostgresSaver` checkpoints, Product DNA V2 immutable versions) and `Valkey` (cache + Celery broker), providing `/api/v1/dna/extract`, `/api/v1/studio/generate`, `/api/v1/qa/evaluate`, and `/health`.
 2. **Atomic Commits & Verification:**
    - Deno checks & tests: `node $npxCli deno check --frozen supabase/functions/app-api/index.ts` and `node $npxCli deno test -A supabase/functions/app-api/tests/` (using full `test:catalog-workflow` list before push).
    - Python backend tests: `$env:PYTHONPATH = "backend"; python -m pytest backend/tests/ -q`.

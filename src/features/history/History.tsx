@@ -1832,10 +1832,10 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   <div className="rounded-xl border border-outline-variant/30 bg-white p-3">
                     <span className="block text-[10px] font-bold uppercase text-secondary">Provider & Reasoning</span>
                     <span className="mt-0.5 block font-mono text-xs font-bold text-on-surface">
-                      {job.analysisProvider ? `${job.analysisProvider[0].toUpperCase()}${job.analysisProvider.slice(1)}` : "Meta Muse Spark"}
+                      {job.analysisProvider ? `${job.analysisProvider[0].toUpperCase()}${job.analysisProvider.slice(1)}` : "Not recorded"}
                     </span>
                     <span className="mt-0.5 block text-[11px] text-secondary">
-                      Thinking Effort: <strong className="text-on-surface">{job.analysisThinking || "High"}</strong>
+                      Thinking Effort: <strong className="text-on-surface">{job.analysisThinking || "Not recorded"}</strong>
                     </span>
                   </div>
                 </div>
@@ -1849,7 +1849,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     </span>
                   )}
                   <span className="rounded-md bg-white px-2 py-0.5 text-[10px] text-secondary border border-outline-variant/30">
-                    Fallback: OpenAI GPT 6.1 Terra (High)
+                    Fallback: Organization AI Policy (Default: Meta High → OpenAI GPT 6.1 Terra High)
                   </span>
                 </div>
               </div>

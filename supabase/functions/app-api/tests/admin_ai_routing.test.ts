@@ -52,6 +52,7 @@ Deno.test("preferred vision models are Muse Spark Contributor and GPT 6.1 Terra,
   assertEquals(preferredModelId("meta", registry.find((entry) => entry.provider === "meta")!.models), "muse-spark-1.2-contributor");
   const openAiModels = modelsForProviderPurpose(registry, "openai", "product_truth");
   assertEquals(preferredModelId("openai", openAiModels), "gpt-6.1-terra");
+  assertEquals(preferredModelId("openai", openAiModels, "qa"), "gpt-5.6-luna");
   assertEquals(preferredModelId("openai", openAiModels.filter((model) => model.id !== "gpt-6.1-terra")), "gpt-5.6-luna");
 });
 

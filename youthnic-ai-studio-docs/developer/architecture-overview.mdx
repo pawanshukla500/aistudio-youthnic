@@ -14,7 +14,7 @@ Youthnic AI Studio is built as a high-performance modern web application paired 
 ```mermaid
 graph TD
     A[Browser Client / React + Vite] -->|HTTPS| B[Supabase Edge Gateway / app-api on Railway]
-    B --> C[Supabase PostgreSQL + AsyncPostgresSaver]
+    B --> C[Supabase PostgreSQL + PostgresSaver]
     B --> D[Firebase Storage CDN]
     B <-->|Internal HTTP| E[FastAPI + LangGraph Orchestrator]
     E <--> F[Celery Worker + Valkey Cache/Broker]
@@ -35,7 +35,7 @@ graph TD
 
 ### Backend Infrastructure (`Railway: AI Studio App`)
 - **Edge API Runtime (`functions`)**: Deno Supabase Edge Function `supabase/functions/app-api/` handling auth, RBAC, AI routing (`organization_ai_model_policies`), job scheduling, and Firebase Storage proxying.
-- **Agentic Workflow Service (`FastAPI` + `celery-worker`)**: Python FastAPI + LangGraph (`AsyncPostgresSaver` checkpoints) + Product DNA V2 (`/api/v1/dna/extract`, `/api/v1/studio/generate`, `/api/v1/qa/evaluate`), backed by `Valkey` for caching & Celery queuing and configured with scale-to-zero idle sleep (`sleepApplication: true`).
+- **Agentic Workflow Service (`FastAPI` + `celery-worker`)**: Python FastAPI + LangGraph (`PostgresSaver` checkpoints) + Product DNA V2 (`/api/v1/dna/extract`, `/api/v1/studio/generate`, `/api/v1/qa/evaluate`), backed by `Valkey` for caching & Celery queuing and configured with scale-to-zero idle sleep (`sleepApplication: true`).
 - **Database**: PostgreSQL with row-level security (RLS) managed via Supabase migrations (`dna_versions`, `generation_jobs`, `session_generations`, `planning_assets`, `ai_runs`).
 - **Object Storage**: Firebase Storage buckets (`ai-studio-app-be068.firebasestorage.app`).
 

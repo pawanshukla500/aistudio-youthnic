@@ -37,7 +37,11 @@ export function modelsForProviderPurpose(
   return (entry?.models || []).filter((model) => model.purposes.includes(purpose));
 }
 
-export function preferredModelId(provider: string, models: AdminAiRegistryModel[]) {
+export function preferredModelId(
+  provider: string,
+  models: AdminAiRegistryModel[],
+  purpose?: AdminAiPurpose,
+) {
   const ids = models.map((model) => model.id);
   if (provider === "openai" && ids.includes("gpt-image-2.6-sunburst")) return "gpt-image-2.6-sunburst";
   if (provider === "openai" && ids.includes("gpt-image-2.6-flare")) return "gpt-image-2.6-flare";
@@ -45,6 +49,7 @@ export function preferredModelId(provider: string, models: AdminAiRegistryModel[
   if (provider === "openai" && ids.includes("gpt-image-2.6")) return "gpt-image-2.6";
   if (provider === "openai" && ids.includes("gpt-image-2.5-flare")) return "gpt-image-2.5-flare";
   if (provider === "openai" && ids.includes("gpt-image-2.5-sunburst")) return "gpt-image-2.5-sunburst";
+  if (provider === "openai" && purpose === "qa" && ids.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
   if (provider === "openai" && ids.includes("gpt-6.1-terra")) return "gpt-6.1-terra";
   if (provider === "openai" && ids.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
   if (provider === "meta" && ids.includes("muse-spark-1.2-contributor")) return "muse-spark-1.2-contributor";
@@ -128,7 +133,7 @@ export function coerceAdminAiPolicy(
   const primaryModels = modelsForProviderPurpose(registry, policy.primaryProvider, policy.purpose);
   const primaryModel = primaryModels.some((model) => model.id === policy.primaryModel)
     ? policy.primaryModel
-    : preferredModelId(policy.primaryProvider, primaryModels);
+    : preferredModelId(policy.primaryProvider, primaryModels, policy.purpose);
   const next: AdminAiPolicy = {
     ...policy,
     primaryModel,
@@ -152,7 +157,7 @@ export function coerceAdminAiPolicy(
   const fallbackModels = modelsForProviderPurpose(registry, fallbackProvider, policy.purpose);
   const fallbackModel = fallbackModels.some((model) => model.id === next.fallbackModel)
     ? next.fallbackModel
-    : preferredModelId(fallbackProvider, fallbackModels);
+    : preferredModelId(fallbackProvider, fallbackModels, policy.purpose);
   const mismatched = Boolean(policy.fallbackProvider && policy.fallbackModel) &&
     (policy.fallbackProvider !== fallbackProvider || policy.fallbackModel !== fallbackModel);
   return {

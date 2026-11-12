@@ -250,7 +250,6 @@ export function defaultThinkingLevel(
     if (allowed.includes("low")) return "low";
     if (allowed.includes("medium")) return "medium";
   }
-  if (allowed.includes("none")) return "none";
   if (purpose === "qa") {
     return allowed.includes("low")
       ? "low"
@@ -258,6 +257,7 @@ export function defaultThinkingLevel(
       ? "medium"
       : allowed[0];
   }
+  if (allowed.includes("none")) return "none";
   return allowed.includes("high") ? "high" : allowed[0];
 }
 
@@ -779,7 +779,7 @@ export function aiModelHelpText(model: string): string {
     return "Standard Muse Spark does not train on your data. About $1.25 / 1M input and $4.25 / 1M output.";
   }
   if (text(model) === "gpt-6.1-terra") {
-    return "GPT 6.1 Terra runs high-reasoning vision analysis & pose planning as primary fallback (~$1.25 / 1M input, $5.00 / 1M output).";
+    return "GPT 6.1 Terra runs high-reasoning vision analysis & pose planning as primary fallback (~$1.00 / 1M input, $5.00 / 1M output).";
   }
   if (text(model) === "gpt-5.6-sol") {
     return "Sol is the expensive GPT 5.6 flagship. Prefer Luna for fallback vision.";
@@ -814,6 +814,7 @@ export function aiModelHelpText(model: string): string {
 export function preferredModelId(
   provider: string,
   models: readonly string[],
+  purpose?: AiModelPurpose,
 ): string {
   if (!models.length) return "";
   if (provider === "openai" && models.includes("gpt-image-2.6-sunburst")) return "gpt-image-2.6-sunburst";
@@ -822,6 +823,7 @@ export function preferredModelId(
   if (provider === "openai" && models.includes("gpt-image-2.6")) return "gpt-image-2.6";
   if (provider === "openai" && models.includes("gpt-image-2.5-flare")) return "gpt-image-2.5-flare";
   if (provider === "openai" && models.includes("gpt-image-2.5-sunburst")) return "gpt-image-2.5-sunburst";
+  if (provider === "openai" && (purpose === "qa" || purpose === "qa_escalation") && models.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
   if (provider === "openai" && models.includes("gpt-6.1-terra")) return "gpt-6.1-terra";
   if (provider === "openai" && models.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
   if (provider === "meta" && models.includes("muse-spark-1.2-contributor")) return "muse-spark-1.2-contributor";

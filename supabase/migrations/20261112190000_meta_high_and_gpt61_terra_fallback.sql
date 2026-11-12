@@ -1,5 +1,5 @@
 -- Upgrade product_truth analysis and pose-planning routing to Meta Muse Spark (high thinking)
--- with OpenAI GPT 6.1 Terra (high thinking) as the primary fallback when OpenAI fallback is enabled.
+-- with OpenAI GPT 6.1 Terra (high thinking) as the primary fallback when Meta is primary and OpenAI fallback is enabled.
 UPDATE public.organization_ai_model_policies
 SET
   primary_reasoning = CASE
@@ -9,19 +9,15 @@ SET
   END,
   fallback_model = CASE
     WHEN fallback_enabled IS TRUE
+      AND primary_provider = 'meta'
       AND fallback_provider = 'openai'
-      AND NOT (primary_provider = 'openai' AND primary_model = 'gpt-6.1-terra')
-      AND (
-        primary_provider = 'meta'
-        OR fallback_model IN ('gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol')
-      )
     THEN 'gpt-6.1-terra'
     ELSE fallback_model
   END,
   fallback_reasoning = CASE
     WHEN fallback_enabled IS TRUE
+      AND primary_provider = 'meta'
       AND fallback_provider = 'openai'
-      AND NOT (primary_provider = 'openai' AND primary_model = 'gpt-6.1-terra')
     THEN 'high'
     ELSE fallback_reasoning
   END,
@@ -33,8 +29,8 @@ WHERE purpose = 'product_truth'
     OR (primary_provider = 'openai' AND primary_model = 'gpt-6.1-terra' AND primary_reasoning IS DISTINCT FROM 'high')
     OR (
       fallback_enabled IS TRUE
+      AND primary_provider = 'meta'
       AND fallback_provider = 'openai'
-      AND NOT (primary_provider = 'openai' AND primary_model = 'gpt-6.1-terra')
       AND (
         fallback_model IS DISTINCT FROM 'gpt-6.1-terra'
         OR fallback_reasoning IS DISTINCT FROM 'high'

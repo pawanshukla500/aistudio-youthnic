@@ -44,6 +44,7 @@ import {
   OPENAI_TERRA_VISION_ROUTE,
   FAST_PRODUCT_TRUTH_ROUTE,
   FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE,
+  FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
   PRODUCT_TRUTH_TIMEOUT_MS,
   VISION_GATEWAY_BUDGET_MS,
   VISION_HOP_MIN_MS,
@@ -599,7 +600,7 @@ function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiMo
 
 function defaultVisionFallbacks(args: { purpose: VisionPurpose }): NormalizedAiModelRoute[] {
   if (args.purpose === "product_truth") {
-    return [
+    const routes: NormalizedAiModelRoute[] = [
       assertAllowedAiModelRoute(
         OPENAI_TERRA_VISION_ROUTE,
         args.purpose,
@@ -611,6 +612,16 @@ function defaultVisionFallbacks(args: { purpose: VisionPurpose }): NormalizedAiM
         { strictJson: true },
       ),
     ];
+    if (Deno.env.get("GEMINI_API_KEY")?.trim()) {
+      routes.push(
+        assertAllowedAiModelRoute(
+          FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+          args.purpose,
+          { strictJson: true },
+        ),
+      );
+    }
+    return routes;
   }
   if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
     return [
@@ -739,10 +750,10 @@ async function resolveVisionPolicy(orgId: string, args: {
 }
 
 function applyFastProductTruthRouting(policy: VisionPolicy): VisionPolicy {
-  if (policy.purpose !== "product_truth" && policy.purpose !== "qa") return policy;
+  if (policy.purpose !== "product_truth" && policy.purpose !== "qa" && policy.purpose !== "qa_escalation") return policy;
   // The models saved in Administration are the models that run, for product
   // truth and QA alike. Only reasoning effort is adjusted to fit the time budget.
-  if (policy.purpose === "qa") {
+  if (policy.purpose === "qa" || policy.purpose === "qa_escalation") {
     return {
       ...policy,
       thinkingLevel: preferFastProductTruthThinking(policy),
@@ -1690,10 +1701,19 @@ async function visionJson(
     const resolvedRoute = (chained.value as { actualModel?: string })?.actualModel
       ? { ...chained.route, model: (chained.value as { actualModel?: string }).actualModel! }
       : chained.route;
+    const attempts = resolvedRoute.model !== chained.route.model
+      ? chained.attempts.map((attempt) =>
+        attempt.outcome === "completed" &&
+          attempt.provider === chained.route.provider &&
+          attempt.model === chained.route.model
+          ? { ...attempt, model: resolvedRoute.model }
+          : attempt
+      )
+      : chained.attempts;
     return {
       ...chained.value,
       policy: { ...policy, ...resolvedRoute },
-      attempts: chained.attempts,
+      attempts,
     };
   } catch (error) {
     const chainError = error && typeof error === "object"

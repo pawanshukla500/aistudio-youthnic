@@ -275,3 +275,35 @@ def test_download_public_image_bounded_streams_without_context_manager(monkeypat
     assert out == b"img123"
     assert closed["flag"] is True
 
+
+def test_meta_vision_json_records_terminal_failure_once(monkeypatch):
+    import pytest
+    from services import ai_clients
+
+    recorded = []
+
+    class FakeResp:
+        status_code = 500
+        content = b'{"error": {"message": "Meta internal error"}}'
+        def json(self):
+            return {"error": {"message": "Meta internal error"}}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def post(self, *args, **kwargs):
+            return FakeResp()
+
+    monkeypatch.setattr(ai_clients.settings, "META_MODEL_API_KEY", "meta-test-key")
+    monkeypatch.setattr(ai_clients.httpx, "Client", FakeClient)
+    monkeypatch.setattr(ai_clients.cache_manager, "record_provider_result", lambda provider, success, error=None: recorded.append((provider, success, error)))
+
+    with pytest.raises(RuntimeError, match="Meta vision call failed"):
+        ai_clients._meta_vision_json("prompt", [], effort="high")
+
+    assert recorded == [("meta", False, "Meta internal error")]
+

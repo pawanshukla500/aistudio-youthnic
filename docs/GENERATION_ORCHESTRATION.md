@@ -11,7 +11,7 @@ The studio pairs an Edge Gateway queue (`supabase/functions/app-api`) with a mul
 3. **Generate, one pose per worker call.** `claim_next_generation_job` leases the job. The worker builds each pose prompt with `gpt-image-2.6-sunburst` (default 3:4 at 2K, `medium` quality), runs optional Computer Vision QA, and either commits the image or schedules a retry with `available_at` backoff.
 4. **Deliver.** The image is uploaded under a unique Firebase Storage path and appended to `planning_assets`.
 
-Each worker call does at most one paid image request. A crash, a deploy, or a Railway sleep loses nothing: `generation_jobs` plus LangGraph `AsyncPostgresSaver` checkpoints resume cleanly from Postgres.
+Each worker call does at most one paid image request. A crash, a deploy, or a Railway sleep leaves the job in `generation_jobs`. When its lease expires, `recover_stale_generation_jobs` clears the lock and `claim_next_generation_job` claims the job again (while LangGraph DNA & pose-planning threads persist checkpoints to Postgres via `PostgresSaver`).
 
 ## Keeping every frame on the same set
 
@@ -51,7 +51,7 @@ Image and QA `ai_runs` rows now carry `generation_epoch`, `attempt_number` and `
 
 ## LangGraph Multi-Agent Architecture (`backend/`)
 
-The agentic workflow runs in `backend/graph.py` on **FastAPI** (Railway `FastAPI` service, configured with scale-to-zero `sleepApplication: true` for zero idle cost) with **`AsyncPostgresSaver`** checkpointing and **`Valkey`** caching/Celery task execution:
+The agentic workflow runs in `backend/graph.py` on **FastAPI** (Railway `FastAPI` service, configured with scale-to-zero `sleepApplication: true` for zero idle cost) with **`PostgresSaver`** checkpointing and **`Valkey`** caching/Celery task execution:
 
 - **Supervisor / Evidence / Product DNA Agents (`agents/supervisor.py`, `agents/evidence_agent.py`, `agents/dna_agent.py`, `models/dna_v2.py`):** Verify reference roles, quarantine style-reference outfits, enforce strict bottom-wear invariants across DNA, QA, and correction (`agents/dna_agent.py`, `agents/qa_agent.py`, `agents/correction_agent.py`), and persist immutable `dna_versions` keyed by source SHA-256 hashes.
 - **Knowledge & Pose Planning Agents (`agents/memory_agent.py`, `agents/pose_planning_agent.py`):** Apply historical approvals/corrections and build category-aware 6-pose shoots (Pose 5 primary craftsmanship detail; Pose 6 non-duplicate showcase) using Meta Muse Spark `high` -> `gpt-6.1-terra:high`.

@@ -15,9 +15,11 @@ Visual product truth extraction, category learning, and 6-pose scene planning re
    - If `muse-spark-1.2-contributor` returns HTTP 404 or model unavailable in a specific region or account tier, the system **automatically retries** with `muse-spark-1.3-contributor` (and vice-versa for 1.3 to 1.2) within the same Meta provider execution before ever declaring a provider failure.
    - This ensures transient model version differences never cause a drop-out to secondary providers.
 3. **Primary Fallback (Hop 1):** **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra:high`)
-   - First fallback for `product_truth` analysis & pose planning, preserving **`high`** reasoning (`reasoning: { effort: "high" }` on Responses / `reasoning_effort: "high"` on Chat Completions; clamped to `low` only when `< 60s` remains in Edge budget or `< 15s` in FastAPI).
-4. **Safety Net (Hop 2+):** **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna:high`/`low`) -> Legacy **GPT 5.6 Terra** (`gpt-5.6-terra:low`) -> **Google Gemini 3.8 Flash** (`gemini-3.8-flash:low`)
-   - Secondary safety nets invoked only if primary and Hop 1 fail.
+   - First fallback for `product_truth` analysis & pose planning, preserving **`high`** reasoning (`reasoning: { effort: "high" }` on Responses / `reasoning_effort: "high"` on Chat Completions; clamped to `low` only when `< 60s` remains in the Edge gateway or FastAPI budget).
+4. **Safety Net (Hop 2+), by service:**
+   - **Edge Function (`app-api`):** When `product_truth` uses Meta primary + OpenAI GPT 6.1 Terra fallback, **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna:high`) is appended as the secondary OpenAI safety net (and default unconfigured fallbacks include **Gemini 3.8 Flash** when `GEMINI_API_KEY` is configured).
+   - **FastAPI (`invoke_vision_json`):** **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna:high`) -> Legacy **GPT 5.6 Terra** (`gpt-5.6-terra:low`) -> **Google Gemini 3.8 Flash** (`gemini-3.8-flash:low`).
+   - Invoked only when primary and Hop 1 fail.
 5. **Default Image Generation Model:** **`gpt-image-2.6-sunburst`**
    - Default flagship model across Studio, Catalog batches, FastAPI LangGraph nodes, and `organization_ai_model_policies` (`image_generation`), producing 3:4 2K (`1536x2048`) images at `medium` default quality (overrideable per shoot).
 
@@ -85,7 +87,7 @@ Visual product truth extraction, category learning, and 6-pose scene planning re
    - Every agent accessing this repo **must** use **`/graphify`** by default: query `graphify-out/graph.json` / `GRAPH_REPORT.md` first for codebase discovery and update `graphify-out/` incrementally (`/graphify . --update`) after edits.
 2. **Pure AI Model Policy:** `supabase/functions/app-api/lib/aiModelPolicy.ts` must remain pure (no database queries, no network fetches, no environment reads). Tenant resolution and database interaction belong in `index.ts`.
 3. **LangGraph + FastAPI + Valkey Microservices (`backend/`):**
-   - `FastAPI` runs the LangGraph state graph (`AsyncPostgresSaver` checkpoints + Product DNA V2 immutable versions) alongside `celery-worker` and `Valkey` on Railway (`AI Studio App`). Internal Edge-to-FastAPI traffic uses `INTERNAL_API_SECRET` / `CATALOG_WORKER_SECRET` and internal networking (`http://fastapi.railway.internal:8000`) with scale-to-zero idle posture (`sleepApplication: true` in `railway.toml`).
+   - `FastAPI` runs the LangGraph state graph (`PostgresSaver` checkpoints + Product DNA V2 immutable versions) alongside `celery-worker` and `Valkey` on Railway (`AI Studio App`). Internal Edge-to-FastAPI traffic uses `INTERNAL_API_SECRET` / `CATALOG_WORKER_SECRET` and internal networking (`http://fastapi.railway.internal:8000`) with scale-to-zero idle posture (`sleepApplication: true` in `railway.toml`).
 4. **Automated Test Gate:** All Deno tests (`node $npxCli deno test -A supabase/functions/app-api/tests/`), Python backend tests (`$env:PYTHONPATH="backend"; python -m pytest backend/tests/ -q`), linter (`npm run lint`), and web build (`npm run build`) must pass cleanly before merging into `main`.
 5. **Workflow Vigilance:** Any pull request merged into `main` triggers automated CI/CD deployment pipelines:
    - `Validate application` + `Deploy Supabase database and Edge Function` (`supabase/functions/app-api` + migrations).

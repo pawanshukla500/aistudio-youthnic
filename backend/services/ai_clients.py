@@ -318,7 +318,6 @@ def _meta_vision_json(
                 last_err = RuntimeError(msg)
                 if resp.status_code == 404 or "not found" in msg.lower() or "not available" in msg.lower():
                     continue
-                cache_manager.record_provider_result("meta", False, msg)
                 break
 
             text = _extract_responses_text(data)
@@ -334,7 +333,6 @@ def _meta_vision_json(
             }
         except Exception as exc:
             last_err = exc
-            cache_manager.record_provider_result("meta", False, str(exc))
             break
     if last_err is not None:
         cache_manager.record_provider_result("meta", False, str(last_err))
@@ -408,7 +406,10 @@ def _gemini_vision_json(prompt: str, images: List[Dict[str, Any]], timeout_s: in
             headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
             json={
                 "contents": [{"role": "user", "parts": parts}],
-                "generationConfig": {"responseMimeType": "application/json"},
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "thinkingConfig": {"thinkingLevel": "low"},
+                },
             },
         )
     data = _safe_resp_json(resp)
@@ -474,10 +475,12 @@ def invoke_vision_json(
             if is_analysis
             else (("gpt-5.6-luna", "low"), ("gpt-6.1-terra", "low"))
         )
-        for model_name, default_effort in openai_candidates:
+        for idx, (model_name, default_effort) in enumerate(openai_candidates):
             remaining = deadline - time.monotonic()
             if remaining < 5:
                 break
+            has_later_hop = idx < len(openai_candidates) - 1 or has_gemini
+            hop_budget = (remaining - 15) if (has_later_hop and remaining > 25) else remaining
             if model_name in ("gpt-6.1-terra", "gpt-5.6-luna") and default_effort == "high" and remaining < 60:
                 effort = "low"
             else:
@@ -488,7 +491,7 @@ def invoke_vision_json(
                     images,
                     model=model_name,
                     reasoning_effort=effort,
-                    timeout_s=int(max(10, remaining)),
+                    timeout_s=int(max(10, hop_budget)),
                 )
             except Exception as exc:
                 logger.warning(f"OpenAI fallback {model_name} ({purpose}) failed: {exc}")
