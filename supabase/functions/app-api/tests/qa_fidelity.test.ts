@@ -430,4 +430,5 @@ Deno.test("buildPoseQaPrompt allows minor embroidery variation on stylist-added 
   });
   assertStringIncludes(prompt, "allowing normal camera-distance softening");
   assertStringIncludes(prompt, "do NOT fail styling_addition or unexpected_changes merely for minor embroidery density variations");
+  assertStringIncludes(prompt, "within the approved footwear family");
 });

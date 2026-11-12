@@ -190,16 +190,17 @@ class ProductDNAAgent:
             elif cut in explicit_non_farshi:
                 cut = cut
             elif has_bottom_ref and cut == "none":
-                cut = "farshi"
+                cut = "farshi" if not has_neg_farshi else "unknown"
             elif cut not in allowed_cuts or not cut:
                 cut = "unknown"
 
             raw_joined_hem = bw_raw.get("joined_hem")
             joined_hem_flag = bool(raw_joined_hem) if raw_joined_hem is not None else (cut == "farshi")
             hem_trim_text = str(bw_raw.get("hem_trim") or "").lower()
+            positive_hem_trim = re.sub(r"\b(?:no|not|without|never)\b[^.;,\n]*", "", hem_trim_text)
             has_farshi_panel_seam = (
                 joined_hem_flag
-                and bool(re.search(r"\b(?:4|5|6|7|8)[-\s]*inch\b|hem\s*panel|lower\s*panel|joined\s*panel|horizontal\s*(?:joint|seam)\b", hem_trim_text))
+                and bool(re.search(r"\b(?:4|5|6|7|8)[-\s]*inch\b|hem\s*panel|lower\s*panel|joined\s*panel|horizontal\s*(?:joint|seam)\b", positive_hem_trim))
                 and not has_neg_farshi
             )
             if has_bottom_wear and cut in {"palazzo", "unknown", ""} and has_farshi_panel_seam:

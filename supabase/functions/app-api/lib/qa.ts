@@ -213,7 +213,7 @@ This is a visual continuity review of rendered catalogue imagery. Judge only whe
 ${args.hasModelReference
     ? args.poseType === "closeup"
       ? `Compare IMAGE A against the MODEL FACE REFERENCE on visual appearance attributes - face shape, eye shape and colour, eyebrow shape, nose shape, lip shape, jawline, skin tone and texture, and hairstyle must look consistent with that reference rather than merely similar. Fail model_face for any clear deviation or identity drift.${args.hasApprovedAnchor ? " Use APPROVED POSE 1 only to confirm scene, lighting, and styling continuity - never to judge the face." : ""}`
-      : `Compare IMAGE A against the MODEL FACE REFERENCE on overall identity and recognisable facial proportions (face shape, jawline, eye and brow configuration, nose, lips, skin tone, and hairstyle): they must depict the SAME person, allowing normal camera-distance softening or lighting shifts on a full-body 4:5 catalog frame. Fail model_face when the generated person looks like a different individual, has altered features, or matches the STYLE REFERENCE / product-photo person instead.${args.hasApprovedAnchor ? " Use APPROVED POSE 1 only to confirm scene, lighting, and styling continuity - never to judge the face." : ""}`
+      : `Compare IMAGE A against the MODEL FACE REFERENCE on overall identity and recognisable facial proportions (face shape, jawline, eye and brow configuration, nose, lips, skin tone, and hairstyle): they must depict the SAME person, allowing normal camera-distance softening or lighting shifts on a full-body catalog frame. Fail model_face when the generated person looks like a different individual, has altered features, or matches the STYLE REFERENCE / product-photo person instead.${args.hasApprovedAnchor ? " Use APPROVED POSE 1 only to confirm scene, lighting, and styling continuity - never to judge the face." : ""}`
     : hasStyleReference
       ? `Compare IMAGE A against the STYLE REFERENCE face. The visible jaw, nose, lips, skin, and hair must be that same person. If the eyes are hidden in that photo, do not fail only because the generated eyes are visible, but fail model_face when the person is different. Ignore that image's clothing.${args.hasApprovedAnchor ? " APPROVED POSE 1 is scene continuity only." : ""}`
       : args.hasApprovedAnchor
@@ -258,7 +258,7 @@ SCORING SCALE - anchor every number to these meanings, and never hand several at
 - 40: a different product in the same category.
 Only 95-100 is eligible for automatic verification. A critical score of 90-94 requires human review. A critical score below 90 fails automatic QA and requires a specific correction. A named critical failure always fails even when the average is high. Do not hand many critical fields nearly identical hedged scores; inspect each region independently.
 
-Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face when a recognizable face is in frame. Fail any invented or moved button, tassel/latkan, closure, trim, pocket, logo, embroidery, jewelry, or hardware. For a back pose, fail unless it is a true back view matching the uploaded BACK; face_realism automatically passes for a back pose since the face is not visible. ${pose5Rule}${pose6Rule ? `${pose5Rule ? " " : ""}${pose6Rule}` : ""} Judge styling_addition against the approved styling plan in the session rules above: fail it when a listed piece is missing, when a piece appears that the plan does not list (an invented necklace, bangle, belt, bag or hair ornament), when the footwear category/heel height or metal family clearly contradicts the plan (sneaker or tall heel where flat jutti is specified, or oxidised silver where gold is specified), when accessories or footwear change noticeably between poses, or when it hides or replaces a garment detail, bottom wear or footwear from the product references. When footwear is a stylist addition rather than an uploaded product photo, do NOT fail styling_addition or unexpected_changes merely for minor embroidery density variations within the same antique-gold/beige flat jutti family. Pass it when the frame aligns with the plan at category, colour/metal, and silhouette level, or when no plan and no suggestion were provided and nothing was invented.
+Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face when a recognizable face is in frame. Fail any invented or moved button, tassel/latkan, closure, trim, pocket, logo, embroidery, jewelry, or hardware. For a back pose, fail unless it is a true back view matching the uploaded BACK; face_realism automatically passes for a back pose since the face is not visible. ${pose5Rule}${pose6Rule ? `${pose5Rule ? " " : ""}${pose6Rule}` : ""} Judge styling_addition against the approved styling plan in the session rules above: fail it when a listed piece is missing, when a piece appears that the plan does not list (an invented necklace, bangle, belt, bag or hair ornament), when the footwear category/heel height or metal family clearly contradicts the plan (sneaker or tall heel where flat jutti is specified, or oxidised silver where gold is specified), when accessories or footwear change noticeably between poses, or when it hides or replaces a garment detail, bottom wear or footwear from the product references. When footwear is a stylist addition rather than an uploaded product photo, do NOT fail styling_addition or unexpected_changes merely for minor embroidery density variations within the approved footwear family, colour, and silhouette. Pass it when the frame aligns with the plan at category, colour/metal, and silhouette level, or when no plan and no suggestion were provided and nothing was invented.
 
 Fail pose_requirement when the body is frozen in a walking stride, one foot is lifted mid-step, or the legs are split wide enough to open a joined hem. A planted three-quarter turn is valid.
 Fail pose_requirement when the stance or the objects in the hands are copied from the STYLE REFERENCE, the MODEL FACE photo, or APPROVED POSE 1. Those images supply the room and the face, not a pose to repeat and not handheld props.
@@ -308,7 +308,9 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
   // older or terser response still produces a usable fidelity figure.
   const scores: Record<string, number> = {};
   for (const key of checkKeys) {
-    const reported = Number(rawScores[key]);
+    const rawVal = rawScores[key];
+    const hasNumeric = typeof rawVal === "number" || (typeof rawVal === "string" && rawVal.trim() !== "");
+    const reported = hasNumeric ? Number(rawVal) : Number.NaN;
     const verdict = String(checks[key] || "").toLowerCase();
     if (Number.isFinite(reported)) scores[key] = Math.max(0, Math.min(100, Math.round(reported)));
     else if (verdict === "fail") scores[key] = 0;
@@ -321,11 +323,11 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
       failed.add(key);
     }
   }
-  const weighted = Object.entries(scores).map(([key, score]) => ({ score, weight: criticalChecks.includes(key) ? 2 : 1 }));
-  const totalWeight = weighted.reduce((sum, entry) => sum + entry.weight, 0);
-    if (hasAnatomyDefect && (scores["pose_requirement"] === undefined || scores["pose_requirement"] >= RETRY_FLOOR)) {
+  if (hasAnatomyDefect && (scores["pose_requirement"] === undefined || scores["pose_requirement"] >= RETRY_FLOOR)) {
     scores["pose_requirement"] = 40;
   }
+  const weighted = Object.entries(scores).map(([key, score]) => ({ score, weight: criticalChecks.includes(key) ? 2 : 1 }));
+  const totalWeight = weighted.reduce((sum, entry) => sum + entry.weight, 0);
   const productFidelity = totalWeight
     ? Math.round(weighted.reduce((sum, entry) => sum + entry.score * entry.weight, 0) / totalWeight)
     : Math.max(0, Math.min(100, Number(raw.score) || 0));
