@@ -29,7 +29,7 @@ export function SellerOnboarding({ user, onEnrolled, onSignOut }: SellerOnboardi
     try {
       const { data, error: rpcError } = await supabase.rpc("app_enroll_seller", {
         store_name: cleanName,
-        contact_email: user.email || null,
+        contact_email: user.email || undefined,
       });
       if (rpcError) throw rpcError;
 

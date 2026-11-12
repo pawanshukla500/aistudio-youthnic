@@ -5161,7 +5161,7 @@ export type Database = {
       app_current_workspace: { Args: Record<PropertyKey, never>; Returns: Json };
       app_enroll_seller: {
         Args: {
-          contact_email?: string | null;
+          contact_email?: string;
           store_name: string;
         };
         Returns: Json;
