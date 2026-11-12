@@ -34,6 +34,21 @@ celery.conf.update(
     task_reject_on_worker_lost=True,
     task_soft_time_limit=300,
     task_time_limit=360,
+    # Stop idle broker/backend TCP keepalive chatter so Railway Valkey can sleep.
+    broker_pool_limit=0,
+    broker_transport_options={
+        "socket_keepalive": False,
+        "health_check_interval": 0,
+        "socket_connect_timeout": 5,
+        "socket_timeout": 5,
+        "retry_on_timeout": True,
+    },
+    redis_backend_health_check_interval=0,
+    redis_socket_keepalive=False,
+    redis_socket_connect_timeout=5,
+    redis_socket_timeout=5,
+    redis_retry_on_timeout=True,
+    worker_enable_remote_control=False,
 )
 
 qa_agent = ComputerVisionQAAgent()

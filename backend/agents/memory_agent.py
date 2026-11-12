@@ -1,6 +1,8 @@
+import hashlib
 import logging
 from typing import Dict, Any, List
 from database import search_knowledge_embeddings, get_db
+from cache import get_memory_rules_cache, set_memory_rules_cache
 from services.ai_clients import embed_text
 
 logger = logging.getLogger(__name__)
@@ -13,17 +15,27 @@ class KnowledgeMemoryAgent:
     """
 
     def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        org_id = state.get("organization_id")
+        org_id = state.get("organization_id") or ""
         dna = state.get("product_dna", {})
         category = dna.get("category", "ethnic/fusion")
         garment_family = dna.get("garment_family", "kurta_or_kurti_set")
         bottom_cut = dna.get("bottom_wear", {}).get("cut_class", "")
+        main_color = dna.get("main_color", "")
+        cache_sig = hashlib.sha256(
+            f"{category}|{garment_family}|{bottom_cut}|{main_color}".encode("utf-8")
+        ).hexdigest()[:20]
+
+        if not state.get("force_refresh"):
+            cached_rules = get_memory_rules_cache(org_id or "global", cache_sig)
+            if cached_rules:
+                return {"retrieved_guidance": cached_rules}
 
         guidance_rules: List[str] = []
+        db_ok = True
 
         # 1. Fetch category guidance & pgvector embeddings scoped to caller organization (+ global null rows)
         try:
-            query_text = f"{garment_family} {category} {bottom_cut} {dna.get('main_color', '')}".strip()
+            query_text = f"{garment_family} {category} {bottom_cut} {main_color}".strip()
             vec = embed_text(query_text)
             if vec:
                 vec_matches = search_knowledge_embeddings(
@@ -80,6 +92,7 @@ class KnowledgeMemoryAgent:
                             if rule and rule not in guidance_rules:
                                 guidance_rules.append(rule)
         except Exception as e:
+            db_ok = False
             logger.warning(f"Error querying fashion knowledge DB: {e}")
 
         # Fallback / deterministic guardrails if DB rules are empty
@@ -95,6 +108,9 @@ class KnowledgeMemoryAgent:
         guidance_rules.append(
             "Anatomical Integrity: Exactly two visible arms and two hands connected to continuous forearms."
         )
+
+        if db_ok and guidance_rules:
+            set_memory_rules_cache(org_id or "global", cache_sig, guidance_rules)
 
         return {
             "retrieved_guidance": guidance_rules,

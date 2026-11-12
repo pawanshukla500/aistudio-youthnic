@@ -6,6 +6,7 @@ from PIL import Image
 
 from models.evidence import PRODUCT_AUTHORITY_ROLES
 from database import save_reference_evidence, save_region_crop
+from cache import cache_manager
 from services.ai_clients import load_reference_image
 from firebase_service import upload_bytes, get_storage_client
 
@@ -72,6 +73,31 @@ class ProductEvidenceAgent:
 
         validated_references: List[Dict[str, Any]] = []
         hash_parts: List[str] = []
+        db_persisted_ok = True
+
+        manifest_sig = hashlib.sha256(
+            "|".join(
+                sorted(
+                    f"{sku_id}:{str(r.get('role', 'additional_product'))}:"
+                    f"{str(r.get('hash') or r.get('sha256_hash') or '')}:"
+                    f"{str(r.get('storagePath') or r.get('storage_path') or '')}:"
+                    f"{str(r.get('downloadUrl') or r.get('download_url') or '')}"
+                    for r in raw_references
+                )
+            ).encode("utf-8")
+        ).hexdigest()[:24]
+
+        if raw_references and not state.get("force_refresh"):
+            cached_manifest = cache_manager.get_manifest_cache(org_id, manifest_sig)
+            if (
+                cached_manifest
+                and isinstance(cached_manifest.get("references"), list)
+                and cached_manifest.get("source_fingerprint")
+            ):
+                return {
+                    "references": cached_manifest["references"],
+                    "source_fingerprint": cached_manifest["source_fingerprint"],
+                }
 
         for ref in raw_references:
             role = str(ref.get("role", "additional_product"))
@@ -133,12 +159,23 @@ class ProductEvidenceAgent:
                     confidence=entry["confidence"],
                 )
             except Exception as e:
+                db_persisted_ok = False
                 logger.warning(f"Could not persist reference evidence: {e}")
 
             if is_product_truth and loaded and evidence_id:
                 self._build_and_store_region_crop(org_id, evidence_id, sku_id, role, loaded)
 
         composite_fingerprint = hashlib.sha256("|".join(sorted(hash_parts)).encode()).hexdigest()
+
+        if validated_references and db_persisted_ok:
+            cache_manager.set_manifest_cache(
+                org_id,
+                manifest_sig,
+                {
+                    "references": validated_references,
+                    "source_fingerprint": composite_fingerprint,
+                },
+            )
 
         return {
             "references": validated_references,

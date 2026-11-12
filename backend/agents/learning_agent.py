@@ -3,6 +3,7 @@ import json
 import logging
 from typing import Dict, Any, List
 from database import get_db
+from cache import invalidate_memory_rules_cache
 from services.ai_clients import embed_text
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ class LearningOptimizationAgent:
                                 """,
                                 (org_id, resolved_category, src_hash),
                             )
+            invalidate_memory_rules_cache(org_id)
             return True
         except Exception as e:
             logger.warning(f"Could not record learning outcome: {e}")

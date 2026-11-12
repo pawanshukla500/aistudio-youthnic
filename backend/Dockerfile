@@ -18,4 +18,4 @@ COPY . ./
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then celery -A celery_app.celery worker --loglevel=info --concurrency=2; else uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
+CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then python worker_supervisor.py; else uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
