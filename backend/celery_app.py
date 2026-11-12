@@ -372,6 +372,53 @@ def process_pose_generation_task(self, generation_id: str, job_id: str, pose_ind
         raise self.retry(exc=exc, countdown=20)
 
 
+def _flush_pending_learning_for_pose(
+    generation_id: str,
+    expected_attempt: int,
+    org_id: str,
+    sku_id: str,
+    pose_index: int,
+    dna: Dict[str, Any],
+) -> None:
+    """Safely record an approved QA learning outcome once if learning_pending is still set."""
+    overall_score = None
+    with get_db() as conn:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT qa_payload FROM public.session_generations
+                    WHERE generation_id = %s AND attempt_count = %s AND status = 'completed' AND qa_status = 'pass'
+                    FOR UPDATE
+                    """,
+                    (generation_id, expected_attempt),
+                )
+                row = cur.fetchone()
+                payload = (row or {}).get("qa_payload") if row else None
+                if not isinstance(payload, dict) or not payload.get("learning_pending"):
+                    return
+                overall_score = payload.get("overall_score")
+                recorded = learning_agent.record_approved_outcome(
+                    org_id=org_id,
+                    sku_id=sku_id,
+                    rule_type="bottom_wear_preservation" if (dna.get("bottom_wear") or {}).get("cut_class") == "farshi" else "scene_continuity",
+                    rule_text=f"QA passed pose {pose_index} for {sku_id} (score={overall_score})",
+                    positive_guidance="; ".join(dna.get("explicit_invariants") or []),
+                    negative_constraints=dna.get("prohibited_changes") or [],
+                    category=str(dna.get("category") or "ethnic/fusion"),
+                )
+                if recorded is not False:
+                    cur.execute(
+                        """
+                        UPDATE public.session_generations
+                        SET qa_payload = jsonb_set(COALESCE(qa_payload, '{}'::jsonb), '{learning_pending}', 'false'::jsonb),
+                            updated_at = now()
+                        WHERE generation_id = %s AND attempt_count = %s
+                        """,
+                        (generation_id, expected_attempt),
+                    )
+
+
 @celery.task(bind=True, max_retries=2)
 def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org_id: str, sku_id: str):
     """Evaluates generated pose with real VLM CV QA, triggers correction/regeneration or learning."""
@@ -384,7 +431,8 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
                 cur.execute(
                     """
                     SELECT g.output_url, g.pose_type, g.attempt_count, g.status AS pose_status,
-                           g.regeneration_instructions, j.status AS job_status, j.job_data
+                           g.qa_status, g.qa_payload, g.regeneration_instructions,
+                           j.status AS job_status, j.job_data
                     FROM public.session_generations g
                     JOIN public.generation_jobs j ON j.session_id = g.session_id
                     WHERE g.generation_id = %s AND j.job_id = %s
@@ -400,14 +448,17 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
         if row.get("pose_status") == "retrying" and row.get("regeneration_instructions"):
             process_pose_generation_task.delay(generation_id, job_id, pose_index, org_id, sku_id)
             return {"status": "regeneration_dispatched", "generation_id": generation_id}
-        if row.get("pose_status") != "qa_pending":
-            _finalize_job_progress(job_id, org_id, sku_id)
-            return {"status": "stale_qa_ignored", "generation_id": generation_id}
 
         dna = cache_manager.get_hot_dna(org_id, sku_id)
         if not dna:
             dna_row = get_latest_dna_version(org_id, sku_id)
             dna = (dna_row or {}).get("dna_payload") or {"sku_name": sku_id}
+
+        if row.get("pose_status") != "qa_pending":
+            if row.get("pose_status") == "completed" and (row.get("qa_payload") or {}).get("learning_pending"):
+                _flush_pending_learning_for_pose(generation_id, expected_attempt, org_id, sku_id, pose_index, dna)
+            _finalize_job_progress(job_id, org_id, sku_id)
+            return {"status": "stale_qa_ignored", "generation_id": generation_id}
 
         job_data = row.get("job_data") or {}
         refs = (job_data.get("references") or []) if isinstance(job_data, dict) else []
@@ -444,6 +495,8 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
                     if not latest_job or latest_job.get("status") == "cancelled":
                         cancelled_ignored = True
                     elif evaluation.outcome == "pass" and not evaluation.requires_human_review:
+                        pass_payload = evaluation.model_dump()
+                        pass_payload["learning_pending"] = True
                         cur.execute(
                             """
                             UPDATE public.session_generations
@@ -451,7 +504,7 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
                             WHERE generation_id = %s AND status = 'qa_pending' AND attempt_count = %s
                             RETURNING generation_id
                             """,
-                            (evaluation.outcome, evaluation.model_dump_json(), generation_id, expected_attempt),
+                            (evaluation.outcome, json.dumps(pass_payload), generation_id, expected_attempt),
                         )
                         if cur.fetchone() is None:
                             stale_ignored = True
@@ -511,19 +564,12 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
         if cancelled_ignored:
             return {"status": "cancelled", "generation_id": generation_id}
         if stale_ignored:
+            _flush_pending_learning_for_pose(generation_id, expected_attempt, org_id, sku_id, pose_index, dna)
             _finalize_job_progress(job_id, org_id, sku_id)
             return {"status": "stale_qa_ignored", "generation_id": generation_id}
 
         if should_record_learning:
-            learning_agent.record_approved_outcome(
-                org_id=org_id,
-                sku_id=sku_id,
-                rule_type="bottom_wear_preservation" if (dna.get("bottom_wear") or {}).get("cut_class") == "farshi" else "scene_continuity",
-                rule_text=f"QA passed pose {pose_index} for {sku_id} (score={evaluation.overall_score})",
-                positive_guidance="; ".join(dna.get("explicit_invariants") or []),
-                negative_constraints=dna.get("prohibited_changes") or [],
-                category=str(dna.get("category") or "ethnic/fusion"),
-            )
+            _flush_pending_learning_for_pose(generation_id, expected_attempt, org_id, sku_id, pose_index, dna)
         elif action is not None:
             correction_agent.record_correction(
                 org_id=org_id,
@@ -544,29 +590,23 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
     except Exception as exc:
         logger.error(f"Error in QA evaluation for {generation_id}: {exc}")
         is_terminal = self.request.retries >= self.max_retries
-        if is_terminal:
+        if is_terminal and expected_attempt is not None:
             try:
+                updated = False
                 with get_db() as conn:
                     with conn.cursor() as cur:
-                        if expected_attempt is not None:
-                            cur.execute(
-                                """
-                                UPDATE public.session_generations
-                                SET status = 'failed', error = %s, updated_at = now()
-                                WHERE generation_id = %s AND status IN ('qa_pending', 'retrying') AND attempt_count = %s
-                                """,
-                                (f"QA error: {str(exc)[:450]}", generation_id, expected_attempt),
-                            )
-                        else:
-                            cur.execute(
-                                """
-                                UPDATE public.session_generations
-                                SET status = 'failed', error = %s, updated_at = now()
-                                WHERE generation_id = %s AND status IN ('qa_pending', 'retrying')
-                                """,
-                                (f"QA error: {str(exc)[:450]}", generation_id),
-                            )
-                _finalize_job_progress(job_id, org_id, sku_id)
+                        cur.execute(
+                            """
+                            UPDATE public.session_generations
+                            SET status = 'failed', error = %s, updated_at = now()
+                            WHERE generation_id = %s AND status IN ('qa_pending', 'retrying') AND attempt_count = %s
+                            RETURNING generation_id
+                            """,
+                            (f"QA error: {str(exc)[:450]}", generation_id, expected_attempt),
+                        )
+                        updated = cur.fetchone() is not None
+                if updated:
+                    _finalize_job_progress(job_id, org_id, sku_id)
             except Exception:
                 pass
         raise self.retry(exc=exc, countdown=15)

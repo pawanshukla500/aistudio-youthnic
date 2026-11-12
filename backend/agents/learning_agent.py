@@ -103,8 +103,10 @@ class LearningOptimizationAgent:
                                 """,
                                 (org_id, resolved_category, src_hash),
                             )
+            return True
         except Exception as e:
             logger.warning(f"Could not record learning outcome: {e}")
+            return False
 
     def update_rule_effectiveness(self, rule_id: str, success: bool):
         try:
