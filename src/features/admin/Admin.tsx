@@ -434,6 +434,20 @@ export function Admin() {
   const probeAiRoute = useMutation(api.admin.probeAiRoute);
   const syncOpenAiUsage = useAction(api.admin.syncOpenAiUsage);
   const [tab, setTab] = useState<Tab>("users");
+  const {
+    data: workflowOverview,
+    error: workflowOverviewError,
+    isLoading: workflowOverviewLoading,
+  } = useQuery(api.workflows.overview, tab === "system" ? {} : "skip") as {
+    data?: {
+      engine?: string;
+      checkpointer?: { backend?: string; tables_ready?: boolean; total_checkpoints?: number; total_threads?: number };
+      nodes?: string[];
+      providers_configured?: Record<string, boolean>;
+    };
+    error?: Error | null;
+    isLoading?: boolean;
+  };
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [editingMember, setEditingMember] = useState<AdminMember | null>(null);
@@ -1343,6 +1357,64 @@ export function Admin() {
                 icon={Users}
                 detail={`${overview.health.memberCount} members`}
               />
+            </div>
+            <div className="rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-manrope text-lg font-bold tracking-tight text-on-surface">
+                    LangGraph & LangChain Persistent Checkpointer
+                  </h3>
+                  <p className="mt-1 text-xs text-secondary">
+                    Runs inside Railway FastAPI &amp; celery-worker with durable PostgreSQL checkpoints across steps.
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-bold ${
+                    workflowOverview?.checkpointer?.tables_ready
+                      ? "bg-success-surface text-success"
+                      : workflowOverviewError
+                        ? "bg-rose-50 text-rose-700"
+                        : workflowOverviewLoading
+                          ? "bg-surface-container text-secondary"
+                          : "bg-amber-50 text-amber-800"
+                  }`}
+                >
+                  {workflowOverview?.checkpointer?.tables_ready
+                    ? "PostgresSaver Active"
+                    : workflowOverviewError
+                      ? "Orchestrator Unreachable"
+                      : workflowOverviewLoading
+                        ? "Checking orchestrator…"
+                        : "Checkpointer Not Ready"}
+                </span>
+              </div>
+              {workflowOverviewError && (
+                <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-xs text-rose-800">
+                  {workflowOverviewError.message || "Could not load LangGraph orchestrator telemetry."}
+                </div>
+              )}
+              {workflowOverview && (
+                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="rounded-xl bg-surface-container-low p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Checkpoints Saved</p>
+                    <p className="mt-1 text-lg font-bold text-on-surface">{workflowOverview.checkpointer?.total_checkpoints ?? 0}</p>
+                  </div>
+                  <div className="rounded-xl bg-surface-container-low p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Persisted Threads</p>
+                    <p className="mt-1 text-lg font-bold text-on-surface">{workflowOverview.checkpointer?.total_threads ?? 0}</p>
+                  </div>
+                  <div className="rounded-xl bg-surface-container-low p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Graph Nodes</p>
+                    <p className="mt-1 text-lg font-bold text-on-surface">{workflowOverview.nodes?.length ?? 0}</p>
+                  </div>
+                  <div className="rounded-xl bg-surface-container-low p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Active Providers</p>
+                    <p className="mt-1 text-xs font-semibold text-on-surface">
+                      {Object.entries(workflowOverview.providers_configured || {}).filter(([, on]) => on).map(([k]) => k.toUpperCase()).join(", ") || "None"}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <div className="mb-4">

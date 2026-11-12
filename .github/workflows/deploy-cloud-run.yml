@@ -57,7 +57,7 @@ jobs:
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: v3.1.0
 
       - name: Verify database types sync
         run: |
@@ -136,7 +136,7 @@ jobs:
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: v3.1.0
 
       - name: Apply database migrations to Railway Postgres
         if: env.RAILWAY_DATABASE_URL != ''

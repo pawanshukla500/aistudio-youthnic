@@ -89,6 +89,7 @@ def test_desktop_saree_evidence_hashing_and_quarantine(tmp_path):
     evidence_out = evidence_agent.process({
         "organization_id": VALID_ORG_UUID,
         "sku_id": sku_id,
+        "allow_local_references": True,
         "references": raw_references,
     })
 
@@ -196,7 +197,7 @@ def test_router_agent_supports_gpt_image_2_6_family():
         "poses_to_generate": [1, 2, 3, 4, 5, 6],
     })
     assert route_sunburst["provider_route"]["image_model"] == "gpt-image-2.6-sunburst"
-    assert route_sunburst["provider_route"]["est_cost_per_pose"] == 0.08
+    assert route_sunburst["provider_route"]["est_cost_per_pose"] == 0.18
 
     # Test selecting low-latency gpt-image-2.6-flare
     route_flare = router.process({
@@ -204,7 +205,7 @@ def test_router_agent_supports_gpt_image_2_6_family():
         "poses_to_generate": [1, 2, 3, 4, 5, 6],
     })
     assert route_flare["provider_route"]["image_model"] == "gpt-image-2.6-flare"
-    assert route_flare["provider_route"]["est_cost_per_pose"] == 0.06
+    assert route_flare["provider_route"]["est_cost_per_pose"] == 0.16
 
     # Test default fallback preserves 2.5-flare-2026-09-08
     route_default = router.process({
@@ -221,7 +222,7 @@ def test_saree_qa_hard_vetos():
         "bottom_wear": {"cut_class": "none", "has_bottom_wear": False},
     }
 
-    # 1. Clean Saree Generation passes QA
+    # 1. Clean Saree Generation with verified scores + negated bottom phrase passes QA
     clean_eval = qa_agent.evaluate(
         org_id=VALID_ORG_UUID,
         job_id="job-1",
@@ -232,11 +233,29 @@ def test_saree_qa_hard_vetos():
         image_url="https://storage.test/saree_clean.jpg",
         product_dna=saree_dna,
         ai_raw_evaluation={
-            "notes": "Authentic Nivi saree drape, neat pleats, elegant pallu fall over shoulder. Strictly two arms.",
+            "scores": {"garment_identity": 96.0, "colors": 95.0, "bottom_wear": 97.0},
+            "checks": {"garment_identity": "pass", "colors": "pass", "bottom_wear": "pass"},
+            "notes": "Authentic Nivi saree drape, neat pleats, continuous saree drape; no trousers or pants. Strictly two arms.",
         },
     )
     assert clean_eval.outcome == "pass"
     assert clean_eval.anatomical_defect_detected is False
+    assert clean_eval.bottom_cut_mismatch is False
+
+    # 1b. Incomplete QA payload (missing scores and no veto) fails closed
+    incomplete_eval = qa_agent.evaluate(
+        org_id=VALID_ORG_UUID,
+        job_id="job-1",
+        generation_id="gen-1b",
+        sku_id="SKU-SAREE-001",
+        pose_index=1,
+        pose_type="full_front",
+        image_url="https://storage.test/saree_incomplete.jpg",
+        product_dna=saree_dna,
+        ai_raw_evaluation={"notes": "Looks good"},
+    )
+    assert incomplete_eval.outcome == "retry"
+    assert "unverified_qa_payload" in incomplete_eval.failed_checks
 
     # 2. Saree with hallucinated trousers/pants is HARD VETOED
     trouser_eval = qa_agent.evaluate(

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AlertTriangle, Aperture, CheckCircle2, ChevronDown, ChevronUp, Loader2, Palette, RefreshCcw, Shirt, Sparkles } from "lucide-react";
+import type { ProductDnaSummary } from "../../../lib/backend";
 import type { StudioAnalysis } from "../types";
 import { sareeProfilePresentation } from "../sareeProfilePresentation";
 
@@ -50,7 +51,9 @@ function analysisRouteLabel(analysis: StudioAnalysis | null) {
     ? "Gemini"
     : analysis.analysisProvider === "openai"
       ? "OpenAI"
-      : analysis.analysisProvider;
+      : analysis.analysisProvider === "meta"
+        ? "Meta Muse Spark"
+        : analysis.analysisProvider;
   const cache = analysis.cacheHit ? " · Cache Hit" : "";
   const thinking = analysis.analysisThinking ? ` · ${analysis.analysisThinking}` : "";
   return `${provider} ${analysis.analysisModel}${thinking}${cache}`;
@@ -79,6 +82,10 @@ export function AnalysisProfile({
   current,
   onAnalyze,
   onImprovePosePlan,
+  dnaCurrent,
+  dnaState,
+  onApproveDna,
+  onRetryDna,
   sceneDirection,
   onSceneDirectionChange,
   garmentSummary,
@@ -91,6 +98,19 @@ export function AnalysisProfile({
   current: boolean;
   onAnalyze: () => void;
   onImprovePosePlan: () => void;
+  dnaCurrent?: boolean;
+  dnaState?: {
+    version?: number;
+    approved?: boolean;
+    threadId?: string;
+    persisted?: boolean;
+    approving?: boolean;
+    extracting?: boolean;
+    error?: string | null;
+    productDna?: ProductDnaSummary | null;
+  } | null;
+  onApproveDna?: () => void;
+  onRetryDna?: () => void;
   sceneDirection: string;
   onSceneDirectionChange: (value: string) => void;
   garmentSummary: string;
@@ -164,7 +184,83 @@ export function AnalysisProfile({
               <Aperture className="h-4 w-4 text-primary" />
               <span>Optimize 6-Pose Plan</span>
             </button>
+            {dnaCurrent && dnaState?.extracting ? (
+              <span className="inline-flex items-center gap-1.5 rounded-xl border border-outline-variant/60 bg-surface-container-low px-3 py-2 text-xs font-semibold text-secondary">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>Extracting Product DNA V2…</span>
+              </span>
+            ) : dnaCurrent && (
+              dnaState?.error ||
+              dnaState?.persisted === false ||
+              dnaState?.productDna?.metadata?.analysis_source === "heuristic_offline"
+            ) ? (
+              <button
+                type="button"
+                onClick={onRetryDna}
+                className="flex items-center gap-1.5 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                <span>Retry Product DNA V2</span>
+              </button>
+            ) : dnaCurrent && dnaState?.version && !stale && current ? (
+              dnaState.approved ? (
+                <span className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>Product DNA v{dnaState.version} Locked</span>
+                </span>
+              ) : onApproveDna ? (
+                <button
+                  type="button"
+                  onClick={onApproveDna}
+                  disabled={dnaState.approving}
+                  className="flex items-center gap-1.5 rounded-xl border border-emerald-600/30 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  {dnaState.approving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                  <span>Approve Product DNA v{dnaState.version}</span>
+                </button>
+              ) : null
+            ) : null}
           </div>
+
+          {dnaCurrent && (
+            dnaState?.error ||
+            dnaState?.persisted === false ||
+            dnaState?.productDna?.metadata?.analysis_source === "heuristic_offline"
+          ) && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-xs text-rose-800">
+              <strong className="font-bold">Product DNA V2 warning:</strong>{" "}
+              {dnaState?.error ||
+                (dnaState?.persisted === false
+                  ? "Draft could not be persisted to PostgreSQL; retry extraction before approving."
+                  : "Vision providers returned an offline fallback draft; retry extraction before locking product truth.")}
+            </div>
+          )}
+
+          {dnaCurrent && !stale && current && dnaState?.productDna && (
+            <div className="rounded-xl border border-emerald-200/70 bg-emerald-50/40 p-3 text-xs text-on-surface">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold text-emerald-900">
+                  Product DNA V2 v{dnaState.version} {dnaState.approved ? "(Approved & Locked)" : "(Draft — Review before locking)"}
+                </span>
+                <span className="text-[11px] font-medium text-emerald-800">
+                  Confidence: {Math.round((Number(dnaState.productDna.confidence_score) || 0) * 100)}%
+                </span>
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-secondary">
+                <span>Family: <strong className="text-on-surface">{dnaState.productDna.garment_family || "unknown"}</strong></span>
+                <span>Color: <strong className="text-on-surface">{dnaState.productDna.main_color || "unknown"}</strong></span>
+                <span>Fabric: <strong className="text-on-surface">{dnaState.productDna.fabric_type || "unknown"}</strong></span>
+                {dnaState.productDna.bottom_wear?.cut_class && (
+                  <span>Bottom: <strong className="text-on-surface">{dnaState.productDna.bottom_wear.cut_class}</strong></span>
+                )}
+              </div>
+              {dnaState.productDna.explicit_invariants && dnaState.productDna.explicit_invariants.length > 0 && (
+                <p className="mt-1.5 text-[11px] text-emerald-900/80">
+                  Invariants: {dnaState.productDna.explicit_invariants.slice(0, 3).join(" · ")}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Director's notes: Scene direction */}
           <div>

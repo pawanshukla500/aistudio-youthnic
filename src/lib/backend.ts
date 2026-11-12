@@ -11,8 +11,44 @@ import { ANALYSIS_RUN_KINDS, GENERATION_RUN_KIND, QA_RUN_KIND, attributeJobCostR
 export type Id<_Table extends string> = string;
 export type BackendEndpoint = string;
 
+export interface ProductDnaSummary {
+  version: number;
+  approved: boolean;
+  status?: string;
+  garment_family?: string;
+  main_color?: string;
+  fabric_type?: string;
+  bottom_wear?: {
+    has_bottom_wear?: boolean;
+    cut_class?: string;
+  };
+  explicit_invariants?: string[];
+  prohibited_changes?: string[];
+  confidence_score?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ProductDnaExtractResult {
+  thread_id?: string;
+  persisted?: boolean;
+  product_dna?: ProductDnaSummary | null;
+}
+
+export interface WorkflowOverviewResult {
+  engine?: string;
+  checkpointer?: {
+    backend?: string;
+    tables_ready?: boolean;
+    total_checkpoints?: number;
+    total_threads?: number;
+  };
+  nodes?: string[];
+  providers_configured?: Record<string, boolean>;
+}
+
 export const api = {
   dna: { extract: "dna.extract", get: "dna.get", approve: "dna.approve" },
+  workflows: { overview: "workflows.overview", checkpoints: "workflows.checkpoints" },
   analysis: { analyzeReferences: "analysis.analyzeReferences" },
   files: { saveReference: "files.saveReference" },
   generation: { queueSku: "generation.queueSku", regeneratePose: "generation.regeneratePose" },
@@ -814,6 +850,9 @@ async function queryBackend(endpoint: BackendEndpoint, args: Record<string, any>
     case api.eventIntelligence.roadmap: return roadmap(args);
     case api.admin.overview: return adminOverview(args);
     case api.ai.getEffectiveRouting: return invokeAppApi("ai.routing.effective", args);
+    case api.dna.get: return invokeAppApi("dna.get", args);
+    case api.workflows.overview: return invokeAppApi("workflows.overview", args);
+    case api.workflows.checkpoints: return invokeAppApi("workflows.checkpoints", args);
     default: throw new Error(`Unsupported Supabase query: ${endpoint}`);
   }
 }
@@ -822,6 +861,10 @@ async function mutateBackend(endpoint: BackendEndpoint, args: Record<string, any
   switch (endpoint) {
     case api.analysis.analyzeReferences:
       return invokeAppApi("studio.analyze", args);
+    case api.dna.extract:
+      return invokeAppApi("dna.extract", args);
+    case api.dna.approve:
+      return invokeAppApi("dna.approve", args);
     case api.generation.queueSku:
       return invokeAppApi("studio.queue", { ...args, sessionId: args.generationSessionId, category: args.categoryStr, analysisFingerprint: args.analysisFingerprint });
     case api.generation.regeneratePose:

@@ -13,6 +13,7 @@ class AgentWorkflowState(TypedDict, total=False):
     source_fingerprint: str
     product_dna: Optional[Dict[str, Any]]
     dna_approved: bool
+    dna_persisted: bool
 
     # Knowledge & Scene Planning
     retrieved_guidance: List[str]
@@ -24,8 +25,16 @@ class AgentWorkflowState(TypedDict, total=False):
     current_pose_index: int
     poses_to_generate: List[int]
     generated_poses: Dict[int, Dict[str, Any]]
+    qa_target_image_url: Optional[str]
+    qa_pose_index: int
+    qa_pose_type: str
+    ai_raw_evaluation: Optional[Dict[str, Any]]
     qa_evaluations: Dict[int, Dict[str, Any]]
     corrections: List[Dict[str, Any]]
+    correction_decision: Optional[str]
+    updated_instruction: Optional[str]
+    force_refresh: bool
+    auto_approve: bool
 
     # Telemetry & Reliability
     provider_route: Dict[str, Any]

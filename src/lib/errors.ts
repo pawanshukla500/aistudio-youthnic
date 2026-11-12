@@ -9,6 +9,7 @@ export function getErrorMessage(reason: unknown, fallback: string) {
 const ANALYZE_OPERATIONS = new Set([
   "studio.analyze",
   "analysis.analyzeReferences",
+  "dna.extract",
 ]);
 
 /**
@@ -21,6 +22,9 @@ const ANALYZE_OPERATIONS = new Set([
  */
 const RETRYABLE_READ_OPERATIONS = new Set([
   "ai.routing.effective",
+  "dna.get",
+  "workflows.overview",
+  "workflows.checkpoints",
 ]);
 
 export function isRetryableInvokeOperation(operation: string) {

@@ -35,16 +35,30 @@ class GenerationRouterAgent:
         else:
             selected_model = "gpt-image-2.5-flare-2026-09-08"
 
-        # Cost estimation per pose (e.g. $0.06 - $0.08 per image depending on model)
-        if "sunburst" in selected_model:
-            est_cost_per_pose = 0.08
+        # Cost estimation per pose aligned with ai_clients.estimate_image_cost_usd
+        if "2.6-sunburst" in selected_model:
+            est_cost_per_pose = 0.18
+        elif "2.6" in selected_model:
+            est_cost_per_pose = 0.16
+        elif "2.5-sunburst" in selected_model:
+            est_cost_per_pose = 0.12
         else:
-            est_cost_per_pose = 0.06
+            est_cost_per_pose = 0.08
         poses_count = len(state.get("poses_to_generate", [1, 2, 3, 4, 5, 6]))
         est_total = budget_used + (poses_count * est_cost_per_pose)
 
         if est_total > max_budget:
-            logger.warning(f"Generation budget projected ({est_total}) exceeds maximum allowed ({max_budget})")
+            if selected_model != "gpt-image-2.5-flare-2026-09-08":
+                logger.warning(
+                    f"Projected budget (${est_total:.2f}) exceeds limit (${max_budget:.2f}); downgrading model to gpt-image-2.5-flare-2026-09-08"
+                )
+                selected_model = "gpt-image-2.5-flare-2026-09-08"
+                est_cost_per_pose = 0.08
+                est_total = budget_used + (poses_count * est_cost_per_pose)
+            if est_total > max_budget:
+                raise ValueError(
+                    f"Projected generation cost (${est_total:.2f}) exceeds maximum budget (${max_budget:.2f})."
+                )
 
         route_info = {
             "image_provider": selected_provider,
@@ -52,6 +66,7 @@ class GenerationRouterAgent:
             "quality": state.get("quality", "medium"),
             "aspect_ratio": "3:4",
             "est_cost_per_pose": est_cost_per_pose,
+            "est_total_cost_usd": round(est_total, 4),
             "circuit_breaker": "closed" if is_openai_healthy else "open",
         }
 

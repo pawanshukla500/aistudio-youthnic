@@ -1,8 +1,9 @@
 import json
 import logging
+import threading
+import uuid
 from typing import Optional, Dict, Any, List, Tuple
 from contextlib import contextmanager
-import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -10,21 +11,31 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Initialize connection pool
+# Initialize connection pool safely under concurrency
 _pool: Optional[ConnectionPool] = None
+_pool_lock = threading.Lock()
+_pool_generation = 0
 
 
 def get_pool() -> ConnectionPool:
-    global _pool
-    if _pool is None or _pool.closed:
-        _pool = ConnectionPool(
-            conninfo=settings.DATABASE_URL,
-            min_size=2,
-            max_size=15,
-            open=True,
-            kwargs={"autocommit": True, "row_factory": dict_row},
-        )
+    global _pool, _pool_generation
+    if not settings.DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is not configured.")
+    with _pool_lock:
+        if _pool is None or _pool.closed:
+            _pool = ConnectionPool(
+                conninfo=settings.DATABASE_URL,
+                min_size=2,
+                max_size=15,
+                open=True,
+                kwargs={"autocommit": True, "row_factory": dict_row},
+            )
+            _pool_generation += 1
     return _pool
+
+
+def get_pool_generation() -> int:
+    return _pool_generation
 
 
 @contextmanager
@@ -46,33 +57,48 @@ def save_dna_version(
     garment_family: str = "kurta_or_kurti_set",
     approved: bool = False,
     approved_by: Optional[str] = None,
+    status_override: Optional[str] = None,
 ) -> int:
     with get_db() as conn:
-        with conn.cursor() as cur:
-            # Find latest version
-            cur.execute(
-                "SELECT COALESCE(MAX(version), 0) + 1 AS next_version FROM public.product_dna_versions WHERE organization_id = %s AND sku_id = %s",
-                (org_id, sku_id),
-            )
-            row = cur.fetchone()
-            next_ver = row["next_version"] if row else 1
+        with conn.transaction():
+            with conn.cursor() as cur:
+                # Serialize concurrent version creation per org+SKU
+                cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (f"dna:{org_id}:{sku_id}",),
+                )
+                cur.execute(
+                    "SELECT COALESCE(MAX(version), 0) + 1 AS next_version FROM public.product_dna_versions WHERE organization_id = %s AND sku_id = %s",
+                    (org_id, sku_id),
+                )
+                row = cur.fetchone()
+                next_ver = row["next_version"] if row else 1
 
-            status = "approved" if approved else "draft"
-            cur.execute(
-                """
-                INSERT INTO public.product_dna_versions (
-                    organization_id, sku_id, sku_name, version, garment_family,
-                    dna_payload, source_fingerprint, status, approved, approved_by, approved_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CASE WHEN %s THEN now() ELSE NULL END)
-                RETURNING version
-                """,
-                (
-                    org_id, sku_id, sku_name, next_ver, garment_family,
-                    json.dumps(dna_payload), fingerprint, status, approved, approved_by, approved
-                ),
-            )
-            saved = cur.fetchone()
-            return saved["version"] if saved else next_ver
+                status = status_override or ("approved" if approved else "draft")
+                synced_payload = {
+                    **dna_payload,
+                    "version": next_ver,
+                    "approved": bool(approved),
+                    "status": status,
+                }
+                if approved_by:
+                    synced_payload["approved_by"] = approved_by
+
+                cur.execute(
+                    """
+                    INSERT INTO public.product_dna_versions (
+                        organization_id, sku_id, sku_name, version, garment_family,
+                        dna_payload, source_fingerprint, status, approved, approved_by, approved_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CASE WHEN %s THEN now() ELSE NULL END)
+                    RETURNING version
+                    """,
+                    (
+                        org_id, sku_id, sku_name, next_ver, garment_family,
+                        json.dumps(synced_payload), fingerprint, status, approved, approved_by, approved
+                    ),
+                )
+                saved = cur.fetchone()
+                return saved["version"] if saved else next_ver
 
 
 def get_latest_dna_version(org_id: str, sku_id: str) -> Optional[Dict[str, Any]]:
@@ -115,18 +141,30 @@ def list_dna_versions(org_id: str, sku_id: str) -> List[Dict[str, Any]]:
 
 
 def approve_dna_version(org_id: str, sku_id: str, version: int, approved_by: str) -> bool:
-    """Mark a specific Product DNA version as approved and update audit timestamps."""
+    """Mark a specific Product DNA version as approved and keep dna_payload in sync."""
     with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE public.product_dna_versions
-                SET approved = true, status = 'approved', approved_by = %s, approved_at = now(), updated_at = now()
-                WHERE organization_id = %s AND sku_id = %s AND version = %s
-                """,
-                (approved_by, org_id, sku_id, version),
-            )
-            return cur.rowcount > 0
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE public.product_dna_versions
+                    SET approved = true,
+                        status = 'approved',
+                        approved_by = %s,
+                        approved_at = now(),
+                        updated_at = now(),
+                        dna_payload = COALESCE(dna_payload, '{}'::jsonb) || jsonb_build_object(
+                            'version', %s::int,
+                            'approved', true,
+                            'status', 'approved',
+                            'approved_by', %s::text,
+                            'approved_at', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                        )
+                    WHERE organization_id = %s AND sku_id = %s AND version = %s
+                    """,
+                    (approved_by, version, approved_by, org_id, sku_id, version),
+                )
+                return cur.rowcount > 0
 
 
 # -------------------------------------------------------------
@@ -230,31 +268,112 @@ def save_qa_assessment(
 # -------------------------------------------------------------
 def search_knowledge_embeddings(
     category: str,
+    organization_id: Optional[str] = None,
     query_embedding: Optional[List[float]] = None,
     limit: int = 5,
 ) -> List[Dict[str, Any]]:
+    org_filter = (
+        "(organization_id IS NULL OR organization_id = %s::uuid)"
+        if organization_id
+        else "organization_id IS NULL"
+    )
     with get_db() as conn:
         with conn.cursor() as cur:
             if query_embedding:
+                params: Tuple[Any, ...] = (
+                    (query_embedding, organization_id, category, category, query_embedding, limit)
+                    if organization_id
+                    else (query_embedding, category, category, query_embedding, limit)
+                )
                 cur.execute(
-                    """
+                    f"""
                     SELECT id, category, sub_category, content, metadata,
                            1 - (embedding <=> %s::vector) AS similarity
                     FROM public.knowledge_embeddings
-                    WHERE is_active = true AND (category = %s OR %s = '')
+                    WHERE is_active = true
+                      AND {org_filter}
+                      AND (category = %s OR %s = '')
                     ORDER BY embedding <=> %s::vector ASC
                     LIMIT %s
                     """,
-                    (query_embedding, category, category, query_embedding, limit),
+                    params,
                 )
             else:
+                params = (
+                    (organization_id, category, category, limit)
+                    if organization_id
+                    else (category, category, limit)
+                )
                 cur.execute(
-                    """
+                    f"""
                     SELECT id, category, sub_category, content, metadata, 1.0 AS similarity
                     FROM public.knowledge_embeddings
-                    WHERE is_active = true AND (category = %s OR %s = '')
+                    WHERE is_active = true
+                      AND {org_filter}
+                      AND (category = %s OR %s = '')
                     LIMIT %s
                     """,
-                    (category, category, limit),
+                    params,
                 )
             return cur.fetchall()
+
+
+def save_region_crop(
+    org_id: str,
+    evidence_id: str,
+    sku_id: str,
+    region_name: str,
+    bounding_box: Dict[str, float],
+    crop_storage_path: str,
+    crop_download_url: str,
+    construction_notes: Optional[str] = None,
+) -> str:
+    """Persist an extracted garment region crop linked to source evidence."""
+    try:
+        uuid.UUID(str(evidence_id))
+    except (ValueError, TypeError):
+        logger.debug("Skipping region crop insert without valid UUID evidence_id")
+        return ""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO public.product_region_crops (
+                    organization_id, evidence_id, sku_id, region_name,
+                    bounding_box, crop_storage_path, crop_download_url, construction_notes
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    org_id,
+                    evidence_id,
+                    sku_id,
+                    region_name,
+                    json.dumps(bounding_box),
+                    crop_storage_path,
+                    crop_download_url,
+                    construction_notes,
+                ),
+            )
+            row = cur.fetchone()
+            return str(row["id"]) if row else ""
+
+
+def get_checkpointer_metrics() -> Dict[str, Any]:
+    """Inspect PostgresSaver checkpoint tables and thread counts."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*)::int AS total_checkpoints,
+                       COUNT(DISTINCT thread_id)::int AS total_threads
+                FROM public.checkpoints
+                """
+            )
+            row = cur.fetchone() or {"total_checkpoints": 0, "total_threads": 0}
+            return {
+                "backend": "postgresql",
+                "tables_ready": True,
+                "total_checkpoints": int(row["total_checkpoints"]),
+                "total_threads": int(row["total_threads"]),
+            }
