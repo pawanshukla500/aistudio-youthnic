@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 from typing import Dict, Any, List
 from database import search_knowledge_embeddings, get_db
 from cache import get_memory_rules_cache, set_memory_rules_cache

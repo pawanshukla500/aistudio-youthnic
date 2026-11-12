@@ -586,3 +586,24 @@ Deno.test("comma-separated dupatta exclusion preserves dupatta lock while sugges
   });
   assertEquals(promptSuggestedOnly.includes("DUPATTA DRAPE & FIDELITY LOCK"), false);
 });
+
+Deno.test("placeholder N/A sareeTruth on a kurta set never leaks saree_ethnic pose grammar into prompts", () => {
+  const identity = {
+    garmentFamily: "kurta_or_kurti_set",
+    bottomWearDetails: "Wide-leg striped Farshi salwar",
+    sareeTruth: {
+      body: { mainFabric: "N/A - not a saree" },
+    },
+  };
+  assertEquals(detectGarmentPoseFamily({ productIdentity: identity, category: "ethnic/fusion" }), "kurta_set");
+  const prompt = composeGenerationPrompt({
+    skuName: "FARSHI-SET",
+    productDetails: "Deep fuchsia kurti set",
+    pose: pose("full_front", 1) as never,
+    session: { category: "ethnic/fusion", productIdentity: identity },
+    references: [{ role: "front" }, { role: "bottom" }],
+  });
+  assertEquals(prompt.includes("GARMENT POSE GRAMMAR (KURTA SET)"), true);
+  assertEquals(prompt.includes("GARMENT POSE GRAMMAR (SAREE ETHNIC)"), false);
+  assertEquals(prompt.includes("PALLU PLACEMENT"), false);
+});

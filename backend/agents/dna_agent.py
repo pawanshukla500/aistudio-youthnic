@@ -54,7 +54,7 @@ CRITICAL RULES:
 1. Extract ONLY attributes visibly proven in these authoritative product images. Any attribute not clearly visible must be marked "unknown" (never guess or invent back details from front images).
 2. Scan ALL uploaded product slots (including mannequin/flat-lay and additional_product) for an included dupatta, stole, or shawl; record it if shown, while keeping top-only kurtis strictly top-only ("has_bottom_wear": false, "cut_class": "none").
 3. For Sarees: preserve drape style, pallu artwork, zari border width/weave, body butti, blouse neckline/sleeves, and enforce no trousers/pants.
-4. For Farshi Salwars ONLY: preserve two-leg construction, waist pleats + side-joint pleats, narrow hem relative to waist fullness, and 6-inch joined hem panel tapering 4 inches inward from upper hem seam. Never apply Farshi taper rules to non-Farshi cuts (palazzo, sharara, churidar, straight trouser, skirt).
+4. For Farshi Salwars ONLY: classify as "farshi" whenever the SKU/notes name farshi/farsi/fasi OR the bottom-wear photo shows waist/hip-yoke pleats plus a distinct ~5-7 inch horizontal joined hem cuff/panel separated by a horizontal seam, gota, piping, or lace joint above the ankle (even on a flatlay where cuff stripes reverse angle or taper softly). For Farshi, preserve two-leg construction, waist pleats + side-joint pleats, narrow hem relative to waist fullness, and a 6-inch joined hem panel tapering 4 inches inward from upper hem seam. Never apply Farshi taper rules to unbroken plain palazzos, shararas, churidars, straight trousers, or skirts.
 
 Reply with STRICT JSON only matching this schema:
 {{

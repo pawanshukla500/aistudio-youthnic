@@ -299,6 +299,7 @@ export function detectGarmentPoseFamily(args: {
   const garmentFamily = text(product.garmentFamily ?? product.garment_family).toLowerCase();
   const sareeTruth = objectValue(product.sareeTruth ?? product.saree_truth);
   const sareeBody = objectValue(sareeTruth.body);
+  const sanitizedSareeFabric = text(sareeBody.mainFabric).replace(/\b(?:n\/a|not|non|never|no|without)\b[\s\-–—]*(?:a\s+)?saree\b/gi, "").trim();
   const category = text(args.category).toLowerCase();
   const notes = joined([args.productDetails, args.skuName]);
   const haystack = joined([
@@ -311,14 +312,16 @@ export function detectGarmentPoseFamily(args: {
     product.pattern,
     product.print,
     product.length,
-    sareeBody.mainFabric,
+    sanitizedSareeFabric,
     sareeBody.weave,
     sareeBody.pattern,
-  ]);
+  ]).replace(/\b(?:not|non|never|no|without)\s+(?:a\s+)?saree\b/gi, "");
 
+  const explicitNonSareeFamily = Boolean(garmentFamily && garmentFamily !== "other" && !SAREE_RE.test(garmentFamily));
+  const hasRealSareeTruth = Boolean(sanitizedSareeFabric || text(sareeBody.weave) || text(sareeBody.pattern));
   const isSaree = garmentFamily === "saree" ||
     SAREE_RE.test(`${garmentFamily} ${category}`) ||
-    (Object.keys(sareeTruth).length > 0 && SAREE_RE.test(haystack));
+    (!explicitNonSareeFamily && hasRealSareeTruth && SAREE_RE.test(haystack));
   if (isSaree) return BENGALI_SAREE_RE.test(haystack) ? "saree_bengali" : "saree_ethnic";
 
   if (LEHENGA_RE.test(haystack)) return "lehenga";
