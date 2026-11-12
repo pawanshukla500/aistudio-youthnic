@@ -3,23 +3,25 @@
 Six-pose fashion catalog photoshoots generated from product references.
 
 - **Frontend:** React + Vite (`src/`).
-- **Backend:** Deno Supabase Edge Function `supabase/functions/app-api/`, running on Railway.
+- **Edge Gateway:** Deno Supabase Edge Function `supabase/functions/app-api/`, running on Railway (`functions`).
+- **Agentic Workflow Backend:** Python FastAPI + LangGraph (`PostgresSaver`) + Celery (`backend/`), running on Railway (`FastAPI`, `celery-worker`) with `Valkey` cache/broker.
 - **Database:** Postgres migrations in `supabase/migrations/`.
 - **Auth:** Firebase.
+- **Knowledge Graph:** `/graphify` index at `graphify-out/graph.json` and `graphify-out/GRAPH_REPORT.md`.
 
 ## Non-negotiable rules
 
-0. **Follow Core Memory:** See [MEMORY.md](MEMORY.md) and [AGENTS.md](AGENTS.md) for canonical architectural memory, agent behavioral constraints, and generation quality standards.
+0. **Follow Core Memory & Mandatory Skills (`/ponytail` + `/graphify`):**
+   - Read [MEMORY.md](MEMORY.md) and [AGENTS.md](AGENTS.md) before making architectural or model changes.
+   - **Always use `/ponytail`** every time you write or edit code: grep callers first, ship the smallest complete diff, preserve validation & error handling, write concise tests, and disclose any skipped checks or risks.
+   - **Use `/graphify` by default** whenever exploring or updating this repo: query `graphify-out/graph.json` first for cross-file discovery, and run `/graphify . --update` after edits.
 1. **AI models follow configured policies.** The primary and fallback
    routes saved in Administration → AI models (`organization_ai_model_policies`), or
    defaulted when unconfigured, determine the execution chain. For product truth and pose
-   planning, the standard chain routes through Meta Muse Spark 1.2 Contributor (`muse-spark-1.2-contributor:low`) as primary,
-   OpenAI GPT-5.6 Luna (with high thinking when primary; low thinking when fallback under tight hop budget) as first fallback,
-   and OpenAI GPT-5.6 Terra as the safety net fallback. Do not add arbitrary unapproved
-   models or bypass the established chain. Reasoning effort is preserved for Luna (high when hop budget permits;
-   clamped to low when hop timeout < 60s to prevent hop timeouts) while heavy models (Terra, Flash, Sol, Muse Spark) run at low (or lowest supported level;
-   explicit none/minimal is preserved; Qwen runs with thinking off) to fit the 180s Studio wait,
-   and Gemini Flash QA runs at low. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
+   planning (`product_truth`), the standard chain routes through Meta Muse Spark (`muse-spark-1.2-contributor` / `muse-spark-1.3-contributor` with **`high` thinking**) as primary,
+   OpenAI GPT 6.1 Terra (`gpt-6.1-terra` with **`high` thinking**) as first fallback,
+   and OpenAI GPT 5.6 Luna (`gpt-5.6-luna`) / Gemini Flash (`gemini-3.8-flash`) as secondary safety nets. Do not add arbitrary unapproved
+   models or bypass the established chain. High reasoning is preserved for Meta Muse Spark, GPT 6.1 Terra, and GPT 5.6 Luna during analysis and pose planning (`clampProductTruthThinking`), only clamping to `low` under emergency tight remaining budgets (`< 60s` in Edge `app-api` or FastAPI `invoke_vision_json`), while legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, `gemini-*`) run at `low` (explicit `none`/`minimal` preserved; Qwen thinking off). Image QA runs at `low`. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
 2. **Product references are the truth (PR 131).** Generated images must take clothing EXCLUSIVELY
    from uploaded product references. The outfit/clothing shown in the STYLE REFERENCE image is 100% DISCARDED and QUARANTINED.
    Style reference is strictly the authority for backdrop, room architecture, flooring, and lighting. Copy the room only: do not copy the pose, the outfit, or objects in the hands.
@@ -38,12 +40,14 @@ Six-pose fashion catalog photoshoots generated from product references.
    dynamically via `lib/providerCost.ts` based on pose count, image model rates,
    quality, pose QA, and analysis cost (never hardcoded to $0.25).
 8. **Defaults:**
+   - image model `gpt-image-2.6-sunburst`;
    - image quality `medium` (`DEFAULT_IMAGE_QUALITY`);
    - pose QA off unless the job or a regeneration asks for it;
-   - aspect ratio 3:4 at 2K.
+   - aspect ratio 3:4 at 2K (`1536x2048`).
+   - Farshi / Farsi construction rules (4-inch upper-hem taper, waist narrowing, 2-leg spread) apply strictly to `farshi`/`farsi` SKUs only and never bleed onto other bottom silhouettes.
 9. **Multimodal provider protocols:**
    - **Meta Muse Spark:** Multimodal vision calls use native Responses API (`https://api.meta.ai/v1/responses`) with canonical `input: [{ role: "user", content }]` schema and in-provider sibling candidate retry (`muse-spark-1.2-contributor` <-> `muse-spark-1.3-contributor`) to guarantee zero-drop reliability. Server secret: `META_MODEL_API_KEY`. Supported reasoning levels: `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` (`muse-spark-1.3` standard only). Never pass `none` (Meta rejects with 400). When image parts are present, Chat Completions is bypassed since it does not support images.
-   - **OpenAI:** Tries Chat Completions first, falling back to Responses API (`/v1/responses`) on 404/400. Server secret: `OPENAI_API_KEY`.
+   - **OpenAI:** Tries Responses API (`/v1/responses`) first when image parts are present, and Chat Completions first for text-only probes (falling back on 404/400). Server secret: `OPENAI_API_KEY`.
 
 ## Where things live
 
@@ -55,7 +59,9 @@ Six-pose fashion catalog photoshoots generated from product references.
 | Analysis prompt, pose plan | `supabase/functions/app-api/lib/profiles.ts` |
 | QA | `supabase/functions/app-api/lib/qa.ts` |
 | History data layer | `src/lib/backend.ts` |
-| Pipeline, version history, LangGraph decision | `docs/GENERATION_ORCHESTRATION.md` |
+| LangGraph, FastAPI, Product DNA V2 & Celery | `backend/main.py`, `backend/graph.py`, `backend/agents/`, `backend/services/` |
+| Pipeline, version history, LangGraph architecture | `docs/GENERATION_ORCHESTRATION.md` |
+| Repository Knowledge Graph (`/graphify`) | `graphify-out/graph.json`, `graphify-out/GRAPH_REPORT.md` |
 | In-app user docs (source of `src/features/docs/docsData.ts`) | `youthnic-ai-studio-docs/` |
 
 ## Checks before pushing
@@ -63,10 +69,12 @@ Six-pose fashion catalog photoshoots generated from product references.
 - `npm run lint`
 - `npx tsc -b`
 - `npm run build` (also regenerates the in-app docs data)
+- Python backend checks: `$env:PYTHONPATH="backend"; python -m pytest backend/tests/ -q`
 - The Deno suites listed in `package.json` → `test:catalog-workflow`. CI runs the same
   list from `.github/workflows/deploy-cloud-run.yml`, and the two lists must stay identical.
 - New test files must be added to **both** lists.
 - `deno check --frozen supabase/functions/app-api/index.ts` runs in CI.
+- Keep `graphify-out/` updated with `/graphify . --update` after edits.
 
 ## Pull requests
 

@@ -1,23 +1,17 @@
 # Generation orchestration
 
-How a six-pose shoot moves from references to delivered images, where the
-history of every image is kept, and why the pipeline does not use LangGraph.
+How a six-pose shoot moves from references to delivered images, how **LangGraph + FastAPI + Postgres** manage Product DNA V2 & durable workflow state, and where every image version is kept.
 
 ## The pipeline
 
-The steps are fixed, and each one is a row in Postgres rather than a process in memory:
+The studio pairs an Edge Gateway queue (`supabase/functions/app-api`) with a multi-agent **LangGraph** service (`backend/`, deployed on Railway as `FastAPI` + `celery-worker` + `Valkey`):
 
-1. **Analyse** (Gemini Vision, one call). Builds the Product Identity Profile, the shared
-   Creative Direction (the set), the Model Identity, and the six-pose plan. The result is
-   fingerprinted and cached, so unchanged references are never analysed twice.
-2. **Queue.** `generation_jobs` gets one row and `session_generations` gets one row per pose.
-3. **Generate, one pose per worker call.** `claim_next_generation_job` leases the job. The worker
-   builds that pose's prompt, calls the image model once, runs optional QA, then either commits
-   the image or schedules a retry with `available_at` backoff. Cron recovers stale leases.
-4. **Deliver.** The image is uploaded under a unique path and a `planning_assets` row is appended.
+1. **Analyse & Product DNA V2** (`studio.analyze` / `/api/v1/dna/extract`). Runs Meta Muse Spark (`high` thinking) with OpenAI `gpt-6.1-terra` (`high` thinking) fallback to extract immutable evidence-linked Product DNA V2 (`dna_versions`), shared Creative Direction (the set), Model Identity, and a tailored six-pose plan (isolating Farshi 4-inch upper-hem taper strictly to Farshi SKUs, Gen-Z saree draping, and top-only vs. multi-piece kurti sets). Results are SHA-256 fingerprinted and cached in Postgres & Valkey.
+2. **Queue.** `generation_jobs` gets one row and `session_generations` gets one row per pose; asynchronous agent tasks can dispatch through Celery + Valkey (`celery-worker`).
+3. **Generate, one pose per worker call.** `claim_next_generation_job` leases the job. The worker builds each pose prompt with `gpt-image-2.6-sunburst` (default 3:4 at 2K, `medium` quality), runs optional Computer Vision QA, and either commits the image or schedules a retry with `available_at` backoff.
+4. **Deliver.** The image is uploaded under a unique Firebase Storage path and appended to `planning_assets`.
 
-Each worker call does at most one paid image request. A crash, a deploy, or a Railway sleep
-loses nothing: the next call resumes from the database.
+Each worker call does at most one paid image request. A crash, a deploy, or a Railway sleep leaves the job in `generation_jobs`. When its lease expires, `recover_stale_generation_jobs` clears the lock and `claim_next_generation_job` claims the job again (while LangGraph DNA & pose-planning threads persist checkpoints to Postgres via `PostgresSaver`).
 
 ## Keeping every frame on the same set
 
@@ -55,37 +49,22 @@ show:
 Images archived before timing was recorded get their wait time from `regeneration_history`.
 Image and QA `ai_runs` rows now carry `generation_epoch`, `attempt_number` and `generation_id`.
 
-## Why not LangGraph
+## LangGraph Multi-Agent Architecture (`backend/`)
 
-[LangGraph](https://github.com/langchain-ai/langgraph) is an open-source library, available for
-Python and JavaScript. It runs in-process, and its hosted platform is optional. It would not help
-this pipeline:
+The agentic workflow runs in `backend/graph.py` on **FastAPI** (Railway `FastAPI` service, configured with scale-to-zero `sleepApplication: true` for zero idle cost) with **`PostgresSaver`** checkpointing and **`Valkey`** caching/Celery task execution:
 
-- **It saves no tokens.** Cost is the image model's input images (about 16–21k tokens per pose)
-  and its output image tokens, which quality and size set. A graph framework sends the same
-  prompts and images. The savings come from medium quality (now the default), the scene lock
-  that makes regenerations less necessary, and the existing analysis cache.
-- **It gives no better images.** Output quality comes from the prompt and the reference set, and
-  both are already explicit, versioned and tested.
-- **Durable execution already exists.** LangGraph needs a checkpointer, such as
-  `@langchain/langgraph-checkpoint-postgres`, to survive restarts. The worker already persists
-  every step, leases, retry backoff and cron recovery in Postgres, and fits the
-  one-paid-call-per-invocation limit.
-- **Its runtime cost is real.** It would add `@langchain/core` and its dependency tree to a Deno
-  function on Railway, plus a second source of truth for job state beside `generation_jobs`.
+- **Supervisor / Evidence / Product DNA Agents (`agents/supervisor.py`, `agents/evidence_agent.py`, `agents/dna_agent.py`, `models/dna_v2.py`):** Verify reference roles, quarantine style-reference outfits, enforce strict bottom-wear invariants across DNA, QA, and correction (`agents/dna_agent.py`, `agents/qa_agent.py`, `agents/correction_agent.py`), and persist immutable `dna_versions` keyed by source SHA-256 hashes.
+- **Knowledge & Pose Planning Agents (`agents/memory_agent.py`, `agents/pose_planning_agent.py`):** Apply historical approvals/corrections and build category-aware 6-pose shoots (Pose 5 primary craftsmanship detail; Pose 6 non-duplicate showcase) using Meta Muse Spark `high` -> `gpt-6.1-terra:high`.
+- **CV QA & Correction Agents (`agents/qa_agent.py`, `agents/correction_agent.py`):** Detect anatomical duplication (must remain 2 arms, 2 hands), Farshi hem fidelity, and background continuity before final approval.
 
-Revisit this if the pipeline becomes branching and agentic. Examples: a planner that chooses
-among many tools, or several models negotiating a shot. Six fixed poses in sequence is a queue,
-not a graph.
+See `AGENTS.md` and `MEMORY.md` for mandatory `/ponytail` and `/graphify` engineering workflows when modifying the orchestrator.
 
 ## Which models run
 
-The vision models for analysis and QA, and the image model, come from Administration → AI
-models, exactly as saved. See [AI model routing](AI_MODEL_ROUTING.md).
+The vision models for analysis (`muse-spark-1.2-contributor:high` -> `gpt-6.1-terra:high`) and QA, and the image model (`gpt-image-2.6-sunburst` default), come from Administration → AI models, exactly as saved. See [AI model routing](AI_MODEL_ROUTING.md).
 
 ## Defaults
 
-- Image quality: `medium` (`DEFAULT_IMAGE_QUALITY` in `index.ts`, Studio, and ad-hoc catalog
-  batches). Choose `high` in Studio when a shoot needs it.
-- Automatic QA: off unless enabled for the job, or ticked when regenerating a pose. A frame
-  delivered without QA is labelled "Not QA-checked · QA off", not "QA unavailable".
+- Image model: `gpt-image-2.6-sunburst` (`DEFAULT_IMAGE_MODEL`, 3:4 at 2K / `1536x2048`).
+- Image quality: `medium` (`DEFAULT_IMAGE_QUALITY` in `index.ts`, Studio, and ad-hoc catalog batches). Choose `high` in Studio when a shoot needs it.
+- Automatic QA: off unless enabled for the job, or ticked when regenerating a pose. A frame delivered without QA is labelled "Not QA-checked · QA off", not "QA unavailable".

@@ -40,12 +40,13 @@ SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 DATABASE_URL="postgresql://postgres:password@db.supabase.co:5432/postgres"
 
 # AI Provider API Keys
-GEMINI_API_KEY="AIzaSyD..."
+META_MODEL_API_KEY="meta-..."
 OPENAI_API_KEY="sk-proj-..."
-FAL_KEY="fal_live_..."
+GEMINI_API_KEY="AIzaSyD..."
+INTERNAL_API_SECRET="..."
 
-# Asynchronous Task Queue (Redis)
-REDIS_URL="rediss://default:password@your-redis-cluster:6379"
+# Asynchronous Task Queue (Valkey)
+VALKEY_URL="redis://valkey.railway.internal:6379/0"
 
 # Object Storage Credentials (GCS / S3)
 STORAGE_BUCKET_NAME="youthnic-production-assets"

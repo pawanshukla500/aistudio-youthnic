@@ -44,6 +44,7 @@ import {
   OPENAI_TERRA_VISION_ROUTE,
   FAST_PRODUCT_TRUTH_ROUTE,
   FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE,
+  FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
   PRODUCT_TRUTH_TIMEOUT_MS,
   VISION_GATEWAY_BUDGET_MS,
   VISION_HOP_MIN_MS,
@@ -554,12 +555,36 @@ function defaultVisionRoute(args: {
 }): NormalizedAiModelRoute {
   if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
     return assertAllowedAiModelRoute(
-      FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE,
+      args.purpose === "product_truth"
+        ? FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE
+        : { ...FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE, thinkingLevel: "low" },
       args.purpose,
       { strictJson: true },
     );
   }
   if (Deno.env.get("OPENAI_API_KEY")?.trim()) {
+    return assertAllowedAiModelRoute(
+      args.purpose === "product_truth" ? OPENAI_TERRA_VISION_ROUTE : CHEAP_OPENAI_VISION_ROUTE,
+      args.purpose,
+      { strictJson: true },
+    );
+  }
+  return assertAllowedAiModelRoute(
+    args.purpose === "product_truth" ? OPENAI_TERRA_VISION_ROUTE : CHEAP_OPENAI_VISION_ROUTE,
+    args.purpose,
+    { strictJson: true },
+  );
+}
+
+function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiModelRoute {
+  if (args.purpose === "product_truth") {
+    return assertAllowedAiModelRoute(
+      OPENAI_TERRA_VISION_ROUTE,
+      args.purpose,
+      { strictJson: true },
+    );
+  }
+  if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
     return assertAllowedAiModelRoute(
       CHEAP_OPENAI_VISION_ROUTE,
       args.purpose,
@@ -567,37 +592,46 @@ function defaultVisionRoute(args: {
     );
   }
   return assertAllowedAiModelRoute(
-    CHEAP_OPENAI_VISION_ROUTE,
-    args.purpose,
-    { strictJson: true },
-  );
-}
-
-function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiModelRoute {
-  if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
-    return assertAllowedAiModelRoute(
-      LUNA_HIGH_THINKING_VISION_ROUTE,
-      args.purpose,
-      { strictJson: true },
-    );
-  }
-  return assertAllowedAiModelRoute(
-    OPENAI_TERRA_VISION_ROUTE,
+    { ...OPENAI_TERRA_VISION_ROUTE, thinkingLevel: "low" },
     args.purpose,
     { strictJson: true },
   );
 }
 
 function defaultVisionFallbacks(args: { purpose: VisionPurpose }): NormalizedAiModelRoute[] {
-  if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
-    return [
+  if (args.purpose === "product_truth") {
+    const routes: NormalizedAiModelRoute[] = [
+      assertAllowedAiModelRoute(
+        OPENAI_TERRA_VISION_ROUTE,
+        args.purpose,
+        { strictJson: true },
+      ),
       assertAllowedAiModelRoute(
         LUNA_HIGH_THINKING_VISION_ROUTE,
         args.purpose,
         { strictJson: true },
       ),
+    ];
+    if (Deno.env.get("GEMINI_API_KEY")?.trim()) {
+      routes.push(
+        assertAllowedAiModelRoute(
+          FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+          args.purpose,
+          { strictJson: true },
+        ),
+      );
+    }
+    return routes;
+  }
+  if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
+    return [
       assertAllowedAiModelRoute(
-        OPENAI_TERRA_VISION_ROUTE,
+        CHEAP_OPENAI_VISION_ROUTE,
+        args.purpose,
+        { strictJson: true },
+      ),
+      assertAllowedAiModelRoute(
+        { ...OPENAI_TERRA_VISION_ROUTE, thinkingLevel: "low" },
         args.purpose,
         { strictJson: true },
       ),
@@ -605,7 +639,7 @@ function defaultVisionFallbacks(args: { purpose: VisionPurpose }): NormalizedAiM
   }
   return [
     assertAllowedAiModelRoute(
-      OPENAI_TERRA_VISION_ROUTE,
+      { ...OPENAI_TERRA_VISION_ROUTE, thinkingLevel: "low" },
       args.purpose,
       { strictJson: true },
     ),
@@ -697,11 +731,13 @@ async function resolveVisionPolicy(orgId: string, args: {
     args.purpose === "product_truth" &&
     primary.provider === "meta" &&
     fallback &&
-    fallback.provider === "openai" &&
-    fallback.model === "gpt-5.6-luna" &&
-    !fallbacks.some((f) => f.model === "gpt-5.6-terra")
+    fallback.provider === "openai"
   ) {
-    fallbacks.push(assertAllowedAiModelRoute(OPENAI_TERRA_VISION_ROUTE, args.purpose, { strictJson: true }));
+    if (fallback.model === "gpt-6.1-terra" && !fallbacks.some((f) => f.model === "gpt-5.6-luna")) {
+      fallbacks.push(assertAllowedAiModelRoute(LUNA_HIGH_THINKING_VISION_ROUTE, args.purpose, { strictJson: true }));
+    } else if (fallback.model === "gpt-5.6-luna" && !fallbacks.some((f) => f.model === "gpt-6.1-terra")) {
+      fallbacks.push(assertAllowedAiModelRoute(OPENAI_TERRA_VISION_ROUTE, args.purpose, { strictJson: true }));
+    }
   }
   return applyFastProductTruthRouting({
     ...primary,
@@ -714,16 +750,20 @@ async function resolveVisionPolicy(orgId: string, args: {
 }
 
 function applyFastProductTruthRouting(policy: VisionPolicy): VisionPolicy {
-  if (policy.purpose !== "product_truth" && policy.purpose !== "qa") return policy;
+  if (policy.purpose !== "product_truth" && policy.purpose !== "qa" && policy.purpose !== "qa_escalation") return policy;
   // The models saved in Administration are the models that run, for product
   // truth and QA alike. Only reasoning effort is adjusted to fit the time budget.
-  if (policy.purpose === "qa") {
+  if (policy.purpose === "qa" || policy.purpose === "qa_escalation") {
     return {
       ...policy,
       thinkingLevel: preferFastProductTruthThinking(policy),
       fallback: policy.fallback
         ? { ...policy.fallback, thinkingLevel: preferFastProductTruthThinking(policy.fallback) }
         : policy.fallback,
+      fallbacks: policy.fallbacks?.map((fb) => ({
+        ...fb,
+        thinkingLevel: preferFastProductTruthThinking(fb),
+      })),
     };
   }
   const [primary, ...fallbacks] = productTruthRouteChain({
@@ -1437,10 +1477,7 @@ async function metaResponsesVisionJson(
   assertVisionProviderConfigured(route);
   const effort = route.thinkingLevel === "none" ? "minimal" : route.thinkingLevel;
   const content = responseContentFromParts(parts);
-  const inputVariants = [
-    [{ role: "user", content }],
-    [{ type: "message", role: "user", content }],
-  ];
+  const input = [{ role: "user", content }];
   const sibling = metaModelSibling(route.model);
   const modelCandidates = sibling ? [route.model, sibling] : [route.model];
 
@@ -1448,51 +1485,48 @@ async function metaResponsesVisionJson(
   const startedAt = Date.now();
 
   for (const modelCandidate of modelCandidates) {
-    for (const input of inputVariants) {
-      const elapsed = Date.now() - startedAt;
-      const remainingMs = timeoutMs - elapsed;
-      if (remainingMs < 2_000) {
-        throw lastError || visionHopTimeoutError("Meta Responses API timed out.");
-      }
-      const response = await fetch("https://api.meta.ai/v1/responses", {
-        method: "POST",
-        signal: AbortSignal.timeout(remainingMs),
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${requiredEnv("META_MODEL_API_KEY")}`,
-        },
-        body: JSON.stringify({
-          model: modelCandidate,
-          input,
-          reasoning: { effort },
-          max_output_tokens: 16384,
-        }),
-      });
-      const data = await response.json().catch(() => ({})) as JsonRecord;
-      if (!response.ok) {
-        const providerError = data.error as JsonRecord | undefined;
-        const rawErrText = String(providerError?.message || data.message || data.detail || "");
-        const rawErrCode = String(providerError?.code || providerError?.type || "");
-        lastError = visionProviderError({ ...route, model: modelCandidate }, {
-          status: response.status,
-          message: rawErrText || `Meta Muse Spark vision request failed (${response.status}).`,
-          code: rawErrCode,
-        });
-        const isModelUnavailable =
-          (lastError instanceof VisionProviderError && lastError.failure.code === "provider_unavailable") ||
-          response.status === 404 ||
-          /not found|not available|does not exist|model_not_found|unsupported\s+model|model\s+(?:is\s+)?unsupported/i.test(`${rawErrCode} ${rawErrText}`);
-        // If 404 or model not available, try sibling model if one remains
-        if (isModelUnavailable && modelCandidate === modelCandidates[0] && modelCandidates.length > 1) {
-          break; // break inputVariants loop to try the sibling candidate
-        }
-        if (response.status === 400 && input === inputVariants[0]) continue;
-        throw lastError;
-      }
-      const text = extractResponseApiText(data);
-      if (!text) throw visionProviderError({ ...route, model: modelCandidate }, { message: "meta returned no structured visual response." });
-      return { raw: data, text, json: parseJsonResponse(text) };
+    const elapsed = Date.now() - startedAt;
+    const remainingMs = timeoutMs - elapsed;
+    if (remainingMs < 2_000) {
+      throw lastError || visionHopTimeoutError("Meta Responses API timed out.");
     }
+    const response = await fetch("https://api.meta.ai/v1/responses", {
+      method: "POST",
+      signal: AbortSignal.timeout(remainingMs),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${requiredEnv("META_MODEL_API_KEY")}`,
+      },
+      body: JSON.stringify({
+        model: modelCandidate,
+        input,
+        reasoning: { effort },
+        max_output_tokens: 16384,
+      }),
+    });
+    const data = await response.json().catch(() => ({})) as JsonRecord;
+    if (!response.ok) {
+      const providerError = data.error as JsonRecord | undefined;
+      const rawErrText = String(providerError?.message || data.message || data.detail || "");
+      const rawErrCode = String(providerError?.code || providerError?.type || "");
+      lastError = visionProviderError({ ...route, model: modelCandidate }, {
+        status: response.status,
+        message: rawErrText || `Meta Muse Spark vision request failed (${response.status}).`,
+        code: rawErrCode,
+      });
+      const isModelUnavailable =
+        (lastError instanceof VisionProviderError && lastError.failure.code === "provider_unavailable") ||
+        response.status === 404 ||
+        /not found|not available|does not exist|model_not_found|unsupported\s+model|model\s+(?:is\s+)?unsupported/i.test(`${rawErrCode} ${rawErrText}`);
+      // If 404 or model not available, try sibling model if one remains
+      if (isModelUnavailable && modelCandidate === modelCandidates[0] && modelCandidates.length > 1) {
+        continue;
+      }
+      throw lastError;
+    }
+    const text = extractResponseApiText(data);
+    if (!text) throw visionProviderError({ ...route, model: modelCandidate }, { message: "meta returned no structured visual response." });
+    return { raw: data, text, json: parseJsonResponse(text), actualModel: modelCandidate };
   }
   throw lastError;
 }
@@ -1664,10 +1698,22 @@ async function visionJson(
       classify: (route, error) => asVisionProviderError(error, route).failure,
       onAttempt: options?.onAttempt,
     });
+    const resolvedRoute = (chained.value as { actualModel?: string })?.actualModel
+      ? { ...chained.route, model: (chained.value as { actualModel?: string }).actualModel! }
+      : chained.route;
+    const attempts = resolvedRoute.model !== chained.route.model
+      ? chained.attempts.map((attempt) =>
+        attempt.outcome === "completed" &&
+          attempt.provider === chained.route.provider &&
+          attempt.model === chained.route.model
+          ? { ...attempt, model: resolvedRoute.model }
+          : attempt
+      )
+      : chained.attempts;
     return {
       ...chained.value,
-      policy: { ...policy, ...chained.route },
-      attempts: chained.attempts,
+      policy: { ...policy, ...resolvedRoute },
+      attempts,
     };
   } catch (error) {
     const chainError = error && typeof error === "object"

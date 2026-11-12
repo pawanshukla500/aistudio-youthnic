@@ -428,7 +428,7 @@ Deno.test("Gemini 3.8 Flash and Gemini 3.1 Pro are approved for visual analysis 
   );
   assertEquals(
     allowedModelsForPurpose("openai", "product_truth"),
-    ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+    ["gpt-6.1-terra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
   );
   assertEquals(
     validateAiModelRoute({
@@ -468,14 +468,22 @@ Deno.test("Gemini 3.8 Flash and Gemini 3.1 Pro are approved for visual analysis 
   );
 });
 
-Deno.test("product-truth analyze clamps Admin high thinking to low for heavy models while preserving high for Luna", () => {
+Deno.test("product-truth analyze preserves high thinking for Meta Muse Spark, GPT 6.1 Terra, and Luna while clamping legacy heavy models", () => {
   assertEquals(
     clampProductTruthThinking({
       provider: "meta",
       model: "muse-spark-1.3",
       thinkingLevel: "high",
     }),
-    "low",
+    "high",
+  );
+  assertEquals(
+    clampProductTruthThinking({
+      provider: "openai",
+      model: "gpt-6.1-terra",
+      thinkingLevel: "high",
+    }),
+    "high",
   );
   assertEquals(
     clampProductTruthThinking({
@@ -531,16 +539,16 @@ Deno.test("product truth runs exactly the Administration primary, then its fallb
   // the reasoning effort is capped for the Studio time budget.
   assertEquals(chain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR), [
     "openai:gpt-5.6-terra:low",
-    "meta:muse-spark-1.3-contributor:low",
+    "meta:muse-spark-1.3-contributor:high",
   ]);
   assertEquals(chain(CHEAP_OPENAI_VISION_ROUTE), ["openai:gpt-5.6-luna:low"]);
-  // The user's architecture: Meta Muse Contributor primary -> Luna high thinking fallback -> Terra 3rd fallback
+  // Meta Muse Contributor (high) primary -> GPT 6.1 Terra (high) fallback + Luna secondary fallback
   assertEquals(
-    chain(FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE, [LUNA_HIGH_THINKING_VISION_ROUTE, OPENAI_TERRA_VISION_ROUTE]),
+    chain(FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE, [OPENAI_TERRA_VISION_ROUTE, LUNA_HIGH_THINKING_VISION_ROUTE]),
     [
-      "meta:muse-spark-1.2-contributor:low",
+      "meta:muse-spark-1.2-contributor:high",
+      "openai:gpt-6.1-terra:high",
       "openai:gpt-5.6-luna:high",
-      "openai:gpt-5.6-terra:low",
     ],
   );
   // Gemini and Sol are no longer dropped: a saved choice is a saved choice.
@@ -553,9 +561,9 @@ Deno.test("product truth runs exactly the Administration primary, then its fallb
     provider: "qwen",
     model: "qwen3.8-max",
     thinkingLevel: "none",
-  }), ["meta:muse-spark-1.3:low", "qwen:qwen3.8-max:none"]);
+  }), ["meta:muse-spark-1.3:high", "qwen:qwen3.8-max:none"]);
   // A fallback identical to the primary runs once.
-  assertEquals(chain(OPENAI_TERRA_VISION_ROUTE, ADMIN_TERRA), ["openai:gpt-5.6-terra:low"]);
+  assertEquals(chain(OPENAI_TERRA_VISION_ROUTE, { provider: "openai", model: "gpt-6.1-terra", thinkingLevel: "high" }), ["openai:gpt-6.1-terra:high"]);
 });
 
 Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
@@ -1115,6 +1123,15 @@ Deno.test("runVisionProviderChain clamps fallback thinking for product truth in 
   assertEquals(result.route.thinkingLevel, "low");
   // Telemetry attempt reflects clamped thinking
   assertEquals(result.attempts[1].thinkingLevel, "low");
+});
+
+Deno.test("defaultThinkingLevel prefers low for OpenAI QA routes when thinking is omitted", () => {
+  assertEquals(defaultThinkingLevel({ provider: "openai", model: "gpt-5.6-luna" }, "qa"), "low");
+  assertEquals(defaultThinkingLevel({ provider: "openai", model: "gpt-6.1-terra" }, "qa"), "low");
+  assertEquals(
+    assertAllowedAiModelRoute({ provider: "openai", model: "gpt-5.6-luna", thinkingLevel: "none" }, "qa").thinkingLevel,
+    "none",
+  );
 });
 
 
