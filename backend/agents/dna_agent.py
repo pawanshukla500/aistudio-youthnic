@@ -194,6 +194,17 @@ class ProductDNAAgent:
             elif cut not in allowed_cuts or not cut:
                 cut = "unknown"
 
+            raw_joined_hem = bw_raw.get("joined_hem")
+            joined_hem_flag = bool(raw_joined_hem) if raw_joined_hem is not None else (cut == "farshi")
+            hem_trim_text = str(bw_raw.get("hem_trim") or "").lower()
+            has_farshi_panel_seam = (
+                joined_hem_flag
+                and bool(re.search(r"\b(?:4|5|6|7|8)[-\s]*inch\b|hem\s*panel|lower\s*panel|joined\s*panel|horizontal\s*(?:joint|seam)\b", hem_trim_text))
+                and not has_neg_farshi
+            )
+            if has_bottom_wear and cut in {"palazzo", "unknown", ""} and has_farshi_panel_seam:
+                cut = "farshi"
+
             raw_classification = str(bw_raw.get("classification") or "").strip()
             if not has_bottom_wear:
                 classification = "none"
@@ -205,7 +216,6 @@ class ProductDNAAgent:
                 classification = raw_classification or cut.title()
 
             raw_two_leg = bw_raw.get("two_leg_construction")
-            raw_joined_hem = bw_raw.get("joined_hem")
             bottom = BottomWearArchitecture(
                 has_bottom_wear=has_bottom_wear,
                 classification=classification,
@@ -213,7 +223,7 @@ class ProductDNAAgent:
                 two_leg_construction=bool(raw_two_leg) if raw_two_leg is not None else (has_bottom_wear and cut != "skirt"),
                 waist_structure=str(bw_raw.get("waist_structure") or ("unknown" if has_bottom_wear else "none")),
                 flare_volume=str(bw_raw.get("flare_volume") or ("unknown" if has_bottom_wear else "none")),
-                joined_hem=bool(raw_joined_hem) if raw_joined_hem is not None else (cut == "farshi"),
+                joined_hem=joined_hem_flag,
                 hem_trim=str(bw_raw.get("hem_trim") or ("unknown" if has_bottom_wear else "none")),
                 fabric_color=str(bw_raw.get("fabric_color") or ("matching" if has_bottom_wear else "none")),
                 print_and_motifs=str(bw_raw.get("print_and_motifs") or ("unknown" if has_bottom_wear else "none")),

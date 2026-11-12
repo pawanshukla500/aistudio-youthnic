@@ -412,3 +412,22 @@ Deno.test("normalizePoseQaResult vetoes image when reason describes anatomical d
   assertEquals(result.scores.pose_requirement, 0);
   assertStringIncludes(result.reason, "pose_requirement");
 });
+
+Deno.test("buildPoseQaPrompt allows minor embroidery variation on stylist-added footwear and camera-distance softening on full-body frames", () => {
+  const prompt = buildPoseQaPrompt({
+    poseNumber: 1,
+    poseType: "full_front",
+    poseTitle: "Hero Front",
+    poseDirection: { id: "full_front", title: "Hero Front" },
+    productIdentity: { garmentFamily: "kurta_or_kurti_set" },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: false,
+    hasModelReference: true,
+    referenceManifest: ["IMAGE 1: MODEL FACE REFERENCE", "IMAGE 2: FRONT PRODUCT"],
+  });
+  assertStringIncludes(prompt, "allowing normal camera-distance softening");
+  assertStringIncludes(prompt, "do NOT fail styling_addition or unexpected_changes merely for minor embroidery density variations");
+});
