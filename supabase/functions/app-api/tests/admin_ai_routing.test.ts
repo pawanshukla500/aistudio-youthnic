@@ -16,7 +16,9 @@ const registry: AdminAiRegistryEntry[] = [
     models: [
       { id: "gpt-5.6-luna", label: "GPT 5.6 Luna", purposes: ["product_truth", "qa"], thinkingLevels: ["none", "low"] },
       { id: "gpt-5.6-sol", label: "GPT 5.6 Sol", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "high"] },
-      { id: "gpt-image-2.5-flare-2026-09-08", label: "GPT Image 2.5 Flare (2026-09-08 · Default)", purposes: ["image_generation"], thinkingLevels: ["none"] },
+      { id: "gpt-image-2.6-sunburst", label: "GPT Image 2.6 Sunburst", purposes: ["image_generation"], thinkingLevels: ["none"] },
+      { id: "gpt-image-2.6-flare", label: "GPT Image 2.6 Flare", purposes: ["image_generation"], thinkingLevels: ["none"] },
+      { id: "gpt-image-2.5-flare-2026-09-08", label: "GPT Image 2.5 Flare (2026-09-08)", purposes: ["image_generation"], thinkingLevels: ["none"] },
       { id: "gpt-image-2.5-sunburst", label: "GPT Image 2.5 Sunburst", purposes: ["image_generation"], thinkingLevels: ["none"] },
       { id: "gpt-image-2.5-flare", label: "GPT Image 2.5 Flare", purposes: ["image_generation"], thinkingLevels: ["none"] },
       { id: "gpt-image-2", label: "GPT Image 2", purposes: ["image_generation"], thinkingLevels: ["none"] },
@@ -84,10 +86,10 @@ Deno.test("product truth routing prefers Meta Muse Spark as primary and OpenAI L
   );
 });
 
-Deno.test("preferred image generation model is Flare 2026-09-08 over Sunburst and legacy GPT Image 2", () => {
+Deno.test("preferred image generation model is 2.6 Sunburst over Flare and legacy GPT Image 2", () => {
   assertEquals(
     preferredModelId("openai", modelsForProviderPurpose(registry, "openai", "image_generation")),
-    "gpt-image-2.5-flare-2026-09-08",
+    "gpt-image-2.6-sunburst",
   );
 });
 

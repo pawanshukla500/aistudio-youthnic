@@ -89,7 +89,21 @@ class KnowledgeMemoryAgent:
                         learnings = cur.fetchall()
                         for l in learnings:
                             rule = l.get("positive_guidance") or l.get("rule_text")
-                            if rule and rule not in guidance_rules:
+                            if not rule:
+                                continue
+                            lower_rule = f"{l.get('rule_text') or ''} {rule}".lower()
+                            positive_clauses = re.sub(
+                                r"\b(?:strictly\s+)?(?:no|not|without|never)\s+(?:pants|palazzos?|shararas?|salwars?|trousers?|bottoms?)\b",
+                                "",
+                                lower_rule,
+                            )
+                            if any(tok in lower_rule for tok in ("farshi", "farsi", "fasi")) and bottom_cut != "farshi":
+                                continue
+                            if garment_family == "saree" and any(tok in positive_clauses for tok in ("palazzo", "sharara", "salwar", "trouser")):
+                                continue
+                            if garment_family != "saree" and "saree" in positive_clauses and "kurti" not in positive_clauses:
+                                continue
+                            if rule not in guidance_rules:
                                 guidance_rules.append(rule)
         except Exception as e:
             db_ok = False
@@ -98,8 +112,9 @@ class KnowledgeMemoryAgent:
         # Fallback / deterministic guardrails if DB rules are empty
         if bottom_cut == "farshi" and not any("farshi" in g.lower() for g in guidance_rules):
             guidance_rules.append(
-                "Farshi Pajama / Salwar: Maintain distinct two-leg construction with vertical gathers from waist "
-                "down to wide flared joined hem. Prohibit palazzos, skirts, or gathered salwar ponchas."
+                "Farshi Pajama / Salwar: Maintain distinct two-leg construction with waist and side-joint pleats, "
+                "a hem that is quite narrow from the waist side, and a 6-inch joined hem panel tapering 4 inches inward from the upper hem seam. "
+                "Prohibit open palazzos, skirts, or gathered salwar ponchas."
             )
 
         guidance_rules.append(

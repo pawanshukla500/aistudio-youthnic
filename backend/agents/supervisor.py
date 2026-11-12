@@ -87,6 +87,9 @@ class SupervisorOrchestratorAgent:
 
         attempts = dict(state.get("retry_counts") or {})
         attempt_count = int(attempts.get(pose_idx, 1))
+        bottom_cut = str(((dna or {}).get("bottom_wear") or {}).get("cut_class") or "")
+        if str((dna or {}).get("garment_family") or "").lower() == "saree":
+            bottom_cut = "saree"
         action, updated_instruction = self.correction_agent.decide_action(
             pose_index=pose_idx,
             attempt_count=attempt_count,
@@ -94,6 +97,7 @@ class SupervisorOrchestratorAgent:
             guidance=eval_res.correction_guidance,
             anatomical_defect=eval_res.anatomical_defect_detected,
             style_violation=eval_res.style_quarantine_violation,
+            bottom_cut=bottom_cut,
         )
         decision = "human_review" if action in ("human_review", "escalate") else "regenerate"
         return {
@@ -131,8 +135,10 @@ class SupervisorOrchestratorAgent:
 
     def step_record_learning(self, state: Dict[str, Any]) -> Dict[str, Any]:
         dna = state.get("product_dna") or {}
-        bottom_cut = (dna.get("bottom_wear") or {}).get("cut_class", "straight")
-        rule_type = "bottom_wear_preservation" if bottom_cut == "farshi" else "scene_continuity"
+        family = str(dna.get("garment_family") or "kurta_or_kurti_set")
+        bw = dna.get("bottom_wear") or {}
+        bottom_cut = "none" if family.lower() == "saree" or not bw.get("has_bottom_wear", True) else str(bw.get("cut_class") or "unknown")
+        rule_type = "bottom_wear_preservation" if bottom_cut == "farshi" else ("fabric_fall" if family.lower() == "saree" else "scene_continuity")
         self.learning_agent.record_approved_outcome(
             org_id=state["organization_id"],
             sku_id=state["sku_id"],
@@ -141,5 +147,7 @@ class SupervisorOrchestratorAgent:
             positive_guidance="; ".join(dna.get("explicit_invariants") or []),
             negative_constraints=dna.get("prohibited_changes") or [],
             category=str(dna.get("category") or "ethnic/fusion"),
+            garment_family=family,
+            bottom_cut=bottom_cut,
         )
         return {"status": "completed"}

@@ -69,8 +69,8 @@ import {
   type VisionHopAttempt,
   type VisionProviderFailure,
 } from "./lib/aiModelPolicy.ts";
-import { coarseGarmentFamilyForCategory, normalizeBottomWearMode, resolveBottomWearPresentation } from "./lib/garmentPoses.ts";
-import { selectReusableLearningRules } from "./lib/learningRules.ts";
+import { classifyBottomCut, coarseGarmentFamilyForCategory, effectiveBottomCutClass, normalizeBottomWearMode, resolveBottomWearPresentation } from "./lib/garmentPoses.ts";
+import { selectApprovedLearningOutcomes, selectReusableLearningRules } from "./lib/learningRules.ts";
 import { selectFashionKnowledgeGuidance } from "./lib/fashionKnowledge.ts";
 import { selectPromptPatterns } from "./lib/promptPatterns.ts";
 import { effectiveShowcaseShot, selectShowcaseFeedbackGuidance } from "./lib/showcaseFeature.ts";
@@ -1697,6 +1697,16 @@ async function visionJson(
   }
 }
 
+function explicitBottomCutHint(bottomWearValue: unknown, productDetails: unknown, skuName: unknown): string {
+  const mode = String(bottomWearValue || "").trim().toLowerCase();
+  if (mode === "top_only") return "none";
+  const detected = classifyBottomCut(`${String(productDetails || "")} ${mode}`, {
+    skuName: String(skuName || ""),
+    productDetails: String(productDetails || ""),
+  });
+  return detected !== "other" && detected !== "none" ? detected : "";
+}
+
 async function analyze(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "studio.generate");
   const references = canonicalReferences((Array.isArray(args.references) ? args.references : []) as ReferenceInput[]);
@@ -1710,9 +1720,10 @@ async function analyze(request: Request, args: JsonRecord) {
   // up to the cache's thirty days. It stays out of the fingerprint on purpose -
   // that is queue-time validation of the references, and saving a plan writes a
   // decision, which would change the fingerprint and reject its own session.
+  const explicitCutHint = explicitBottomCutHint(args.bottomWear, args.productDetails, args.skuName);
   const [housePreferences, fashionKnowledge, analysisLearning, showcaseFeedback, policy] = await Promise.all([
     stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion")),
-    fashionKnowledgeBrief(orgId, String(args.category || "")),
+    fashionKnowledgeBrief(orgId, String(args.category || ""), "", explicitCutHint),
     analysisLearningBrief(orgId, String(args.category || "ethnic/fusion")),
     showcaseFeedbackBrief(orgId, String(args.category || "ethnic/fusion")),
     resolveVisionPolicy(orgId, { purpose: "product_truth", garmentFamily: String(args.category || "") }),
@@ -2422,6 +2433,88 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   } catch (error) {
     console.error(`Could not record house prompt patterns: ${errorMessage(error)}`);
   }
+  if (status === "completed" && verifiedQualityScore !== null && verifiedQualityScore >= 85 && job.org_id) {
+    try {
+      const pi = (sessionData.productIdentity || {}) as JsonRecord;
+      const gFamily = String(pi.garmentFamily || "");
+      const jobData = (job.job_data || {}) as JsonRecord;
+      const hasBottom = (Array.isArray(sessionData.references) ? sessionData.references : []).some((r) => String((r as JsonRecord)?.role || "") === "bottom");
+      const cutClass = gFamily === "saree" || !bottomWear.includesBottomWear
+        ? "none"
+        : effectiveBottomCutClass(bottomWear.cutClass, hasBottom, {
+          skuName: String(job.sku_name || ""),
+          productDetails: String(jobData.productDetails || ""),
+          details: bottomWear.details,
+        });
+      const isTopOnlyKurti = gFamily === "top_only" || gFamily === "kurta_or_kurti_set";
+      const ruleType = gFamily === "saree" ? "fabric_fall" : "bottom_wear_preservation";
+      const ruleText = gFamily === "saree"
+        ? `Verified saree drape & border continuity (${String(sessionData.category || "saree")})`
+        : bottomWear.includesBottomWear
+          ? `Verified ${cutClass} silhouette preservation (${String(sessionData.category || "kurta_or_kurti_set")})`
+          : isTopOnlyKurti
+            ? `Verified top-only kurti proportion preservation (${String(sessionData.category || "kurti")})`
+            : `Verified standalone garment styling continuity (${String(sessionData.category || gFamily || "apparel")})`;
+      const guidanceText = gFamily === "saree"
+        ? "Maintain exact saree drape family, continuous borders, crisp pleat alignment, and zero trousers."
+        : cutClass === "farshi"
+          ? "Preserve two-leg Farshi salwar with narrow hem from waist side and 6-inch joined panel tapering 4 inches inward from upper hem seam."
+          : bottomWear.includesBottomWear
+            ? `Preserve exact uploaded ${cutClass} bottom-wear cut, leg width, ankle opening, and motif scale faithfully.`
+            : isTopOnlyKurti
+              ? "Present standalone top-only kurti with neutral plain styling trousers; never invent a matching set."
+              : "Preserve exact uploaded garment silhouette, length, and plain neutral styling coordination; never invent matching lower pieces.";
+      const allPosesVerified = poses.length > 0 && completed === poses.length &&
+        poses.every((pose) => ["automatically_verified", "human_approved"].includes(String(pose.qa_status || "")));
+      const shouldAutoApprove = verifiedQualityScore >= 92 && allPosesVerified;
+      const { data: existingRule, error: existingRuleError } = await service.from("learning_outcomes")
+        .select("id,usage_count,success_count,effectiveness_score,approved")
+        .eq("organization_id", String(job.org_id))
+        .eq("rule_type", ruleType)
+        .eq("rule_text", ruleText)
+        .limit(1)
+        .maybeSingle();
+      if (existingRuleError) {
+        console.error(`Could not query learning_outcomes: ${existingRuleError.message}`);
+      } else if (existingRule?.id) {
+        const prevUsage = Math.max(0, Number(existingRule.usage_count || 0));
+        const nextSuccess = Number(existingRule.success_count || 0) + 1;
+        const nextUsage = prevUsage + 1;
+        const prevScore = Number(existingRule.effectiveness_score || 0);
+        const runningScore = Number((((prevScore * prevUsage) + (verifiedQualityScore / 100)) / nextUsage).toFixed(4));
+        const { error: updateRuleError } = await service.from("learning_outcomes").update({
+          usage_count: nextUsage,
+          success_count: nextSuccess,
+          effectiveness_score: runningScore,
+          approved: Boolean(existingRule.approved) || shouldAutoApprove,
+          updated_at: now,
+        }).eq("id", existingRule.id);
+        if (updateRuleError) {
+          console.error(`Could not update learning_outcomes: ${updateRuleError.message}`);
+        }
+      } else {
+        const { error: insertRuleError } = await service.from("learning_outcomes").insert({
+          organization_id: String(job.org_id),
+          sku_id: String(job.sku_name || ""),
+          rule_type: ruleType,
+          rule_text: ruleText,
+          trigger_condition: { garment_family: gFamily || "kurta_or_kurti_set", bottom_cut: cutClass, category: String(sessionData.category || "") },
+          positive_guidance: guidanceText,
+          negative_constraints: cutClass === "farshi" ? ["palazzo", "circular_skirt", "gathered_poncha"] : [],
+          effectiveness_score: Number((verifiedQualityScore / 100).toFixed(4)),
+          usage_count: 1,
+          success_count: 1,
+          is_active: true,
+          approved: shouldAutoApprove,
+        });
+        if (insertRuleError) {
+          console.error(`Could not insert learning_outcomes: ${insertRuleError.message}`);
+        }
+      }
+    } catch (error) {
+      console.error(`Could not record cut-scoped learning outcome: ${errorMessage(error)}`);
+    }
+  }
   // A sixth frame that automatic QA refused is evidence against that subject and
   // framing. A completed one is not yet evidence for it - only a human keeping
   // it is, which the catalog review paths record.
@@ -2735,7 +2828,16 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     skuName: String(variant?.sku_name), productDetails: String(variant?.product_description || ""), category,
     modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
     housePreferences: await stylingPreferenceBrief(orgId, category),
-    fashionKnowledge: await fashionKnowledgeBrief(orgId, category),
+    fashionKnowledge: await fashionKnowledgeBrief(
+      orgId,
+      category,
+      "",
+      explicitBottomCutHint(
+        settings.bottomWear ?? settings.bottomWearMode,
+        variant?.product_description,
+        variant?.sku_name,
+      ),
+    ),
     analysisLearning: await analysisLearningBrief(orgId, category),
     showcaseFeedback: await showcaseFeedbackBrief(orgId, category),
   }) });
@@ -3118,14 +3220,29 @@ async function compilePosePrompt(
     requestedCorrection ? `USER REGENERATION INSTRUCTION (apply only if compatible with original product truth): ${requestedCorrection}` : "",
   ].filter(Boolean).join("\n");
 
-  const currentGarmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
+  const currentProductIdentity = (sessionData.productIdentity || {}) as JsonRecord;
+  const currentGarmentFamily = String(currentProductIdentity.garmentFamily || "");
+  const hasBottomRef = selected.some((ref) => ref.role === "bottom");
+  const bottomPresentation = resolveBottomWearPresentation({
+    mode: sessionData.bottomWearMode ?? (job.job_data as JsonRecord | undefined)?.bottomWearMode,
+    productIdentity: currentProductIdentity,
+    skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || ""),
+    productDetails: String((job.job_data as JsonRecord)?.productDetails || ""),
+    hasBottomReference: hasBottomRef,
+  });
+  const currentBottomCutClass = currentGarmentFamily === "saree" || !bottomPresentation.includesBottomWear
+    ? "none"
+    : effectiveBottomCutClass(bottomPresentation.cutClass, hasBottomRef, {
+      skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || ""),
+      productDetails: String((job.job_data as JsonRecord)?.productDetails || ""),
+      details: bottomPresentation.details,
+    });
   // Legacy generation_learnings intentionally never enters this query. It is
   // an observation ledger containing failed and unavailable-QA jobs. Only a
   // reviewed rule may be advisory, and product-specific guidance additionally
   // requires the exact current reference fingerprint.
-  // Both lookups are independent advisory reads, so they run together rather
-  // than adding two serial round trips to every paid pose attempt.
-  const [learningRulesResult, fashionKnowledge] = await Promise.all([
+  // Independent advisory lookups run together in parallel.
+  const [learningRulesResult, learningOutcomesResult, fashionKnowledge] = await Promise.all([
     service.from("generation_learning_rules")
       .select("id,organization_id,garment_family,product_category,pose_id,scope,rule_kind,reference_fingerprint,guidance,status,approved_by_member_id,approved_at")
       .eq("organization_id", String(job.org_id))
@@ -3134,10 +3251,18 @@ async function compilePosePrompt(
       .eq("product_category", String(sessionData.category || ""))
       .order("updated_at", { ascending: false })
       .limit(30),
+    service.from("learning_outcomes")
+      .select("id,organization_id,sku_id,rule_type,rule_text,trigger_condition,positive_guidance,effectiveness_score,is_active,approved")
+      .eq("organization_id", String(job.org_id))
+      .eq("is_active", true)
+      .eq("approved", true)
+      .order("effectiveness_score", { ascending: false })
+      .limit(20),
     fashionKnowledgeBrief(
       String(job.org_id),
       String(sessionData.category || ""),
       currentGarmentFamily,
+      currentBottomCutClass,
     ),
   ]);
   let learningRows: JsonRecord[] = [];
@@ -3153,11 +3278,21 @@ async function compilePosePrompt(
     productCategory: String(sessionData.category || ""), poseType: poseData.id,
     referenceFingerprint: String(session.reference_hash || ""),
   });
+  const outcomeSelection = learningOutcomesResult.error
+    ? { ids: [], guidance: "" }
+    : selectApprovedLearningOutcomes((learningOutcomesResult.data || []) as JsonRecord[], {
+      organizationId: String(job.org_id),
+      garmentFamily: currentGarmentFamily,
+      bottomCutClass: currentBottomCutClass,
+    });
+  const combinedLearnings = learningSelection.guidance && outcomeSelection.guidance
+    ? `${learningSelection.guidance.slice(0, 430)}\n${outcomeSelection.guidance.slice(0, 430)}`
+    : [learningSelection.guidance, outcomeSelection.guidance].filter(Boolean).join("\n");
 
   const prompt = composeGenerationPrompt({
     skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || "Untitled product"),
     productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
-    references: selected, correction: promptCorrection(), learnings: learningSelection.guidance, fashionKnowledge,
+    references: selected, correction: promptCorrection(), learnings: combinedLearnings, fashionKnowledge,
     bottomWearMode: sessionData.bottomWearMode ?? (job.job_data as JsonRecord | undefined)?.bottomWearMode,
     generationMemory: formatGenerationMemoryBrief({
       references: selected,
@@ -5397,9 +5532,14 @@ async function analyzeCatalogVariant(
   }
 
   // Full base analysis for the first SKU in the batch (check persistent analysis_cache first)
+  const catalogCutHint = explicitBottomCutHint(
+    settings.bottomWear ?? settings.bottomWearMode,
+    variant.product_description,
+    variant.sku_name,
+  );
   const [housePreferences, fashionKnowledge, analysisLearning, showcaseFeedback] = await Promise.all([
     stylingPreferenceBrief(orgId, category),
-    fashionKnowledgeBrief(orgId, category),
+    fashionKnowledgeBrief(orgId, category, String(asBaseAnalysisGarmentFamily(batch)), catalogCutHint),
     analysisLearningBrief(orgId, category),
     showcaseFeedbackBrief(orgId, category, String(asBaseAnalysisGarmentFamily(batch))),
   ]);
@@ -5715,7 +5855,7 @@ async function stylingPreferenceBrief(orgId: string, category: string) {
   return preferences.length ? preferences.join("\n") : "";
 }
 
-async function fashionKnowledgeBrief(orgId: string, category = "", garmentFamily = "") {
+async function fashionKnowledgeBrief(orgId: string, category = "", garmentFamily = "", bottomCutClass = "") {
   try {
     const orgFilter = /^[0-9a-f-]{36}$/i.test(orgId)
       ? `organization_id.eq.${orgId},organization_id.is.null`
@@ -5735,6 +5875,7 @@ async function fashionKnowledgeBrief(orgId: string, category = "", garmentFamily
       organizationId: orgId,
       category,
       garmentFamily,
+      bottomCutClass,
     }).guidance;
   } catch (error) {
     console.error(`Could not load fashion knowledge: ${error instanceof Error ? error.message : String(error)}`);

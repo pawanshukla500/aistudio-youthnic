@@ -526,7 +526,7 @@ def estimate_image_cost_usd(model: str, usage: Optional[Dict[str, Any]] = None) 
 
 def generate_catalog_image(
     prompt: str,
-    model: str = "gpt-image-2.5-flare-2026-09-08",
+    model: str = "gpt-image-2.6-sunburst",
     aspect_ratio: str = "3:4",
     image_size: str = "2K",
     quality: str = "medium",

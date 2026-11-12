@@ -33,7 +33,7 @@ class GenerationRouterAgent:
         if requested_model in valid_openai_models:
             selected_model = requested_model
         else:
-            selected_model = "gpt-image-2.5-flare-2026-09-08"
+            selected_model = "gpt-image-2.6-sunburst"
 
         # Cost estimation per pose aligned with ai_clients.estimate_image_cost_usd
         if "2.6-sunburst" in selected_model:

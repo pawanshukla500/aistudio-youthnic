@@ -263,7 +263,7 @@ function compactOptionalPromptContent(prompt: string) {
     compacted,
     "\nPOSE REQUIREMENT:\n",
     ["\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:", "\n\nPROMPT:"],
-    1_400,
+    3_200,
   );
   compacted = compactPromptBlock(
     compacted,
@@ -298,65 +298,133 @@ export function compactFullPromptSafely(prompt: string): string {
     compacted,
     "\nGARMENT TRUTH CONTRACT (EVIDENCE BY REGION):\n",
     ["\nDetail placement hard locks:\n", "\nNegative-evidence hard locks:\n", "\nCRITICAL EVIDENCE RULES:"],
-    3_500,
+    2_400,
   );
   if (compacted.length <= IMAGE_PROMPT_SAFE_CHARS) return compacted;
 
-  // Tier 3: Compact reference authority, background set continuity, and prohibited changes boilerplate
+  // Tier 3: Compact verbose repeated prose (manifest, photographic realism, geometry, reference authority, set continuity, prohibited boilerplate)
   compacted = compactPromptBlock(
     compacted,
     "Reference authority: ",
     ["\n- Product references may be flat-lay", "\nGARMENT TRUTH CONTRACT"],
-    600,
+    500,
   );
   compacted = compactPromptBlock(
     compacted,
-    "\nLOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:\n",
+    "\nPHOTOGRAPHIC REALISM - MUST READ AS CAPTURED BY A REAL CAMERA, NEVER AS AI-GENERATED:\n",
+    ["\nLOCKED SUBJECT - MUST NOT CHANGE:"],
+    900,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nPRINT AND EMBROIDERY GEOMETRY LOCK",
+    ["\nLOCKED BOTTOM WEAR ARCHITECTURE", "\nTOP-ONLY PRODUCT", "\nLOCKED ART DIRECTION"],
+    1_200,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\n- SET ONLY: the direction below is backdrop, light, and camera. It does not set the pose, the garment, or handheld props.\n",
     ["\nAPPROVED STYLING PLAN", "\nSTYLING ADDITION", "\nALLOWED DELTA"],
-    1_000,
+    450,
   );
   compacted = compactPromptBlock(
     compacted,
     "\nREALISTIC INTEGRATION:\n",
     ["\nPROHIBITED UNRELATED CHANGES:"],
-    800,
+    700,
   );
   compacted = compactPromptBlock(
     compacted,
     "GARMENT POSE GRAMMAR (",
     ["\nDO NOT COPY THE STYLE POSE", "\nSEATED EDITORIAL POSE REQUIREMENT", "\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:", "\n\nPROMPT:"],
-    900,
+    800,
   );
   compacted = compactPromptBlock(
     compacted,
     "\nPROHIBITED UNRELATED CHANGES:\n",
     ["\nProduct accuracy is more important than style matching."],
-    900,
+    1_700,
   );
   if (compacted.length <= IMAGE_PROMPT_SAFE_CHARS) return compacted;
 
-  // Tier 4: Further compact evidence lines down to 2,000 chars if still over budget
+  // Tier 4: Further trim evidence, manifest, product JSON, and geometry blocks before touching any pose/bottom-wear locks
+  compacted = compactPromptBlock(
+    compacted,
+    "\nREFERENCE MANIFEST IN UPLOAD ORDER:\n",
+    ["\nGENERATION MEMORY", "\n\nEDIT GOAL:"],
+    1_200,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nLOCKED PRODUCT - MUST NOT CHANGE:\n",
+    ["\nSAREE TRUTH", "\nSAREE REAR TRUTH", "\nGARMENT TRUTH CONTRACT"],
+    2_200,
+  );
   compacted = compactPromptBlock(
     compacted,
     "\nGARMENT TRUTH CONTRACT (EVIDENCE BY REGION):\n",
     ["\nDetail placement hard locks:\n", "\nNegative-evidence hard locks:\n", "\nCRITICAL EVIDENCE RULES:"],
-    2_000,
+    1_400,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nPHOTOGRAPHIC REALISM - MUST READ AS CAPTURED BY A REAL CAMERA, NEVER AS AI-GENERATED:\n",
+    ["\nLOCKED SUBJECT - MUST NOT CHANGE:"],
+    500,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nPRINT AND EMBROIDERY GEOMETRY LOCK",
+    ["\nLOCKED BOTTOM WEAR ARCHITECTURE", "\nTOP-ONLY PRODUCT", "\nLOCKED ART DIRECTION"],
+    700,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nLOCKED BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT - HIGHEST FIDELITY:\n",
+    ["\nLOCKED ART DIRECTION & SET CONTINUITY"],
+    3_200,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "\nPOSE REQUIREMENT:\n",
+    ["\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:", "\n\nPROMPT:"],
+    1_800,
   );
   if (compacted.length <= IMAGE_PROMPT_SAFE_CHARS) return compacted;
 
-  // Tier 5: Absolute guarantee / Hard Fail-Safe.
-  // OpenAI hard reject is 32,000 chars. We preserve the beginning up to the closing directive.
+  // Tier 5: Emergency failsafe — NEVER slice off POSE REQUIREMENT, PROMPT:, or closing HARD RULEs.
   const closingMarker = "\nProduct accuracy is more important than style matching.";
   const closingIndex = compacted.lastIndexOf(closingMarker);
+  const poseMarker = "\nPOSE REQUIREMENT:";
+  const realMarker = "\nREALISTIC INTEGRATION:";
+  const poseIndex = compacted.indexOf(poseMarker);
+  const realIndex = poseIndex >= 0 ? compacted.indexOf(realMarker, poseIndex) : -1;
+
   if (closingIndex > 0) {
     const closingText = compacted.slice(closingIndex);
-    const budgetForPrefix = IMAGE_PROMPT_SAFE_CHARS - closingText.length - 80;
-    if (budgetForPrefix > 5_000) {
-      compacted = `${compacted.slice(0, budgetForPrefix).trimEnd()}\n\n[Prompt sections safely compacted within provider limits]\n${closingText}`;
+    if (poseIndex > 0 && realIndex > poseIndex && realIndex <= closingIndex) {
+      const preservedTail = `${compacted.slice(poseIndex, realIndex).trimEnd()}\n${closingText}`;
+      const prefixAnchor = "Create ONE real-camera fashion e-commerce photograph";
+      const anchorPos = compacted.indexOf(prefixAnchor);
+      const rawPrefix = anchorPos > 200 ? compacted.slice(anchorPos, poseIndex) : compacted.slice(0, poseIndex);
+      const budgetForPrefix = IMAGE_PROMPT_SAFE_CHARS - preservedTail.length - 80;
+      if (budgetForPrefix > 1_500) {
+        const slicedPrefix = rawPrefix.length > budgetForPrefix
+          ? `${rawPrefix.slice(0, budgetForPrefix).trimEnd()}\n\n[Background and auxiliary sections compacted]`
+          : rawPrefix.trimEnd();
+        compacted = `${slicedPrefix}\n${preservedTail}`;
+      }
+    } else {
+      const budgetForPrefix = IMAGE_PROMPT_SAFE_CHARS - closingText.length - 80;
+      if (budgetForPrefix > 5_000) {
+        compacted = `${compacted.slice(0, budgetForPrefix).trimEnd()}\n\n[Prompt sections safely compacted within provider limits]\n${closingText}`;
+      }
     }
   }
 
-  return compacted;
+  return compacted.length > IMAGE_PROMPT_SAFE_CHARS
+    ? compacted.slice(0, IMAGE_PROMPT_SAFE_CHARS)
+    : compacted;
 }
 
 // Analyses cached before the geometry profiles existed still flow through here,
@@ -922,7 +990,7 @@ export function composeGenerationPrompt(args: {
     productDetails: String(args.productDetails || ""),
     hasBottomReference,
   });
-  const farshiGeneration = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, {
+  const farshiGeneration = bottomWear.includesBottomWear && effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, {
     skuName: String(args.skuName || ""),
     productDetails: String(args.productDetails || ""),
     details: bottomWear.details,
@@ -1073,11 +1141,14 @@ export function composeGenerationPrompt(args: {
     12,
     260,
   ).join("; ");
-  const visibilityRules = effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, {
-    skuName: String(args.skuName || ""),
-    productDetails: String(args.productDetails || ""),
-    details: bottomWear.details,
-  }) === "farshi"
+  const visibilityRules = (
+    bottomWear.includesBottomWear &&
+    effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, {
+      skuName: String(args.skuName || ""),
+      productDetails: String(args.productDetails || ""),
+      details: bottomWear.details,
+    }) === "farshi"
+  )
     ? reconcileFarshiVisibilityRules(recordedVisibility)
     : recordedVisibility;
   const poseCategory = (isTrueBack || args.pose.id === "back")
@@ -1141,6 +1212,26 @@ export function composeGenerationPrompt(args: {
     }
     return lines.join("\n");
   }).join("\n");
+
+  const positiveDupattaClauses = [
+    String(product.accessoriesIncluded || ""),
+    String(styling?.ornaments || ""),
+    String(args.productDetails || ""),
+  ]
+    .flatMap((text) => text.split(/[,;\n.!?]+/))
+    .map((clause) => clause.trim())
+    .filter((clause) => (
+      clause.length > 0 &&
+      /\b(?:dupatta|stole|chunni|odhani)\b/i.test(clause) &&
+      !/\b(?:no|not|without|never(?:\s+add)?|absent|missing|excluded|excludes|optional|Optional)\b/i.test(clause) &&
+      !/\b(?:dupatta|stole|chunni|odhani|scarf|shawl)\s*:\s*none\b/i.test(clause)
+    ));
+  const hasDupatta = !isSareeShoot && positiveDupattaClauses.length > 0;
+  const dupattaLock = hasDupatta
+    ? isTrueBack || args.pose.id === "back"
+      ? `\nDUPATTA DRAPE & FIDELITY LOCK (REAR VIEW):\n- Include the uploaded dupatta/stole from the product references (exact fabric weight, colour/ombré gradient, motif scale, and border/gota lace trim), draped cleanly forward over both forearms/elbows or held lightly in front so 100% of the rear garment neckline, closures, and back panel stay completely unobstructed.\n`
+      : `\nDUPATTA DRAPE & FIDELITY LOCK:\n- Render the uploaded dupatta/stole faithfully (exact sheer/opaque fabric, colour/ombré gradient, motif placement, and border/gota lace trim from the MANNEQUIN / ADDITIONAL / FRONT product references), draped naturally over one shoulder/forearm so the primary garment neckline, butti craft, and bottom-wear cut stay clearly visible.\n`
+    : "";
 
   const prompt = `Create ONE real-camera fashion e-commerce photograph for ${boundedText(args.skuName, 160) || "this product"} that is indistinguishable from an unretouched frame of a professional catalog shoot.
 
@@ -1252,12 +1343,9 @@ ${bottomWearSection({
 })}
 
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
-${lockedDetailsDirective()}
-- SET ONLY: the direction below is backdrop, light, and camera. It does not set the pose, the garment, or handheld props.
-${creativeJson}
-- Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild only the room those images show: the same wall colour and finish, floor or ground surface, furniture in the room, light direction and quality, and colour grade. Do not substitute a different backdrop.
 - ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS: Never reproduce the background, wall, arches, urns, pots, plants, steps, or environment visible behind the garment in the product reference photos (front, back, bottom, mannequin). The photoshoot set must come exclusively from the STYLE REFERENCE (or Pose 1 anchor / studio specification).
 - BACKDROP AND SET CONTINUITY ACROSS ALL POSES: The exact same photoshoot set (wall color, wall finish, floor, and lighting) must remain identical across every pose in this set without drift or forgetting context.
+${lockedDetailsDirective()}
 ${hasApprovedAnchor
   ? `- SET & BACKDROP HARD LOCK TO APPROVED POSE 1:
   * Rebuild the EXACT SAME physical room and backdrop set from Pose 1: identical wall color, wall plaster/paint finish, texture, architectural elements, floor surface, and carpet/rug.
@@ -1265,6 +1353,9 @@ ${hasApprovedAnchor
   * LIGHTING & SHADOW CONTINUITY: Keep the exact same light direction, shadow density, and warm/cool color temperature established in Pose 1.
   * The camera and model remain in the exact same photoshoot location - only the pose and framing change.`
   : "- Maintain a single, consistent studio set, wall finish, flooring, and lighting setup across all poses."}
+- SET ONLY: the direction below is backdrop, light, and camera. It does not set the pose, the garment, or handheld props.
+${creativeJson}
+- Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild only the room those images show: the same wall colour and finish, floor or ground surface, furniture in the room, light direction and quality, and colour grade. Do not substitute a different backdrop.
 
 ${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in every frame:
 - Footwear: ${boundedText(poseInstructionText(styling.footwear, isSittingDemanded, ""), 360)}
@@ -1283,7 +1374,7 @@ ${directedCreative.suggestedAccessories ? `The stylist has proposed adding: ${bo
 - JEWELLERY & ORNAMENT LOCK: ${hasStyleReference
     ? "If the STYLE REFERENCE image in this manifest shows jewellery or ornaments that complement this product and the product itself does not already include competing pieces, keep those exact style-reference pieces identical across the set. Never invent a second jewellery story."
     : "No STYLE REFERENCE image is in this manifest. Use only jewellery/ornaments that ship with the product or were named in the approved styling plan. Do not invent jewellery from a missing style reference."}`}
-
+${dupattaLock}
 ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
 ${allowedDelta.map((value) => `- ${value}`).join("\n")}
 - Hand placement: ${boundedText(catalogPoseText(args.pose.handPlacement, RELAXED_HANDS, isSittingDemanded), 360)}
@@ -1343,26 +1434,26 @@ ${faceRequired ? `- If the identity photo hides the eyes, keep that cover and th
 - Skin must show real photographic micro-detail (pores, faint texture variation) rather than an airbrushed, plastic, or over-smoothed "beauty filter" look.` : ""}
 
 PROHIBITED UNRELATED CHANGES:
-${rules.map((rule) => `- ${rule}`).join("\n")}
 - STRICT ANATOMICAL RULE: NEVER render three hands, extra arms, duplicate hands, floating hands, phantom limbs, or extra body parts. The model must have strictly and exactly two arms and two hands with five natural fingers each.
 - STRICT PRODUCT ISOLATION RULE: Never copy, transfer, or borrow the clothing, saree, dress, colors, prints, or embroidery from the STYLE REFERENCE image. Dress the model ONLY in the uploaded product.
+- STRICT PROHIBITION ON COPYING PRE-SHOOT BACKGROUNDS: Never copy or reproduce pre-shoot background walls, terracotta arches, urns, clay pots, plants, courtyard structures, or outdoor scenery from the product reference images into the generated image.
 - Never render duplicate or identical frontal standing poses across different pose slots (Poses 2, 4, and 6 must visibly physically diverge from Pose 1).
 - Never freeze a walking stride, a spin, a mid-laugh, or a wide leg split. Use a natural catalog stance with both feet grounded. A joined or tapered hem stays closed.
-- Never render artificial, forced, stiff, or frozen stock catalog smiles.
-- Never redesign the product or copy garment details from the style reference.
-- Never complete, mirror, continue, relocate, add or remove decoration for symmetry.
-- Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
 ${bottomWear.includesBottomWear
     ? "- ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION: it is strictly forbidden to alter or replace the recorded bottom-wear cut, silhouette, volume, colour or print, or to reduce bold motifs to solid colour or tiny dots. Customers buy the complete set and expect the exact silhouette, colour and motif pattern shown in the product references."
     : isSareeShoot
       ? "- Never substitute or restyle the saree drape, pallu placement, pleat stack or border geometry."
       : "- ABSOLUTE PROHIBITION ON INVENTING A MATCHING SET: it is strictly forbidden to render coordinated bottom wear that repeats this product's print, motif, embroidery, border, colour blocking or fabric. The bottom stays plain, neutral and clearly styling, never a second product piece."}
-- STRICT PROHIBITION ON COPYING PRE-SHOOT BACKGROUNDS: Never copy or reproduce pre-shoot background walls, terracotta arches, urns, clay pots, plants, courtyard structures, or outdoor scenery from the product reference images into the generated image.
-- Never change the backdrop wall color, texture, floor, or lighting from what was established in Pose 1.
-- Never add random background props (brass urlis, urns, flower petals, pedestals) not present in Pose 1.
 ${(args.pose.id === "back" || isTrueBack) ? `- DUPATTA REAR VISIBILITY LOCK: If wearing a dupatta, scarf, stole, or shawl, it MUST be draped forward over both arms or held in front. The entire back of the kurti/dress (neckline, back panel, embroidery, seams, darts, and hem) must be 100% visible and NEVER covered or obstructed by the dupatta.
 - HAIR REAR VISIBILITY LOCK: Hair MUST be swept forward over the shoulders or styled in an updo/bun so the back neckline, rear embroidery, closures, and rear garment panel are completely unobstructed and fully visible.
 - TRUE BACK HARD RULE: shoulders and hips fully face away. Reproduce uploaded BACK exactly; never infer the rear from FRONT.` : ""}
+- Never change the backdrop wall color, texture, floor, or lighting from what was established in Pose 1.
+- Never add random background props (brass urlis, urns, flower petals, pedestals) not present in Pose 1.
+- Never render artificial, forced, stiff, or frozen stock catalog smiles.
+- Never redesign the product or copy garment details from the style reference.
+- Never complete, mirror, continue, relocate, add or remove decoration for symmetry.
+- Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
+${rules.map((rule) => `- ${rule}`).join("\n")}
 
 Product accuracy is more important than style matching.
 ${isCloseup ? `${pose5HardRule({ closeupMode, heroDetail: closeupHeroDetail })}

@@ -207,11 +207,11 @@ def test_router_agent_supports_gpt_image_2_6_family():
     assert route_flare["provider_route"]["image_model"] == "gpt-image-2.6-flare"
     assert route_flare["provider_route"]["est_cost_per_pose"] == 0.16
 
-    # Test default fallback preserves 2.5-flare-2026-09-08
+    # Test default fallback uses flagship gpt-image-2.6-sunburst
     route_default = router.process({
         "poses_to_generate": [1, 2, 3, 4, 5, 6],
     })
-    assert route_default["provider_route"]["image_model"] == "gpt-image-2.5-flare-2026-09-08"
+    assert route_default["provider_route"]["image_model"] == "gpt-image-2.6-sunburst"
 
 
 def test_saree_qa_hard_vetos():
@@ -307,3 +307,95 @@ def test_saree_qa_hard_vetos():
     )
     assert hijack_eval.outcome in ["retry", "fail"]
     assert hijack_eval.pose_requirement_failed is True
+
+
+def test_farshi_taper_rule_isolated_from_non_farshi_and_top_only():
+    dna_agent = ProductDNAAgent()
+    farshi_dna = dna_agent._build_from_vlm(
+        raw={
+            "garment_family": "kurta_or_kurti_set",
+            "main_color": "magenta",
+            "bottom_wear": {"has_bottom_wear": True, "cut_class": "farshi"},
+        },
+        org_id=VALID_ORG_UUID,
+        sku_id="FARSHI-01",
+        sku_name="MAGENTA-FARSHI-SET",
+        fingerprint="fp-farshi",
+        is_saree=False,
+        references=[{"role": "front"}, {"role": "bottom"}],
+        provider="meta",
+        model="muse-spark-1.2-contributor",
+    )
+    palazzo_dna = dna_agent._build_from_vlm(
+        raw={
+            "garment_family": "kurta_or_kurti_set",
+            "main_color": "ivory",
+            "bottom_wear": {"has_bottom_wear": True, "cut_class": "palazzo"},
+        },
+        org_id=VALID_ORG_UUID,
+        sku_id="PALAZZO-01",
+        sku_name="IVORY-PALAZZO-SET",
+        fingerprint="fp-palazzo",
+        is_saree=False,
+        references=[{"role": "front"}, {"role": "bottom"}],
+        provider="meta",
+        model="muse-spark-1.2-contributor",
+    )
+    assert farshi_dna.bottom_wear.cut_class == "farshi"
+    assert palazzo_dna.bottom_wear.cut_class == "palazzo"
+
+    planner = CreativePosePlanningAgent()
+    farshi_poses = planner.process({"product_dna": farshi_dna.model_dump()})["pose_plans"]
+    palazzo_poses = planner.process({"product_dna": palazzo_dna.model_dump()})["pose_plans"]
+    assert "tapering 4 inches inward from the upper hem seam" in farshi_poses[0]["prompt"]
+    assert "narrow from the waist side" in farshi_poses[0]["prompt"]
+    assert "farshi" not in palazzo_poses[0]["prompt"].lower()
+    assert "tapering 4 inches inward" not in palazzo_poses[0]["prompt"]
+
+    from agents.correction_agent import CorrectionAgent
+
+    ca = CorrectionAgent()
+    _, palazzo_fix = ca.decide_action(1, 1, ["bottom_wear"], "bottom wrong", False, False, bottom_cut="palazzo")
+    _, farshi_fix = ca.decide_action(1, 1, ["bottom_wear"], "bottom wrong", False, False, bottom_cut="farshi")
+    _, top_only_fix = ca.decide_action(1, 1, ["bottom_wear"], "Remove invented matching trousers", False, False, bottom_cut="none")
+    assert "palazzo" in palazzo_fix.lower()
+    assert "farshi" not in palazzo_fix.lower()
+    assert "4 inches inward" not in palazzo_fix.lower()
+    assert "4 inches inward" in farshi_fix.lower()
+    assert "standalone" in top_only_fix.lower()
+    assert "saree drape" not in top_only_fix.lower()
+
+    # Negative-Farshi classification string & unresolved cut stay isolated
+    neg_farshi_dna = dna_agent._build_from_vlm(
+        raw={
+            "garment_family": "kurta_or_kurti_set",
+            "main_color": "ivory",
+            "bottom_wear": {"has_bottom_wear": True, "cut_class": "palazzo", "classification": "Palazzo, not Farshi"},
+        },
+        org_id=VALID_ORG_UUID,
+        sku_id="PALAZZO-NEG",
+        sku_name="IVORY-PALAZZO",
+        fingerprint="fp-pal-neg",
+        is_saree=False,
+        references=[{"role": "front"}, {"role": "bottom"}],
+        provider="meta",
+        model="muse-spark-1.2-contributor",
+    )
+    assert neg_farshi_dna.bottom_wear.cut_class == "palazzo"
+
+    unknown_dna = dna_agent._build_from_vlm(
+        raw={
+            "garment_family": "kurta_or_kurti_set",
+            "main_color": "ivory",
+            "bottom_wear": {"has_bottom_wear": True, "cut_class": "unknown"},
+        },
+        org_id=VALID_ORG_UUID,
+        sku_id="UNKNOWN-01",
+        sku_name="IVORY-SET",
+        fingerprint="fp-unk",
+        is_saree=False,
+        references=[{"role": "front"}, {"role": "bottom"}],
+        provider="meta",
+        model="muse-spark-1.2-contributor",
+    )
+    assert unknown_dna.bottom_wear.cut_class == "unknown"

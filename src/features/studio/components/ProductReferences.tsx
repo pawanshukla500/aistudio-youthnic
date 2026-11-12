@@ -14,7 +14,7 @@ const genericProductSlots: Array<{
   { id: "back", label: "Upload Back", description: "Back design & rear detail", required: true },
   { id: "fabric_pattern", label: "Fabric / Pattern Detail", description: "Fabric weave, embroidery close-up", required: false },
   { id: "bottom", label: "Bottom Wear / Farshi", description: "Trousers/skirt cut, drape & hem", required: false },
-  { id: "mannequin", label: "Mannequin / Flat-lay", description: "Dress form shape & fit guide", required: false },
+  { id: "mannequin", label: "Mannequin / Flat-lay / Dupatta", description: "Dress form shape, fit guide, or dupatta", required: false },
   { id: "additional_product", label: "Additional Photo", description: "Alternate angle or detail", required: false },
 ];
 

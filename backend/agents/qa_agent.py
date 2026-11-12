@@ -60,7 +60,7 @@ Invariants: {invariants}
 Evaluate strictly:
 1. ANATOMY: Does the model have strictly exactly 2 arms and 2 hands connected naturally? Any extra/third/floating hand or 6 fingers is an immediate defect.
 2. PRODUCT FIDELITY: Does color, fabric, pattern/butti geometry, neckline, and embroidery match authoritative product references?
-3. BOTTOM WEAR: For Saree -> unstitched drape ONLY, zero trousers/palazzos. For Farshi -> two-leg pleated salwar with joined hem (not tubular palazzo or circular skirt).
+3. BOTTOM WEAR: {"For Saree -> unstitched drape ONLY, zero trousers/palazzos." if family == "saree" else "For Farshi ONLY -> two-leg pleated salwar whose hem is quite narrow from the waist side with a 6-inch joined hem panel tapering 4 inches inward from the upper hem seam (fail wide-open palazzo hem or circular skirt)." if bottom_cut == "farshi" else "Preserve exact standalone upper garment silhouette with plain neutral styling bottoms and no invented matching suit bottom." if bottom_cut in {"", "none"} else f"Preserve exact uploaded {bottom_cut} cut and hem cleanly without substituting Farshi or another silhouette."}
 4. POSE 5 ({pose_type}): If closeup, does it frame primary garment craft rather than secondary dupatta/accessory hijack?
 5. STYLE QUARANTINE: Did the model copy clothing from a backdrop/style reference instead of the uploaded product?
 

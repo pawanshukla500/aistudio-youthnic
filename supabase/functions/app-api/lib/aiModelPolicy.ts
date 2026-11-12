@@ -58,7 +58,7 @@ export type AiRouteValidationOptions = {
  */
 export const DEFAULT_IMAGE_GENERATION_ROUTE = {
   provider: "openai",
-  model: "gpt-image-2.5-flare-2026-09-08",
+  model: "gpt-image-2.6-sunburst",
   thinkingLevel: "none",
 } as const satisfies NormalizedAiModelRoute;
 
@@ -732,10 +732,10 @@ export async function runVisionProviderChain<T>(args: {
 
 export function aiModelDisplayLabel(model: string): string {
   const labels: Record<string, string> = {
-    "gpt-image-2.6-sunburst": "GPT Image 2.6 Sunburst · next-gen fidelity/memory/complex layout",
+    "gpt-image-2.6-sunburst": "GPT Image 2.6 Sunburst · next-gen fidelity/memory (Default)",
     "gpt-image-2.6-flare": "GPT Image 2.6 Flare · next-gen ultra-fast/high-volume",
     "gpt-image-2.6": "GPT Image 2.6 · flagship",
-    "gpt-image-2.5-flare-2026-09-08": "GPT Image 2.5 Flare (2026-09-08 · Default)",
+    "gpt-image-2.5-flare-2026-09-08": "GPT Image 2.5 Flare (2026-09-08)",
     "gpt-image-2.5-flare": "GPT Image 2.5 Flare · fast/high-volume",
     "gpt-image-2.5-sunburst": "GPT Image 2.5 Sunburst · high-fidelity/memory",
     "gpt-image-2": "GPT Image 2 · standard",
@@ -802,9 +802,9 @@ export function preferredModelId(
   models: readonly string[],
 ): string {
   if (!models.length) return "";
-  if (provider === "openai" && models.includes("gpt-image-2.5-flare-2026-09-08")) return "gpt-image-2.5-flare-2026-09-08";
-  if (provider === "openai" && models.includes("gpt-image-2.6-flare")) return "gpt-image-2.6-flare";
   if (provider === "openai" && models.includes("gpt-image-2.6-sunburst")) return "gpt-image-2.6-sunburst";
+  if (provider === "openai" && models.includes("gpt-image-2.6-flare")) return "gpt-image-2.6-flare";
+  if (provider === "openai" && models.includes("gpt-image-2.5-flare-2026-09-08")) return "gpt-image-2.5-flare-2026-09-08";
   if (provider === "openai" && models.includes("gpt-image-2.6")) return "gpt-image-2.6";
   if (provider === "openai" && models.includes("gpt-image-2.5-flare")) return "gpt-image-2.5-flare";
   if (provider === "openai" && models.includes("gpt-image-2.5-sunburst")) return "gpt-image-2.5-sunburst";

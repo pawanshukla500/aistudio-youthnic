@@ -29,8 +29,11 @@ export type FashionKnowledgeSelection = {
 
 const BOTTOM_IDENTITY_RE = /\b(farshi|farsi|fasi|pajama|bottom.?wear|palazzo|sharara|gharara|salwar|trouser)\b/i;
 const CUT_PRINT_RE =
-  /\b(cut|silhouette|print|motif|floral|boota|volume|pleat|farshi|farsi|fasi|palazzo|lehenga|pajama)\b/i;
+  /\b(cut|silhouette|print|motif|floral|boota|volume|pleat|farshi|farsi|fasi|palazzo|lehenga|pajama|taper)\b/i;
 const FARSHI_RE = /\b(farshi|farsi|fasi)\b/i;
+const SAREE_KNOWLEDGE_RE = /\b(saree|pallu|drape|nivi|border|gen-?z|pleats)\b/i;
+const DUPATTA_STYLING_TOPICS = new Set(["dupatta_drape", "top_only", "kurti_styling"]);
+const EXPLICIT_NON_FARSHI_CUTS = new Set(["palazzo", "sharara_gharara", "salwar_churidar", "straight_trouser", "skirt_lehenga", "none"]);
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -67,26 +70,62 @@ function isBottomCutPrintKnowledge(row: FashionKnowledgeRow) {
   return BOTTOM_IDENTITY_RE.test(haystack(row)) && CUT_PRINT_RE.test(text(row.guidance));
 }
 
-function rank(row: FashionKnowledgeRow) {
-  const farshi = FARSHI_RE.test(`${haystack(row)} ${text(row.guidance)}`) ? 1_000 : 0;
+function isSareeKnowledge(row: FashionKnowledgeRow) {
+  const hay = haystack(row);
+  const g = text(row.guidance);
+  const topic = text(row.topic).toLowerCase();
+  if (BOTTOM_IDENTITY_RE.test(hay) || FARSHI_RE.test(`${hay} ${g}`)) return false;
+  return (topic === "saree_drape" || /\bsaree\b/i.test(hay)) && SAREE_KNOWLEDGE_RE.test(g);
+}
+
+function isCategoryKurtiOrDupattaKnowledge(row: FashionKnowledgeRow) {
+  const topic = text(row.topic).toLowerCase();
+  return DUPATTA_STYLING_TOPICS.has(topic) && Boolean(text(row.guidance));
+}
+
+function isFarshiConstructionRule(row: FashionKnowledgeRow) {
+  const topic = text(row.topic).toLowerCase();
+  const tags = tagsOf(row.tags);
+  if (topic === "top_only" || tags.includes("top_only")) return false;
+  const hay = haystack(row);
+  if (FARSHI_RE.test(hay)) return true;
+  const positiveGuidance = text(row.guidance)
+    .replace(/\bnon-?(?:farshi|farsi|fasi)\b/gi, "")
+    .replace(/\b(?:never|not|no|without)\s+(?:apply|use|render|substitute)\s+(?:the\s+)?(?:farshi|farsi|fasi)\b/gi, "");
+  return FARSHI_RE.test(positiveGuidance);
+}
+
+function rank(row: FashionKnowledgeRow, bottomCutClass: string) {
+  const textAll = `${haystack(row)} ${text(row.guidance)}`;
+  const positiveForCutMatch = textAll.replace(/\bnon-?(?:farshi|farsi|fasi)\b/gi, "").toLowerCase();
+  const isFarshiRow = isFarshiConstructionRule(row);
+  const farshiBoost = isFarshiRow && (!bottomCutClass || bottomCutClass === "farshi") ? 1_000 : 0;
+  const cutMatchBoost = bottomCutClass && positiveForCutMatch.includes(bottomCutClass.replace("_", " ")) ? 500 : 0;
   const priority = Number(row.priority);
-  return farshi + (Number.isFinite(priority) ? priority : 0);
+  return farshiBoost + cutMatchBoost + (Number.isFinite(priority) ? priority : 0);
 }
 
 export function selectFashionKnowledgeGuidance(
   rows: readonly FashionKnowledgeRow[] | null | undefined,
-  args: { organizationId: string; category?: string; garmentFamily?: string },
+  args: { organizationId: string; category?: string; garmentFamily?: string; bottomCutClass?: string },
 ): FashionKnowledgeSelection {
   const organizationId = text(args.organizationId);
   if (!organizationId || !Array.isArray(rows)) return { ids: [], guidance: "" };
-  if (/\bsaree\b/i.test(`${text(args.garmentFamily)} ${text(args.category)}`)) {
-    return { ids: [], guidance: "" };
-  }
+  const isSaree = /\bsaree\b/i.test(`${text(args.garmentFamily)} ${text(args.category)}`);
+  const cutClass = text(args.bottomCutClass).toLowerCase();
+  const forbidFarshi = EXPLICIT_NON_FARSHI_CUTS.has(cutClass);
 
-  const eligible = rows.filter((row) => (
-    isActive(row) && orgAllowed(row, organizationId) && isBottomCutPrintKnowledge(row)
-  )).sort((left, right) => {
-    const delta = rank(right) - rank(left);
+  const eligible = rows.filter((row) => {
+    if (!isActive(row) || !orgAllowed(row, organizationId)) return false;
+    if (isSaree) return isSareeKnowledge(row);
+    const topic = text(row.topic).toLowerCase();
+    const isFarshiRow = isFarshiConstructionRule(row);
+    if (forbidFarshi && isFarshiRow) return false;
+    if (cutClass === "none" && topic === "bottom_wear") return false;
+    if (topic === "top_only" && cutClass && cutClass !== "none" && cutClass !== "other") return false;
+    return isBottomCutPrintKnowledge(row) || isCategoryKurtiOrDupattaKnowledge(row);
+  }).sort((left, right) => {
+    const delta = rank(right, cutClass) - rank(left, cutClass);
     if (delta) return delta;
     return text(left.id).localeCompare(text(right.id));
   });

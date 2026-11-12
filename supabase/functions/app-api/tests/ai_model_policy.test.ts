@@ -45,7 +45,7 @@ const ADMIN_MUSE_CONTRIBUTOR = { provider: "meta", model: "muse-spark-1.3-contri
 Deno.test("vision registry keeps image generation on approved OpenAI image models", () => {
   assertEquals(DEFAULT_IMAGE_GENERATION_ROUTE, {
     provider: "openai",
-    model: "gpt-image-2.5-flare-2026-09-08",
+    model: "gpt-image-2.6-sunburst",
     thinkingLevel: "none",
   });
   assertEquals(defaultImageGenerationRoute(), DEFAULT_IMAGE_GENERATION_ROUTE);

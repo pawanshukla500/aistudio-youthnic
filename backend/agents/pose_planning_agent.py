@@ -165,13 +165,27 @@ class CreativePosePlanningAgent:
                 },
             ]
         else:
-            # Farshi specific bottom prompt text
-            bottom_prompt_chunk = (
-                "worn with voluminous two-leg Farshi salwar trousers featuring distinct vertical pleating/gathers "
-                "from the waist down to a wide flared joined hem with sequin lace trim (NOT a palazzo, NOT a skirt)"
-                if is_farshi
-                else f"worn with coordinated {bottom_cut} trousers matching product evidence"
-            )
+            bottom_bw = dna.get("bottom_wear") or {}
+            has_bottom_wear = bool(bottom_bw.get("has_bottom_wear", True))
+            if is_farshi:
+                bottom_prompt_chunk = (
+                    "worn with voluminous two-leg Farshi salwar trousers featuring vertical waist pleats and side-joint pleats, "
+                    "where the hem is quite narrow from the waist side with a 6-inch joined hem panel tapering 4 inches inward "
+                    "from the upper hem seam to the lower ankle cuff (NOT a wide-open palazzo, NOT a circular skirt)"
+                )
+            elif not has_bottom_wear or bottom_cut in {"", "none"}:
+                bottom_prompt_chunk = (
+                    "paired solely with understated plain neutral monochrome trousers for styling only — "
+                    "never invent a matching suit bottom for a standalone top-only kurti"
+                )
+            elif bottom_cut == "skirt":
+                bottom_prompt_chunk = (
+                    "worn with authentic coordinated skirt/lehenga bottom wear preserving drape, panel flare, and hem from product evidence"
+                )
+            else:
+                bottom_prompt_chunk = (
+                    f"worn with authentic coordinated {bottom_cut} bottom wear preserving exact leg cut, width, and hem from product evidence"
+                )
 
             poses: List[Dict[str, Any]] = [
             {
@@ -229,7 +243,7 @@ class CreativePosePlanningAgent:
                 "highlighted_details": ["rear neckline", "back construction", "back trouser flare"],
                 "prompt": (
                     f"Rear catalog view of the model facing away from the camera, displaying the back design of the {main_color} "
-                    f"{sku_name}. Derived strictly from direct rear product reference. Rear neckline and back panels shown cleanly, "
+                    f"{sku_name}. Derived strictly from direct rear product reference, with hair swept forward and any uploaded dupatta draped forward over the arms/front so the rear garment is 100% unobstructed, "
                     f"{bottom_prompt_chunk} seen from behind. Do not mirror front yoke onto back. {scene_desc}"
                 ),
             },

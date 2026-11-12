@@ -63,12 +63,14 @@ export const FARSHI_SILHOUETTE_STRUCTURE =
   "FALL: soft and flowy, but structured, with a fluid or heavy drape. " +
   "WAIST: high-waisted or mid-rise, with an elasticated or fitted waistband, and three waist pleats on each side. " +
   "SIDE JOINT: one large pleat on each side at the side-seam joint (one on the left and one on the right), in addition to the three waist pleats. " +
-  "HEM: the hem is narrower than the volume at the waist. A separate hem panel 6 inches wide is joined (seamed) onto the bottom of each leg, and that panel tapers 4 inches from its upper edge to its lower edge, so the opening at the bottom of the hem is 4 inches narrower than the seam where the hem joins the leg. " +
+  "HEM: the hem is narrower than the volume at the waist (the hem is quite narrow from the waist side). A separate hem panel 6 inches wide is joined (seamed) onto the bottom of each leg, and that panel tapers 4 inches from its upper edge to its lower edge (a taper of 4 inches from the upper hem), so the opening at the bottom of the hem is 4 inches narrower than the seam where the hem joins the leg. " +
   "Keep two distinct trouser legs. This joined hem is not a gathered salwar poncha, not churidar rings, and not an open straight palazzo hem.";
 
 /**
- * A dedicated bottom-wear photo is the Farshi authority when analysis was
- * unsure or called the cut a plain palazzo. Named cuts such as sharara stay put.
+ * A dedicated bottom-wear photo confirms Farshi only when analysis was unsure
+ * ("none"/"other") or explicitly named Farshi/Farsi/Fasi. Named non-Farshi cuts
+ * such as palazzo, sharara, churidar, straight trouser, or skirt stay isolated
+ * so Farshi taper/hem rules never bleed onto other silhouettes.
  */
 export function effectiveBottomCutClass(
   cutClass: BottomCutClass,
@@ -83,7 +85,7 @@ export function effectiveBottomCutClass(
       ].filter(Boolean).join(" ")
     : "";
   if (/\b(?:farshi|farsi|fasi)\b/i.test(contextText)) return "farshi";
-  if (hasBottomReference && (cutClass === "palazzo" || cutClass === "none" || cutClass === "other")) return "farshi";
+  if (hasBottomReference && cutClass === "none") return "farshi";
   return cutClass;
 }
 

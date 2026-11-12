@@ -24,7 +24,17 @@ class LearningOptimizationAgent:
         positive_guidance: str,
         negative_constraints: List[str],
         category: str = "ethnic/fusion",
+        garment_family: str = "",
+        bottom_cut: str = "",
+        trigger_condition: Dict[str, Any] | None = None,
     ):
+        scoped_trigger = dict(trigger_condition or {})
+        if garment_family and "garment_family" not in scoped_trigger:
+            scoped_trigger["garment_family"] = str(garment_family)
+        if bottom_cut and "bottom_cut" not in scoped_trigger:
+            scoped_trigger["bottom_cut"] = str(bottom_cut)
+        if category and "category" not in scoped_trigger:
+            scoped_trigger["category"] = str(category)
         try:
             with get_db() as conn:
                 with conn.transaction():
@@ -46,23 +56,24 @@ class LearningOptimizationAgent:
                                 UPDATE public.learning_outcomes
                                 SET positive_guidance = %s,
                                     negative_constraints = %s,
+                                    trigger_condition = %s::jsonb,
                                     success_count = success_count + 1,
                                     usage_count = usage_count + 1,
                                     updated_at = now()
                                 WHERE id = %s
                                 """,
-                                (positive_guidance, negative_constraints, existing["id"]),
+                                (positive_guidance, negative_constraints, json.dumps(scoped_trigger), existing["id"]),
                             )
                         else:
                             cur.execute(
                                 """
                                 INSERT INTO public.learning_outcomes (
                                     organization_id, sku_id, rule_type, rule_text,
-                                    positive_guidance, negative_constraints, effectiveness_score,
+                                    trigger_condition, positive_guidance, negative_constraints, effectiveness_score,
                                     usage_count, success_count, is_active, approved
-                                ) VALUES (%s, %s, %s, %s, %s, %s, 1.0, 1, 1, true, true)
+                                ) VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, 1.0, 1, 1, true, true)
                                 """,
-                                (org_id, sku_id, rule_type, rule_text, positive_guidance, negative_constraints),
+                                (org_id, sku_id, rule_type, rule_text, json.dumps(scoped_trigger), positive_guidance, negative_constraints),
                             )
                         logger.info(f"Recorded approved learning rule for {sku_id}: {rule_type}")
 

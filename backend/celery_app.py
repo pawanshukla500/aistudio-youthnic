@@ -273,7 +273,7 @@ def process_pose_generation_task(self, generation_id: str, job_id: str, pose_ind
         loaded_refs = _load_sku_reference_payloads(org_id, sku_id, row.get("job_data") or {})
         gen_result = generate_catalog_image(
             prompt=composed_prompt,
-            model=str(row.get("model") or "gpt-image-2.5-flare-2026-09-08"),
+            model=str(row.get("model") or "gpt-image-2.6-sunburst"),
             aspect_ratio=str(row.get("aspect_ratio") or "3:4"),
             image_size=str(row.get("image_size") or "2K"),
             quality=str(row.get("quality") or "medium"),
@@ -539,6 +539,9 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
                         if cur.fetchone() is None:
                             stale_ignored = True
                     else:
+                        dna_cut = str(((dna or {}).get("bottom_wear") or {}).get("cut_class") or "")
+                        if str((dna or {}).get("garment_family") or "").lower() == "saree":
+                            dna_cut = "saree"
                         action, guidance = correction_agent.decide_action(
                             pose_index=pose_index,
                             attempt_count=expected_attempt or 1,
@@ -546,6 +549,7 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
                             guidance=evaluation.correction_guidance,
                             anatomical_defect=evaluation.anatomical_defect_detected,
                             style_violation=evaluation.style_quarantine_violation,
+                            bottom_cut=dna_cut,
                         )
                         if action == "regenerate":
                             cur.execute(
