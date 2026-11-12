@@ -3,10 +3,10 @@ from pydantic import BaseModel, Field, model_validator
 
 
 FARSHI_SALWAR_STRUCTURE = (
-    "Voluminous flared trousers with TWO DISTINCT LEGS (never a lehenga or circular skirt). "
-    "Vertical pleats or gathers from waist/hip create an architectural A-line flare toward the hem. "
-    "Features a joined hem panel (approx. 5-6 inches) with sequin/lace trim. "
-    "Strictly prohibited: circular skirt flare, tubular palazzo pants, gathered salwar ponchas, or knee-jointed shararas."
+    "Voluminous two-leg Farshi salwar trousers with TWO DISTINCT LEGS (never a lehenga or circular skirt). "
+    "High-waisted or mid-rise elasticated/fitted waistband with three waist pleats on each side plus one large pleat at each side-seam joint. "
+    "The hem is quite narrow from the waist side: a separate 6-inch joined hem panel is seamed onto each leg with a 4-inch inward taper from the upper hem seam to the lower ankle opening (so the ankle opening is 4 inches narrower than the seam where the hem joins the leg). "
+    "Strictly prohibited: wide-open tubular palazzo pants, circular skirt flare, gathered salwar ponchas, or knee-jointed shararas."
 )
 
 

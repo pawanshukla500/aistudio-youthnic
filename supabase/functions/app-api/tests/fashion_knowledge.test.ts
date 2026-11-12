@@ -52,3 +52,48 @@ Deno.test("fashion knowledge fails closed without an organization and skips inac
     { ids: [], guidance: "" },
   );
 });
+
+Deno.test("fashion knowledge isolates Farshi from non-Farshi cuts while allowing saree and dupatta rules", () => {
+  const rows = [
+    row(),
+    row({
+      id: "saree-genz-1",
+      category: "saree",
+      topic: "saree_drape",
+      title: "Gen-Z saree drape",
+      guidance: "Present sarees with clean Gen-Z Nivi shoulder drape and crisp pleated borders.",
+      tags: ["saree", "genz", "drape"],
+      priority: 85,
+    }),
+    row({
+      id: "dupatta-1",
+      category: "kurta_or_kurti_set",
+      topic: "dupatta_drape",
+      title: "Dupatta detection and forward rear drape",
+      guidance: "Inspect mannequin/flat-lay uploads for dupatta and sweep forward on pose 3 back view.",
+      tags: ["dupatta"],
+      priority: 80,
+    }),
+  ];
+
+  const palazzoSelection = selectFashionKnowledgeGuidance(rows, {
+    organizationId: "org-a",
+    garmentFamily: "kurta_or_kurti_set",
+    bottomCutClass: "palazzo",
+  });
+  assertEquals(palazzoSelection.ids, ["dupatta-1"]);
+  assertEquals(palazzoSelection.guidance.includes("Farshi"), false);
+
+  const farshiSelection = selectFashionKnowledgeGuidance(rows, {
+    organizationId: "org-a",
+    garmentFamily: "kurta_or_kurti_set",
+    bottomCutClass: "farshi",
+  });
+  assertEquals(farshiSelection.ids, ["farshi-1", "dupatta-1"]);
+
+  const sareeSelection = selectFashionKnowledgeGuidance(rows, {
+    organizationId: "org-a",
+    garmentFamily: "saree",
+  });
+  assertEquals(sareeSelection.ids, ["saree-genz-1"]);
+});

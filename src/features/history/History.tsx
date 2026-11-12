@@ -114,6 +114,9 @@ function formatModelName(model?: string | null): string {
     "gemini-3.8-flash": "Gemini 3.8 Flash",
     "gemini-3.6-flash": "Gemini 3.6 Flash",
     "qwen3.8-max": "Qwen 3.8 Max",
+    "gpt-image-2.6-sunburst": "GPT Image 2.6 Sunburst",
+    "gpt-image-2.6-flare": "GPT Image 2.6 Flare",
+    "gpt-image-2.6": "GPT Image 2.6",
     "gpt-image-2.5-flare-2026-09-08": "GPT Image 2.5 Flare",
     "gpt-image-2.5-flare": "GPT Image 2.5 Flare",
     "gpt-image-2.5-sunburst": "GPT Image 2.5 Sunburst",
@@ -701,12 +704,12 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 
           <div
             className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50/70 px-2.5 py-1.5 font-medium shadow-xs"
-            title={`Image Generation Engine: ${job.generationModel || job.model || "GPT Image 2.5 Flare"}`}
+            title={`Image Generation Engine: ${job.generationModel || job.model || "GPT Image 2.6 Sunburst"}`}
           >
             <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
             <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Image Gen</span>
             <span className="font-bold text-indigo-700 truncate max-w-[130px]">
-              {formatModelName(job.generationModel || job.model || "gpt-image-2.5-flare-2026-09-08")}
+              {formatModelName(job.generationModel || job.model || "gpt-image-2.6-sunburst")}
             </span>
           </div>
 
@@ -1865,10 +1868,10 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   <div className="rounded-xl border border-outline-variant/30 bg-white p-3">
                     <span className="block text-[10px] font-bold uppercase text-secondary">Generation Model</span>
                     <span className="mt-0.5 block font-mono text-xs font-bold text-on-surface">
-                      {job.generationModel || job.model || "gpt-image-2.5-flare-2026-09-08"}
+                      {job.generationModel || job.model || "gpt-image-2.6-sunburst"}
                     </span>
                     <span className="mt-0.5 block text-[11px] font-semibold text-indigo-700">
-                      {formatModelName(job.generationModel || job.model || "gpt-image-2.5-flare-2026-09-08")}
+                      {formatModelName(job.generationModel || job.model || "gpt-image-2.6-sunburst")}
                     </span>
                   </div>
                   <div className="rounded-xl border border-outline-variant/30 bg-white p-3">

@@ -19,6 +19,7 @@ class CorrectionAgent:
         guidance: str,
         anatomical_defect: bool,
         style_violation: bool,
+        bottom_cut: str = "",
     ) -> Tuple[str, str]:
         """Returns: (action, updated_instruction)
 
@@ -39,10 +40,24 @@ class CorrectionAgent:
                 "Dress model strictly in uploaded product references."
             )
         if "bottom_wear" in failed_checks:
-            instructions.append(
-                "BOTTOM WEAR SILHOUETTE FIX: Maintain authentic two-leg Farshi salwar with vertical gathers "
-                "and joined hem panel. Do not produce palazzo or skirt."
-            )
+            normalized_cut = str(bottom_cut or "").strip().lower()
+            is_farshi = normalized_cut == "farshi" or (not normalized_cut and "farshi" in str(guidance or "").lower())
+            if is_farshi:
+                instructions.append(
+                    "BOTTOM WEAR SILHOUETTE FIX: Maintain authentic two-leg Farshi salwar with vertical waist pleats, "
+                    "side-joint pleats, and a narrower 6-inch joined hem panel tapering 4 inches inward from the upper hem seam. "
+                    "Do not produce wide-open palazzo or circular skirt."
+                )
+            elif normalized_cut in {"saree", "none"} and "trouser" in str(guidance or "").lower():
+                instructions.append(
+                    "BOTTOM WEAR SILHOUETTE FIX: Maintain continuous unstitched saree drape with zero trousers or palazzos."
+                )
+            else:
+                cut_label = normalized_cut or "uploaded"
+                instructions.append(
+                    f"BOTTOM WEAR SILHOUETTE FIX: Strictly reproduce the {cut_label} bottom-wear cut, leg width, "
+                    "and hem finish from the product references without substituting another silhouette."
+                )
         if "front_back_design" in failed_checks:
             instructions.append(
                 "REAR PURITY FIX: Adhere exclusively to direct back photo. "

@@ -39,9 +39,9 @@ export function modelsForProviderPurpose(
 
 export function preferredModelId(provider: string, models: AdminAiRegistryModel[]) {
   const ids = models.map((model) => model.id);
-  if (provider === "openai" && ids.includes("gpt-image-2.5-flare-2026-09-08")) return "gpt-image-2.5-flare-2026-09-08";
-  if (provider === "openai" && ids.includes("gpt-image-2.6-flare")) return "gpt-image-2.6-flare";
   if (provider === "openai" && ids.includes("gpt-image-2.6-sunburst")) return "gpt-image-2.6-sunburst";
+  if (provider === "openai" && ids.includes("gpt-image-2.6-flare")) return "gpt-image-2.6-flare";
+  if (provider === "openai" && ids.includes("gpt-image-2.5-flare-2026-09-08")) return "gpt-image-2.5-flare-2026-09-08";
   if (provider === "openai" && ids.includes("gpt-image-2.6")) return "gpt-image-2.6";
   if (provider === "openai" && ids.includes("gpt-image-2.5-flare")) return "gpt-image-2.5-flare";
   if (provider === "openai" && ids.includes("gpt-image-2.5-sunburst")) return "gpt-image-2.5-sunburst";

@@ -176,8 +176,10 @@ Deno.test("Farshi structure is recorded on Farshi pose slots and stripped of the
     "keep the 6-inch joined Farshi hem with its 4-inch taper; never a gathered salwar cuff",
   );
   assertEquals(effectiveBottomCutClass("sharara_gharara", true), "sharara_gharara");
-  assertEquals(effectiveBottomCutClass("palazzo", true), "farshi");
+  assertEquals(effectiveBottomCutClass("palazzo", true), "palazzo");
   assertEquals(effectiveBottomCutClass("palazzo", false), "palazzo");
+  assertEquals(effectiveBottomCutClass("other", true), "other");
+  assertEquals(effectiveBottomCutClass("none", true), "farshi");
 });
 
 Deno.test("normalizeAnalysis always returns the ordered six-pose plan", () => {
@@ -452,4 +454,104 @@ Deno.test("Fasi / Farsi / Farshi salwar variants are classified as Farshi with c
     productDetails: "Palazzo pants, solid magenta; NOT fasi",
   });
   assertEquals(negativeInContext, "palazzo");
+});
+
+Deno.test("Farshi narrow-from-waist + 4-inch taper is strictly isolated from palazzo even with a bottom photo", () => {
+  const farshiPrompt = composeGenerationPrompt({
+    skuName: "MAGENTA-FARSHI-SET",
+    productDetails: "Pink Farshi salwar set",
+    pose: pose("full_front", 1) as never,
+    session: {
+      category: "kurti set",
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        accessoriesIncluded: "Ombré pink gota-edged dupatta",
+        bottomWearDetails: "Pink striped Farshi salwar with pleated waist",
+      },
+      stylingPlan: { ornaments: "Ombré pink chiffon dupatta with golden gota lace" },
+    },
+    references: [{ role: "front" }, { role: "bottom" }, { role: "mannequin" }],
+  });
+  assertEquals(farshiPrompt.includes("hem is quite narrow from the waist side"), true);
+  assertEquals(farshiPrompt.includes("taper of 4 inches from the upper hem"), true);
+  assertEquals(farshiPrompt.includes("DUPATTA DRAPE & FIDELITY LOCK"), true);
+
+  const palazzoPrompt = composeGenerationPrompt({
+    skuName: "PALAZZO-SET-01",
+    productDetails: "Ivory kurti with wide straight palazzo",
+    pose: pose("full_front", 1) as never,
+    session: {
+      category: "kurti set",
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        bottomWearDetails: "Palazzo wide straight leg trousers",
+      },
+    },
+    references: [{ role: "front" }, { role: "bottom" }],
+  });
+  assertEquals(palazzoPrompt.includes("PALAZZO HARD LOCK"), true);
+  assertEquals(palazzoPrompt.includes("taper of 4 inches from the upper hem"), false);
+});
+
+Deno.test("back pose enforces forward dupatta drape when a dupatta ships and Tier-5 compaction preserves pose + prompt blocks", () => {
+  const oversizedEvidence = Array.from({ length: 16 }, (_, idx) => ({
+    region: `panel_${idx}`,
+    state: "confirmed",
+    sourceRole: "front",
+    visibleConstruction: "panel construction detail ".repeat(22),
+    visibleDecoration: "delicate ivory floral motif border ".repeat(22),
+    closures: "crisscross corset ties",
+    explicitlyAbsent: [],
+    uncertainty: "none",
+  }));
+  const backPrompt = composeGenerationPrompt({
+    skuName: "HEAVY-EVIDENCE-FARSHI",
+    productDetails: "Magenta corset kurti + striped farshi + ombre dupatta",
+    pose: {
+      ...(pose("back", 3) as Record<string, unknown>),
+      id: "back",
+      poseNumber: 3,
+      title: "Full Back View",
+      prompt: "Show true rear corset lacing cleanly from direct back reference.",
+    } as never,
+    session: {
+      category: "kurti set",
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        accessoriesIncluded: "Ombre magenta-pink dupatta with gota triangle lace",
+        bottomWearDetails: "Pink striped Farshi salwar",
+        garmentEvidence: oversizedEvidence,
+      },
+      stylingPlan: {
+        footwear: "Silver embroidered juttis",
+        jewellery: "Gold chandbalis",
+        ornaments: "Ombre chiffon dupatta draped forward over arms on rear view",
+        makeup: "Soft rose dewy",
+        hair: "High sleek bun",
+      },
+    },
+    references: [{ role: "front" }, { role: "back" }, { role: "bottom" }, { role: "mannequin" }, { role: "style_reference" }],
+  });
+  assertEquals(backPrompt.includes("DUPATTA DRAPE & FIDELITY LOCK (REAR VIEW)"), true);
+  assertEquals(backPrompt.includes("POSE REQUIREMENT:"), true);
+  assertEquals(backPrompt.includes("Show true rear corset lacing cleanly from direct back reference."), true);
+});
+
+Deno.test("negative dupatta clauses and top-only mode do not emit dupatta or Farshi locks", () => {
+  const topOnlyPrompt = composeGenerationPrompt({
+    skuName: "SOLO-KURTI-FARSI-REF-TEST",
+    productDetails: "Embroidered kurti only; dupatta: none; does not include a dupatta",
+    bottomWearMode: "top_only",
+    pose: pose("full_front", 1) as never,
+    session: {
+      category: "kurti",
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        accessoriesIncluded: "No dupatta or stole",
+      },
+    },
+    references: [{ role: "front" }, { role: "back" }],
+  });
+  assertEquals(topOnlyPrompt.includes("DUPATTA DRAPE & FIDELITY LOCK"), false);
+  assertEquals(topOnlyPrompt.includes("taper of 4 inches from the upper hem"), false);
 });

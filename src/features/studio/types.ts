@@ -294,6 +294,9 @@ export type OutputOptions = {
   // Administration decides, which is the default for every new shoot.
   model:
     | ""
+    | "gpt-image-2.6-sunburst"
+    | "gpt-image-2.6-flare"
+    | "gpt-image-2.6"
     | "gpt-image-2.5-flare-2026-09-08"
     | "gpt-image-2.5-flare"
     | "gpt-image-2.5-sunburst"

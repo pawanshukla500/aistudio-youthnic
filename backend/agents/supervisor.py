@@ -87,6 +87,9 @@ class SupervisorOrchestratorAgent:
 
         attempts = dict(state.get("retry_counts") or {})
         attempt_count = int(attempts.get(pose_idx, 1))
+        bottom_cut = str(((dna or {}).get("bottom_wear") or {}).get("cut_class") or "")
+        if str((dna or {}).get("garment_family") or "").lower() == "saree":
+            bottom_cut = "saree"
         action, updated_instruction = self.correction_agent.decide_action(
             pose_index=pose_idx,
             attempt_count=attempt_count,
@@ -94,6 +97,7 @@ class SupervisorOrchestratorAgent:
             guidance=eval_res.correction_guidance,
             anatomical_defect=eval_res.anatomical_defect_detected,
             style_violation=eval_res.style_quarantine_violation,
+            bottom_cut=bottom_cut,
         )
         decision = "human_review" if action in ("human_review", "escalate") else "regenerate"
         return {

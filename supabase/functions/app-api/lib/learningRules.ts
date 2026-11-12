@@ -200,3 +200,72 @@ export function selectReusableLearningRules(
     guidance: selected.map((rule) => `- ${rule.guidance}`).join("\n"),
   };
 }
+
+export type LearningOutcomeRow = {
+  [key: string]: unknown;
+  id?: unknown;
+  organization_id?: unknown;
+  sku_id?: unknown;
+  rule_type?: unknown;
+  rule_text?: unknown;
+  trigger_condition?: unknown;
+  positive_guidance?: unknown;
+  effectiveness_score?: unknown;
+  is_active?: unknown;
+  approved?: unknown;
+};
+
+/**
+ * Filter approved organizational learning outcomes so Farshi rules never bleed
+ * onto Palazzo/Sharara/Straight/Saree SKUs, and cross-tenant rows never leak.
+ */
+export function selectApprovedLearningOutcomes(
+  rows: readonly LearningOutcomeRow[] | null | undefined,
+  args: { organizationId: string; garmentFamily?: string; bottomCutClass?: string },
+): { ids: string[]; guidance: string } {
+  const expectedOrg = text(args.organizationId);
+  if (!expectedOrg || !Array.isArray(rows)) return { ids: [], guidance: "" };
+  const family = comparable(args.garmentFamily);
+  const bottomCut = comparable(args.bottomCutClass);
+  const isSaree = family === "saree";
+  const FAMILY_NON_FARSHI = new Set(["palazzo", "sharara_gharara", "sharara", "salwar_churidar", "churidar", "straight_trouser", "straight", "skirt_lehenga", "skirt", "none", "other"]);
+
+  const selected: Array<{ id: string; guidance: string }> = [];
+  let used = 0;
+  for (const row of rows) {
+    if (selected.length >= MAX_REUSABLE_LEARNING_RULES) break;
+    const id = text(row?.id);
+    const active = row?.is_active === true || comparable(row?.is_active) === "true";
+    const approved = row?.approved === true || comparable(row?.approved) === "true";
+    if (!id || !active || !approved || text(row?.organization_id) !== expectedOrg) continue;
+
+    const trigger = row?.trigger_condition && typeof row.trigger_condition === "object"
+      ? (row.trigger_condition as Record<string, unknown>)
+      : {};
+    const triggerFamily = comparable(trigger.garment_family ?? trigger.garmentFamily);
+    const triggerCut = comparable(trigger.bottom_cut ?? trigger.bottomCut ?? trigger.cut_class);
+    if (triggerFamily && family && triggerFamily !== family) continue;
+    if (triggerCut && triggerCut !== (bottomCut || "none")) continue;
+
+    const guidanceRaw = text(row?.positive_guidance) || text(row?.rule_text);
+    const lower = `${text(row?.rule_text)} ${guidanceRaw}`.toLowerCase();
+    if (isSaree && (/\b(farshi|farsi|fasi|palazzo|sharara|salwar|trouser)\b/i.test(lower))) continue;
+    if (!isSaree && /\bsaree\b/i.test(lower) && !/\bkurti|kurta\b/i.test(lower)) continue;
+    if (/\b(farshi|farsi|fasi)\b/i.test(lower) && (isSaree || !bottomCut || FAMILY_NON_FARSHI.has(bottomCut))) continue;
+
+    const compacted = compactGuidance(guidanceRaw, MAX_REUSABLE_RULE_GUIDANCE_CHARS);
+    if (!compacted) continue;
+    const prefix = used ? "\n- " : "- ";
+    const available = MAX_REUSABLE_LEARNING_GUIDANCE_CHARS - used - prefix.length;
+    if (available < 2) break;
+    const guidance = compactGuidance(compacted, available);
+    if (!guidance) continue;
+    selected.push({ id, guidance });
+    used += prefix.length + guidance.length;
+  }
+
+  return {
+    ids: selected.map((entry) => entry.id),
+    guidance: selected.map((entry) => `- ${entry.guidance}`).join("\n"),
+  };
+}

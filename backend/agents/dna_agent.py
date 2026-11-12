@@ -36,9 +36,13 @@ SAREE_BASELINE_INVARIANTS = [
 ]
 
 KURTI_BASELINE_INVARIANTS = [
-    "Two distinct legs for bottom wear, never a circular skirt or palazzo.",
-    "Primary garment butti work and yoke embroidery must remain identical to uploaded photos.",
+    "Primary garment butti work, neckline, silhouette, and yoke embroidery must remain identical to uploaded photos.",
     "Rear garment construction is locked exclusively to direct back photo.",
+]
+
+FARSHI_BASELINE_INVARIANTS = [
+    "Two distinct legs for Farshi salwar bottom wear, never a circular skirt or open wide palazzo.",
+    "Farshi hem is quite narrow from the waist side, with a 6-inch joined hem panel tapering 4 inches inward from the upper hem seam.",
 ]
 
 
@@ -48,8 +52,9 @@ def _build_dna_extraction_prompt(sku_name: str, category_hint: str, references: 
 Reference roles provided: [{manifest}].
 CRITICAL RULES:
 1. Extract ONLY attributes visibly proven in these authoritative product images. Any attribute not clearly visible must be marked "unknown" (never guess or invent back details from front images).
-2. For Sarees: preserve drape style, pallu artwork, zari border width/weave, body butti, blouse neckline/sleeves, and enforce no trousers/pants.
-3. For Farshi Salwars: preserve two-leg construction, waist gathers, vertical flare, and joined hem panel (never label as palazzo or circular skirt).
+2. Scan ALL uploaded product slots (including mannequin/flat-lay and additional_product) for an included dupatta, stole, or shawl; record it if shown, while keeping top-only kurtis strictly top-only ("has_bottom_wear": false, "cut_class": "none").
+3. For Sarees: preserve drape style, pallu artwork, zari border width/weave, body butti, blouse neckline/sleeves, and enforce no trousers/pants.
+4. For Farshi Salwars ONLY: preserve two-leg construction, waist pleats + side-joint pleats, narrow hem relative to waist fullness, and 6-inch joined hem panel tapering 4 inches inward from upper hem seam. Never apply Farshi taper rules to non-Farshi cuts (palazzo, sharara, churidar, straight trouser, skirt).
 
 Reply with STRICT JSON only matching this schema:
 {{
@@ -163,8 +168,11 @@ class ProductDNAAgent:
             prohibited = list(dict.fromkeys(["trousers", "palazzo", "salwar", "circular_skirt", "floating_hand", *(raw.get("prohibited_changes") or [])]))
         else:
             has_bottom_ref = any(r.get("role") == "bottom" for r in references)
-            is_farshi_hint = bool(re.search(r"\b(?:farshi|farsi)\b", sku_name.lower()))
+            sku_lower = sku_name.lower()
+            has_neg_farshi = bool(re.search(r"\b(?:not|non|never|without|no)\s+(?:a\s+)?(?:farshi|farsi|fasi)\b", sku_lower))
+            is_farshi_hint = bool(re.search(r"\b(?:farshi|farsi|fasi)\b", sku_lower)) and not has_neg_farshi
             allowed_cuts = {"farshi", "straight", "palazzo", "sharara", "churidar", "skirt", "unknown", "none"}
+            explicit_non_farshi = {"straight", "palazzo", "sharara", "churidar", "skirt"}
             cut = str(bw_raw.get("cut_class") or "").lower().strip()
             has_bottom_wear = (
                 bool(bw_raw.get("has_bottom_wear"))
@@ -175,6 +183,10 @@ class ProductDNAAgent:
                 cut = "none"
             elif is_farshi_hint:
                 cut = "farshi"
+            elif cut in explicit_non_farshi:
+                cut = cut
+            elif has_bottom_ref and cut in {"", "unknown", "none"}:
+                cut = "farshi"
             elif cut not in allowed_cuts or not cut:
                 cut = "unknown"
 
@@ -182,10 +194,10 @@ class ProductDNAAgent:
                 has_bottom_wear=has_bottom_wear,
                 classification=str(
                     bw_raw.get("classification")
-                    or ("Farshi Salwar" if cut == "farshi" else ("none" if not has_bottom_wear else "unknown"))
+                    or ("Farshi Salwar" if cut == "farshi" else ("none" if not has_bottom_wear else cut.title()))
                 ),
                 cut_class=cut,  # type: ignore[arg-type]
-                two_leg_construction=bool(bw_raw.get("two_leg_construction", has_bottom_wear)),
+                two_leg_construction=bool(bw_raw.get("two_leg_construction", has_bottom_wear and cut != "skirt")),
                 waist_structure=str(bw_raw.get("waist_structure") or ("unknown" if has_bottom_wear else "none")),
                 flare_volume=str(bw_raw.get("flare_volume") or ("unknown" if has_bottom_wear else "none")),
                 joined_hem=bool(bw_raw.get("joined_hem", cut == "farshi")),
@@ -195,7 +207,15 @@ class ProductDNAAgent:
                 prohibited_cuts=["palazzo", "circular_skirt", "lehenga", "sharara_knee_joint"] if cut == "farshi" else [],
             )
             saree_details = None
-            invariants = list(dict.fromkeys([*KURTI_BASELINE_INVARIANTS, *(raw.get("explicit_invariants") or [])]))
+            invariants = list(
+                dict.fromkeys(
+                    [
+                        *KURTI_BASELINE_INVARIANTS,
+                        *(FARSHI_BASELINE_INVARIANTS if cut == "farshi" else []),
+                        *(raw.get("explicit_invariants") or []),
+                    ]
+                )
+            )
             prohibited = list(dict.fromkeys(["floating_hand", *(["palazzo", "circular_skirt"] if cut == "farshi" else []), *(raw.get("prohibited_changes") or [])]))
 
         return ProductDNAV2(
