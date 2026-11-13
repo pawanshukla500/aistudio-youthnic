@@ -50,22 +50,25 @@ export function matchImageAsset<T extends MatchableAsset>(
     if (candidate.fallbackUrl) {
       const fbNoQuery = candidate.fallbackUrl.split("?")[0].trim();
       if (fbNoQuery === noQuery) return true;
-      const fbClean = cleanPathString(candidate.fallbackUrl);
-      if (fbClean && fbClean === cleanQuery) return true;
     }
 
     // 3. Storage path boundary-aware matching
     const candClean = cleanPathString(candidate.storagePath);
-    if (!candClean) return false;
+    if (candClean) {
+      if (candClean === cleanQuery) return true;
+      if (cleanQuery.endsWith("/" + candClean)) return true;
+      if (candClean.endsWith("/" + cleanQuery)) return true;
+    }
 
-    // Exact path match
-    if (candClean === cleanQuery) return true;
-
-    // cleanQuery is a full URL ending in candidate storagePath (e.g. https://.../o/organizations/...)
-    if (cleanQuery.endsWith("/" + candClean)) return true;
-
-    // cleanQuery is a relative subpath or exact filename (e.g. "1-pose-hero.jpg" or "job/1-pose-hero.jpg")
-    if (candClean.endsWith("/" + cleanQuery)) return true;
+    // 4. Fallback URL path boundary-aware matching (if storagePath was absent or matched via URL)
+    if (candidate.fallbackUrl) {
+      const fallbackClean = cleanPathString(candidate.fallbackUrl);
+      if (fallbackClean) {
+        if (fallbackClean === cleanQuery) return true;
+        if (cleanQuery.endsWith("/" + fallbackClean)) return true;
+        if (fallbackClean.endsWith("/" + cleanQuery)) return true;
+      }
+    }
 
     return false;
   });

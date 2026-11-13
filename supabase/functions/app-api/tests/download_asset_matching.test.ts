@@ -92,6 +92,21 @@ Deno.test("matchImageAsset rejects non-existent or foreign storage path", () => 
   assertEquals(result, undefined);
 });
 
+Deno.test("matchImageAsset matches candidate when storagePath is empty and only fallbackUrl is populated", () => {
+  const assetsWithoutStoragePath = [
+    {
+      storagePath: "",
+      storageBackend: "firebase",
+      fallbackUrl: "https://firebasestorage.googleapis.com/v0/b/bucket/o/organizations%2F7d56360f-2c96-4eb2-923e-f22b7fe36605%2Fgenerated%2Fjob_abc-123%2F3-pose-back.jpg?alt=media&token=token-999",
+    },
+  ];
+  const byFilename = matchImageAsset(assetsWithoutStoragePath, "3-pose-back.jpg");
+  assertEquals(byFilename?.fallbackUrl, assetsWithoutStoragePath[0].fallbackUrl);
+
+  const byFullUrl = matchImageAsset(assetsWithoutStoragePath, assetsWithoutStoragePath[0].fallbackUrl);
+  assertEquals(byFullUrl?.fallbackUrl, assetsWithoutStoragePath[0].fallbackUrl);
+});
+
 Deno.test("matchImageAsset returns undefined on empty query", () => {
   assertEquals(matchImageAsset(ALLOWED_ASSETS, ""), undefined);
   assertEquals(matchImageAsset(ALLOWED_ASSETS, "   "), undefined);
