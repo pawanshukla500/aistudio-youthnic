@@ -44,10 +44,11 @@ type PendingHistoryAction = {
 };
 
 function base64ToBlob(base64: string, mimeType: string): Blob {
-  const binary = atob(base64);
+  const clean = base64.replace(/[\r\n\s]/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(clean);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mimeType || "image/png" });
+  return new Blob([bytes], { type: mimeType || "image/jpeg" });
 }
 
 // Firebase Storage download URLs render fine in <img> tags (no CORS needed to display an
@@ -58,17 +59,19 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 // Firebase Admin credentials and hands them back as base64. Fall back to a direct fetch for
 // any pose missing a storagePath (e.g. legacy rows), or if the proxy call fails.
 async function fetchPoseImageBlob(jobId: string, pose: any): Promise<{ blob?: Blob; base64?: string; mimeType?: string }> {
-  if (pose.storagePath) {
+  const pathOrUrl = String(pose.storagePath || pose.outputUrl || "").trim();
+  if (pathOrUrl) {
     try {
       const result = await invokeAppApi<{ base64: string; mimeType: string }>("jobs.downloadAsset", {
         jobId,
-        storagePath: pose.storagePath,
+        storagePath: pathOrUrl,
       });
-      return { base64: result.base64, mimeType: result.mimeType };
+      if (result?.base64) return { base64: result.base64, mimeType: result.mimeType };
     } catch (err) {
       console.error("Proxied image download failed, falling back to direct fetch", err);
     }
   }
+  if (!pose.outputUrl) throw new Error("No image URL or storage path available for this pose.");
   const response = await fetch(pose.outputUrl);
   if (!response.ok) throw new Error("Image download failed");
   return { blob: await response.blob() };
@@ -433,7 +436,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       // One batched call fetches every pose's bytes in a single round trip (the server fetches
       // them from Firebase in parallel, sharing one auth token) instead of one function call per
       // image — that per-image round-tripping was what made "Download ZIP" slow.
-      const storagePaths = [...new Set(storedPoses.map((pose: any) => visiblePoseStoragePath(pose)).filter(Boolean))];
+      const storagePaths = [...new Set(storedPoses.map((pose: any) => visiblePoseStoragePath(pose) || visiblePoseOutputUrl(pose)).filter(Boolean))];
       const assetByStoragePath = new Map<string, { base64: string; mimeType: string }>();
       if (storagePaths.length) {
         try {
@@ -441,7 +444,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             assets: Array<{ storagePath: string; base64?: string; mimeType?: string; error?: string }>;
           }>("jobs.downloadAssets", { jobId, storagePaths });
           for (const asset of result.assets) {
-            if (asset.base64) assetByStoragePath.set(asset.storagePath, { base64: asset.base64, mimeType: asset.mimeType || "image/png" });
+            if (asset.base64) assetByStoragePath.set(asset.storagePath, { base64: asset.base64, mimeType: asset.mimeType || "image/jpeg" });
           }
         } catch (err) {
           console.error("Batched ZIP download failed, falling back to per-image downloads", err);
@@ -452,7 +455,9 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       const promises = storedPoses.map(async (pose: any, i: number) => {
         try {
           const asset = visiblePoseAsset(pose);
-          const cachedAsset = assetByStoragePath.get(asset.storagePath);
+          const cachedAsset = (asset.storagePath && assetByStoragePath.get(asset.storagePath)) ||
+            (asset.outputUrl && assetByStoragePath.get(asset.outputUrl)) ||
+            [...assetByStoragePath.entries()].find(([path]) => (asset.storagePath && path.endsWith(asset.storagePath.replace(/^\/+/, ""))) || (asset.storagePath && asset.storagePath.endsWith(path.replace(/^\/+/, ""))))?.[1];
           const safeTitle = String(pose.title || "pose").replace(/[^a-z0-9]/gi, "_").toLowerCase();
           const poseNumber = Number(pose.poseNumber) || i + 1;
 

@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import * as ExcelJS from "https://esm.sh/exceljs@4.4.0";
 import { encodeBase64, decodeBase64 } from "jsr:@std/encoding/base64";
 import { deleteFirebaseObject, downloadFirebaseObject, uploadFirebaseObject, createFirebaseUser, updateFirebaseUser, deleteFirebaseUser } from "./firebase-admin.ts";
-import { claimGenerationRun, queueReuseResponse } from "../../../src/lib/generationRuns.ts";
+import { claimGenerationRun, queueReuseResponse, scopePoseRowsToJob, type PoseRowLike } from "../../../src/lib/generationRuns.ts";
 import { deliveredVersionTiming, stampPoseTiming } from "../../../src/lib/poseVersions.ts";
 import { applyRequestedBackground } from "./lib/sceneLock.ts";
 import { fetchFastApiWithRetry } from "./lib/fastApiClient.ts";
@@ -231,8 +231,16 @@ async function downloadCatalogObject(orgId: string, storagePath: string, storage
     if (!response.ok) throw new Error(`External asset download failed (${response.status}).`);
     return response.blob();
   }
-  assertCatalogReferenceOwnership(orgId, { role: "stored_asset", storagePath, storageBackend: "firebase", hash: "", filename: "stored-asset", mimeType: "", size: 0 });
-  return downloadFirebaseObject(storagePath);
+  try {
+    assertCatalogReferenceOwnership(orgId, { role: "stored_asset", storagePath, storageBackend: "firebase", hash: "", filename: "stored-asset", mimeType: "", size: 0 });
+    return await downloadFirebaseObject(storagePath);
+  } catch (firebaseError) {
+    if (fallbackUrl && /^https:\/\//i.test(fallbackUrl)) {
+      const response = await fetch(fallbackUrl);
+      if (response.ok) return await response.blob();
+    }
+    throw firebaseError;
+  }
 }
 
 async function deleteCatalogObject(orgId: string, storagePath: string, storageBackend: unknown) {
@@ -4322,11 +4330,19 @@ async function jobImageAssets(job: JsonRecord) {
     service.from("planning_assets").select("storage_path,storage_backend,image_url").eq("generation_job_id", job.job_id).eq("asset_role", "generated"),
   ]);
   const assets = [
-    ...(poses || []).map((row) => ({ storagePath: String(row.storage_path || ""), storageBackend: String(row.storage_backend || "firebase"), fallbackUrl: String(row.output_url || "") })),
+    ...(poses || []).map((row) => ({
+      storagePath: String(row.storage_path || row.output_url || ""),
+      storageBackend: String(row.storage_backend || "firebase"),
+      fallbackUrl: String(row.output_url || "")
+    })),
     ...rejectedAttemptAssets((poses || []) as JsonRecord[]),
-    ...(generatedAssets || []).map((row) => ({ storagePath: String(row.storage_path || ""), storageBackend: String(row.storage_backend || "firebase"), fallbackUrl: String(row.image_url || "") })),
-  ].filter((asset) => asset.storagePath);
-  return [...new Map(assets.map((asset) => [asset.storagePath, asset])).values()];
+    ...(generatedAssets || []).map((row) => ({
+      storagePath: String(row.storage_path || row.image_url || ""),
+      storageBackend: String(row.storage_backend || "firebase"),
+      fallbackUrl: String(row.image_url || "")
+    })),
+  ].filter((asset) => asset.storagePath || asset.fallbackUrl);
+  return [...new Map(assets.map((asset) => [asset.storagePath || asset.fallbackUrl, asset])).values()];
 }
 
 async function removeJob(request: Request, args: JsonRecord) {
@@ -4353,7 +4369,7 @@ async function removeJob(request: Request, args: JsonRecord) {
 // back empty). Proxy the bytes through this already-authenticated, same-origin function
 // instead, using the Firebase Admin credentials this worker already holds.
 async function downloadGeneratedAsset(request: Request, args: JsonRecord) {
-  const { workspace } = await workspaceFor(request, "studio.generate");
+  const { workspace } = await workspaceFor(request, "planning.view");
   const jobId = String(args.jobId || "");
   const storagePath = String(args.storagePath || "");
   if (!jobId || !storagePath) throw new Error("jobId and storagePath are required.");
@@ -4361,9 +4377,15 @@ async function downloadGeneratedAsset(request: Request, args: JsonRecord) {
   if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
   const allowed = await jobImageAssets(job);
-  const asset = allowed.find((candidate) => candidate.storagePath === storagePath);
+  const normalizedStoragePath = storagePath.replace(/^\/+/, "");
+  const asset = allowed.find((candidate) =>
+    candidate.storagePath === storagePath ||
+    candidate.fallbackUrl === storagePath ||
+    (normalizedStoragePath && candidate.storagePath.endsWith(normalizedStoragePath)) ||
+    (candidate.storagePath && normalizedStoragePath.endsWith(candidate.storagePath.replace(/^\/+/, "")))
+  );
   if (!asset) throw new Error("This image does not belong to the requested generation job.");
-  const blob = await downloadCatalogObject(workspace.organization.id, storagePath, asset.storageBackend, asset.fallbackUrl);
+  const blob = await downloadCatalogObject(workspace.organization.id, asset.storagePath, asset.storageBackend, asset.fallbackUrl);
   return { base64: await blobToBase64(blob), mimeType: blob.type || "image/png" };
 }
 
@@ -4373,7 +4395,7 @@ async function downloadGeneratedAsset(request: Request, args: JsonRecord) {
 // This does one job lookup, one batched ownership check, and fetches every image in parallel
 // within a single invocation (one shared token), so the client makes exactly one round trip.
 async function downloadGeneratedAssets(request: Request, args: JsonRecord) {
-  const { workspace } = await workspaceFor(request, "studio.generate");
+  const { workspace } = await workspaceFor(request, "planning.view");
   const jobId = String(args.jobId || "");
   const storagePaths = [...new Set((Array.isArray(args.storagePaths) ? args.storagePaths : []).map((value) => String(value || "")).filter(Boolean))];
   if (!jobId || !storagePaths.length) throw new Error("jobId and storagePaths are required.");
@@ -4382,10 +4404,16 @@ async function downloadGeneratedAssets(request: Request, args: JsonRecord) {
   if (!job) throw new Error("Generation job not found.");
   const allowed = await jobImageAssets(job);
   const assetResults = await Promise.all(storagePaths.map(async (storagePath) => {
-    const asset = allowed.find((candidate) => candidate.storagePath === storagePath);
+    const normalizedStoragePath = storagePath.replace(/^\/+/, "");
+    const asset = allowed.find((candidate) =>
+      candidate.storagePath === storagePath ||
+      candidate.fallbackUrl === storagePath ||
+      (normalizedStoragePath && candidate.storagePath.endsWith(normalizedStoragePath)) ||
+      (candidate.storagePath && normalizedStoragePath.endsWith(candidate.storagePath.replace(/^\/+/, "")))
+    );
     if (!asset) return { storagePath, error: "This image does not belong to the requested generation job." };
     try {
-      const blob = await downloadCatalogObject(workspace.organization.id, storagePath, asset.storageBackend, asset.fallbackUrl);
+      const blob = await downloadCatalogObject(workspace.organization.id, asset.storagePath, asset.storageBackend, asset.fallbackUrl);
       return { storagePath, base64: await blobToBase64(blob), mimeType: blob.type || "image/png" };
     } catch (error) {
       return { storagePath, error: errorMessage(error) };
@@ -4399,7 +4427,7 @@ async function downloadCatalogProductionAssets(request: Request, args: JsonRecor
   const workItemId = String(args.workItemId || "");
   const requestedPaths = new Set(
     (Array.isArray(args.storagePaths) ? args.storagePaths : [])
-      .map((value) => String(value || "").trim())
+      .map((value) => String(value || "").trim().replace(/^\/+/, ""))
       .filter(Boolean),
   );
   const requestedPoseIndexes = new Set(
@@ -4409,23 +4437,26 @@ async function downloadCatalogProductionAssets(request: Request, args: JsonRecor
   );
   if (!workItemId) throw new Error("A catalog work item is required.");
   const { data: workItem, error: workItemError } = await service.from("catalog_work_items")
-    .select("id,catalog_session_id")
+    .select("id,catalog_session_id,generation_job_id")
     .eq("id", workItemId)
     .eq("organization_id", workspace.organization.id)
     .maybeSingle();
   if (workItemError) throw new Error(workItemError.message);
   if (!workItem?.catalog_session_id) throw new Error("This work item has no generated session assets.");
   const { data: poses, error: posesError } = await service.from("session_generations")
-    .select("generation_id,pose_index,title,storage_path,storage_backend,output_url,status")
+    .select("generation_id,pose_index,title,storage_path,storage_backend,output_url,status,generation_data")
     .eq("session_id", workItem.catalog_session_id)
     .eq("status", "completed")
     .order("pose_index");
   if (posesError) throw new Error(posesError.message);
-  const selected = (poses || []).filter((pose) => {
-    const storagePath = String(pose.storage_path || "");
+  const scopedPoses = workItem.generation_job_id
+    ? scopePoseRowsToJob(poses || [], workItem.generation_job_id)
+    : (poses || []);
+  const selected = scopedPoses.filter((pose) => {
+    const storagePath = String(pose.storage_path || "").trim().replace(/^\/+/, "");
     if (requestedPoseIndexes.size && !requestedPoseIndexes.has(Number(pose.pose_index || 0))) return false;
-    return !requestedPaths.size || requestedPaths.has(storagePath);
-  }).slice(0, 10);
+    return !requestedPaths.size || requestedPaths.has(storagePath) || (pose.output_url && requestedPaths.has(String(pose.output_url).trim()));
+  });
   if (!selected.length) throw new Error("No completed generated assets were selected.");
 
   const assets = await Promise.all(selected.map(async (pose) => {
