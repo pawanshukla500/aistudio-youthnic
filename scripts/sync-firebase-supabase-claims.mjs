@@ -108,10 +108,15 @@ async function listUsers(projectId, token) {
   return users;
 }
 
-const env = parseEnv(await readFile(resolve(".env.local"), "utf8"));
-const projectId = env.FIREBASE_PROJECT_ID || env.VITE_FIREBASE_PROJECT_ID;
-if (!projectId) throw new Error("FIREBASE_PROJECT_ID is missing from .env.local.");
-const account = serviceAccountFrom(env.FIREBASE_SERVICE_ACCOUNT);
+let env = {};
+try {
+  env = parseEnv(await readFile(resolve(".env.local"), "utf8"));
+} catch {
+  env = process.env;
+}
+const projectId = env.FIREBASE_PROJECT_ID || env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID;
+if (!projectId) throw new Error("FIREBASE_PROJECT_ID is missing from environment.");
+const account = serviceAccountFrom(env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT);
 const token = await accessToken(account);
 const users = await listUsers(projectId, token);
 const apply = process.argv.includes("--apply");
