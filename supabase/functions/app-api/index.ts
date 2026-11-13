@@ -232,6 +232,11 @@ async function downloadCatalogObject(orgId: string, storagePath: string, storage
     if (!response.ok) throw new Error(`External asset download failed (${response.status}).`);
     return response.blob();
   }
+  if (!storagePath && fallbackUrl && /^https:\/\//i.test(fallbackUrl)) {
+    const response = await fetch(fallbackUrl);
+    if (!response.ok) throw new Error(`Fallback asset download failed (${response.status}).`);
+    return response.blob();
+  }
   try {
     assertCatalogReferenceOwnership(orgId, { role: "stored_asset", storagePath, storageBackend: "firebase", hash: "", filename: "stored-asset", mimeType: "", size: 0 });
     return await downloadFirebaseObject(storagePath);
