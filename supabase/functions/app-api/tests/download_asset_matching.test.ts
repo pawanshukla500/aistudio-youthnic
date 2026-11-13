@@ -50,13 +50,41 @@ Deno.test("matchImageAsset matches relative filename suffix with boundary", () =
 });
 
 Deno.test("matchImageAsset does NOT collide on partial substring suffix (1-pose-hero vs 11-pose-hero)", () => {
-  // Querying for 1-pose-hero.jpg must return ALLOWED_ASSETS[0] and NOT ALLOWED_ASSETS[1]
   const result = matchImageAsset(ALLOWED_ASSETS, "1-pose-hero.jpg");
   assertEquals(result?.storagePath, ALLOWED_ASSETS[0].storagePath);
 
-  // Querying for pose-hero.jpg (missing pose number) must return undefined to prevent ambiguity
   const ambiguous = matchImageAsset(ALLOWED_ASSETS, "pose-hero.jpg");
   assertEquals(ambiguous, undefined);
+});
+
+Deno.test("matchImageAsset rejects root slash and query-only paths", () => {
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, "/"), undefined);
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, "///"), undefined);
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, "?alt=media"), undefined);
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, "/?alt=media"), undefined);
+});
+
+Deno.test("matchImageAsset rejects extension-only queries", () => {
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, ".jpg"), undefined);
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, "jpg"), undefined);
+});
+
+Deno.test("matchImageAsset rejects partial filename substrings without slash boundary", () => {
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, "hero.jpg"), undefined);
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, "-hero.jpg"), undefined);
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, "side.jpg"), undefined);
+});
+
+Deno.test("matchImageAsset handles trailing slashes and backslashes", () => {
+  const resultTrailing = matchImageAsset(ALLOWED_ASSETS, "1-pose-hero.jpg/");
+  assertEquals(resultTrailing?.storagePath, ALLOWED_ASSETS[0].storagePath);
+
+  const resultBackslash = matchImageAsset(ALLOWED_ASSETS, "organizations\\7d56360f-2c96-4eb2-923e-f22b7fe36605\\generated\\job_abc-123\\1-pose-hero.jpg");
+  assertEquals(resultBackslash?.storagePath, ALLOWED_ASSETS[0].storagePath);
+});
+
+Deno.test("matchImageAsset rejects strings with null bytes", () => {
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, "1-pose-hero.jpg\0"), undefined);
 });
 
 Deno.test("matchImageAsset rejects non-existent or foreign storage path", () => {
@@ -65,6 +93,6 @@ Deno.test("matchImageAsset rejects non-existent or foreign storage path", () => 
 });
 
 Deno.test("matchImageAsset returns undefined on empty query", () => {
-  const result = matchImageAsset(ALLOWED_ASSETS, "");
-  assertEquals(result, undefined);
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, ""), undefined);
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, "   "), undefined);
 });
