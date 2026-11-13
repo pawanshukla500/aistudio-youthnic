@@ -166,7 +166,8 @@ function extension(mimeType = "image/png") {
 }
 
 function base64Blob(base64: string, mimeType: string) {
-  const binary = window.atob(base64);
+  const clean = base64.replace(/[\r\n\s]/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  const binary = window.atob(clean);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return new Blob([bytes], { type: mimeType });

@@ -231,8 +231,16 @@ async function downloadCatalogObject(orgId: string, storagePath: string, storage
     if (!response.ok) throw new Error(`External asset download failed (${response.status}).`);
     return response.blob();
   }
-  assertCatalogReferenceOwnership(orgId, { role: "stored_asset", storagePath, storageBackend: "firebase", hash: "", filename: "stored-asset", mimeType: "", size: 0 });
-  return downloadFirebaseObject(storagePath);
+  try {
+    assertCatalogReferenceOwnership(orgId, { role: "stored_asset", storagePath, storageBackend: "firebase", hash: "", filename: "stored-asset", mimeType: "", size: 0 });
+    return await downloadFirebaseObject(storagePath);
+  } catch (firebaseError) {
+    if (fallbackUrl && /^https:\/\//i.test(fallbackUrl)) {
+      const response = await fetch(fallbackUrl);
+      if (response.ok) return await response.blob();
+    }
+    throw firebaseError;
+  }
 }
 
 async function deleteCatalogObject(orgId: string, storagePath: string, storageBackend: unknown) {
@@ -4361,9 +4369,15 @@ async function downloadGeneratedAsset(request: Request, args: JsonRecord) {
   if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
   const allowed = await jobImageAssets(job);
-  const asset = allowed.find((candidate) => candidate.storagePath === storagePath);
+  const normalizedStoragePath = storagePath.replace(/^\/+/, "");
+  const asset = allowed.find((candidate) =>
+    candidate.storagePath === storagePath ||
+    candidate.fallbackUrl === storagePath ||
+    (normalizedStoragePath && candidate.storagePath.endsWith(normalizedStoragePath)) ||
+    (candidate.storagePath && normalizedStoragePath.endsWith(candidate.storagePath.replace(/^\/+/, "")))
+  );
   if (!asset) throw new Error("This image does not belong to the requested generation job.");
-  const blob = await downloadCatalogObject(workspace.organization.id, storagePath, asset.storageBackend, asset.fallbackUrl);
+  const blob = await downloadCatalogObject(workspace.organization.id, asset.storagePath, asset.storageBackend, asset.fallbackUrl);
   return { base64: await blobToBase64(blob), mimeType: blob.type || "image/png" };
 }
 
@@ -4382,10 +4396,16 @@ async function downloadGeneratedAssets(request: Request, args: JsonRecord) {
   if (!job) throw new Error("Generation job not found.");
   const allowed = await jobImageAssets(job);
   const assetResults = await Promise.all(storagePaths.map(async (storagePath) => {
-    const asset = allowed.find((candidate) => candidate.storagePath === storagePath);
+    const normalizedStoragePath = storagePath.replace(/^\/+/, "");
+    const asset = allowed.find((candidate) =>
+      candidate.storagePath === storagePath ||
+      candidate.fallbackUrl === storagePath ||
+      (normalizedStoragePath && candidate.storagePath.endsWith(normalizedStoragePath)) ||
+      (candidate.storagePath && normalizedStoragePath.endsWith(candidate.storagePath.replace(/^\/+/, "")))
+    );
     if (!asset) return { storagePath, error: "This image does not belong to the requested generation job." };
     try {
-      const blob = await downloadCatalogObject(workspace.organization.id, storagePath, asset.storageBackend, asset.fallbackUrl);
+      const blob = await downloadCatalogObject(workspace.organization.id, asset.storagePath, asset.storageBackend, asset.fallbackUrl);
       return { storagePath, base64: await blobToBase64(blob), mimeType: blob.type || "image/png" };
     } catch (error) {
       return { storagePath, error: errorMessage(error) };
