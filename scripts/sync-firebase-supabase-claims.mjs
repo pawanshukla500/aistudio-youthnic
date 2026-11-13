@@ -35,7 +35,7 @@ function base64Url(value) {
 }
 
 function serviceAccountFrom(raw) {
-  if (!raw) throw new Error("FIREBASE_SERVICE_ACCOUNT is missing from .env.local.");
+  if (!raw) throw new Error("FIREBASE_SERVICE_ACCOUNT is missing from environment or .env.local.");
   for (const candidate of [raw, Buffer.from(raw, "base64").toString("utf8")]) {
     try {
       const parsed = JSON.parse(candidate);
@@ -112,11 +112,17 @@ let env = {};
 try {
   env = parseEnv(await readFile(resolve(".env.local"), "utf8"));
 } catch {
-  env = process.env;
+  // .env.local is optional; environment variables will be used as fallback
 }
-const projectId = env.FIREBASE_PROJECT_ID || env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID;
+const accountRaw = process.env.FIREBASE_SERVICE_ACCOUNT || env.FIREBASE_SERVICE_ACCOUNT;
+const account = serviceAccountFrom(accountRaw);
+const projectId =
+  process.env.FIREBASE_PROJECT_ID ||
+  process.env.VITE_FIREBASE_PROJECT_ID ||
+  env.FIREBASE_PROJECT_ID ||
+  env.VITE_FIREBASE_PROJECT_ID ||
+  account.project_id;
 if (!projectId) throw new Error("FIREBASE_PROJECT_ID is missing from environment.");
-const account = serviceAccountFrom(env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT);
 const token = await accessToken(account);
 const users = await listUsers(projectId, token);
 const apply = process.argv.includes("--apply");
