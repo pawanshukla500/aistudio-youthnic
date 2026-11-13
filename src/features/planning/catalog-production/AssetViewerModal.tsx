@@ -45,7 +45,7 @@ function base64Blob(base64: string, mimeType: string) {
   const binary = window.atob(clean);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
-  return new Blob([bytes], { type: mimeType });
+  return new Blob([bytes], { type: mimeType || "image/png" });
 }
 
 function extension(mimeType = "image/png") {
@@ -54,8 +54,8 @@ function extension(mimeType = "image/png") {
   return "png";
 }
 
-function safeFilename(value: string) {
-  return value.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "catalog";
+function safeFilename(value?: string | null) {
+  return String(value || "").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "catalog";
 }
 
 const referenceLabels: Record<string, string> = {
@@ -182,14 +182,20 @@ export function AssetViewerModal({ item, onClose }: { item: CatalogWorkItem; onC
     setError("");
     try {
       const [{ default: JSZip }, assets] = await Promise.all([import("jszip"), fetchAssets(completed)]);
+      const successfulAssets = (assets || []).filter((a) => a.base64);
+      if (!successfulAssets.length) {
+        throw new Error(assets?.[0]?.error || "None of the pose images could be downloaded.");
+      }
       const zip = new JSZip();
-      for (const asset of assets) {
-        if (!asset.base64) continue;
+      for (const asset of successfulAssets) {
         const mimeType = asset.mimeType || "image/png";
-        zip.file(`pose-${asset.poseIndex}.${extension(mimeType)}`, asset.base64, { base64: true });
+        zip.file(`pose-${asset.poseIndex}.${extension(mimeType)}`, asset.base64!, { base64: true });
       }
       const blob = await zip.generateAsync({ type: "blob" });
       saveAs(blob, `${safeFilename(item.sku_name)}-poses.zip`);
+      if (successfulAssets.length < completed.length) {
+        setError(`ZIP saved, but ${completed.length - successfulAssets.length} of ${completed.length} poses failed to download.`);
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {

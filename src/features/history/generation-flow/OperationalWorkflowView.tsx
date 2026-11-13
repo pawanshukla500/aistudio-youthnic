@@ -155,8 +155,8 @@ function elapsedSeconds(start: unknown, end: unknown) {
     : 0;
 }
 
-function safeFilename(value: string) {
-  return value.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "catalog";
+function safeFilename(value?: string | null) {
+  return String(value || "").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "catalog";
 }
 
 function extension(mimeType = "image/png") {
@@ -170,7 +170,7 @@ function base64Blob(base64: string, mimeType: string) {
   const binary = window.atob(clean);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return new Blob([bytes], { type: mimeType });
+  return new Blob([bytes], { type: mimeType || "image/png" });
 }
 
 function stageTone(stage: WorkflowStage) {
@@ -394,11 +394,21 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
     setNotice(null);
     try {
       const [{ default: JSZip }, result] = await Promise.all([import("jszip"), fetchAssets(available)]);
+      const successfulAssets = (result.assets || []).filter((a) => a.base64);
+      if (!successfulAssets.length) {
+        throw new Error(result.assets?.[0]?.error || "None of the pose images could be downloaded.");
+      }
       const zip = new JSZip();
-      for (const asset of result.assets) {
-        if (asset.base64) zip.file(`pose-${asset.poseIndex}.${extension(asset.mimeType)}`, asset.base64, { base64: true });
+      for (const asset of successfulAssets) {
+        zip.file(`pose-${asset.poseIndex}.${extension(asset.mimeType)}`, asset.base64!, { base64: true });
       }
       saveAs(await zip.generateAsync({ type: "blob" }), `${safeFilename(item.sku_name)}-approved-pose-set.zip`);
+      if (successfulAssets.length < available.length) {
+        setNotice({
+          tone: "error",
+          text: `ZIP saved, but ${available.length - successfulAssets.length} of ${available.length} poses failed to download.`,
+        });
+      }
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     } finally {
