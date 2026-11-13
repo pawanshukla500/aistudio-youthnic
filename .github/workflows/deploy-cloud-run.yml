@@ -62,9 +62,13 @@ jobs:
       - name: Verify database types sync
         run: |
           if [ -n "${{ secrets.RAILWAY_DATABASE_URL }}" ]; then
-            supabase gen types typescript --db-url "${{ secrets.RAILWAY_DATABASE_URL }}" > generated.types.ts
+            supabase gen types typescript --db-url "${{ secrets.RAILWAY_DATABASE_URL }}" > raw.types.ts
+            sed -n '/^export /,$p' raw.types.ts > generated.types.ts
+            if [ ! -s generated.types.ts ]; then cp raw.types.ts generated.types.ts; fi
           elif [ -n "${{ vars.SUPABASE_PROJECT_REF }}" ] && [ -n "${{ secrets.SUPABASE_ACCESS_TOKEN }}" ]; then
-            supabase gen types typescript --project-id ${{ vars.SUPABASE_PROJECT_REF }} > generated.types.ts
+            supabase gen types typescript --project-id ${{ vars.SUPABASE_PROJECT_REF }} > raw.types.ts
+            sed -n '/^export /,$p' raw.types.ts > generated.types.ts
+            if [ ! -s generated.types.ts ]; then cp raw.types.ts generated.types.ts; fi
           else
             echo "Skipping remote type generation check (no credentials provided)."
             exit 0
