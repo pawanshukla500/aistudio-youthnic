@@ -6,6 +6,7 @@ import { claimGenerationRun, queueReuseResponse, scopePoseRowsToJob, type PoseRo
 import { deliveredVersionTiming, stampPoseTiming } from "../../../src/lib/poseVersions.ts";
 import { applyRequestedBackground } from "./lib/sceneLock.ts";
 import { fetchFastApiWithRetry } from "./lib/fastApiClient.ts";
+import { matchImageAsset } from "./lib/downloadAssetMatching.ts";
 import {
   ANALYSIS_VERSION,
   CONSISTENCY_RULES,
@@ -4371,19 +4372,13 @@ async function removeJob(request: Request, args: JsonRecord) {
 async function downloadGeneratedAsset(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.view");
   const jobId = String(args.jobId || "");
-  const storagePath = String(args.storagePath || "");
+  const storagePath = String(args.storagePath || args.fallbackUrl || args.url || "");
   if (!jobId || !storagePath) throw new Error("jobId and storagePath are required.");
   const { data: job, error: jobError } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
   if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
   const allowed = await jobImageAssets(job);
-  const normalizedStoragePath = storagePath.replace(/^\/+/, "");
-  const asset = allowed.find((candidate) =>
-    candidate.storagePath === storagePath ||
-    candidate.fallbackUrl === storagePath ||
-    (normalizedStoragePath && candidate.storagePath.endsWith(normalizedStoragePath)) ||
-    (candidate.storagePath && normalizedStoragePath.endsWith(candidate.storagePath.replace(/^\/+/, "")))
-  );
+  const asset = matchImageAsset(allowed, storagePath);
   if (!asset) throw new Error("This image does not belong to the requested generation job.");
   const blob = await downloadCatalogObject(workspace.organization.id, asset.storagePath, asset.storageBackend, asset.fallbackUrl);
   return { base64: await blobToBase64(blob), mimeType: blob.type || "image/png" };
@@ -4397,20 +4392,14 @@ async function downloadGeneratedAsset(request: Request, args: JsonRecord) {
 async function downloadGeneratedAssets(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "planning.view");
   const jobId = String(args.jobId || "");
-  const storagePaths = [...new Set((Array.isArray(args.storagePaths) ? args.storagePaths : []).map((value) => String(value || "")).filter(Boolean))];
+  const storagePaths = [...new Set((Array.isArray(args.storagePaths) ? args.storagePaths : Array.isArray(args.urls) ? args.urls : []).map((value) => String(value || "")).filter(Boolean))];
   if (!jobId || !storagePaths.length) throw new Error("jobId and storagePaths are required.");
   const { data: job, error: jobError } = await service.from("generation_jobs").select("job_id,session_id,org_id").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
   if (jobError) throw new Error(jobError.message);
   if (!job) throw new Error("Generation job not found.");
   const allowed = await jobImageAssets(job);
   const assetResults = await Promise.all(storagePaths.map(async (storagePath) => {
-    const normalizedStoragePath = storagePath.replace(/^\/+/, "");
-    const asset = allowed.find((candidate) =>
-      candidate.storagePath === storagePath ||
-      candidate.fallbackUrl === storagePath ||
-      (normalizedStoragePath && candidate.storagePath.endsWith(normalizedStoragePath)) ||
-      (candidate.storagePath && normalizedStoragePath.endsWith(candidate.storagePath.replace(/^\/+/, "")))
-    );
+    const asset = matchImageAsset(allowed, storagePath);
     if (!asset) return { storagePath, error: "This image does not belong to the requested generation job." };
     try {
       const blob = await downloadCatalogObject(workspace.organization.id, asset.storagePath, asset.storageBackend, asset.fallbackUrl);
