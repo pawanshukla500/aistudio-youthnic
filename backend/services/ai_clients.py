@@ -90,9 +90,13 @@ def _is_allowed_local_path(local_path: str) -> bool:
         resolved = os.path.realpath(local_path)
         repo_tests_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "tests"))
         allowed_roots = [repo_tests_dir]
-        desktop_proj = os.path.realpath(r"C:\Users\Pawan Shukla\Desktop\Projec Images")
-        if os.path.isdir(desktop_proj):
-            allowed_roots.append(desktop_proj)
+        for candidate in [
+            r"C:\Users\Pawan Shukla\Desktop\Project Images",
+            r"C:\Users\Pawan Shukla\Desktop\Projec Images",
+        ]:
+            c_path = os.path.realpath(candidate)
+            if os.path.isdir(c_path):
+                allowed_roots.append(c_path)
         return any(
             resolved == root or resolved.startswith(root + os.sep)
             for root in allowed_roots

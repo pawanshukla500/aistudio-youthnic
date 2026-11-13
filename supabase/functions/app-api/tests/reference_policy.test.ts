@@ -367,3 +367,13 @@ Deno.test("selectReferences does not attach bottom wear to back pose for sarees"
   assertEquals(roles.includes("saree_back_drape"), true);
   assertEquals(roles.includes("bottom"), false);
 });
+
+Deno.test("missingRequiredReferenceLabels accepts standard front and back roles for saree", () => {
+  const references = [
+    { role: "front", hash: "front-hash", downloadUrl: "https://example.com/front.jpg" },
+    { role: "back", hash: "back-hash", downloadUrl: "https://example.com/back.jpg" },
+    { role: "style_reference", hash: "room", downloadUrl: "https://example.com/room.jpg" },
+  ];
+  const missing = missingRequiredReferenceLabels(references, "saree");
+  assertEquals(missing.length, 0);
+});

@@ -15,6 +15,7 @@ import {
   RefreshCcw,
   Search,
   Shield,
+  ShieldAlert,
   ShieldCheck,
   Trash2,
   UserCog,
@@ -188,7 +189,7 @@ function MemberEditor({
               Edit member access
             </h3>
             <p className="mt-1 text-sm text-secondary">
-              {member.user?.displayName} · {member.user?.email}
+              {member.user?.displayName || member.user?.email || "Member"} · {member.user?.email || "No email"}
             </p>
           </div>
           <button
@@ -401,13 +402,13 @@ function TeamEditor({
           <div className="mt-3 grid max-h-52 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
             {activeMembers.map((member) => {
               const selected = memberIds.has(member._id);
-              return <button key={member._id} type="button" onClick={() => toggleMember(member._id)} className={`flex items-center gap-3 rounded-xl border p-3 text-left ${selected ? "border-primary/30 bg-soft-blush" : "border-outline-variant/40 hover:bg-surface-container-low"}`}><span className={`grid h-5 w-5 shrink-0 place-items-center rounded-md border ${selected ? "border-primary bg-primary text-white" : "border-outline-variant bg-white"}`}>{selected && <Check className="h-3.5 w-3.5" />}</span><span className="min-w-0"><span className="block truncate text-sm font-bold text-on-surface">{member.user?.displayName}</span><span className="block truncate text-[10px] text-secondary">{member.user?.email}</span></span></button>;
+              return <button key={member._id} type="button" onClick={() => toggleMember(member._id)} className={`flex items-center gap-3 rounded-xl border p-3 text-left ${selected ? "border-primary/30 bg-soft-blush" : "border-outline-variant/40 hover:bg-surface-container-low"}`}><span className={`grid h-5 w-5 shrink-0 place-items-center rounded-md border ${selected ? "border-primary bg-primary text-white" : "border-outline-variant bg-white"}`}>{selected && <Check className="h-3.5 w-3.5" />}</span><span className="min-w-0"><span className="block truncate text-sm font-bold text-on-surface">{member.user?.displayName || member.user?.email || "Unknown user"}</span><span className="block truncate text-[10px] text-secondary">{member.user?.email}</span></span></button>;
             })}
             {!activeMembers.length && <p className="sm:col-span-2 rounded-xl border-2 border-dashed border-outline-variant/40 p-6 text-center text-sm text-secondary">Create an active organization member before assigning a team.</p>}
           </div>
         </div>
 
-        <label className="mt-5 block text-xs font-bold uppercase tracking-wider text-secondary">Team lead<select value={leadMemberId} onChange={(event) => setLeadMemberId(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary"><option value="">No designated lead</option>{activeMembers.filter((member) => memberIds.has(member._id)).map((member) => <option key={member._id} value={member._id}>{member.user?.displayName}</option>)}</select></label>
+        <label className="mt-5 block text-xs font-bold uppercase tracking-wider text-secondary">Team lead<select value={leadMemberId} onChange={(event) => setLeadMemberId(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary"><option value="">No designated lead</option>{activeMembers.filter((member) => memberIds.has(member._id)).map((member) => <option key={member._id} value={member._id}>{member.user?.displayName || member.user?.email || "Member"}</option>)}</select></label>
 
         {error && <div role="alert" className="mt-4 rounded-xl border border-danger/15 bg-danger-surface p-3 text-sm text-danger">{error}</div>}
         <div className="mt-7 flex justify-end gap-3">
@@ -421,9 +422,9 @@ function TeamEditor({
 
 export function Admin() {
   const { organization, user } = useWorkspace();
-  const { data: overview, error: _overviewError } = useQuery(api.admin.overview, {
+  const { data: overview, error: overviewError } = useQuery(api.admin.overview, {
     organizationId: organization._id,
-  }) as { data: AdminOverview | undefined, error: any };
+  }) as { data: AdminOverview | undefined; error: any };
   const createUser = useAction(api.authActions.createUser);
   const updateMemberAccess = useAction(api.authActions.updateMemberAccess);
   const deleteMember = useAction(api.authActions.deleteMember);
@@ -521,7 +522,7 @@ export function Admin() {
   const filteredMembers = useMemo(
     () =>
       (overview?.members || []).filter((member) =>
-        `${member.user?.displayName} ${member.user?.email} ${member.roles.map((role) => role.name).join(" ")}`
+        `${member.user?.displayName || ""} ${member.user?.email || ""} ${member.roles.map((role) => role.name).join(" ")}`
           .toLowerCase()
           .includes(search.toLowerCase()),
       ),
@@ -878,6 +879,18 @@ export function Admin() {
     } finally { setSaving(false); }
   };
 
+  if (overviewError)
+    return (
+      <div className="grid min-h-[60vh] place-items-center p-6">
+        <div className="max-w-md rounded-2xl border border-danger/20 bg-white p-6 text-center shadow-sm">
+          <ShieldAlert className="mx-auto h-8 w-8 text-danger" />
+          <h2 className="mt-3 text-lg font-bold text-on-surface">Could not load Administration</h2>
+          <p className="mt-2 text-sm leading-6 text-secondary">{getErrorMessage(overviewError, "Failed to load admin console.")}</p>
+          <button onClick={() => window.location.reload()} className="mt-5 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white">Retry</button>
+        </div>
+      </div>
+    );
+
   if (!overview)
     return (
       <div className="grid min-h-[60vh] place-items-center">
@@ -997,7 +1010,7 @@ export function Admin() {
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-container font-bold text-on-primary-container">
-                      {member.user?.displayName.slice(0, 1).toUpperCase()}
+                      {(member.user?.displayName || member.user?.email || "U").slice(0, 1).toUpperCase()}
                     </div>
                     <div className="min-w-0">
                       <p className="truncate text-sm font-bold text-on-surface">
