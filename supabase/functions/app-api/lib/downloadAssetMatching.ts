@@ -38,7 +38,7 @@ export function matchImageAsset<T extends MatchableAsset>(
   if (!raw || raw.includes("\0")) return undefined;
 
   const cleanQuery = cleanPathString(raw);
-  if (!cleanQuery) return undefined;
+  if (!cleanQuery || cleanQuery.includes("\0")) return undefined;
 
   const noQuery = raw.split("?")[0].trim();
 
