@@ -83,8 +83,10 @@ Deno.test("matchImageAsset handles trailing slashes and backslashes", () => {
   assertEquals(resultBackslash?.storagePath, ALLOWED_ASSETS[0].storagePath);
 });
 
-Deno.test("matchImageAsset rejects strings with null bytes", () => {
+Deno.test("matchImageAsset rejects strings with literal or encoded null bytes", () => {
   assertEquals(matchImageAsset(ALLOWED_ASSETS, "1-pose-hero.jpg\0"), undefined);
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, "1-pose-hero.jpg%00"), undefined);
+  assertEquals(matchImageAsset(ALLOWED_ASSETS, "%00"), undefined);
 });
 
 Deno.test("matchImageAsset rejects non-existent or foreign storage path", () => {
