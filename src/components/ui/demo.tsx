@@ -1,7 +1,12 @@
+import { CollectionSurfer } from "@/components/ui/collection-surfer";
 import { ImageGeneration } from "@/components/ui/ai-chat-image-generation-1";
 import { ImageSliderLoginDemo } from "@/components/ui/image-slider-login-demo";
 
-export { ImageSliderLoginDemo };
+export { ImageSliderLoginDemo, ImageGeneration };
+
+export function CollectionSurferDemo() {
+  return <CollectionSurfer variant="magnetic" />;
+}
 
 export function ImageGenerationDemo() {
   return (
@@ -17,4 +22,4 @@ export function ImageGenerationDemo() {
   );
 }
 
-export default ImageSliderLoginDemo;
+export default CollectionSurferDemo;
