@@ -8707,6 +8707,7 @@ async function warmFastApiProductDna(input: {
           })),
           force_refresh: false,
           auto_approve: false,
+          timeout_seconds: 18,
         }),
       },
     });
@@ -8742,6 +8743,7 @@ async function dnaExtractOperation(request: Request, args: JsonRecord) {
     references,
     force_refresh: Boolean(args.force_refresh),
     auto_approve: Boolean(args.auto_approve && canApprove),
+    timeout_seconds: 75,
   };
   if (typeof args.category === "string" && args.category.trim()) payload.category = args.category.trim();
   if (typeof args.garment_family === "string" && args.garment_family.trim()) payload.garment_family = args.garment_family.trim();

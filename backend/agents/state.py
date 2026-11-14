@@ -49,6 +49,7 @@ class AgentWorkflowState(TypedDict, total=False):
     updated_instruction: Optional[str]
     force_refresh: bool
     auto_approve: bool
+    vision_timeout_seconds: Optional[float]
 
     # Telemetry & Reliability
     provider_route: Dict[str, Any]

@@ -6,9 +6,10 @@
 UPDATE public.organization_ai_model_policies
 SET
   primary_model = CASE
-    WHEN primary_provider = 'meta'
-      AND primary_model IN ('muse-spark-1.2-contributor', 'muse-spark-1.2')
+    WHEN primary_provider = 'meta' AND primary_model = 'muse-spark-1.2-contributor'
     THEN 'muse-spark-1.3-contributor'
+    WHEN primary_provider = 'meta' AND primary_model = 'muse-spark-1.2'
+    THEN 'muse-spark-1.3'
     ELSE primary_model
   END,
   primary_reasoning = CASE
@@ -47,36 +48,14 @@ WHERE purpose = 'product_truth'
     )
   );
 
--- 2. Repair image_generation policies (primary_reasoning must be 'none'; default OpenAI model gpt-image-2.6-sunburst)
+-- 2. Repair invalid image_generation primary_reasoning values ('none' is required; preserve explicitly selected primary_model)
 UPDATE public.organization_ai_model_policies
 SET
-  primary_model = CASE
-    WHEN primary_provider = 'openai'
-      AND primary_model IN (
-        'gpt-image-2',
-        'gpt-image-2.5-flare-2026-09-08',
-        'gpt-image-2.5-flare',
-        'gpt-image-2.5-sunburst'
-      )
-    THEN 'gpt-image-2.6-sunburst'
-    ELSE primary_model
-  END,
   primary_reasoning = 'none',
   revision = revision + 1,
   updated_at = now()
 WHERE purpose = 'image_generation'
-  AND (
-    primary_reasoning IS DISTINCT FROM 'none'
-    OR (
-      primary_provider = 'openai'
-      AND primary_model IN (
-        'gpt-image-2',
-        'gpt-image-2.5-flare-2026-09-08',
-        'gpt-image-2.5-flare',
-        'gpt-image-2.5-sunburst'
-      )
-    )
-  );
+  AND primary_reasoning IS DISTINCT FROM 'none';
 
 -- 3. Update app_enroll_seller so new external sellers receive valid medium product_truth and 'none' image_generation reasoning
 create or replace function public.app_enroll_seller(

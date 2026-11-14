@@ -860,7 +860,7 @@ Deno.test("a failed hop's row is written before the fallback starts", async () =
 Deno.test("a stalled telemetry write takes at most the capped wait from the fallback, and is still awaited", async () => {
   const routes = productTruthRouteChain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR);
   let clock = 0;
-  let releaseWrite: () => void = () => {};
+  let releaseWrite: () => void = () => { };
   let writeFinished = false;
   const fallbackTimeouts: number[] = [];
   const events: string[] = [];

@@ -301,12 +301,17 @@ def _meta_vision_json(
             break
         for transient_attempt in range(2):
             elapsed = time.monotonic() - started_at
-            remaining = (deadline - time.monotonic()) if deadline is not None else float(timeout_s)
+            remaining = (
+                (deadline - time.monotonic())
+                if deadline is not None
+                else max(0.0, float(timeout_s) - elapsed)
+            )
             if remaining < 5:
                 last_err = last_err or RuntimeError("Meta vision deadline exhausted before retry")
                 should_stop = True
                 break
             per_call_timeout = int(max(5, min(float(timeout_s), remaining)))
+            attempt_effort = "low" if (effort in ("medium", "high") and remaining < 60.0) else effort
             try:
                 with httpx.Client(timeout=per_call_timeout) as client:
                     resp = client.post(
@@ -318,7 +323,7 @@ def _meta_vision_json(
                         json={
                             "model": model_name,
                             "input": [{"role": "user", "content": content_items}],
-                            "reasoning": {"effort": effort},
+                            "reasoning": {"effort": attempt_effort},
                             "max_output_tokens": 16384,
                         },
                     )
@@ -362,7 +367,7 @@ def _meta_vision_json(
                 return {
                     "provider": "meta",
                     "model": model_name,
-                    "reasoning": effort,
+                    "reasoning": attempt_effort,
                     "data": parsed,
                 }
             except Exception as exc:
@@ -480,6 +485,7 @@ def invoke_vision_json(
     prompt: str,
     images: List[Dict[str, Any]],
     purpose: str = "product_truth",
+    timeout_budget_s: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     """Call Meta Muse Spark (medium for analysis/pose_planning) -> GPT 6.1 Terra (medium) / Luna -> Gemini.
 
@@ -493,8 +499,13 @@ def invoke_vision_json(
         return None
 
     is_analysis = purpose in ("product_truth", "pose_planning")
-    meta_effort = "medium" if is_analysis else "low"
-    deadline = time.monotonic() + float(max(30, settings.VISION_TIMEOUT_SECONDS))
+    configured_budget = float(max(12, settings.VISION_TIMEOUT_SECONDS))
+    total_budget = (
+        max(12.0, min(configured_budget, float(timeout_budget_s)))
+        if timeout_budget_s is not None
+        else configured_budget
+    )
+    deadline = time.monotonic() + total_budget
     errors: List[str] = []
 
     if has_meta:
@@ -502,6 +513,7 @@ def invoke_vision_json(
         meta_cap = 115 if is_analysis else 25
         meta_timeout = int(max(12, min(meta_cap, remaining)))
         meta_deadline = min(deadline, time.monotonic() + float(meta_timeout))
+        meta_effort = "low" if (is_analysis and meta_timeout < 60) else ("medium" if is_analysis else "low")
         try:
             return _meta_vision_json(
                 prompt,

@@ -255,8 +255,8 @@ export function defaultThinkingLevel(
     return allowed.includes("low")
       ? "low"
       : allowed.includes("medium")
-      ? "medium"
-      : allowed[0];
+        ? "medium"
+        : allowed[0];
   }
   if (allowed.includes("none")) return "none";
   return allowed.includes("high") ? "high" : allowed[0];
@@ -486,7 +486,7 @@ export async function invokeWithHopTimeout<T>(
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const work = Promise.resolve().then(invoke);
-  work.catch(() => {});
+  work.catch(() => { });
   try {
     return await Promise.race([
       work,
@@ -923,8 +923,7 @@ export function validateAiModelRoute(
     return {
       valid: false,
       message: allowed.length
-        ? `Model ${
-          model || "(missing)"
+        ? `Model ${model || "(missing)"
         } is not approved for ${purpose} with ${providerRaw}.`
         : `${providerRaw} is not approved for ${purpose}.`,
     };
@@ -1032,14 +1031,14 @@ export type ProviderFailureInput = {
 export type VisionProviderFailure = {
   provider: AiProvider;
   code:
-    | "provider_budget_exhausted"
-    | "provider_rate_limited"
-    | "provider_unavailable"
-    | "provider_timeout"
-    | "provider_authentication_failed"
-    | "provider_invalid_request"
-    | "provider_incomplete_response"
-    | "provider_request_failed";
+  | "provider_budget_exhausted"
+  | "provider_rate_limited"
+  | "provider_unavailable"
+  | "provider_timeout"
+  | "provider_authentication_failed"
+  | "provider_invalid_request"
+  | "provider_incomplete_response"
+  | "provider_request_failed";
   status: number | null;
   retryable: boolean;
   fallbackEligible: boolean;

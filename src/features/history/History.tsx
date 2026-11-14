@@ -699,12 +699,12 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 
           <div
             className="flex items-center gap-1.5 rounded-lg border border-primary/25 bg-soft-blush px-2.5 py-1.5 font-medium shadow-xs"
-            title={`Vision Analysis Engine: ${job.analysisModel || "Meta Muse Spark 1.3 Contributor"}`}
+            title={`Vision Analysis Engine: ${job.analysisModel || "Not recorded"}`}
           >
             <Brain className="h-3.5 w-3.5 text-primary" />
             <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Analysis</span>
             <span className="font-bold text-primary truncate max-w-[130px]">
-              {formatModelName(job.analysisModel || "muse-spark-1.3-contributor")}
+              {job.analysisModel ? formatModelName(job.analysisModel) : "Not recorded"}
             </span>
           </div>
 
@@ -1828,10 +1828,10 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   <div className="rounded-xl border border-outline-variant/30 bg-white p-3">
                     <span className="block text-[10px] font-bold uppercase text-secondary">Vision Analysis Model</span>
                     <span className="mt-0.5 block font-mono text-xs font-bold text-on-surface">
-                      {job.analysisModel || "muse-spark-1.3-contributor"}
+                      {job.analysisModel || "Not recorded"}
                     </span>
                     <span className="mt-0.5 block text-[11px] font-semibold text-primary">
-                      {formatModelName(job.analysisModel || "muse-spark-1.3-contributor")}
+                      {job.analysisModel ? formatModelName(job.analysisModel) : "Not recorded"}
                     </span>
                   </div>
                   <div className="rounded-xl border border-outline-variant/30 bg-white p-3">

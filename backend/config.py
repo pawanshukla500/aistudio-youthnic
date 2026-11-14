@@ -53,9 +53,9 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
 
-    # Budgets & Timeouts
+    # Budgets & Timeouts (VISION_TIMEOUT_SECONDS stays inside synchronous 90s caller windows)
     MAX_JOB_COST_USD: float = 2.50
-    VISION_TIMEOUT_SECONDS: int = 180
+    VISION_TIMEOUT_SECONDS: int = 80
     IMAGE_GEN_TIMEOUT_SECONDS: int = 180
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
