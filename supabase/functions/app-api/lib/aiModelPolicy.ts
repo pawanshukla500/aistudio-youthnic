@@ -239,13 +239,14 @@ export function defaultThinkingLevel(
 ): AiThinkingLevel {
   const allowed = allowedThinkingLevels(route, purpose, options);
   if (purpose === "image_generation") return "none";
-  // Product-truth analysis uses high thinking for Meta Muse Spark and OpenAI
-  // GPT 6.1 Terra for deeper garment truth + pose planning; other vision models
-  // default to low when omitted so legacy routes stay safely within Edge time.
+  // Product-truth analysis defaults to medium thinking for Meta Muse Spark and
+  // OpenAI GPT 6.1 Terra for deep garment truth + pose planning within the Studio
+  // timeout window; other vision models default to low when omitted so legacy
+  // routes stay safely within Edge time.
   if (purpose === "product_truth") {
     const provider = text(route.provider);
     const model = text(route.model);
-    if ((provider === "meta" || model === "gpt-6.1-terra") && allowed.includes("high")) return "high";
+    if ((provider === "meta" || model === "gpt-6.1-terra") && allowed.includes("medium")) return "medium";
     if (provider === "openai" && allowed.includes("low")) return "low";
     if (allowed.includes("low")) return "low";
     if (allowed.includes("medium")) return "medium";
@@ -254,8 +255,8 @@ export function defaultThinkingLevel(
     return allowed.includes("low")
       ? "low"
       : allowed.includes("medium")
-      ? "medium"
-      : allowed[0];
+        ? "medium"
+        : allowed[0];
   }
   if (allowed.includes("none")) return "none";
   return allowed.includes("high") ? "high" : allowed[0];
@@ -268,13 +269,13 @@ export function defaultThinkingLevel(
 export const FAST_PRODUCT_TRUTH_ROUTE = {
   provider: "meta",
   model: "muse-spark-1.3",
-  thinkingLevel: "high",
+  thinkingLevel: "medium",
 } as const satisfies NormalizedAiModelRoute;
 
 export const FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE = {
   provider: "meta",
-  model: "muse-spark-1.2-contributor",
-  thinkingLevel: "high",
+  model: "muse-spark-1.3-contributor",
+  thinkingLevel: "medium",
 } as const satisfies NormalizedAiModelRoute;
 
 export const FAST_PRODUCT_TRUTH_GEMINI_ROUTE = {
@@ -298,7 +299,7 @@ export const LUNA_HIGH_THINKING_VISION_ROUTE = {
 export const OPENAI_TERRA_VISION_ROUTE = {
   provider: "openai",
   model: "gpt-6.1-terra",
-  thinkingLevel: "high",
+  thinkingLevel: "medium",
 } as const satisfies NormalizedAiModelRoute;
 
 /**
@@ -353,14 +354,14 @@ export function clampProductTruthThinking(route: NormalizedAiModelRoute): AiThin
   const allowed = allowedThinkingLevels(route, "product_truth", { strictJson: true });
   if (route.thinkingLevel === "none" && allowed.includes("none")) return "none";
   if (route.thinkingLevel === "minimal" && allowed.includes("minimal")) return "minimal";
-  // Luna is fast and cost-efficient. When explicitly configured with high thinking
-  // for deep reasoning across scene, styling, and 6-pose plans, preserve high thinking.
+  // Meta Muse Spark, GPT 6.1 Terra, and Luna preserve medium/high thinking when
+  // configured for deep reasoning across scene, styling, and 6-pose plans.
   if (
-    route.thinkingLevel === "high" &&
-    allowed.includes("high") &&
+    (route.thinkingLevel === "medium" || route.thinkingLevel === "high") &&
+    allowed.includes(route.thinkingLevel) &&
     (route.provider === "meta" || route.model === "gpt-6.1-terra" || route.model === "gpt-5.6-luna")
   ) {
-    return "high";
+    return route.thinkingLevel;
   }
   if (allowed.includes("low")) return "low";
   if (allowed.includes("minimal")) return "minimal";
@@ -406,14 +407,17 @@ export function dualProtocolPrimaryTimeoutMs(hopTimeoutMs: number): number {
 
 /**
  * When product truth analysis runs under a tight hop budget (< 60s, e.g. fallbacks
- * in a multi-hop chain), heavy reasoning is guaranteed to miss the hop timeout.
- * Clamps high thinking to low.
+ * in a multi-hop chain), heavy or medium reasoning is likely to miss the hop timeout.
+ * Clamps high/medium thinking to low.
  */
 export function clampProductTruthHopThinking(
   route: NormalizedAiModelRoute,
   timeoutMs: number,
 ): NormalizedAiModelRoute {
-  if (timeoutMs < 60_000 && route.thinkingLevel === "high") {
+  if (
+    timeoutMs < 60_000 &&
+    (route.thinkingLevel === "high" || route.thinkingLevel === "medium")
+  ) {
     return { ...route, thinkingLevel: "low" };
   }
   return route;
@@ -482,7 +486,7 @@ export async function invokeWithHopTimeout<T>(
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const work = Promise.resolve().then(invoke);
-  work.catch(() => {});
+  work.catch(() => { });
   try {
     return await Promise.race([
       work,
@@ -826,8 +830,8 @@ export function preferredModelId(
   if (provider === "openai" && (purpose === "qa" || purpose === "qa_escalation") && models.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
   if (provider === "openai" && models.includes("gpt-6.1-terra")) return "gpt-6.1-terra";
   if (provider === "openai" && models.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
-  if (provider === "meta" && models.includes("muse-spark-1.2-contributor")) return "muse-spark-1.2-contributor";
   if (provider === "meta" && models.includes("muse-spark-1.3-contributor")) return "muse-spark-1.3-contributor";
+  if (provider === "meta" && models.includes("muse-spark-1.2-contributor")) return "muse-spark-1.2-contributor";
   if (provider === "meta" && models.includes("muse-spark-1.3")) return "muse-spark-1.3";
   if (provider === "meta" && models.includes("muse-spark-1.2")) return "muse-spark-1.2";
   if (provider === "gemini" && models.includes("gemini-3.8-flash")) return "gemini-3.8-flash";
@@ -919,8 +923,7 @@ export function validateAiModelRoute(
     return {
       valid: false,
       message: allowed.length
-        ? `Model ${
-          model || "(missing)"
+        ? `Model ${model || "(missing)"
         } is not approved for ${purpose} with ${providerRaw}.`
         : `${providerRaw} is not approved for ${purpose}.`,
     };
@@ -1028,14 +1031,14 @@ export type ProviderFailureInput = {
 export type VisionProviderFailure = {
   provider: AiProvider;
   code:
-    | "provider_budget_exhausted"
-    | "provider_rate_limited"
-    | "provider_unavailable"
-    | "provider_timeout"
-    | "provider_authentication_failed"
-    | "provider_invalid_request"
-    | "provider_incomplete_response"
-    | "provider_request_failed";
+  | "provider_budget_exhausted"
+  | "provider_rate_limited"
+  | "provider_unavailable"
+  | "provider_timeout"
+  | "provider_authentication_failed"
+  | "provider_invalid_request"
+  | "provider_incomplete_response"
+  | "provider_request_failed";
   status: number | null;
   retryable: boolean;
   fallbackEligible: boolean;
@@ -1089,6 +1092,7 @@ export function classifyVisionProviderFailure(
   const status = statusNumber(input.status);
   const detail = failureText(input);
   const budgetExhausted =
+    status === 402 ||
     /monthly\s+(?:spend|spending)|spend(?:ing)?\s+cap|project\s+spend|billing|budget(?:\s+(?:has\s+)?(?:been\s+)?exceeded)?|quota(?:\s+(?:has\s+)?(?:been\s+)?exceeded)?|resource[_\s-]*exhausted|daily\s+limit/
       .test(detail);
   if (budgetExhausted) {
@@ -1107,8 +1111,9 @@ export function classifyVisionProviderFailure(
   // allowlisted id. 30–45s empty failures are timeouts, not 404s.
   if (
     status === 404 ||
-    /(?:model|models\/[\w.-]+)\s+(?:is\s+)?not found|not found for api version|is not available/
-      .test(detail)
+    ((status === null || status < 500) &&
+      /(?:model|models\/[\w.-]+)\s+(?:is\s+)?not found|not found for api version|is not available|does not exist|model_not_found|unsupported\s+model|model\s+(?:is\s+)?unsupported/
+        .test(detail))
   ) {
     return failure(
       provider,

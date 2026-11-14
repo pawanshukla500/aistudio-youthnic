@@ -33,7 +33,7 @@ def test_meta_muse_spark_sibling_retry_uses_canonical_input(monkeypatch):
 
         def post(self, url, headers=None, json=None):
             calls.append({"url": url, "json": json})
-            if json["model"] == "muse-spark-1.2-contributor":
+            if json["model"] == "muse-spark-1.3-contributor":
                 return FakeResp(404, {"error": {"message": "Model not found"}})
             return FakeResp(
                 200,
@@ -50,13 +50,15 @@ def test_meta_muse_spark_sibling_retry_uses_canonical_input(monkeypatch):
     )
     assert result is not None
     assert result["provider"] == "meta"
-    assert result["model"] == "muse-spark-1.3-contributor"
-    assert result["reasoning"] == "high"
+    assert result["model"] == "muse-spark-1.2-contributor"
+    assert result["reasoning"] == "medium"
+    assert calls[0]["json"]["model"] == "muse-spark-1.3-contributor"
+    assert calls[1]["json"]["model"] == "muse-spark-1.2-contributor"
     assert calls[0]["json"]["input"][0]["role"] == "user"
-    assert calls[0]["json"]["reasoning"] == {"effort": "high"}
+    assert calls[0]["json"]["reasoning"] == {"effort": "medium"}
 
 
-def test_invoke_vision_json_falls_back_to_gpt61_terra_high_for_analysis(monkeypatch):
+def test_invoke_vision_json_falls_back_to_gpt61_terra_medium_for_analysis(monkeypatch):
     monkeypatch.setattr(settings, "META_MODEL_API_KEY", "meta_test_key")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test-key")
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
@@ -66,7 +68,7 @@ def test_invoke_vision_json_falls_back_to_gpt61_terra_high_for_analysis(monkeypa
 
     openai_calls = []
 
-    def fake_openai(prompt, images, model="gpt-5.6-luna", reasoning_effort="high", timeout_s=60):
+    def fake_openai(prompt, images, model="gpt-5.6-luna", reasoning_effort="medium", timeout_s=60):
         openai_calls.append((model, reasoning_effort))
         return {
             "provider": "openai",
@@ -86,8 +88,8 @@ def test_invoke_vision_json_falls_back_to_gpt61_terra_high_for_analysis(monkeypa
     assert result is not None
     assert result["provider"] == "openai"
     assert result["model"] == "gpt-6.1-terra"
-    assert result["reasoning"] == "high"
-    assert openai_calls == [("gpt-6.1-terra", "high")]
+    assert result["reasoning"] == "medium"
+    assert openai_calls == [("gpt-6.1-terra", "medium")]
 
 
 def test_generate_catalog_image_gpt_2_6_multipart_and_size(monkeypatch):
@@ -168,7 +170,7 @@ def test_dna_agent_sets_draft_and_quarantines_style(monkeypatch):
 
     seen_roles = []
 
-    def fake_vision(prompt, images, purpose="product_truth"):
+    def fake_vision(prompt, images, purpose="product_truth", timeout_budget_s=None):
         seen_roles.extend(img.get("role") for img in images)
         return {
             "provider": "meta",
@@ -306,4 +308,105 @@ def test_meta_vision_json_records_terminal_failure_once(monkeypatch):
         ai_clients._meta_vision_json("prompt", [], effort="high")
 
     assert recorded == [("meta", False, "Meta internal error")]
+
+
+def test_invoke_vision_json_clamps_tight_budget_to_low_effort(monkeypatch):
+    from services import ai_clients
+
+    seen_efforts = []
+
+    class FakeResp:
+        status_code = 200
+        content = b"{}"
+
+        def json(self):
+            return {"output_text": '{"ok": true}'}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            seen_efforts.append((json["model"], json["reasoning"]["effort"]))
+            return FakeResp()
+
+    monkeypatch.setattr(ai_clients.settings, "META_MODEL_API_KEY", "meta-test-key")
+    monkeypatch.setattr(ai_clients.settings, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(ai_clients.settings, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(ai_clients.httpx, "Client", FakeClient)
+    monkeypatch.setattr(ai_clients.cache_manager, "record_provider_result", lambda *a, **k: None)
+
+    result = ai_clients.invoke_vision_json(
+        "prompt",
+        [],
+        purpose="product_truth",
+        timeout_budget_s=45.0,
+    )
+    assert result is not None
+    assert result["reasoning"] == "low"
+    assert seen_efforts == [("muse-spark-1.3-contributor", "low")]
+
+
+def test_meta_sibling_retry_clamps_medium_to_low_when_budget_drops_below_60s(monkeypatch):
+    from services import ai_clients
+
+    seen_calls = []
+    # Simulated clock: starts at t=100.0 (deadline=175.0 -> 75s remaining -> medium);
+    # after first 404 response, jumps +20s so sibling retry sees 55s remaining (<60s -> low).
+    clock = {"now": 100.0}
+
+    def fake_monotonic():
+        return clock["now"]
+
+    class FakeResp:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+            self.content = b"{}"
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            seen_calls.append((json["model"], json["reasoning"]["effort"]))
+            if json["model"] == "muse-spark-1.3-contributor":
+                clock["now"] += 20.0
+                return FakeResp(404, {"error": {"message": "Model not found"}})
+            return FakeResp(200, {"output_text": '{"ok": true}'})
+
+    monkeypatch.setattr(ai_clients.settings, "META_MODEL_API_KEY", "meta-test-key")
+    monkeypatch.setattr(ai_clients.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(ai_clients.httpx, "Client", FakeClient)
+    monkeypatch.setattr(ai_clients.cache_manager, "record_provider_result", lambda *a, **k: None)
+
+    result = ai_clients._meta_vision_json(
+        "prompt",
+        [],
+        timeout_s=75,
+        effort="medium",
+        deadline=175.0,
+    )
+    assert seen_calls == [
+        ("muse-spark-1.3-contributor", "medium"),
+        ("muse-spark-1.2-contributor", "low"),
+    ]
+    assert result["model"] == "muse-spark-1.2-contributor"
+    assert result["reasoning"] == "low"
+
 

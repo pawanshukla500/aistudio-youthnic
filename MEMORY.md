@@ -8,20 +8,20 @@ This file is the **Canonical Core Memory** for the Youthnic AI Fashion Studio co
 
 ### 1.1 Model Topology & Hierarchy
 Visual product truth extraction, category learning, and 6-pose scene planning rely on a deep-reasoning, high-reliability multi-tier hierarchy:
-1. **Primary Vision Model:** **Meta Muse Spark** (`muse-spark-1.2-contributor:high` or `muse-spark-1.3-contributor:high`; standard `muse-spark-1.3:high` when training opt-out is required)
-   - Runs at **`high` thinking** (`reasoning: { effort: "high" }`) during `product_truth` analysis & pose planning for deep visual garment extraction and Gen-Z / ethnic pose choreography (~6–12s typical live execution).
+1. **Primary Vision Model:** **Meta Muse Spark** (`muse-spark-1.3-contributor:medium` default, or `muse-spark-1.2-contributor:medium`; standard `muse-spark-1.3` when training opt-out is required)
+   - Runs at **`medium` thinking** (`reasoning: { effort: "medium" }`) by default during `product_truth` analysis & pose planning (~103s typical full 6-image extraction within the 125s Hop 1 window, avoiding `high` 113–125s+ timeout cascades while preserving `"high"` if explicitly selected in Administration).
    - Image QA (`qa`) continues running at `"low"` for sub-second-to-few-second turnaround.
 2. **In-Provider Sibling Fallback (Zero-Drop Recovery):**
-   - If `muse-spark-1.2-contributor` returns HTTP 404 or model unavailable in a specific region or account tier, the system **automatically retries** with `muse-spark-1.3-contributor` (and vice-versa for 1.3 to 1.2) within the same Meta provider execution before ever declaring a provider failure.
+   - If `muse-spark-1.3-contributor` returns HTTP 404 or model unavailable in a specific region or account tier (or suffers a fast `<10s` transient 429/5xx), the system retries once quickly / **automatically switches** to `muse-spark-1.2-contributor` (and vice-versa) within the same Meta provider execution before declaring a provider failure.
    - This ensures transient model version differences never cause a drop-out to secondary providers.
-3. **Primary Fallback (Hop 1):** **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra:high`)
-   - First fallback for `product_truth` analysis & pose planning, preserving **`high`** reasoning (`reasoning: { effort: "high" }` on Responses / `reasoning_effort: "high"` on Chat Completions; clamped to `low` only when `< 60s` remains in the Edge gateway or FastAPI budget).
+3. **Primary Fallback (Hop 1):** **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra:medium`)
+   - First fallback for `product_truth` analysis & pose planning, defaulting to **`medium`** reasoning (`reasoning: { effort: "medium" }` on Responses / `reasoning_effort: "medium"` on Chat Completions; clamped to `low` only when `< 60s` remains in the Edge gateway or FastAPI budget, while still preserving `"high"` if explicitly chosen in Administration when budget allows).
 4. **Safety Net (Hop 2+), by service:**
-   - **Edge Function (`app-api`):** When `product_truth` uses Meta primary + OpenAI GPT 6.1 Terra fallback, **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna:high`) is appended as the secondary OpenAI safety net (and default unconfigured fallbacks include **Gemini 3.8 Flash** when `GEMINI_API_KEY` is configured).
-   - **FastAPI (`invoke_vision_json`):** **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna:high`) -> Legacy **GPT 5.6 Terra** (`gpt-5.6-terra:low`) -> **Google Gemini 3.8 Flash** (`gemini-3.8-flash:low`).
+   - **Edge Function (`app-api`):** When `product_truth` uses Meta primary + OpenAI GPT 6.1 Terra fallback, **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna:low`) is appended as the fast secondary OpenAI safety net (and default unconfigured fallbacks include **Gemini 3.8 Flash** when `GEMINI_API_KEY` is configured).
+   - **FastAPI (`invoke_vision_json`):** **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna:medium`) -> Legacy **GPT 5.6 Terra** (`gpt-5.6-terra:low`) -> **Google Gemini 3.8 Flash** (`gemini-3.8-flash:low`).
    - Invoked only when primary and Hop 1 fail.
-5. **Default Image Generation Model:** **`gpt-image-2.6-sunburst`**
-   - Default flagship model across Studio, Catalog batches, FastAPI LangGraph nodes, and `organization_ai_model_policies` (`image_generation`), producing 3:4 2K (`1536x2048`) images at `medium` default quality (overrideable per shoot).
+5. **Default Image Generation Model:** **`gpt-image-2.6-sunburst`** (`primary_reasoning = 'none'`)
+   - Default flagship model across Studio, Catalog batches, FastAPI LangGraph nodes, and `organization_ai_model_policies` (`image_generation`), producing 3:4 2K (`1536x2048`) images at `medium` default quality (overrideable per shoot; visually verified sharper than `gpt-image-2.5-sunburst`).
 
 ### 1.2 Meta Responses API Protocol Rules
 - **Multimodal Endpoint:** `https://api.meta.ai/v1/responses` is the sole multimodal endpoint for Meta Muse Spark.

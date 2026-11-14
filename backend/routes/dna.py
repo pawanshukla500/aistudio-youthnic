@@ -1,6 +1,7 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Query, Body, Depends
 from auth import verify_internal_secret
+from config import settings
 from models.dna_v2 import ProductDNAV2
 from database import get_latest_dna_version, list_dna_versions, approve_dna_version
 from graph import get_compiled_graph
@@ -26,6 +27,14 @@ def extract_product_dna(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     if not sku_id:
         raise HTTPException(status_code=400, detail="sku_id is required")
 
+    raw_timeout = payload.get("timeout_seconds")
+    caller_timeout: Optional[float] = None
+    if raw_timeout is not None:
+        try:
+            caller_timeout = max(12.0, min(float(settings.VISION_TIMEOUT_SECONDS), float(raw_timeout)))
+        except (TypeError, ValueError):
+            caller_timeout = None
+
     graph = get_compiled_graph()
     thread_id = f"thread_dna_{org_id}_{sku_id}"
     initial_state = {
@@ -38,6 +47,7 @@ def extract_product_dna(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         "main_color": payload.get("main_color", "unknown"),
         "force_refresh": bool(payload.get("force_refresh", False)),
         "auto_approve": bool(payload.get("auto_approve", False)),
+        "vision_timeout_seconds": caller_timeout,
         "poses_to_generate": [1, 2, 3, 4, 5, 6],
         # Reset QA/generation fields so prior checkpoint values on thread_id never bleed into DNA extraction
         "qa_target_image_url": "",

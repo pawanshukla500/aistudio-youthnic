@@ -476,6 +476,17 @@ class ProductDNAAgent:
                         "dna_approved": bool(synced.get("approved", False)),
                     }
 
+        import time
+        from config import settings
+
+        caller_started_at = time.monotonic()
+        raw_caller_budget = state.get("vision_timeout_seconds")
+        total_budget = (
+            max(12.0, min(float(settings.VISION_TIMEOUT_SECONDS), float(raw_caller_budget)))
+            if raw_caller_budget is not None
+            else float(settings.VISION_TIMEOUT_SECONDS)
+        )
+
         # 3. Filter strictly to AUTHORITATIVE product references (Style Quarantine!)
         references = state.get("references", [])
         auth_refs = [r for r in references if r.get("role", "additional_product") in PRODUCT_AUTHORITY_ROLES]
@@ -493,23 +504,32 @@ class ProductDNAAgent:
 
         dna: Optional[ProductDNAV2] = None
         if loaded_images:
-            try:
-                prompt = _build_dna_extraction_prompt(sku_name, str(state.get("category") or "ethnic/fusion"), loaded_images)
-                vlm_res = invoke_vision_json(prompt, loaded_images, purpose="product_truth")
-                if vlm_res and isinstance(vlm_res.get("data"), dict):
-                    dna = self._build_from_vlm(
-                        raw=vlm_res["data"],
-                        org_id=org_id,
-                        sku_id=sku_id,
-                        sku_name=sku_name,
-                        fingerprint=fingerprint,
-                        is_saree=is_saree,
-                        references=references,
-                        provider=vlm_res["provider"],
-                        model=vlm_res["model"],
+            remaining_after_load = total_budget - (time.monotonic() - caller_started_at)
+            if remaining_after_load >= 12.0:
+                try:
+                    prompt = _build_dna_extraction_prompt(sku_name, str(state.get("category") or "ethnic/fusion"), loaded_images)
+                    vlm_res = invoke_vision_json(
+                        prompt,
+                        loaded_images,
+                        purpose="product_truth",
+                        timeout_budget_s=remaining_after_load,
                     )
-            except Exception as exc:
-                logger.warning(f"Vision DNA extraction failed for {sku_id}, falling back to draft heuristic: {exc}")
+                    if vlm_res and isinstance(vlm_res.get("data"), dict):
+                        dna = self._build_from_vlm(
+                            raw=vlm_res["data"],
+                            org_id=org_id,
+                            sku_id=sku_id,
+                            sku_name=sku_name,
+                            fingerprint=fingerprint,
+                            is_saree=is_saree,
+                            references=references,
+                            provider=vlm_res["provider"],
+                            model=vlm_res["model"],
+                        )
+                except Exception as exc:
+                    logger.warning(f"Vision DNA extraction failed for {sku_id}, falling back to draft heuristic: {exc}")
+            else:
+                logger.warning(f"Skipping VLM call for {sku_id}: remaining caller budget {remaining_after_load:.1f}s < 12s after reference load")
 
         is_heuristic = dna is None
         if dna is None:
