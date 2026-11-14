@@ -1109,7 +1109,15 @@ function requiredAvailabilityRoles(references: ReferenceInput[], garmentFamily =
   // optional omission in the real worker path.
   const requiresSareeEvidence = garmentFamily.trim().toLowerCase() === "saree" || isSareeReferenceSet(references);
   return requiresSareeEvidence
-    ? new Set(["saree_front_drape", "saree_back_drape", "saree_pallu_spread", "saree_body_detail"])
+    ? new Set([
+        "saree_front_drape",
+        "front",
+        "saree_back_drape",
+        "back",
+        "saree_pallu_spread",
+        "saree_body_detail",
+        "fabric_pattern",
+      ])
     : new Set(["front", "back"]);
 }
 

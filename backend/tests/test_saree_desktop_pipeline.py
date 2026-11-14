@@ -10,7 +10,11 @@ from agents.router_agent import GenerationRouterAgent
 from agents.qa_agent import ComputerVisionQAAgent
 from cache import cache_manager
 
-DESKTOP_DIR = r"C:\Users\Pawan Shukla\Desktop\Projec Images"
+DESKTOP_DIR_CANDIDATES = [
+    r"C:\Users\Pawan Shukla\Desktop\Project Images",
+    r"C:\Users\Pawan Shukla\Desktop\Projec Images",
+]
+DESKTOP_DIR = next((d for d in DESKTOP_DIR_CANDIDATES if os.path.isdir(d)), DESKTOP_DIR_CANDIDATES[0])
 
 
 VALID_ORG_UUID = "7d56360f-2c96-4eb2-923e-f22b7fe36605"
@@ -20,7 +24,11 @@ def test_desktop_saree_evidence_hashing_and_quarantine(tmp_path):
     if os.path.exists(DESKTOP_DIR):
         front_path = os.path.join(DESKTOP_DIR, "Sarees Front.jpeg")
         back_path = os.path.join(DESKTOP_DIR, "Sarees Back.jpg")
-        ref_path = os.path.join(DESKTOP_DIR, "Refrence images.jpg")
+        ref_candidates = [
+            os.path.join(DESKTOP_DIR, "Reference images.jpg"),
+            os.path.join(DESKTOP_DIR, "Refrence images.jpg"),
+        ]
+        ref_path = next((p for p in ref_candidates if os.path.isfile(p)), ref_candidates[0])
         detail_path = os.path.join(DESKTOP_DIR, "Sarees product image (1).jpg")
     else:
         # Fallback fixture for headless CI environments
