@@ -6,11 +6,9 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
-  Layers,
   Loader2,
   Lock,
   Mail,
-  MousePointerClick,
   Pause,
   Play,
   ShieldCheck,
@@ -33,7 +31,11 @@ export function Login({ redirect }: LoginProps) {
   const { signIn, signUp } = useFirebaseAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const targetRedirect = redirect || searchParams.get("redirect") || "";
+  const rawRedirect = redirect || searchParams.get("redirect") || "";
+  const targetRedirect =
+    rawRedirect.startsWith("/") && !rawRedirect.startsWith("//")
+      ? rawRedirect
+      : "";
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [storeName, setStoreName] = useState("");
@@ -43,7 +45,7 @@ export function Login({ redirect }: LoginProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // Interactive 3D Runway Controls (Option 2: Luxury Floating Glass Atelier)
+  // Interactive 3D Runway Controls (Light Atelier Floating Glass)
   const [surferVariant, setSurferVariant] =
     useState<CollectionSurferVariant>("magnetic");
   const [autoGlide, setAutoGlide] = useState(true);
@@ -96,7 +98,7 @@ export function Login({ redirect }: LoginProps) {
   };
 
   return (
-    <main className="relative min-h-screen bg-[#070609] text-on-background selection:bg-primary/20 selection:text-primary">
+    <main className="relative min-h-screen bg-background text-on-background selection:bg-primary/15 selection:text-primary">
       {/* Layer 0: Full-Viewport 3D Collection Surfer Runway */}
       <CollectionSurfer
         variant={surferVariant}
@@ -106,29 +108,28 @@ export function Login({ redirect }: LoginProps) {
         perspectiveOrigin="16% 22%"
       />
 
-      {/* Layer 1: Sculpted Radial & Cinema Lighting Scrims (Preserves Center 3D Runway Clarity) */}
-      <div className="pointer-events-none fixed inset-0 z-10 bg-[radial-gradient(ellipse_at_16%_50%,rgba(7,6,9,0.88)_0%,rgba(7,6,9,0.42)_46%,transparent_76%)]" />
-      <div className="pointer-events-none fixed inset-0 z-10 bg-[radial-gradient(circle_at_80%_50%,rgba(151,0,70,0.22)_0%,rgba(7,6,9,0.68)_58%,transparent_100%)]" />
-      <div className="pointer-events-none fixed inset-0 z-10 bg-[linear-gradient(to_bottom,rgba(7,6,9,0.72)_0%,transparent_22%,transparent_78%,rgba(7,6,9,0.85)_100%)]" />
+      {/* Layer 1: Warm Daylight Atelier Scrims (Preserves Center 3D Runway Clarity & Text Contrast) */}
+      <div className="pointer-events-none fixed inset-0 z-10 bg-gradient-to-r from-background/95 via-background/60 to-background/35" />
+      <div className="pointer-events-none fixed inset-0 z-10 bg-gradient-to-b from-background/80 via-transparent to-background/85" />
 
-      {/* Layer 2: Floating Glass Atelier Interface */}
+      {/* Layer 2: Floating Light Atelier Interface */}
       <div className="pointer-events-none fixed inset-0 z-20 overflow-y-auto overscroll-contain">
         <div className="mx-auto grid min-h-screen max-w-[1560px] items-stretch lg:grid-cols-[1.08fr_0.92fr]">
           {/* Left Hero Section: Floating Editorial Overlay on top of the 3D Runway */}
           <section className="hidden flex-col justify-between p-10 lg:flex xl:p-14">
             {/* Top Bar: Brand Identity + Live 3D Runway Controls */}
             <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="pointer-events-auto inline-flex items-center gap-3.5 rounded-2xl border border-white/15 bg-black/55 px-4 py-2.5 shadow-[0_16px_40px_rgba(0,0,0,0.6),inset_0_1px_0_0_rgba(255,255,255,0.18)] backdrop-blur-xl">
+              <div className="pointer-events-auto inline-flex items-center gap-3.5 rounded-2xl border border-outline-variant/60 bg-card/90 px-4 py-2.5 backdrop-blur-xl">
                 <img
                   src="/logo.png"
                   alt="Youthnic"
                   className="h-11 w-11 object-contain"
                 />
                 <div>
-                  <span className="font-syne text-xl font-bold tracking-tight text-white">
+                  <span className="font-syne text-xl font-bold tracking-tight text-on-surface">
                     Youthnic
                   </span>
-                  <span className="block text-[9px] font-bold uppercase tracking-[0.24em] text-[#ff7aa8]">
+                  <span className="block text-xs font-semibold text-primary">
                     AI Studio Atelier
                   </span>
                 </div>
@@ -137,9 +138,9 @@ export function Login({ redirect }: LoginProps) {
               {/* Interactive 3D Runway Switcher */}
               <div
                 data-surfer-ignore="true"
-                className="pointer-events-auto inline-flex items-center gap-1 rounded-2xl border border-white/15 bg-black/60 p-1.5 text-[11px] text-white/80 shadow-[0_16px_40px_rgba(0,0,0,0.6),inset_0_1px_0_0_rgba(255,255,255,0.15)] backdrop-blur-xl"
+                className="pointer-events-auto inline-flex items-center gap-1 rounded-2xl border border-outline-variant/60 bg-card/90 p-1.5 text-xs text-secondary backdrop-blur-xl"
               >
-                <span className="px-2.5 font-mono text-[10px] uppercase tracking-wider text-white/50">
+                <span className="px-2.5 font-medium text-secondary">
                   3D Runway
                 </span>
                 {(["magnetic", "uplift"] as const).map((v) => (
@@ -148,10 +149,10 @@ export function Login({ redirect }: LoginProps) {
                     type="button"
                     aria-pressed={surferVariant === v}
                     onClick={() => setSurferVariant(v)}
-                    className={`rounded-xl px-2.5 py-1 font-semibold capitalize transition-all cursor-pointer ${
+                    className={`cursor-pointer rounded-xl px-2.5 py-1 font-semibold capitalize transition-colors ${
                       surferVariant === v
-                        ? "bg-[#970046] text-white shadow-sm"
-                        : "text-white/70 hover:bg-white/10 hover:text-white"
+                        ? "bg-primary text-on-primary"
+                        : "text-secondary hover:bg-surface-container hover:text-on-surface"
                     }`}
                   >
                     {v}
@@ -164,16 +165,16 @@ export function Login({ redirect }: LoginProps) {
                   aria-label={
                     autoGlide ? "Pause runway glide" : "Play runway glide"
                   }
-                  className="ml-0.5 inline-flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-white/85 transition hover:bg-white/15 cursor-pointer"
+                  className="ml-0.5 inline-flex cursor-pointer items-center gap-1 rounded-xl border border-outline-variant/50 bg-surface-container-low px-2.5 py-1 text-xs font-semibold text-on-surface transition-colors hover:bg-surface-container"
                 >
                   {autoGlide ? (
                     <>
-                      <Pause className="h-3 w-3 text-[#ff7aa8]" />
+                      <Pause className="h-3 w-3 text-primary" />
                       <span>Glide</span>
                     </>
                   ) : (
                     <>
-                      <Play className="h-3 w-3 text-emerald-400" />
+                      <Play className="h-3 w-3 text-success" />
                       <span>Paused</span>
                     </>
                   )}
@@ -183,126 +184,77 @@ export function Login({ redirect }: LoginProps) {
 
             {/* Center-Left Editorial Headline & Studio Telemetry */}
             <div className="my-auto max-w-xl py-6">
-              <div className="inline-flex items-center gap-2 rounded-full border border-[#ff7aa8]/35 bg-[#970046]/30 px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-[#ffb8d0] shadow-lg backdrop-blur-xl">
-                <Sparkles className="h-3.5 w-3.5 text-[#ff7aa8]" />
-                <span>Multi-Tenant Fashion Studio · AaaS</span>
+              <div className="inline-flex items-center gap-2 rounded-full border border-outline-variant/70 bg-soft-blush/90 px-3.5 py-1.5 text-xs font-semibold text-primary backdrop-blur-md">
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                <span>Multi-Tenant Fashion Studio (AaaS)</span>
               </div>
 
-              <h1 className="mt-5 font-syne text-4xl font-extrabold leading-[1.06] tracking-[-0.035em] text-white drop-shadow-[0_10px_30px_rgba(0,0,0,0.85)] xl:text-[3.4rem]">
+              <h1 className="mt-5 font-syne text-4xl font-extrabold leading-[1.06] tracking-tighter text-on-surface xl:text-[3.4rem]">
                 One product.
                 <br />
                 One model.
                 <br />
-                <span className="bg-gradient-to-r from-[#ff7aa8] via-[#ffb1c9] to-amber-200 bg-clip-text text-transparent">
-                  One perfect shoot.
-                </span>
+                <span className="text-primary">One perfect shoot.</span>
               </h1>
 
-              <p className="mt-4 max-w-lg text-sm font-medium leading-relaxed text-white/85 drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]">
+              <p className="mt-4 max-w-lg text-base font-medium leading-relaxed text-secondary">
                 Transform product photos into high-fashion e-commerce catalog
                 shoots. Locked product truth, natural studio lighting, and
-                automated CV QA.
+                automated CV QA across every frame.
               </p>
 
-              {/* Compact 4-Angle Studio Proof Dock */}
-              <div className="mt-6 inline-flex flex-col gap-2.5 rounded-2xl border border-white/15 bg-black/60 p-3 shadow-[0_20px_50px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.14)] backdrop-blur-xl">
-                <div className="flex items-center justify-between gap-4 px-1">
-                  <span className="inline-flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[#ff8ab5]">
-                    <Layers className="h-3 w-3" />
-                    <span>Locked 6-Pose Production Pipeline</span>
-                  </span>
-                  <span className="inline-flex items-center gap-1 font-mono text-[10px] text-white/65">
-                    <MousePointerClick className="h-3 w-3 text-[#ff7aa8]" />
-                    <span>Move cursor or scroll to surf</span>
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-4 gap-2.5 max-w-[420px]">
-                  {[
-                    {
-                      src: "/images/editorial/editorial-ref-1.webp",
-                      label: "Studio Set",
-                      idx: "01",
-                    },
-                    {
-                      src: "/images/editorial/editorial-saree-front.webp",
-                      label: "Hero Front",
-                      idx: "02",
-                    },
-                    {
-                      src: "/images/editorial/editorial-saree-back.webp",
-                      label: "True Back",
-                      idx: "03",
-                    },
-                    {
-                      src: "/images/editorial/editorial-saree-detail.webp",
-                      label: "Craft Detail",
-                      idx: "04",
-                    },
-                  ].map(({ src, label, idx }) => (
-                    <div
-                      key={label}
-                      className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-white/20 bg-neutral-900 shadow-md"
-                    >
-                      <img
-                        src={src}
-                        alt={label}
-                        className="h-full w-full object-cover object-top"
-                        loading="lazy"
-                      />
-                      <span className="absolute left-1.5 top-1.5 rounded bg-black/65 px-1 py-0.2 font-mono text-[8px] font-bold text-white/80 backdrop-blur-sm">
-                        {idx}
-                      </span>
-                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/45 to-transparent p-1.5 text-center">
-                        <span className="text-[9px] font-bold tracking-wide text-white">
-                          {label}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
               {/* Commercial Pricing Transparency */}
-              <div className="mt-5 inline-flex flex-wrap items-center gap-2 rounded-2xl border border-white/15 bg-black/65 px-4 py-3 text-xs text-white/90 shadow-xl backdrop-blur-xl">
-                <div className="flex items-center gap-1.5 font-bold text-white">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+              <div className="mt-6 inline-flex flex-wrap items-center gap-2.5 rounded-2xl border border-outline-variant/60 bg-card/90 px-4 py-3 text-xs text-secondary backdrop-blur-xl">
+                <div className="flex items-center gap-1.5 font-bold text-on-surface">
+                  <CheckCircle2 className="h-4 w-4 text-success" />
                   <span>5 Free Shoots on Enrollment</span>
                 </div>
-                <span className="text-white/30">·</span>
-                <span className="text-white/80">
-                  Commercial rate: <b className="text-white">$1.00</b> / shoot
-                  (High Reasoning) + <b className="text-white">$0.50</b> with CV
-                  QA
+                <span className="text-outline-variant" aria-hidden="true">
+                  /
+                </span>
+                <span>
+                  Commercial rate:{" "}
+                  <b className="font-mono tabular-nums text-on-surface">
+                    $1.00
+                  </b>{" "}
+                  / shoot (High Reasoning) +{" "}
+                  <b className="font-mono tabular-nums text-on-surface">
+                    $0.50
+                  </b>{" "}
+                  with CV QA
                 </span>
               </div>
             </div>
 
             {/* Bottom Status Footer */}
-            <div className="flex items-center justify-between border-t border-white/15 pt-4 text-xs text-white/70">
-              <p className="font-medium tracking-wide">
-                Youthnic AI Studio · Production Cloud Portal
+            <div className="flex items-center justify-between border-t border-outline-variant/50 pt-4 text-xs text-secondary">
+              <p className="font-medium">
+                Youthnic AI Studio, Production Cloud Portal
               </p>
               <div className="flex items-center gap-3">
-                <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/50">
-                  Scroll to surf 16 looks
+                <span className="font-medium text-secondary">
+                  Scroll or move cursor to surf{" "}
+                  <span className="font-mono tabular-nums text-on-surface">
+                    16
+                  </span>{" "}
+                  looks
                 </span>
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-black/60 px-3 py-1 text-[10px] font-semibold text-white/90 shadow-sm backdrop-blur-md">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />{" "}
-                  All Systems Online
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant/60 bg-card/90 px-3 py-1 text-xs font-semibold text-on-surface backdrop-blur-md">
+                  <span className="h-2 w-2 rounded-full bg-success" />
+                  <span>All Systems Online</span>
                 </span>
               </div>
             </div>
           </section>
 
-          {/* Right Section: Floating Luxury Double-Bezel Frosted-Glass Atelier Auth Card */}
+          {/* Right Section: Floating Light Atelier Auth Card */}
           <section className="grid min-h-screen place-items-center p-4 sm:p-8 lg:p-10">
             <div
               data-surfer-ignore="true"
               onWheel={(e) => e.stopPropagation()}
-              className="pointer-events-auto w-full max-w-[485px] rounded-[36px] border border-white/25 bg-gradient-to-b from-white/25 via-white/10 to-white/5 p-1.5 shadow-[0_36px_120px_rgba(0,0,0,0.85),0_0_60px_rgba(151,0,70,0.2)] backdrop-blur-2xl"
+              className="pointer-events-auto w-full max-w-[485px] rounded-[34px] border border-outline-variant/60 bg-surface-container-low/65 p-1.5 backdrop-blur-2xl"
             >
-              <div className="w-full rounded-[30px] border border-white/95 bg-[#faf8f5]/[0.96] p-7 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.9)] backdrop-blur-2xl transition-all sm:p-9">
+              <div className="w-full rounded-[28px] border border-outline-variant/45 bg-card/95 p-7 backdrop-blur-2xl transition-colors sm:p-9">
                 {/* Mobile Header */}
                 <div className="mb-6 flex items-center justify-between gap-2 lg:hidden">
                   <div className="flex items-center gap-2.5">
@@ -315,7 +267,7 @@ export function Login({ redirect }: LoginProps) {
                       <span className="font-syne text-lg font-bold text-on-surface">
                         Youthnic
                       </span>
-                      <span className="block text-[8px] font-bold uppercase tracking-[0.2em] text-primary">
+                      <span className="block text-xs font-semibold text-primary">
                         AI Studio
                       </span>
                     </div>
@@ -328,7 +280,7 @@ export function Login({ redirect }: LoginProps) {
                       aria-label={
                         autoGlide ? "Pause runway glide" : "Play runway glide"
                       }
-                      className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-white px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-on-surface shadow-sm transition hover:bg-surface-container cursor-pointer"
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-outline-variant/60 bg-card px-2.5 py-1 text-xs font-semibold text-on-surface transition-colors hover:bg-surface-container"
                     >
                       {autoGlide ? (
                         <>
@@ -337,12 +289,12 @@ export function Login({ redirect }: LoginProps) {
                         </>
                       ) : (
                         <>
-                          <Play className="h-3 w-3 text-emerald-600" />
+                          <Play className="h-3 w-3 text-success" />
                           <span>Paused</span>
                         </>
                       )}
                     </button>
-                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                    <span className="rounded-full border border-outline-variant/50 bg-success-surface px-2.5 py-1 text-xs font-semibold text-success">
                       5 Free Shoots
                     </span>
                   </div>
@@ -357,9 +309,9 @@ export function Login({ redirect }: LoginProps) {
                       setMode("signin");
                       setError("");
                     }}
-                    className={`rounded-xl py-2 text-xs font-bold transition-all cursor-pointer ${
+                    className={`cursor-pointer rounded-xl py-2 text-xs font-bold transition-colors ${
                       mode === "signin"
-                        ? "bg-white text-on-surface shadow-sm"
+                        ? "bg-card text-on-surface"
                         : "text-secondary hover:text-on-surface"
                     }`}
                   >
@@ -372,14 +324,14 @@ export function Login({ redirect }: LoginProps) {
                       setMode("signup");
                       setError("");
                     }}
-                    className={`relative rounded-xl py-2 text-xs font-bold transition-all cursor-pointer ${
+                    className={`relative cursor-pointer rounded-xl py-2 text-xs font-bold transition-colors ${
                       mode === "signup"
-                        ? "bg-white text-primary shadow-sm"
+                        ? "bg-card text-primary"
                         : "text-secondary hover:text-on-surface"
                     }`}
                   >
                     <span>Start Free Studio</span>
-                    <span className="ml-1 rounded-full bg-emerald-500 px-1.5 py-0.2 text-[9px] text-white">
+                    <span className="ml-1.5 rounded-full bg-success px-1.5 py-0.5 text-[10px] font-semibold text-on-primary">
                       5 Free
                     </span>
                   </button>
@@ -399,7 +351,7 @@ export function Login({ redirect }: LoginProps) {
                 </div>
 
                 {targetRedirect && (
-                  <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs font-medium text-primary">
+                  <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-primary/20 bg-soft-blush p-3 text-xs font-medium text-primary">
                     <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     <span>
                       Sign in required to access workspace:{" "}
@@ -414,7 +366,7 @@ export function Login({ redirect }: LoginProps) {
                     <div>
                       <label
                         htmlFor="store-name-input"
-                        className="block text-xs font-bold uppercase tracking-wider text-secondary"
+                        className="block text-xs font-semibold text-on-surface"
                       >
                         Store or Brand Name
                       </label>
@@ -430,7 +382,7 @@ export function Login({ redirect }: LoginProps) {
                           value={storeName}
                           onChange={(e) => setStoreName(e.target.value)}
                           placeholder="e.g. Silk & Stone, Myntra Trendz"
-                          className="h-11 w-full rounded-xl border border-outline-variant/70 bg-white pl-10 pr-4 text-sm text-on-surface outline-none transition-all placeholder:text-secondary/50 focus:border-primary focus:ring-4 focus:ring-primary/10"
+                          className="h-11 w-full rounded-xl border border-outline-variant/70 bg-card pl-10 pr-4 text-sm text-on-surface outline-none transition-colors placeholder:text-secondary/50 focus:border-primary focus:ring-4 focus:ring-primary/10"
                         />
                       </div>
                     </div>
@@ -439,7 +391,7 @@ export function Login({ redirect }: LoginProps) {
                   <div>
                     <label
                       htmlFor="email-input"
-                      className="block text-xs font-bold uppercase tracking-wider text-secondary"
+                      className="block text-xs font-semibold text-on-surface"
                     >
                       Work Email Address
                     </label>
@@ -456,7 +408,7 @@ export function Login({ redirect }: LoginProps) {
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         placeholder="name@store.com"
-                        className="h-11 w-full rounded-xl border border-outline-variant/70 bg-white pl-10 pr-4 text-sm text-on-surface outline-none transition-all placeholder:text-secondary/50 focus:border-primary focus:ring-4 focus:ring-primary/10"
+                        className="h-11 w-full rounded-xl border border-outline-variant/70 bg-card pl-10 pr-4 text-sm text-on-surface outline-none transition-colors placeholder:text-secondary/50 focus:border-primary focus:ring-4 focus:ring-primary/10"
                       />
                     </div>
                   </div>
@@ -464,7 +416,7 @@ export function Login({ redirect }: LoginProps) {
                   <div>
                     <label
                       htmlFor="password-input"
-                      className="block text-xs font-bold uppercase tracking-wider text-secondary"
+                      className="block text-xs font-semibold text-on-surface"
                     >
                       Password
                     </label>
@@ -488,7 +440,7 @@ export function Login({ redirect }: LoginProps) {
                             ? "Create a secure password (min 6 chars)"
                             : "Enter your password"
                         }
-                        className="h-11 w-full rounded-xl border border-outline-variant/70 bg-white pl-10 pr-12 text-sm text-on-surface outline-none transition-all placeholder:text-secondary/50 focus:border-primary focus:ring-4 focus:ring-primary/10"
+                        className="h-11 w-full rounded-xl border border-outline-variant/70 bg-card pl-10 pr-12 text-sm text-on-surface outline-none transition-colors placeholder:text-secondary/50 focus:border-primary focus:ring-4 focus:ring-primary/10"
                       />
                       <button
                         type="button"
@@ -496,7 +448,7 @@ export function Login({ redirect }: LoginProps) {
                         aria-label={
                           showPassword ? "Hide password" : "Show password"
                         }
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-2 text-secondary transition hover:bg-surface-container hover:text-on-surface cursor-pointer"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 cursor-pointer rounded-lg p-2 text-secondary transition-colors hover:bg-surface-container hover:text-on-surface"
                       >
                         {showPassword ? (
                           <EyeOff className="h-4 w-4" />
@@ -510,7 +462,7 @@ export function Login({ redirect }: LoginProps) {
                   {error && (
                     <div
                       role="alert"
-                      className="flex items-start gap-2.5 rounded-xl border border-danger/20 bg-danger-surface p-3.5 text-xs font-medium text-danger animate-in fade-in"
+                      className="flex items-start gap-2.5 rounded-xl border border-danger/20 bg-danger-surface p-3.5 text-xs font-medium text-danger"
                     >
                       <span className="font-bold">Error:</span>
                       <span>{error}</span>
@@ -520,11 +472,11 @@ export function Login({ redirect }: LoginProps) {
                   <button
                     disabled={submitting}
                     type="submit"
-                    className="group relative mt-2 flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-r from-primary via-[#b81059] to-[#be185d] px-5 text-sm font-bold text-white shadow-lg shadow-primary/25 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-primary/35 active:scale-[0.99] disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+                    className="group relative mt-2 flex h-12 w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl bg-primary px-5 text-sm font-bold text-on-primary transition-colors duration-200 hover:bg-primary-container active:bg-rose-dark disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {submitting ? (
                       <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
                         <span>
                           {mode === "signup"
                             ? "Creating store & claiming free shoots…"
@@ -538,7 +490,7 @@ export function Login({ redirect }: LoginProps) {
                             ? "Create Store & Claim 5 Free Shoots"
                             : "Sign in to Studio"}
                         </span>
-                        <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
+                        <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1 motion-reduce:transition-none" />
                       </>
                     )}
                   </button>
@@ -548,11 +500,11 @@ export function Login({ redirect }: LoginProps) {
                 <div className="mt-5 flex flex-col items-center gap-2 border-t border-outline-variant/40 pt-3.5">
                   <Link
                     to="/docs"
-                    className="group inline-flex items-center gap-2 rounded-lg px-3 py-1 text-xs font-semibold text-primary transition hover:bg-primary/5"
+                    className="group inline-flex items-center gap-2 rounded-lg px-3 py-1 text-xs font-semibold text-primary transition-colors hover:bg-soft-blush"
                   >
-                    <BookOpen className="h-3.5 w-3.5 transition-transform group-hover:scale-110" />
+                    <BookOpen className="h-3.5 w-3.5" />
                     <span>Explore Public Documentation & Guides</span>
-                    <span className="rounded-full bg-primary/10 px-1.5 py-0.2 text-[9px] font-bold text-primary">
+                    <span className="rounded-full bg-soft-blush px-1.5 py-0.5 font-mono text-[10px] font-bold tabular-nums text-primary">
                       v2.4
                     </span>
                   </Link>
@@ -560,11 +512,11 @@ export function Login({ redirect }: LoginProps) {
 
                 {/* Trust and Security Card */}
                 <div className="mt-3.5 flex items-start gap-2.5 rounded-xl border border-outline-variant/30 bg-surface-container-low/70 p-3">
-                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" />
                   <p className="text-[11px] leading-relaxed text-secondary">
                     Protected by Firebase Auth and isolated tenant storage. Each
-                    store's catalog data is strictly segregated by Supabase Row
-                    Level Security.
+                    store’s catalog data is strictly segregated by Supabase Row
+                    Level Security, with 24-hour session expiration.
                   </p>
                 </div>
               </div>

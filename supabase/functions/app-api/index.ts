@@ -912,6 +912,31 @@ function retryDelayMs(error: unknown, attempt: number) {
   return Math.min(5 * 60_000, Math.max(TIER_ONE_RETRY_FLOOR_MS, exponential, providerDelay));
 }
 
+const MAX_SESSION_AGE_SECONDS = 24 * 60 * 60;
+
+function assertTokenNotOlderThan24Hours(request: Request) {
+  const authorization = request.headers.get("Authorization") || "";
+  const token = authorization.replace(/^Bearer\s+/i, "").trim();
+  if (!token) return;
+  const parts = token.split(".");
+  if (parts.length !== 3) return;
+  let authTime = NaN;
+  try {
+    const normalized = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+    const payload = JSON.parse(new TextDecoder().decode(decodeBase64(padded))) as JsonRecord;
+    authTime = Number(payload.auth_time);
+  } catch {
+    return;
+  }
+  if (Number.isFinite(authTime) && authTime > 0) {
+    const ageSeconds = Math.floor(Date.now() / 1000) - authTime;
+    if (ageSeconds >= MAX_SESSION_AGE_SECONDS) {
+      throw new Error("Your login session expired after 24 hours. Please sign in again.");
+    }
+  }
+}
+
 function userClient(request: Request) {
   const authorization = request.headers.get("Authorization") || "";
   return createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
@@ -921,6 +946,7 @@ function userClient(request: Request) {
 }
 
 async function workspaceFor(request: Request, permission?: string) {
+  assertTokenNotOlderThan24Hours(request);
   const client = userClient(request);
   const { data, error } = await client.rpc("app_current_workspace");
   if (error || !data) throw new Error("Your Firebase session is not linked to an active Supabase workspace.");
