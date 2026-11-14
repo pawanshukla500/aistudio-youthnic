@@ -88,13 +88,17 @@ export function GenerationFlowPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'catalog_pose_asset_versions', filter: `work_item_id=eq.${workItemId}` }, refreshSoon)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'catalog_listing_handoffs', filter: `work_item_id=eq.${workItemId}` }, refreshSoon)
       .subscribe();
-    const recoveryPoll = window.setInterval(() => void fetchFlow(true), 60_000);
+    const recoveryPoll = window.setInterval(() => {
+      if (!document.hidden && selectedGraphData?.item?.workflow_stage === 'generation_in_progress') {
+        void fetchFlow(true);
+      }
+    }, 60_000);
     return () => {
       window.clearTimeout(timer);
       window.clearInterval(recoveryPoll);
       void supabase.removeChannel(channel);
     };
-  }, [fetchFlow, selectedGraphData?.is_workflow_v2, selectedGraphData?.item?.id]);
+  }, [fetchFlow, selectedGraphData?.is_workflow_v2, selectedGraphData?.item?.id, selectedGraphData?.item?.workflow_stage]);
 
   if (error) {
     return (

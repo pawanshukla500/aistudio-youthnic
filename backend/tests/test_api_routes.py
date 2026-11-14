@@ -14,12 +14,25 @@ def test_root_endpoint():
 
 
 def test_health_check_endpoint():
+    import cache
+    import database
+    import main
+
+    main.release_idle_resources()
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
+    assert data["deep_probe"] is False
     assert "components" in data
     assert "postgresql" in data["components"]
     assert "valkey" in data["components"]
+    # Idle health check must NOT open DB pool or Valkey sockets
+    assert database.is_pool_open() is False
+    assert cache.is_valkey_open() is False
+
+    deep_response = client.get("/health?deep=true")
+    assert deep_response.status_code == 200
+    assert deep_response.json()["deep_probe"] is True
 
 
 def test_readiness_endpoint():

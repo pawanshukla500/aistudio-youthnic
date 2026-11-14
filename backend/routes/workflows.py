@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from auth import verify_internal_secret
 from config import settings
 from database import get_checkpointer_metrics
-from graph import get_compiled_graph, list_workflow_threads, get_thread_state_history
+from graph import get_topology_graph, list_workflow_threads, get_thread_state_history
 
 router = APIRouter(
     prefix="/api/v1/workflows",
@@ -16,7 +16,7 @@ router = APIRouter(
 @router.get("/overview")
 def get_workflow_overview() -> Dict[str, Any]:
     """Return LangGraph topology, checkpointer backend status, and configured AI runtime capabilities."""
-    graph = get_compiled_graph()
+    graph = get_topology_graph()
     drawable = graph.get_graph()
     metrics: Dict[str, Any] = {"backend": "memory", "tables_ready": False, "total_checkpoints": 0, "total_threads": 0}
     try:

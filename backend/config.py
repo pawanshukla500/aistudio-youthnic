@@ -22,11 +22,18 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("POSTGRES_PRIVATE_URL", "DATABASE_URL", "POSTGRES_URL"),
     )
+    DB_POOL_MAX_SIZE: int = 5
+    DB_POOL_MAX_IDLE_SECONDS: float = 60.0
+    IDLE_RESOURCE_RELEASE_SECONDS: int = 45
+    HEALTH_CHECK_IDLE_SAFE: bool = True
     CELERY_WORKER_WAKE_URL: str = Field(
         default="http://celery-worker.railway.internal:8080/wake",
         validation_alias=AliasChoices("CELERY_WORKER_WAKE_URL", "WORKER_WAKE_URL"),
     )
-    WORKER_IDLE_SHUTDOWN_SECONDS: int = 120
+    CELERY_WORKER_POOL: str = "threads"
+    CELERY_WORKER_CONCURRENCY: int = 2
+    WORKER_IDLE_SHUTDOWN_SECONDS: int = 60
+    WORKER_POLL_INTERVAL_SECONDS: int = 15
     SUPABASE_URL: str = "https://envoy-production-37ba.up.railway.app"
     SUPABASE_SERVICE_ROLE_KEY: str = ""
 

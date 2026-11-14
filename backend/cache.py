@@ -13,6 +13,13 @@ logger = logging.getLogger(__name__)
 
 _valkey_lock = threading.Lock()
 _valkey_client: Optional[redis.Redis] = None
+MAX_LOCAL_FALLBACK_KEYS = 128
+
+
+def is_valkey_open() -> bool:
+    """Return True when the shared Valkey client is currently initialized."""
+    with _valkey_lock:
+        return _valkey_client is not None
 
 
 def get_valkey() -> redis.Redis:
@@ -27,6 +34,7 @@ def get_valkey() -> redis.Redis:
                 retry_on_timeout=True,
                 socket_keepalive=False,
                 health_check_interval=0,
+                max_connections=4,
             )
         return _valkey_client
 
@@ -56,14 +64,26 @@ def invalidate_memory_rules_cache(org_id: str) -> None:
 
 
 def get_celery_queue_depth(queue_name: str = "celery") -> int:
+    client = None
     try:
-        r = get_valkey()
-        depth = int(r.llen(queue_name) or 0)
-        reset_valkey()
-        return depth
+        client = redis.from_url(
+            settings.VALKEY_URL,
+            decode_responses=True,
+            socket_timeout=5,
+            socket_connect_timeout=5,
+            retry_on_timeout=False,
+            socket_keepalive=False,
+            health_check_interval=0,
+        )
+        return int(client.llen(queue_name) or 0)
     except Exception:
-        reset_valkey()
         return 0
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
 
 
 class ValkeyCacheManager:
@@ -105,8 +125,24 @@ class ValkeyCacheManager:
 
     def _local_set(self, key: str, value: str, ex: Optional[int] = None):
         with self._lock:
-            expires_at = (time.time() + ex) if ex is not None else None
+            now = time.time()
+            if key not in self._local_fallback and len(self._local_fallback) >= MAX_LOCAL_FALLBACK_KEYS:
+                expired_keys = [
+                    k for k, (_, exp) in self._local_fallback.items()
+                    if exp is not None and now >= exp
+                ]
+                for k in expired_keys:
+                    self._local_fallback.pop(k, None)
+                while len(self._local_fallback) >= MAX_LOCAL_FALLBACK_KEYS:
+                    oldest_key = next(iter(self._local_fallback))
+                    self._local_fallback.pop(oldest_key, None)
+            expires_at = (now + ex) if ex is not None else None
             self._local_fallback[key] = (value, expires_at)
+
+    def clear_local_fallback(self) -> None:
+        """Release in-memory fallback entries when idling to keep RSS minimal."""
+        with self._lock:
+            self._local_fallback.clear()
 
     def _reconcile_pending(self):
         """Flush offline cache invalidations to Redis before trusting Redis reads again."""

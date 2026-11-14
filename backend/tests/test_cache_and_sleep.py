@@ -311,3 +311,32 @@ def test_wake_celery_worker_sends_secret_header(monkeypatch):
     assert generation.wake_celery_worker() is True
     assert seen["url"] == "http://celery-worker.railway.internal:8080/wake"
 
+
+def test_celery_supervisor_uses_threads_pool_and_bounded_fallback_cache():
+    import cache
+    import database
+    import main
+    import worker_supervisor
+
+    cmd = worker_supervisor.build_default_celery_cmd()
+    assert "--pool=threads" in cmd
+    assert "--concurrency=2" in cmd
+    assert "--without-gossip" in cmd
+    assert "--without-mingle" in cmd
+    assert "--without-heartbeat" in cmd
+
+    mgr = cache.ValkeyCacheManager()
+    for idx in range(cache.MAX_LOCAL_FALLBACK_KEYS + 25):
+        mgr._local_set(f"key_{idx}", f"val_{idx}", 60)
+    assert len(mgr._local_fallback) <= cache.MAX_LOCAL_FALLBACK_KEYS
+    mgr.clear_local_fallback()
+    assert len(mgr._local_fallback) == 0
+
+    trimmed = database.release_process_memory()
+    assert isinstance(trimmed, bool)
+
+    main.release_idle_resources()
+    assert database.is_pool_open() is False
+    assert cache.is_valkey_open() is False
+
+

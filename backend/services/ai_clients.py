@@ -13,8 +13,6 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 import httpx
 from PIL import Image
-from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from config import settings
 from cache import cache_manager
@@ -25,6 +23,7 @@ logger = logging.getLogger(__name__)
 MAX_IMAGE_PROMPT_CHARS = 30000
 MAX_REFERENCE_DIM = 1536
 MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
+_embeddings_client_cache: Dict[str, Any] = {}
 
 
 def _safe_resp_json(resp: httpx.Response) -> Dict[str, Any]:
@@ -363,6 +362,9 @@ def _langchain_openai_vision_json(
         })
     content_blocks.append({"type": "text", "text": prompt})
 
+    from langchain_core.messages import HumanMessage
+    from langchain_openai import ChatOpenAI
+
     llm = ChatOpenAI(
         model=model,
         api_key=api_key,
@@ -681,7 +683,14 @@ def embed_text(text: str) -> Optional[List[float]]:
     if not api_key or not (text or "").strip():
         return None
     try:
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=api_key)
+        from langchain_openai import OpenAIEmbeddings
+
+        embeddings = _embeddings_client_cache.get(api_key)
+        if embeddings is None:
+            if len(_embeddings_client_cache) >= 4:
+                _embeddings_client_cache.clear()
+            embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=api_key)
+            _embeddings_client_cache[api_key] = embeddings
         return embeddings.embed_query(text)
     except Exception as exc:
         logger.warning(f"Embedding generation failed: {exc}")

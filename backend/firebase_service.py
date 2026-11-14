@@ -1,21 +1,22 @@
 import json
 import logging
-from typing import Optional, List
-from google.oauth2 import service_account
-from google.cloud import storage
+from typing import Any, Optional, List
 
 from config import settings
 
 logger = logging.getLogger(__name__)
 
-_storage_client: Optional[storage.Client] = None
+_storage_client: Optional[Any] = None
 
 
-def get_storage_client() -> Optional[storage.Client]:
+def get_storage_client() -> Optional[Any]:
     global _storage_client
     if _storage_client is None:
         if settings.FIREBASE_SERVICE_ACCOUNT:
             try:
+                from google.oauth2 import service_account
+                from google.cloud import storage
+
                 sa_info = json.loads(settings.FIREBASE_SERVICE_ACCOUNT)
                 creds = service_account.Credentials.from_service_account_info(sa_info)
                 _storage_client = storage.Client(project=settings.FIREBASE_PROJECT_ID, credentials=creds)
@@ -77,5 +78,7 @@ def generate_signed_url(storage_path: str, expiration_seconds: int = 604800) -> 
 
 def list_objects(prefix: str, max_results: int = 50) -> List[str]:
     client = get_storage_client()
+    if client is None:
+        return []
     blobs = client.list_blobs(settings.FIREBASE_STORAGE_BUCKET, prefix=prefix, max_results=max_results)
     return [b.name for b in blobs]
