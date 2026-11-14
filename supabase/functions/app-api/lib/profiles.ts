@@ -1803,7 +1803,7 @@ In every family the pose may only change body position, angle, framing and expre
 
 Create exactly six product-specific camera setups in one coherent commercial coverage sequence with MANDATORY PHYSICAL VARIATION across all 6 slots, in this order and with these ids: full_front, angled, back, creative, closeup, showcase. They are NOT repeats of each other. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints. Every individual prompt must (1) describe THIS product's exact colour, fabric, construction and selling details from the product references, and (2) direct the model's stance, angle, action, and expression, while creativeDirection must rebuild the photoshoot backdrop, wall, floor, lighting and furniture from the STYLE REFERENCE only.
 
-- full_front: straight-on (shoulders and hips facing forward), unobstructed head-to-toe hero matching the requested output aspect ratio (use "straight-on" or "portrait" framing terminology; never describe framing or the frame itself as "square" unless 1:1 output is requested); establishes face/hair/styling/footwear/scene/lighting anchor with balanced weight, natural catalog composure, and an authentic gentle smile or relaxed glance (never a stiff stance or artificial smile).
+- full_front: straight-on (shoulders and hips facing forward), unobstructed head-to-toe hero matching the requested output aspect ratio (use "straight-on" or the matching portrait/landscape framing terminology; never describe framing or the frame itself as "square" unless 1:1 output is requested); establishes face/hair/styling/footwear/scene/lighting anchor with balanced weight, natural catalog composure, and an authentic gentle smile or relaxed glance (never a stiff stance or artificial smile).
 - angled: mandatory 35 to 45 degree intentional turn of torso and hips with both feet planted and close, clearly revealing side construction, garment depth, side seam, and sleeve silhouette. Never a walking stride or a lifted foot, and never open a joined Farshi hem. Must be visibly turned away from flat frontal — NEVER a static frontal standing repeat! Natural, effortless glance following the angle with an authentic soft smile or composed editorial look (never an exaggerated or frozen stock smile). Do not copy the pose or the handheld props from the style or model-face photo.
 - back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees. For outfits with a dupatta or shawl, the dupatta must be draped forward over arms or front so the rear garment (neckline, back panel, embroidery, hem) is 100% unobstructed and visible. Hair swept forward or in an updo. The studio set, backdrop wall, lighting, and model identity must strictly match the other poses.
 - creative:
@@ -2165,6 +2165,24 @@ export function resolveAspectRatioLabel(aspectRatio?: unknown): string {
   return VALID_ASPECT_RATIOS.has(cleaned) ? cleaned : "3:4";
 }
 
+export type AspectRatioOrientation = "square" | "portrait" | "landscape";
+
+/**
+ * Determine whether a supported aspect ratio represents square, portrait, or landscape framing,
+ * matching the dimensions selected by `normalizeImageSize`.
+ */
+export function resolveAspectRatioOrientation(aspectRatio?: unknown): AspectRatioOrientation {
+  const ratio = resolveAspectRatioLabel(aspectRatio);
+  const [wStr, hStr] = ratio.split(":");
+  const w = Number(wStr);
+  const h = Number(hStr);
+  if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+    if (w === h) return "square";
+    return w > h ? "landscape" : "portrait";
+  }
+  return "portrait";
+}
+
 /**
  * Rewrite framing/orientation uses of "square" into aspect-safe phrasing when
  * generating non-1:1 portrait/landscape outputs, without ever altering garment
@@ -2174,12 +2192,13 @@ export function normalizePoseAspectText(text: string, aspectRatio?: unknown): st
   const value = String(text || "");
   if (!value) return value;
   const ratio = resolveAspectRatioLabel(aspectRatio);
-  if (ratio === "1:1") return value;
+  const orientation = resolveAspectRatioOrientation(ratio);
+  if (orientation === "square") return value;
   return value
-    .replace(/^\s*square\.?\s*$/i, `${ratio} portrait, head-to-toe.`)
+    .replace(/^\s*square\.?\s*$/i, `${ratio} ${orientation}, head-to-toe.`)
     .replace(/\bSquare,\s*(unobstructed\b)/g, "Straight-on, $1")
     .replace(/\bsquare,\s*(unobstructed\b)/g, "straight-on, $1")
-    .replace(/\b(Photorealistic|Studio|Editorial|Full-body|Catalog)\s+square\s+(head-to-toe|full[- ]front|portrait|hero)\b/gi, `$1 ${ratio} portrait $2`)
+    .replace(/\b(Photorealistic|Studio|Editorial|Full-body|Catalog)\s+square\s+(head-to-toe|full[- ]front|portrait|hero)\b/gi, `$1 ${ratio} ${orientation} $2`)
     .replace(/\bSquare,?\s+(head-to-toe|full[- ]front)\b/g, "Straight-on $1")
     .replace(/\bsquare,?\s+(head-to-toe|full[- ]front)\b/g, "straight-on $1")
     .replace(/\bSquare-on\b/g, "Straight-on")
@@ -2188,7 +2207,7 @@ export function normalizePoseAspectText(text: string, aspectRatio?: unknown): st
     .replace(/\bsquare\s+to\s+camera\b/g, "straight-on toward camera")
     .replace(/\bSquare\s+front\s+hero\b/g, "Straight-on front hero")
     .replace(/\bsquare\s+front\s+hero\b/g, "straight-on front hero")
-    .replace(/\bsquare\s+framing\b/gi, `${ratio} portrait framing`);
+    .replace(/\bsquare\s+framing\b/gi, `${ratio} ${orientation} framing`);
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   isSeatedEditorialPoseDemanded,
   normalizeStylingPlan,
   resolveAspectRatioLabel,
+  resolveAspectRatioOrientation,
   resolveCloseupMode,
   type JsonRecord,
   type ShowcaseIntent,
@@ -1114,6 +1115,8 @@ export function composeGenerationPrompt(args: {
   const plantedStance = plantedPoseReplacement(args.pose, isSittingDemanded);
   const poseTitle = boundedText(poseTitleText(args.pose.title, isSittingDemanded), 160);
   const resolvedAspectRatio = resolveAspectRatioLabel(args.aspectRatio);
+  const resolvedOrientation = resolveAspectRatioOrientation(resolvedAspectRatio);
+  const orientationDescriptor = resolvedOrientation === "portrait" ? "vertical portrait" : resolvedOrientation;
   const aspectSafePose = sanitizePoseDirectionForAspectRatio(args.pose, resolvedAspectRatio) as StudioPose & { poseNumber: number };
   const poseDescription = boundedText(catalogPoseText(aspectSafePose.description, plantedStance, isSittingDemanded), 600);
   const posePrompt = boundedText(catalogPoseText(aspectSafePose.prompt, plantedStance, isSittingDemanded), 1_200);
@@ -1132,7 +1135,7 @@ export function composeGenerationPrompt(args: {
     `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(catalogPoseText(aspectSafePose.bodyPosition, plantedStance, isSittingDemanded), 360)}`,
     `camera angle: ${poseCamera}`,
     `framing: ${poseFraming}`,
-    `output aspect ratio: ${resolvedAspectRatio}${resolvedAspectRatio === "1:1" ? " (square 1:1 framing)" : " vertical portrait framing"}`,
+    `output aspect ratio: ${resolvedAspectRatio} ${orientationDescriptor} framing`,
     `expression: ${boundedText(catalogPoseText(aspectSafePose.expression, CALM_EXPRESSION, isSittingDemanded), 360)}`,
   ];
   const correction = boundedText(args.correction, 1_200);

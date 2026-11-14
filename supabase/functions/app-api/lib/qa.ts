@@ -2,6 +2,7 @@ import {
   CLOSEUP_PRODUCT_DETAIL,
   parseJsonResponse,
   resolveAspectRatioLabel,
+  resolveAspectRatioOrientation,
   resolveCloseupMode,
   sanitizePoseDirectionForAspectRatio,
   type JsonRecord,
@@ -115,6 +116,7 @@ export function unavailableQaResult(reason: string) {
     automaticallyVerified: false,
     outcome: "unverified",
     requiresIndependentRecheck: false,
+    anatomicalDefectDetected: false,
   };
 }
 
@@ -208,6 +210,8 @@ export function buildPoseQaPrompt(args: {
       : "For pose 6 (garment-led showcase), fail pose_requirement if it merely repeats Pose 1's static flat-frontal hero stance instead of presenting a distinct, aesthetic editorial angle/stance that highlights the garment's signature drape, silhouette, or set coordination."
     : "";
   const resolvedAspectRatio = resolveAspectRatioLabel(args.aspectRatio);
+  const resolvedOrientation = resolveAspectRatioOrientation(resolvedAspectRatio);
+  const orientationDescriptor = resolvedOrientation === "portrait" ? "vertical portrait" : resolvedOrientation;
   const qaPoseDirection = sanitizePoseDirectionForAspectRatio(args.poseDirection, resolvedAspectRatio);
   return `You are a strict fashion e-commerce consistency validator.
 
@@ -215,7 +219,7 @@ Review IMAGE A (the newly generated pose) against every labeled source image tha
 SOURCE PRIORITY: original region-labeled product references are authoritative for the garment and always outrank APPROVED POSE 1. For a saree, compare body/weave only with BODY/WEAVE and full-drape references, pallu only with FULLY SPREAD PALLU, borders/tassels only with BORDER/TASSELS, and blouse construction only with the matching BLOUSE reference. Never use APPROVED POSE 1 as saree product evidence. Legacy FRONT/BACK/FABRIC/ADDITIONAL product references remain valid for their proven regions. A MANNEQUIN or DRESS-FORM shot (if present) is authoritative for worn shape, fit, proportion, drape and how the garment falls on a body - validate silhouette and drape against it. A FLAT-LAY is authoritative only for outline, construction, panel layout and garment length. MODEL FACE REFERENCE outranks every other face source, including the STYLE REFERENCE face and any face in a product photo. APPROVED POSE 1 controls only model/styling/scene continuity and never garment identity. STYLE REFERENCE is the backdrop, wall, floor, set dressing, and lighting for every pose, including a back view. The clothing in the STYLE REFERENCE must be ignored. When a MODEL FACE REFERENCE is present, its face outranks the style-reference face: fail model_face if the generated face matches the style-reference person or a product-photo face instead. When no MODEL FACE REFERENCE is present, the STYLE REFERENCE face is the identity, including if the eyes are hidden: fail model_face if the generated person is different. Fail styling_continuity when the visible backdrop matches a product-photo background instead of the STYLE REFERENCE.
 
 Pose ${args.poseNumber}: ${args.poseTitle} (${args.poseType})
-Requested Output Aspect Ratio: ${resolvedAspectRatio} (${resolvedAspectRatio === "1:1" ? "square" : "vertical portrait"} canvas - evaluate full-body framing in ${resolvedAspectRatio} orientation; never fail pose_requirement or fit_silhouette merely because ${resolvedAspectRatio} is tall portrait rather than 1:1 square, or because a directional note used 'square' to mean straight-on to camera).
+Requested Output Aspect Ratio: ${resolvedAspectRatio} (${orientationDescriptor} canvas - evaluate full-body framing in ${resolvedAspectRatio} ${resolvedOrientation} orientation; ${resolvedOrientation === "square" ? "evaluate 1:1 square framing directly" : `never fail pose_requirement or fit_silhouette merely because ${resolvedAspectRatio} is ${resolvedOrientation} rather than 1:1 square, or because a directional note used 'square' to mean straight-on to camera`}).
 Approved pose requirement: ${JSON.stringify(qaPoseDirection)}
 Product Identity Profile: ${JSON.stringify(qaProductIdentity)}
 Creative Direction Profile: ${JSON.stringify(args.creativeDirection)}
@@ -318,10 +322,12 @@ export function canSalvageExhaustedPoseQa(
     severe?: string[];
     reason?: string;
     correction?: string;
+    anatomicalDefectDetected?: boolean;
   },
   options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean } = {},
 ): boolean {
   if (!qa || typeof qa !== "object") return false;
+  if (qa.anatomicalDefectDetected === true) return false;
   const textFeedback = `${String(qa.reason || "")} ${String(qa.correction || "")}`;
   if (hasAnatomicalDefectText(textFeedback)) return false;
   const scores = qa.scores && typeof qa.scores === "object" ? qa.scores : {};
@@ -396,8 +402,8 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
       failed.add(key);
     }
   }
-  if (hasAnatomyDefect && (scores["pose_requirement"] === undefined || scores["pose_requirement"] >= RETRY_FLOOR)) {
-    scores["pose_requirement"] = 40;
+  if (hasAnatomyDefect) {
+    scores["pose_requirement"] = Math.min(scores["pose_requirement"] ?? 40, 40);
   }
   const weighted = Object.entries(scores).map(([key, score]) => ({ score, weight: criticalChecks.includes(key) ? 2 : 1 }));
   const totalWeight = weighted.reduce((sum, entry) => sum + entry.weight, 0);
@@ -467,6 +473,7 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
     automaticallyVerified,
     outcome,
     requiresIndependentRecheck: suspiciousFlatScores,
+    anatomicalDefectDetected: hasAnatomyDefect,
   };
 }
 

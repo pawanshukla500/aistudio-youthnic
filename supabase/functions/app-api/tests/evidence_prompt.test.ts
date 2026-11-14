@@ -1966,5 +1966,24 @@ Deno.test("composeGenerationPrompt normalizes upstream square framing for 3:4 po
   assertStringIncludes(prompt, "square neckline yoke");
   assertEquals(prompt.includes("POSE 1 - SQUARE HERO"), false);
   assertEquals(prompt.includes("Square, unobstructed"), false);
+
+  const landscapePrompt = composeGenerationPrompt({
+    skuName: "ASPECT-KURTI-16X9",
+    productDetails: "Teal kurti",
+    aspectRatio: "16:9",
+    pose: {
+      id: "full_front",
+      title: "Wide Hero",
+      poseNumber: 1,
+      enabled: true,
+      framing: "Square, unobstructed head to toe.",
+      prompt: "Photorealistic square head-to-toe shot.",
+    } as any,
+    session: { productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "teal" } },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(landscapePrompt, "output aspect ratio: 16:9 landscape framing");
+  assertStringIncludes(landscapePrompt, "16:9 landscape head-to-toe");
+  assertEquals(landscapePrompt.includes("16:9 vertical portrait"), false);
 });
 
