@@ -112,7 +112,7 @@ export function Login({ redirect }: LoginProps) {
       <div className="pointer-events-none fixed inset-0 z-10 bg-[linear-gradient(to_bottom,rgba(7,6,9,0.72)_0%,transparent_22%,transparent_78%,rgba(7,6,9,0.85)_100%)]" />
 
       {/* Layer 2: Floating Glass Atelier Interface */}
-      <div className="pointer-events-none fixed inset-0 z-20 overflow-y-auto lg:overflow-hidden">
+      <div className="pointer-events-none fixed inset-0 z-20 overflow-y-auto overscroll-contain">
         <div className="mx-auto grid min-h-screen max-w-[1560px] items-stretch lg:grid-cols-[1.08fr_0.92fr]">
           {/* Left Hero Section: Floating Editorial Overlay on top of the 3D Runway */}
           <section className="hidden flex-col justify-between p-10 lg:flex xl:p-14">
@@ -302,9 +302,9 @@ export function Login({ redirect }: LoginProps) {
               onWheel={(e) => e.stopPropagation()}
               className="pointer-events-auto w-full max-w-[485px] rounded-[36px] border border-white/25 bg-gradient-to-b from-white/25 via-white/10 to-white/5 p-1.5 shadow-[0_36px_120px_rgba(0,0,0,0.85),0_0_60px_rgba(151,0,70,0.2)] backdrop-blur-2xl"
             >
-              <div className="w-full rounded-[30px] border border-white/95 bg-[#faf8f5]/96 p-7 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.9)] backdrop-blur-2xl transition-all sm:p-9">
+              <div className="w-full rounded-[30px] border border-white/95 bg-[#faf8f5]/[0.96] p-7 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.9)] backdrop-blur-2xl transition-all sm:p-9">
                 {/* Mobile Header */}
-                <div className="mb-6 flex items-center justify-between lg:hidden">
+                <div className="mb-6 flex items-center justify-between gap-2 lg:hidden">
                   <div className="flex items-center gap-2.5">
                     <img
                       src="/logo.png"
@@ -320,9 +320,32 @@ export function Login({ redirect }: LoginProps) {
                       </span>
                     </div>
                   </div>
-                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-                    5 Free Shoots
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      aria-pressed={autoGlide}
+                      onClick={() => setAutoGlide((prev) => !prev)}
+                      aria-label={
+                        autoGlide ? "Pause runway glide" : "Play runway glide"
+                      }
+                      className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-white px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-on-surface shadow-sm transition hover:bg-surface-container cursor-pointer"
+                    >
+                      {autoGlide ? (
+                        <>
+                          <Pause className="h-3 w-3 text-primary" />
+                          <span>Glide</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-3 w-3 text-emerald-600" />
+                          <span>Paused</span>
+                        </>
+                      )}
+                    </button>
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                      5 Free Shoots
+                    </span>
+                  </div>
                 </div>
 
                 {/* Mode Switcher Tabs */}

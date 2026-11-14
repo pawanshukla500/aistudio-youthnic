@@ -163,14 +163,21 @@ export function CollectionSurfer({
   perspectiveOrigin = "14% 18%",
 }: CollectionSurferProps) {
   const safeItems = items.length > 0 ? items : ITEMS;
-  // 1. Loop Setup: Duplicate items to create a seamless infinite buffer
-  const duplicatedItems = [...safeItems, ...safeItems];
+  // 1. Loop Setup: Repeat short collections so the base track always covers at least 16 visible slots,
+  // then duplicate with a 2-card tail buffer so slots [-2 .. baseTrack.length - 1] match across the wrap boundary.
+  const repeatCount = Math.max(1, Math.ceil(16 / safeItems.length));
+  const baseTrack = Array.from({ length: repeatCount }, () => safeItems).flat();
+  const duplicatedItems = [
+    ...baseTrack,
+    ...baseTrack,
+    ...baseTrack.slice(0, 2),
+  ];
 
   // Scroll sensitivity
   const scrollPerItem = 600;
 
-  // The exact scroll distance to complete one full loop of the ORIGINAL items
-  const loopDistance = safeItems.length * scrollPerItem;
+  // The exact scroll distance to complete one full loop of the baseTrack items
+  const loopDistance = baseTrack.length * scrollPerItem;
 
   const { scrollY } = useScroll();
 
@@ -181,6 +188,12 @@ export function CollectionSurfer({
   });
 
   // Continuous ambient runway glide + bidirectional wheel support
+  const wheelOffset = useMotionValue(0);
+  const smoothWheel = useSpring(wheelOffset, {
+    mass: 0.1,
+    stiffness: 100,
+    damping: 20,
+  });
   const autoOffset = useMotionValue(0);
   const reducedMotionRef = useRef(false);
 
@@ -198,14 +211,15 @@ export function CollectionSurfer({
     const handleWheel = (e: WheelEvent) => {
       const target = e.target as HTMLElement | null;
       if (target?.closest?.("[data-surfer-ignore='true']")) return;
-      // When at top of page and scrolling upward, feed delta directly into autoOffset for seamless reverse surfing
-      if (window.scrollY <= 0 && e.deltaY < 0) {
-        autoOffset.set(autoOffset.get() + e.deltaY * 1.2);
+      // In embedded mode (!showOverlays) or when scrolling upward at the top of the page,
+      // feed wheel delta into smoothWheel so surfing works without document scroll coupling.
+      if (!showOverlays || (window.scrollY <= 0 && e.deltaY < 0)) {
+        wheelOffset.set(wheelOffset.get() + e.deltaY * 1.2);
       }
     };
     window.addEventListener("wheel", handleWheel, { passive: true });
     return () => window.removeEventListener("wheel", handleWheel);
-  }, [autoOffset]);
+  }, [showOverlays, wheelOffset]);
 
   useAnimationFrame((_, delta) => {
     if (!autoPlay || reducedMotionRef.current) return;
@@ -215,8 +229,11 @@ export function CollectionSurfer({
   });
 
   const combinedScroll = useTransform(
-    [smoothScroll, autoOffset],
-    (values) => Number(values[0]) + Number(values[1]),
+    [smoothScroll, smoothWheel, autoOffset],
+    (values) =>
+      (showOverlays ? Number(values[0]) : 0) +
+      Number(values[1]) +
+      Number(values[2]),
   );
 
   // 2. Positive Modulo Logic: loops 0 -> loopDistance -> 0 smoothly in both directions
@@ -230,21 +247,21 @@ export function CollectionSurfer({
   const stepY = -84;
   const stepZ = -288;
 
-  // Move the scene backwards by the length of ONE set of items
+  // Move the scene backwards by the length of ONE baseTrack set
   const x = useTransform(
     loopedProgress,
     [0, loopDistance],
-    [0, -safeItems.length * stepX],
+    [0, -baseTrack.length * stepX],
   );
   const y = useTransform(
     loopedProgress,
     [0, loopDistance],
-    [0, -safeItems.length * stepY],
+    [0, -baseTrack.length * stepY],
   );
   const z = useTransform(
     loopedProgress,
     [0, loopDistance],
-    [0, -safeItems.length * stepZ],
+    [0, -baseTrack.length * stepZ],
   );
 
   // Mouse position for magnetic/uplift effect
@@ -289,11 +306,13 @@ export function CollectionSurfer({
     <div
       className={`relative bg-[#070609] min-h-screen text-white w-full ${className}`}
     >
-      {/* 3. Infinite Spacer so the user can scroll for a very long time */}
-      <div
-        style={{ height: "50000px" }}
-        className="w-full pointer-events-none"
-      />
+      {/* 3. Infinite Spacer for standalone scroll mode */}
+      {showOverlays && (
+        <div
+          style={{ height: "50000px" }}
+          className="w-full pointer-events-none"
+        />
+      )}
 
       {/* Fixed viewport */}
       <div className="fixed inset-0 w-full h-screen overflow-hidden flex items-center justify-center perspective-container">
