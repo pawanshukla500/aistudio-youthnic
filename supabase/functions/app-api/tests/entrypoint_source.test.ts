@@ -45,3 +45,17 @@ Deno.test("Railway idle sleep optimization: useQuery polls only active work and 
   assertEquals(cronMigration.includes("ELSIF operation_name = 'usage.sync' THEN"), true);
   assertEquals(cronMigration.includes("ELSIF operation_name = 'events.automation' THEN"), true);
 });
+
+Deno.test("Shockproof resilience contracts: safety fallbacks, retries, and delayed retry wakeup are wired", () => {
+  const indexSource = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  assertEquals(indexSource.includes("function appendSafetyVisionFallbacks("), true);
+  assertEquals(indexSource.includes("return qwenVisionJson(effectiveRoute, parts, timeoutMs);"), true);
+  assertEquals(indexSource.includes("async function fetchAssetBlobWithRetry("), true);
+  assertEquals(indexSource.includes("await response.body?.cancel().catch(() => {});"), true);
+  assertEquals(indexSource.includes("if (!retryable) break;"), true);
+  assertEquals(indexSource.includes("body: buildImageGenerationFormData(args),"), true);
+  assertEquals(indexSource.includes("while (Date.now() < targetWakeMs)"), true);
+
+  const studioSource = Deno.readTextFileSync(new URL("../../../../src/features/studio/Studio.tsx", import.meta.url)).replace(/\r\n/g, "\n");
+  assertEquals(studioSource.includes("!hasRequiredSareeReferences(productReferences)"), true);
+});

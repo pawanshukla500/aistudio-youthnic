@@ -526,8 +526,8 @@ Deno.test("product-truth analyze preserves high thinking for Meta Muse Spark, GP
     "none",
   );
   assertEquals(PRODUCT_TRUTH_TIMEOUT_MS, 40_000);
-  assertEquals(PRODUCT_TRUTH_FALLBACK_RESERVE_MS, 45_000);
-  assertEquals(STUDIO_INVOKE_BUDGET_MS, 180_000);
+  assertEquals(PRODUCT_TRUTH_FALLBACK_RESERVE_MS, 60_000);
+  assertEquals(STUDIO_INVOKE_BUDGET_MS, 240_000);
 });
 
 Deno.test("product truth runs exactly the Administration primary, then its fallback", () => {
@@ -571,7 +571,7 @@ Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
   // browser aborted: the chain's clock starts after auth, the workspace RPC and
   // reference loading, so none of that is covered by the per-hop reserve.
   const reserved = STUDIO_INVOKE_BUDGET_MS - VISION_REQUEST_OVERHEAD_MS;
-  assertEquals(productTruthGatewayBudgetMs(185_000), reserved);
+  assertEquals(productTruthGatewayBudgetMs(245_000), reserved);
   assertEquals(productTruthGatewayBudgetMs(), reserved);
   assert(productTruthGatewayBudgetMs() < STUDIO_INVOKE_BUDGET_MS);
 
@@ -695,14 +695,14 @@ Deno.test("unclassified provider request failure on hop-1 fails over to hop-2 in
   assertEquals(result.value, { ok: true, model: "muse-spark-1.3-contributor" });
 });
 
-Deno.test("60s leftover gateway still runs hop-2 after a full hop-1 timeout", async () => {
+Deno.test("80s leftover gateway still runs hop-2 after a full hop-1 timeout", async () => {
   const routes = productTruthRouteChain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR);
   let clock = 0;
   const invoked: Array<{ model: string; timeoutMs: number; at: number }> = [];
   const result = await runVisionProviderChain({
     routes,
     purpose: "product_truth",
-    gatewayBudgetMs: 60_000,
+    gatewayBudgetMs: 80_000,
     now: () => clock,
     invoke: async (route, timeoutMs) => {
       invoked.push({ model: route.model, timeoutMs, at: clock });
@@ -726,7 +726,7 @@ Deno.test("60s leftover gateway still runs hop-2 after a full hop-1 timeout", as
     "muse-spark-1.3-contributor",
   ]);
   assert(invoked[1].timeoutMs >= PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
-  assert(invoked[0].timeoutMs + invoked[1].timeoutMs <= 60_000);
+  assert(invoked[0].timeoutMs + invoked[1].timeoutMs <= 80_000);
   assertEquals(result.route.model, "muse-spark-1.3-contributor");
 });
 
@@ -1024,42 +1024,52 @@ Deno.test("3-tier vision fallback chain formats failure messages and budgets tim
   assert(message.includes("OpenAI gpt-5.6-luna"));
   assert(message.includes("OpenAI gpt-5.6-terra"));
 
-  // Terra is a third hop, but it does not take a second 45s reserve out of
+  // Terra is a third hop, but it does not take a second 60s reserve out of
   // the primary. One fallback window is held back, same as a two-hop chain.
   const hop1Timeout = remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 3,
     elapsedMs: 0,
-    gatewayBudgetMs: 175_000,
+    gatewayBudgetMs: 235_000,
   });
-  // 175,000 - 5,000 reserve - 45,000 fallback window = 125,000ms
-  assertEquals(hop1Timeout, 125_000);
+  // 235,000 - 5,000 reserve - 60,000 fallback window = 170,000ms
+  assertEquals(hop1Timeout, 170_000);
   assertEquals(hop1Timeout, remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 2,
     elapsedMs: 0,
-    gatewayBudgetMs: 175_000,
+    gatewayBudgetMs: 235_000,
   }));
 
-  // hop 2 leaves 45s reserve for hop 3
+  // hop 2 leaves 60s reserve for hop 3
   const hop2Timeout = remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 2,
     elapsedMs: 20_000,
-    gatewayBudgetMs: 175_000,
+    gatewayBudgetMs: 235_000,
   });
-  // 175,000 - 20,000 - 5,000 - 45,000 = 105,000ms
-  assertEquals(hop2Timeout, 105_000);
+  // 235,000 - 20,000 - 5,000 - 60,000 = 150,000ms
+  assertEquals(hop2Timeout, 150_000);
+
+  // Inside a tight 60s leftover window with 2 hops left ([Luna, Gemini]),
+  // share the remaining budget (36s Luna / 24s Gemini) instead of starving hop 2 to 10s.
+  const tightHop2Timeout = remainingVisionTimeoutMs({
+    purpose: "product_truth",
+    remainingRouteCount: 2,
+    elapsedMs: 170_000,
+    gatewayBudgetMs: 235_000,
+  });
+  assertEquals(tightHop2Timeout, 36_000);
 
   // hop 3 gets whatever is left of the wait
   const hop3Timeout = remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 1,
     elapsedMs: 80_000,
-    gatewayBudgetMs: 175_000,
+    gatewayBudgetMs: 235_000,
   });
-  // 175,000 - 80,000 - 5,000 = 90,000ms
-  assertEquals(hop3Timeout, 90_000);
+  // 235,000 - 80,000 - 5,000 = 150,000ms
+  assertEquals(hop3Timeout, 150_000);
 });
 
 Deno.test("the first vision protocol keeps the whole hop", () => {
@@ -1189,6 +1199,67 @@ Deno.test("defaultThinkingLevel prefers low for OpenAI QA routes when thinking i
     assertAllowedAiModelRoute({ provider: "openai", model: "gpt-5.6-luna", thinkingLevel: "none" }, "qa").thinkingLevel,
     "none",
   );
+});
+
+Deno.test("4-tier shockproof chain (Meta -> Terra -> Luna -> Gemini) preserves runway for every fallback", async () => {
+  const routes = [
+    FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE,
+    OPENAI_TERRA_VISION_ROUTE,
+    CHEAP_OPENAI_VISION_ROUTE,
+    FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+  ];
+  let clock = 0;
+  const hops: Array<{ provider: string; model: string; thinking: string; timeoutMs: number }> = [];
+  const result = await runVisionProviderChain({
+    routes,
+    purpose: "product_truth",
+    gatewayBudgetMs: productTruthGatewayBudgetMs(),
+    now: () => clock,
+    invoke: async (route, timeoutMs) => {
+      hops.push({
+        provider: route.provider,
+        model: route.model,
+        thinking: route.thinkingLevel,
+        timeoutMs,
+      });
+      if (route.provider === "meta") {
+        clock += 2_000;
+        throw Object.assign(new Error("model not found"), { status: 404 });
+      }
+      if (route.model === "gpt-6.1-terra") {
+        clock += timeoutMs;
+        throw Object.assign(new Error("The signal has been aborted"), { name: "TimeoutError" });
+      }
+      if (route.model === "gpt-5.6-luna") {
+        clock += 12_000;
+        throw Object.assign(new Error("Rate limit reached"), { status: 429 });
+      }
+      clock += 8_000;
+      return { ok: true, model: route.model };
+    },
+    classify: (route, error) =>
+      classifyVisionProviderFailure(route.provider, {
+        name: (error as { name?: string }).name,
+        status: (error as { status?: number }).status,
+        message: error instanceof Error ? error.message : String(error),
+      }),
+  });
+
+  assertEquals(hops.map((h) => h.model), [
+    "muse-spark-1.3-contributor",
+    "gpt-6.1-terra",
+    "gpt-5.6-luna",
+    "gemini-3.8-flash",
+  ]);
+  // Terra preserves medium thinking with >= 165s after fast Meta 404
+  assertEquals(hops[1].thinking, "medium");
+  assert(hops[1].timeoutMs >= 165_000);
+  // Luna still gets > 30s inside tight reserve window instead of starving to 10s
+  assertEquals(hops[2].thinking, "low");
+  assert(hops[2].timeoutMs >= 30_000);
+  // Gemini 3.8 Flash gets plenty of runway and completes
+  assert(hops[3].timeoutMs >= 24_000);
+  assertEquals(result.route.model, "gemini-3.8-flash");
 });
 
 

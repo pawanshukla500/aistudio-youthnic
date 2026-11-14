@@ -2,6 +2,50 @@ type ServiceAccount = { client_email: string; private_key: string; private_key_i
 type CachedToken = { value: string; expiresAt: number; scope: string };
 let cachedToken: CachedToken | null = null;
 
+const TRANSIENT_FIREBASE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+
+export async function firebaseFetchWithRetry(
+  url: string,
+  makeInit: () => Promise<RequestInit> | RequestInit,
+  options: { timeoutMs?: number; maxAttempts?: number; invalidateTokenOn401?: boolean } = {},
+): Promise<Response> {
+  const timeoutMs = options.timeoutMs ?? 45_000;
+  const maxAttempts = options.maxAttempts ?? 3;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const requestInit = await makeInit();
+      const response = await fetch(url, {
+        ...requestInit,
+        signal: requestInit.signal ?? AbortSignal.timeout(timeoutMs),
+      });
+      if (response.status === 401 && options.invalidateTokenOn401 && attempt < maxAttempts) {
+        cachedToken = null;
+        await response.body?.cancel().catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        continue;
+      }
+      if (TRANSIENT_FIREBASE_STATUSES.has(response.status) && attempt < maxAttempts) {
+        const retryAfter = Number(response.headers.get("retry-after") || "0");
+        const delayMs = retryAfter > 0 && retryAfter <= 8
+          ? retryAfter * 1000
+          : 250 * 2 ** (attempt - 1);
+        await response.body?.cancel().catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+      return response;
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** (attempt - 1)));
+        continue;
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || "Firebase request failed."));
+}
+
 function requiredEnv(name: string) {
   const value = Deno.env.get(name)?.trim();
   if (!value) throw new Error(`${name} is not configured in the Supabase Edge Function.`);
@@ -56,10 +100,14 @@ export async function googleAccessToken(scopes: string[]) {
   const key = await crypto.subtle.importKey("pkcs8", pemToBytes(account.private_key), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
   const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(input));
   const assertion = `${input}.${bytesToBase64Url(new Uint8Array(signature))}`;
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }),
-  });
+  const response = await firebaseFetchWithRetry(
+    "https://oauth2.googleapis.com/token",
+    () => ({
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }),
+    }),
+  );
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !(data as { access_token?: string }).access_token) throw new Error((data as { error_description?: string }).error_description || `Google authorization failed (${response.status}).`);
   cachedToken = { value: (data as { access_token: string }).access_token, expiresAt: Date.now() + Number((data as { expires_in?: number }).expires_in || 3600) * 1000, scope };
@@ -70,10 +118,18 @@ async function identityToolkit(path: string, body: Record<string, unknown>) {
   const account = serviceAccount();
   const projectId = Deno.env.get("FIREBASE_PROJECT_ID")?.trim() || account.project_id;
   if (!projectId) throw new Error("FIREBASE_PROJECT_ID is not configured.");
-  const token = await googleAccessToken(["https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/identitytoolkit"]);
-  const response = await fetch(`https://identitytoolkit.googleapis.com/v1/projects/${encodeURIComponent(projectId)}${path}`, {
-    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
-  });
+  const response = await firebaseFetchWithRetry(
+    `https://identitytoolkit.googleapis.com/v1/projects/${encodeURIComponent(projectId)}${path}`,
+    async () => {
+      const token = await googleAccessToken(["https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/identitytoolkit"]);
+      return {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      };
+    },
+    { invalidateTokenOn401: true },
+  );
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error((data as { error?: { message?: string } })?.error?.message || `Firebase Auth request failed (${response.status}).`);
   return data as Record<string, unknown>;
@@ -98,17 +154,33 @@ export async function deleteFirebaseUser(uid: string) {
 
 export async function uploadFirebaseObject(args: { storagePath: string; blob: Blob; mimeType: string }) {
   const bucket = requiredEnv("FIREBASE_STORAGE_BUCKET");
-  const token = await googleAccessToken(["https://www.googleapis.com/auth/cloud-platform"]);
-  const upload = await fetch(`https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(bucket)}/o?uploadType=media&name=${encodeURIComponent(args.storagePath)}`, {
-    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": args.mimeType }, body: args.blob,
-  });
+  const upload = await firebaseFetchWithRetry(
+    `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(bucket)}/o?uploadType=media&name=${encodeURIComponent(args.storagePath)}`,
+    async () => {
+      const token = await googleAccessToken(["https://www.googleapis.com/auth/cloud-platform"]);
+      return {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": args.mimeType },
+        body: args.blob,
+      };
+    },
+    { invalidateTokenOn401: true },
+  );
   const uploadData = await upload.json().catch(() => ({}));
   if (!upload.ok) throw new Error((uploadData as { error?: { message?: string } })?.error?.message || `Firebase upload failed (${upload.status}).`);
   const downloadToken = crypto.randomUUID();
-  const metadata = await fetch(`https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(args.storagePath)}`, {
-    method: "PATCH", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ contentType: args.mimeType, metadata: { firebaseStorageDownloadTokens: downloadToken } }),
-  });
+  const metadata = await firebaseFetchWithRetry(
+    `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(args.storagePath)}`,
+    async () => {
+      const token = await googleAccessToken(["https://www.googleapis.com/auth/cloud-platform"]);
+      return {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ contentType: args.mimeType, metadata: { firebaseStorageDownloadTokens: downloadToken } }),
+      };
+    },
+    { invalidateTokenOn401: true },
+  );
   if (!metadata.ok) throw new Error(`Firebase metadata update failed (${metadata.status}).`);
   return {
     storagePath: args.storagePath,
@@ -118,8 +190,14 @@ export async function uploadFirebaseObject(args: { storagePath: string; blob: Bl
 
 export async function downloadFirebaseObject(storagePath: string) {
   const bucket = requiredEnv("FIREBASE_STORAGE_BUCKET");
-  const token = await googleAccessToken(["https://www.googleapis.com/auth/cloud-platform"]);
-  const response = await fetch(`https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}?alt=media`, { headers: { Authorization: `Bearer ${token}` } });
+  const response = await firebaseFetchWithRetry(
+    `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}?alt=media`,
+    async () => {
+      const token = await googleAccessToken(["https://www.googleapis.com/auth/cloud-platform"]);
+      return { headers: { Authorization: `Bearer ${token}` } };
+    },
+    { invalidateTokenOn401: true },
+  );
   if (!response.ok) throw new Error(`Firebase download failed (${response.status}).`);
   return response.blob();
 }
@@ -127,10 +205,13 @@ export async function downloadFirebaseObject(storagePath: string) {
 export async function deleteFirebaseObject(storagePath: string) {
   if (!storagePath) return;
   const bucket = requiredEnv("FIREBASE_STORAGE_BUCKET");
-  const token = await googleAccessToken(["https://www.googleapis.com/auth/cloud-platform"]);
-  const response = await fetch(
+  const response = await firebaseFetchWithRetry(
     `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}`,
-    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+    async () => {
+      const token = await googleAccessToken(["https://www.googleapis.com/auth/cloud-platform"]);
+      return { method: "DELETE", headers: { Authorization: `Bearer ${token}` } };
+    },
+    { invalidateTokenOn401: true },
   );
   if (!response.ok && response.status !== 404) {
     const data = await response.json().catch(() => ({})) as { error?: { message?: string } };

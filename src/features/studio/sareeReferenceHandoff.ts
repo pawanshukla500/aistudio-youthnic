@@ -1,5 +1,17 @@
 type ReferenceLike = { id: string; role: string; uploadedId?: unknown };
 
+export function hasRequiredSareeReferences<K extends string, T extends ReferenceLike>(
+  references: Partial<Record<K, T>>,
+): boolean {
+  const refs = references as Record<string, T | undefined>;
+  return Boolean(
+    (refs.saree_front_drape || refs.front) &&
+      (refs.saree_back_drape || refs.back) &&
+      refs.saree_pallu_spread &&
+      (refs.saree_body_detail || refs.fabric_pattern),
+  );
+}
+
 // Only the explicit generic front/back labels can move automatically. A fabric
 // close-up, mannequin image, or extra product image can contain several regions;
 // it remains available for a member to map deliberately in the Studio UI.

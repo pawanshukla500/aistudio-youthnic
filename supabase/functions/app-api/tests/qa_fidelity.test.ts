@@ -390,6 +390,12 @@ Deno.test("hasAnatomicalDefectText detects positive defect mentions and respects
   assertEquals(hasAnatomicalDefectText("An extra hand appears holding the dupatta."), true);
   assertEquals(hasAnatomicalDefectText("A floating hand is resting on the pleats."), true);
   assertEquals(hasAnatomicalDefectText("Six fingers detected on right hand."), true);
+  assertEquals(hasAnatomicalDefectText("No extra limbs on the left, but extra hands appear near the waist."), true);
+  assertEquals(hasAnatomicalDefectText("Model has no extra fingers but a third hand appears near the drape."), true);
+  assertEquals(hasAnatomicalDefectText("Hand area is not free of duplicate wrists."), true);
+  assertEquals(hasAnatomicalDefectText("No extra hands, malformed fingers, or phantom limbs."), false);
+  assertEquals(hasAnatomicalDefectText("The image is not without flaws and has no extra hands."), false);
+  assertEquals(hasAnatomicalDefectText("Zero extra limbs, silhouette is accurate."), false);
 });
 
 Deno.test("normalizePoseQaResult vetoes image when reason describes anatomical duplication despite pass=true", () => {

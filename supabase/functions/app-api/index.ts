@@ -221,32 +221,50 @@ async function downloadCatalogObject(orgId: string, storagePath: string, storage
     return data;
   }
   if (/^https:\/\//i.test(storagePath)) {
-    const response = await fetch(storagePath);
-    if (!response.ok) throw new Error(`Asset download failed (${response.status}).`);
-    return response.blob();
+    return await fetchAssetBlobWithRetry(storagePath, "Asset download");
   }
   if (/^http:\/\//i.test(storagePath)) throw new Error("Catalog asset URLs must use HTTPS.");
   if (backend === "external") {
     if (!fallbackUrl) throw new Error("External asset URL is unavailable.");
-    const response = await fetch(fallbackUrl);
-    if (!response.ok) throw new Error(`External asset download failed (${response.status}).`);
-    return response.blob();
+    return await fetchAssetBlobWithRetry(fallbackUrl, "External asset download");
   }
   if (!storagePath && fallbackUrl && /^https:\/\//i.test(fallbackUrl)) {
-    const response = await fetch(fallbackUrl);
-    if (!response.ok) throw new Error(`Fallback asset download failed (${response.status}).`);
-    return response.blob();
+    return await fetchAssetBlobWithRetry(fallbackUrl, "Fallback asset download");
   }
   try {
     assertCatalogReferenceOwnership(orgId, { role: "stored_asset", storagePath, storageBackend: "firebase", hash: "", filename: "stored-asset", mimeType: "", size: 0 });
     return await downloadFirebaseObject(storagePath);
   } catch (firebaseError) {
     if (fallbackUrl && /^https:\/\//i.test(fallbackUrl)) {
-      const response = await fetch(fallbackUrl);
-      if (response.ok) return await response.blob();
+      try {
+        return await fetchAssetBlobWithRetry(fallbackUrl, "Fallback asset download");
+      } catch {
+        // Surface the primary Firebase storage error when the fallback URL also fails.
+      }
     }
     throw firebaseError;
   }
+}
+
+async function fetchAssetBlobWithRetry(url: string, label: string): Promise<Blob> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      if (response.ok) return await response.blob();
+      const status = response.status;
+      await response.body?.cancel().catch(() => {});
+      lastError = new Error(`${label} failed (${status}).`);
+      const retryable = [408, 429, 500, 502, 503, 504].includes(status);
+      if (!retryable) break;
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < 3) {
+      await sleep(300 * 2 ** (attempt - 1));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`${label} failed.`);
 }
 
 async function deleteCatalogObject(orgId: string, storagePath: string, storageBackend: unknown) {
@@ -612,6 +630,48 @@ function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiMo
   );
 }
 
+function appendSafetyVisionFallbacks(args: {
+  purpose: VisionPurpose;
+  primary?: NormalizedAiModelRoute;
+  fallbacks: NormalizedAiModelRoute[];
+  fallbackEnabled: boolean;
+}): NormalizedAiModelRoute[] {
+  const chain = [...args.fallbacks];
+  if (!args.fallbackEnabled) return chain;
+  const hasRoute = (provider: AiProvider, model?: string) =>
+    (args.primary?.provider === provider && (!model || args.primary.model === model)) ||
+    chain.some((route) => route.provider === provider && (!model || route.model === model));
+
+  if (args.purpose === "product_truth") {
+    const hasTerra = hasRoute("openai", "gpt-6.1-terra");
+    const hasLuna = hasRoute("openai", "gpt-5.6-luna");
+    if (
+      hasTerra &&
+      !hasLuna &&
+      (args.primary?.provider === "openai" || chain.some((r) => r.provider === "openai") || Deno.env.get("OPENAI_API_KEY")?.trim())
+    ) {
+      chain.push(assertAllowedAiModelRoute(CHEAP_OPENAI_VISION_ROUTE, args.purpose, { strictJson: true }));
+    } else if (!hasTerra && hasLuna && args.primary?.provider === "meta" && chain.some((r) => r.provider === "openai")) {
+      chain.push(assertAllowedAiModelRoute(OPENAI_TERRA_VISION_ROUTE, args.purpose, { strictJson: true }));
+    }
+  } else if (
+    (args.purpose === "qa" || args.purpose === "qa_escalation") &&
+    !hasRoute("openai") &&
+    Deno.env.get("OPENAI_API_KEY")?.trim()
+  ) {
+    chain.push(assertAllowedAiModelRoute(CHEAP_OPENAI_VISION_ROUTE, args.purpose, { strictJson: true }));
+  }
+
+  if (
+    (args.purpose === "product_truth" || args.purpose === "qa" || args.purpose === "qa_escalation") &&
+    !hasRoute("gemini") &&
+    Deno.env.get("GEMINI_API_KEY")?.trim()
+  ) {
+    chain.push(assertAllowedAiModelRoute(FAST_PRODUCT_TRUTH_GEMINI_ROUTE, args.purpose, { strictJson: true }));
+  }
+  return chain;
+}
+
 function defaultVisionFallbacks(args: { purpose: VisionPurpose }): NormalizedAiModelRoute[] {
   if (args.purpose === "product_truth") {
     const routes: NormalizedAiModelRoute[] = [
@@ -626,38 +686,37 @@ function defaultVisionFallbacks(args: { purpose: VisionPurpose }): NormalizedAiM
         { strictJson: true },
       ),
     ];
-    if (Deno.env.get("GEMINI_API_KEY")?.trim()) {
-      routes.push(
+    return appendSafetyVisionFallbacks({ purpose: args.purpose, fallbacks: routes, fallbackEnabled: true });
+  }
+  if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
+    return appendSafetyVisionFallbacks({
+      purpose: args.purpose,
+      fallbacks: [
         assertAllowedAiModelRoute(
-          FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+          CHEAP_OPENAI_VISION_ROUTE,
           args.purpose,
           { strictJson: true },
         ),
-      );
-    }
-    return routes;
+        assertAllowedAiModelRoute(
+          { ...OPENAI_TERRA_VISION_ROUTE, thinkingLevel: "low" },
+          args.purpose,
+          { strictJson: true },
+        ),
+      ],
+      fallbackEnabled: true,
+    });
   }
-  if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
-    return [
-      assertAllowedAiModelRoute(
-        CHEAP_OPENAI_VISION_ROUTE,
-        args.purpose,
-        { strictJson: true },
-      ),
+  return appendSafetyVisionFallbacks({
+    purpose: args.purpose,
+    fallbacks: [
       assertAllowedAiModelRoute(
         { ...OPENAI_TERRA_VISION_ROUTE, thinkingLevel: "low" },
         args.purpose,
         { strictJson: true },
       ),
-    ];
-  }
-  return [
-    assertAllowedAiModelRoute(
-      { ...OPENAI_TERRA_VISION_ROUTE, thinkingLevel: "low" },
-      args.purpose,
-      { strictJson: true },
-    ),
-  ];
+    ],
+    fallbackEnabled: true,
+  });
 }
 
 function visionPolicyFingerprint(policy: VisionPolicy) {
@@ -740,19 +799,12 @@ async function resolveVisionPolicy(orgId: string, args: {
       thinkingLevel: String(row.fallback_reasoning || ""),
     }, args.purpose, { strictJson: true })
     : undefined;
-  const fallbacks: NormalizedAiModelRoute[] = fallback ? [fallback] : [];
-  if (
-    args.purpose === "product_truth" &&
-    primary.provider === "meta" &&
-    fallback &&
-    fallback.provider === "openai"
-  ) {
-    if (fallback.model === "gpt-6.1-terra" && !fallbacks.some((f) => f.model === "gpt-5.6-luna")) {
-      fallbacks.push(assertAllowedAiModelRoute(CHEAP_OPENAI_VISION_ROUTE, args.purpose, { strictJson: true }));
-    } else if (fallback.model === "gpt-5.6-luna" && !fallbacks.some((f) => f.model === "gpt-6.1-terra")) {
-      fallbacks.push(assertAllowedAiModelRoute(OPENAI_TERRA_VISION_ROUTE, args.purpose, { strictJson: true }));
-    }
-  }
+  const fallbacks = appendSafetyVisionFallbacks({
+    purpose: args.purpose,
+    primary,
+    fallbacks: fallback ? [fallback] : [],
+    fallbackEnabled: row.fallback_enabled === true,
+  });
   return applyFastProductTruthRouting({
     ...primary,
     purpose: args.purpose,
@@ -1101,8 +1153,11 @@ async function loadReference(
   assertCatalogReferenceOwnership(orgId, reference);
   if (reference.storagePath) blob = await downloadCatalogObject(orgId, reference.storagePath, reference.storageBackend, reference.downloadUrl);
   if (!blob && reference.downloadUrl) {
-    const response = await fetch(reference.downloadUrl);
-    if (response.ok) blob = await response.blob();
+    try {
+      blob = await fetchAssetBlobWithRetry(reference.downloadUrl, `Reference ${reference.filename}`);
+    } catch {
+      blob = null;
+    }
   }
   if (!blob) throw new Error(`Could not load ${reference.filename} from catalog asset storage.`);
   const mimeType = reference.mimeType || blob.type || "image/jpeg";
@@ -1661,11 +1716,15 @@ async function metaVisionJson(
   }
 }
 
-async function qwenVisionJson(route: NormalizedAiModelRoute, parts: JsonRecord[]) {
+async function qwenVisionJson(
+  route: NormalizedAiModelRoute,
+  parts: JsonRecord[],
+  timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+) {
   assertVisionProviderConfigured(route);
   const response = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
     method: "POST",
-    signal: AbortSignal.timeout(50_000),
+    signal: AbortSignal.timeout(timeoutMs),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${requiredEnv("QWEN_API_KEY")}`,
@@ -1717,7 +1776,7 @@ async function invokeVisionRoute(
   if (effectiveRoute.provider === "meta") {
     return metaVisionJson(effectiveRoute, parts, timeoutMs);
   }
-  return qwenVisionJson(effectiveRoute, parts);
+  return qwenVisionJson(effectiveRoute, parts, timeoutMs);
 }
 
 function asVisionProviderError(error: unknown, route: NormalizedAiModelRoute) {
@@ -2087,10 +2146,7 @@ function normalizeImageSize(aspectRatio: string, imageSize: string, model: strin
   return is2k ? "2048x2048" : "1024x1024";
 }
 
-async function generateImage(args: { prompt: string; model: string; size: string; quality: string; references: LoadedReference[] }) {
-  // composeGenerationPrompt enforces this too. Keep the provider boundary guarded
-  // so future callers cannot send an oversized prompt and trigger a paid-job retry.
-  assertGenerationPromptWithinLimit(args.prompt);
+function buildImageGenerationFormData(args: { prompt: string; model: string; size: string; quality: string; references: LoadedReference[] }) {
   const body = new FormData();
   body.append("model", args.model);
   body.append("prompt", args.prompt);
@@ -2109,29 +2165,69 @@ async function generateImage(args: { prompt: string; model: string; size: string
     const reference = args.references[index];
     body.append("image[]", reference.blob, `${String(index + 1).padStart(2, "0")}_${reference.role}_${reference.filename.replace(/[^a-zA-Z0-9._-]/g, "_")}`);
   }
+  return body;
+}
+
+async function generateImage(args: { prompt: string; model: string; size: string; quality: string; references: LoadedReference[] }) {
+  // composeGenerationPrompt enforces this too. Keep the provider boundary guarded
+  // so future callers cannot send an oversized prompt and trigger a paid-job retry.
+  assertGenerationPromptWithinLimit(args.prompt);
   const isReve = args.model.startsWith("reve-");
   const apiUrl = isReve ? "https://api.reve.com/v2/create" : "https://api.openai.com/v1/images/edits";
   const apiKey = isReve ? requiredEnv("REVE_API_KEY") : requiredEnv("OPENAI_API_KEY");
+  const transientStatuses = new Set([408, 429, 500, 502, 503, 504]);
 
-  const response = await fetch(apiUrl, {
-    method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body,
-    signal: AbortSignal.timeout(IMAGE_REQUEST_TIMEOUT_MS),
-  });
-  const responseText = await response.text();
+  let response: Response | null = null;
+  let responseText = "";
   let data: JsonRecord = {};
-  try { data = JSON.parse(responseText) as JsonRecord; } catch { data = {}; }
-  if (!response.ok) {
-    const providerError = data.error as JsonRecord | undefined;
-    const providerMessage = String(providerError?.message || responseText.slice(0, 800) || `${isReve ? 'Reve' : 'OpenAI'} image request failed (${response.status}).`);
-    const error = new Error(providerMessage) as Error & { code?: string; status?: number; retryAfterMs?: number };
-    error.code = String(providerError?.code || providerError?.type || "");
-    error.status = response.status;
-    error.retryAfterMs = Math.max(
-      parseRetryAfterMs(response.headers.get("retry-after")),
-      parseRetryAfterMs(response.headers.get("x-ratelimit-reset-images")),
-    );
-    throw error;
+  const maxInlineAttempts = 3;
+  for (let attempt = 1; attempt <= maxInlineAttempts; attempt += 1) {
+    try {
+      const candidate = await fetch(apiUrl, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: buildImageGenerationFormData(args),
+        signal: AbortSignal.timeout(IMAGE_REQUEST_TIMEOUT_MS),
+      });
+      const candidateText = await candidate.text();
+      let candidateData: JsonRecord = {};
+      try { candidateData = JSON.parse(candidateText) as JsonRecord; } catch { candidateData = {}; }
+      if (candidate.ok) {
+        response = candidate;
+        responseText = candidateText;
+        data = candidateData;
+        break;
+      }
+      const retryAfterMs = Math.max(
+        parseRetryAfterMs(candidate.headers.get("retry-after")),
+        parseRetryAfterMs(candidate.headers.get("x-ratelimit-reset-images")),
+      );
+      const canRetryInline = attempt < maxInlineAttempts &&
+        transientStatuses.has(candidate.status) &&
+        (candidate.status !== 429 || retryAfterMs <= 10_000);
+      if (canRetryInline) {
+        const waitMs = Math.min(10_000, Math.max(retryAfterMs, 1_500 * attempt));
+        await sleep(waitMs);
+        continue;
+      }
+      const providerError = candidateData.error as JsonRecord | undefined;
+      const providerMessage = String(providerError?.message || candidateText.slice(0, 800) || `${isReve ? 'Reve' : 'OpenAI'} image request failed (${candidate.status}).`);
+      const error = new Error(providerMessage) as Error & { code?: string; status?: number; retryAfterMs?: number };
+      error.code = String(providerError?.code || providerError?.type || "");
+      error.status = candidate.status;
+      error.retryAfterMs = retryAfterMs;
+      throw error;
+    } catch (error) {
+      const isAbortOrTimeout = error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError");
+      const hasHttpStatus = Number((error as { status?: number })?.status || 0) > 0;
+      if (!isAbortOrTimeout && !hasHttpStatus && attempt < maxInlineAttempts) {
+        await sleep(1_500 * attempt);
+        continue;
+      }
+      throw error;
+    }
   }
+  if (!response) throw new Error(`${isReve ? 'Reve' : 'OpenAI'} image request failed after retries (${responseText.slice(0, 200)}).`);
   const requestId = response.headers.get("x-request-id") || "";
   const usage = providerUsage(data.usage);
   const costUsd = usageCostUsd(args.model, usage, await currentAdminRates());
@@ -2147,9 +2243,7 @@ async function generateImage(args: { prompt: string; model: string; size: string
       requestId, usage, costUsd,
     };
   }
-  const imageResponse = await fetch(String(item.url));
-  if (!imageResponse.ok) throw new Error(`The generated ${isReve ? 'Reve' : 'OpenAI'} image could not be downloaded.`);
-  const blob = await imageResponse.blob();
+  const blob = await fetchAssetBlobWithRetry(String(item.url), `The generated ${isReve ? 'Reve' : 'OpenAI'} image download`);
   return { blob, base64: await blobToBase64(blob), mimeType: blob.type || "image/jpeg", requestId, usage, costUsd };
 }
 
@@ -2897,6 +2991,15 @@ async function deferPoseRetry(args: {
       generation_status: "queued", error_message: retryMessage, updated_at: now,
     }).eq("id", args.job.planning_request_id),
   ]);
+  const targetWakeMs = Date.now() + delayMs + 500;
+  scheduleBackground((async () => {
+    // Railway Deno.serve persists across delayed retries up to retryDelayMs (max 5m);
+    // re-arm in <=120s segments until availableAt is reached so kickWorker never fires early.
+    while (Date.now() < targetWakeMs) {
+      await sleep(Math.min(120_000, Math.max(0, targetWakeMs - Date.now())));
+    }
+    await kickWorker(String(args.job.job_id));
+  })());
   return { processed: true, deferred: true, jobId: args.job.job_id, pose: args.pose.pose_index, availableAt, error: args.message };
 }
 

@@ -146,3 +146,22 @@ def test_qa_agent_contrast_conjunctions_still_trigger_veto():
     assert eval_res.bottom_cut_mismatch is True
     assert eval_res.outcome in ("retry", "fail")
 
+
+def test_qa_agent_pose_hijack_without_scores_marks_pose_requirement():
+    agent = ComputerVisionQAAgent()
+    eval_res = agent.evaluate(
+        org_id="org_test",
+        job_id="job_test",
+        generation_id="gen_pose_hijack",
+        sku_id="sku_test",
+        pose_index=5,
+        pose_type="closeup",
+        image_url="http://example.com/image.jpg",
+        product_dna={"garment_family": "kurta_or_kurti_set", "bottom_wear": {"cut_class": "straight"}},
+        ai_raw_evaluation={"notes": "Close-up shows only dupatta focus instead of kurti bodice craft."},
+    )
+    assert eval_res.checks["pose_requirement"] == "fail"
+    assert eval_res.scores["pose_requirement"] == 50.0
+    assert eval_res.scores["bottom_wear"] >= 90.0
+    assert eval_res.outcome in ("retry", "fail")
+

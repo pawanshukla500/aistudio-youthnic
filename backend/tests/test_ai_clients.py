@@ -410,3 +410,178 @@ def test_meta_sibling_retry_clamps_medium_to_low_when_budget_drops_below_60s(mon
     assert result["reasoning"] == "low"
 
 
+def test_generate_catalog_image_retries_transient_503_before_succeeding(monkeypatch):
+    from services import ai_clients
+
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test-key")
+    monkeypatch.setattr(ai_clients.time, "sleep", lambda *a, **k: None)
+    calls = {"count": 0}
+
+    class FakeResp:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+            self.headers = {"x-request-id": f"req_{calls['count']}"}
+            self.content = b"{}"
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers=None, data=None, files=None, json=None):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return FakeResp(503, {"error": {"message": "Upstream overloaded"}})
+            return FakeResp(
+                200,
+                {
+                    "data": [{"b64_json": base64.b64encode(b"\xff\xd8\xff\xe0jpegok").decode("ascii")}],
+                    "usage": {"input_tokens": 500, "output_tokens": 1000},
+                },
+            )
+
+    monkeypatch.setattr("services.ai_clients.httpx.Client", FakeClient)
+
+    res = ai_clients.generate_catalog_image(
+        prompt="Kurti front catalog pose",
+        model="gpt-image-2.6-sunburst",
+        aspect_ratio="3:4",
+        image_size="2K",
+        quality="medium",
+        reference_images=[{"role": "front", "filename": "front.jpg", "bytes": b"img", "mime_type": "image/jpeg"}],
+    )
+    assert calls["count"] == 2
+    assert res["mime_type"] == "image/jpeg"
+    assert res["image_bytes"].startswith(b"\xff\xd8")
+
+
+def test_gemini_vision_json_retries_transient_503_and_preserves_multihop_budget(monkeypatch):
+    from services import ai_clients
+
+    monkeypatch.setattr(settings, "VISION_TIMEOUT_SECONDS", 150)
+    monkeypatch.setattr(settings, "META_MODEL_API_KEY", "")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "gem-test")
+    monkeypatch.setattr(ai_clients.time, "sleep", lambda *a, **k: None)
+
+    recorded_timeouts = []
+    gemini_calls = {"count": 0}
+
+    def fake_openai(prompt, images, model="gpt-5.6-luna", reasoning_effort="medium", timeout_s=60):
+        recorded_timeouts.append((model, timeout_s))
+        raise RuntimeError(f"{model} timed out")
+
+    class FakeGeminiResp:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+            self.headers = {}
+            self.content = b"{}"
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            gemini_calls["count"] += 1
+            if gemini_calls["count"] == 1:
+                return FakeGeminiResp(503, {"error": {"message": "Temporarily unavailable"}})
+            return FakeGeminiResp(
+                200,
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"text": '{"garment_family": "kurta_or_kurti_set", "main_color": "mustard yellow"}'}
+                                ]
+                            }
+                        }
+                    ]
+                },
+            )
+
+    monkeypatch.setattr("services.ai_clients._langchain_openai_vision_json", fake_openai)
+    monkeypatch.setattr("services.ai_clients.httpx.Client", FakeClient)
+    monkeypatch.setattr("services.ai_clients.cache_manager.record_provider_result", lambda *a, **k: None)
+
+    res = ai_clients.invoke_vision_json(
+        "Extract DNA",
+        [{"role": "front", "mime_type": "image/jpeg", "base64": "YWJj"}],
+        purpose="product_truth",
+        timeout_budget_s=150.0,
+    )
+    assert res["provider"] == "gemini"
+    assert res["model"] == "gemini-3.8-flash"
+    assert gemini_calls["count"] == 2
+    # gpt-6.1-terra reserved >= 35s for later hops instead of only 15s
+    assert 110 <= recorded_timeouts[0][1] <= 116
+    assert 110 <= recorded_timeouts[1][1] <= 116
+
+
+def test_generate_catalog_image_skips_doomed_retry_below_min_budget(monkeypatch):
+    import pytest
+    from services import ai_clients
+
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test-key")
+    monkeypatch.setattr(settings, "IMAGE_GEN_TIMEOUT_SECONDS", 25)
+    monkeypatch.setattr(ai_clients.time, "sleep", lambda *a, **k: None)
+    calls = {"count": 0}
+
+    class FakeResp:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+            self.headers = {"x-request-id": "req_low_budget"}
+            self.content = b"{}"
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers=None, data=None, files=None, json=None):
+            calls["count"] += 1
+            return FakeResp(503, {"error": {"message": "Upstream overloaded"}})
+
+    monkeypatch.setattr("services.ai_clients.httpx.Client", FakeClient)
+
+    with pytest.raises(RuntimeError, match="OpenAI image generation failed \\(503\\)"):
+        ai_clients.generate_catalog_image(
+            prompt="Kurti front catalog pose",
+            model="gpt-image-2.6-sunburst",
+            aspect_ratio="3:4",
+            image_size="2K",
+            quality="medium",
+            reference_images=[{"role": "front", "filename": "front.jpg", "bytes": b"img", "mime_type": "image/jpeg"}],
+        )
+    assert calls["count"] == 1
+
+
+

@@ -234,18 +234,28 @@ class ComputerVisionQAAgent:
         is_saree = str(product_dna.get("garment_family", "")).lower() == "saree"
         bottom_cut_mismatch = False
         pose_hijack = pose_type == "closeup" and _has_affirmative_term(notes, ["dupatta focus", "accessory hijack"])
+        bottom_mismatch_triggered = bool(ai_data.get("bottom_cut_mismatch")) or (
+            is_saree and _has_affirmative_term(notes, ["trousers", "pants", "palazzo", "salwar", "churidar", "jeans"])
+        ) or (
+            bottom_cut == "farshi" and _has_affirmative_term(notes, ["palazzo", "skirt", "circular flare"])
+        )
 
         if isinstance(raw_scores, dict) and raw_scores:
             scores = {k: float(v) for k, v in raw_scores.items()}
             checks = dict(ai_data.get("checks") or {k: ("pass" if float(v) >= 90 else "fail") for k, v in scores.items()})
-        elif anatomical_defect or style_violation or pose_hijack or bool(ai_data.get("bottom_cut_mismatch")) or (
-            is_saree and _has_affirmative_term(notes, ["trousers", "pants", "palazzo", "salwar", "churidar", "jeans"])
-        ) or (
-            bottom_cut == "farshi" and _has_affirmative_term(notes, ["palazzo", "skirt", "circular flare"])
-        ):
+        elif anatomical_defect or style_violation or pose_hijack or bottom_mismatch_triggered:
             # Explicit hard-veto fixture/override without scores dict
-            scores = {"garment_identity": 40.0 if (anatomical_defect or style_violation) else 80.0, "bottom_wear": 45.0}
-            checks = {"garment_identity": "fail" if (anatomical_defect or style_violation) else "pass", "bottom_wear": "pass"}
+            scores = {
+                "garment_identity": 40.0 if (anatomical_defect or style_violation) else 80.0,
+                "bottom_wear": 45.0 if bottom_mismatch_triggered else 90.0,
+            }
+            checks = {
+                "garment_identity": "fail" if (anatomical_defect or style_violation) else "pass",
+                "bottom_wear": "fail" if bottom_mismatch_triggered else "pass",
+            }
+            if pose_hijack:
+                scores["pose_requirement"] = 50.0
+                checks["pose_requirement"] = "fail"
         else:
             # Fail closed when scores are absent or malformed
             return QAAgentEvaluation(
