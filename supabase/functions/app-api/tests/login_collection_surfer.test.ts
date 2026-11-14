@@ -26,21 +26,31 @@ const appApiIndexSource = Deno.readTextFileSync(
   new URL("../index.ts", import.meta.url),
 ).replace(/\r\n/g, "\n");
 
-Deno.test("Option 2 Login integrates CollectionSurfer in Light Atelier Mode without dark mode or saree mannequin box", () => {
+Deno.test("Option 2 Login integrates CollectionSurfer in Light Atelier Mode with default Magnetic + Glide and no badge/runway-switcher clutter", () => {
   assertEquals(loginSource.includes("<CollectionSurfer"), true);
-  assertEquals(loginSource.includes("variant={surferVariant}"), true);
-  assertEquals(loginSource.includes("autoPlay={autoGlide}"), true);
+  assertEquals(loginSource.includes('variant="magnetic"'), true);
+  assertEquals(loginSource.includes("autoPlay={true}"), true);
   assertEquals(loginSource.includes("showOverlays={false}"), true);
-  // Light Atelier Mode tokens used; no #070609 dark mode or saree mannequin box
+  // Light Atelier Mode tokens used; no #070609 dark mode, saree mannequin box, or removed pills
   assertEquals(loginSource.includes("bg-background"), true);
   assertEquals(loginSource.includes("#070609"), false);
   assertEquals(loginSource.includes("Locked 6-Pose Production Pipeline"), false);
+  assertEquals(loginSource.includes("Multi-Tenant Fashion Studio"), false);
+  assertEquals(loginSource.includes("All Systems Online"), false);
+  assertEquals(loginSource.includes("Scroll or move cursor to surf"), false);
+  assertEquals(loginSource.includes("setSurferVariant"), false);
+  assertEquals(loginSource.includes("setAutoGlide"), false);
   assertEquals(loginSource.includes("editorial-saree-"), false);
   assertEquals(surferSource.includes("#070609"), false);
   assertEquals(surferSource.includes("editorial-saree-"), false);
+  assertEquals(surferSource.includes("autoPlay = true"), true);
+  assertEquals(
+    surferSource.includes("useTransform([mouseX, mouseY, scrollSpring]"),
+    true,
+  );
 });
 
-Deno.test("Option 2 Login isolates the floating glass auth card, validates internal redirect, and exposes mobile glide pause", () => {
+Deno.test("Option 2 Login isolates the floating glass auth card, remains scrollable on short desktops, and validates internal redirect", () => {
   assertEquals(loginSource.includes('data-surfer-ignore="true"'), true);
   assertEquals(loginSource.includes("onWheel={(e) => e.stopPropagation()}"), true);
   assertEquals(loginSource.includes("overflow-y-auto overscroll-contain"), true);
@@ -50,11 +60,6 @@ Deno.test("Option 2 Login isolates the floating glass auth card, validates inter
   assertEquals(
     loginSource.includes('rawRedirect.startsWith("/") && !rawRedirect.startsWith("//")'),
     true,
-  );
-  // Both desktop and mobile headers expose the autoGlide pause/play toggle
-  assertEquals(
-    loginSource.split("setAutoGlide((prev) => !prev)").length - 1,
-    2,
   );
 });
 

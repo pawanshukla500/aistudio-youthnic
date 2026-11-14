@@ -162,7 +162,7 @@ export function CollectionSurfer({
   title = "Heritage FW25/26",
   subtitle = "Collection",
   showOverlays = true,
-  autoPlay = false,
+  autoPlay = true,
   autoPlaySpeed = 48,
   perspectiveOrigin = "14% 18%",
 }: CollectionSurferProps) {
@@ -370,6 +370,7 @@ export function CollectionSurfer({
                 stepZ={stepZ}
                 mouseX={mouseX}
                 mouseY={mouseY}
+                scrollSpring={combinedScroll}
                 variant={variant}
               />
             ))}
@@ -389,6 +390,7 @@ function Card({
   stepZ,
   mouseX,
   mouseY,
+  scrollSpring,
   variant,
 }: {
   item: CollectionItem;
@@ -399,12 +401,13 @@ function Card({
   stepZ: number;
   mouseX: MotionValue<number>;
   mouseY: MotionValue<number>;
+  scrollSpring: MotionValue<number>;
   variant: CollectionSurferVariant;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
   // Calculate distance from mouse to center of card (short-circuit when cursor is parked/ignored)
-  const distance = useTransform([mouseX, mouseY], (values) => {
+  const distance = useTransform([mouseX, mouseY, scrollSpring], (values) => {
     const [x, y] = values as number[];
     if (!ref.current || variant === "simple" || x < -1000 || y < -1000) {
       return 400;

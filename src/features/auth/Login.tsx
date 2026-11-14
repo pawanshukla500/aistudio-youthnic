@@ -9,16 +9,11 @@ import {
   Loader2,
   Lock,
   Mail,
-  Pause,
-  Play,
   ShieldCheck,
   Sparkles,
   Store,
 } from "lucide-react";
-import {
-  CollectionSurfer,
-  type CollectionSurferVariant,
-} from "../../components/ui/collection-surfer";
+import { CollectionSurfer } from "../../components/ui/collection-surfer";
 import { getErrorMessage } from "../../lib/errors";
 import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
 import { supabase } from "../../lib/supabase";
@@ -44,11 +39,6 @@ export function Login({ redirect }: LoginProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-
-  // Interactive 3D Runway Controls (Light Atelier Floating Glass)
-  const [surferVariant, setSurferVariant] =
-    useState<CollectionSurferVariant>("magnetic");
-  const [autoGlide, setAutoGlide] = useState(true);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -99,10 +89,10 @@ export function Login({ redirect }: LoginProps) {
 
   return (
     <main className="relative min-h-screen bg-background text-on-background selection:bg-primary/15 selection:text-primary">
-      {/* Layer 0: Full-Viewport 3D Collection Surfer Runway */}
+      {/* Layer 0: Full-Viewport 3D Collection Surfer Runway (Default Magnetic + Glide) */}
       <CollectionSurfer
-        variant={surferVariant}
-        autoPlay={autoGlide}
+        variant="magnetic"
+        autoPlay={true}
         autoPlaySpeed={46}
         showOverlays={false}
         perspectiveOrigin="16% 22%"
@@ -117,7 +107,7 @@ export function Login({ redirect }: LoginProps) {
         <div className="mx-auto grid min-h-screen max-w-[1560px] items-stretch lg:grid-cols-[1.08fr_0.92fr]">
           {/* Left Hero Section: Floating Editorial Overlay on top of the 3D Runway */}
           <section className="hidden flex-col justify-between p-10 lg:flex xl:p-14">
-            {/* Top Bar: Brand Identity + Live 3D Runway Controls */}
+            {/* Top Bar: Brand Identity */}
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="pointer-events-auto inline-flex items-center gap-3.5 rounded-2xl border border-outline-variant/60 bg-card/90 px-4 py-2.5 backdrop-blur-xl">
                 <img
@@ -134,62 +124,11 @@ export function Login({ redirect }: LoginProps) {
                   </span>
                 </div>
               </div>
-
-              {/* Interactive 3D Runway Switcher */}
-              <div
-                data-surfer-ignore="true"
-                className="pointer-events-auto inline-flex items-center gap-1 rounded-2xl border border-outline-variant/60 bg-card/90 p-1.5 text-xs text-secondary backdrop-blur-xl"
-              >
-                <span className="px-2.5 font-medium text-secondary">
-                  3D Runway
-                </span>
-                {(["magnetic", "uplift"] as const).map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    aria-pressed={surferVariant === v}
-                    onClick={() => setSurferVariant(v)}
-                    className={`cursor-pointer rounded-xl px-2.5 py-1 font-semibold capitalize transition-colors ${
-                      surferVariant === v
-                        ? "bg-primary text-on-primary"
-                        : "text-secondary hover:bg-surface-container hover:text-on-surface"
-                    }`}
-                  >
-                    {v}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  aria-pressed={autoGlide}
-                  onClick={() => setAutoGlide((prev) => !prev)}
-                  aria-label={
-                    autoGlide ? "Pause runway glide" : "Play runway glide"
-                  }
-                  className="ml-0.5 inline-flex cursor-pointer items-center gap-1 rounded-xl border border-outline-variant/50 bg-surface-container-low px-2.5 py-1 text-xs font-semibold text-on-surface transition-colors hover:bg-surface-container"
-                >
-                  {autoGlide ? (
-                    <>
-                      <Pause className="h-3 w-3 text-primary" />
-                      <span>Glide</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="h-3 w-3 text-success" />
-                      <span>Paused</span>
-                    </>
-                  )}
-                </button>
-              </div>
             </div>
 
             {/* Center-Left Editorial Headline & Studio Telemetry */}
             <div className="my-auto max-w-xl py-6">
-              <div className="inline-flex items-center gap-2 rounded-full border border-outline-variant/70 bg-soft-blush/90 px-3.5 py-1.5 text-xs font-semibold text-primary backdrop-blur-md">
-                <Sparkles className="h-3.5 w-3.5 text-primary" />
-                <span>Multi-Tenant Fashion Studio (AaaS)</span>
-              </div>
-
-              <h1 className="mt-5 font-syne text-4xl font-extrabold leading-[1.06] tracking-tighter text-on-surface xl:text-[3.4rem]">
+              <h1 className="font-syne text-4xl font-extrabold leading-[1.06] tracking-tighter text-on-surface xl:text-[3.4rem]">
                 One product.
                 <br />
                 One model.
@@ -231,19 +170,6 @@ export function Login({ redirect }: LoginProps) {
               <p className="font-medium">
                 Youthnic AI Studio, Production Cloud Portal
               </p>
-              <div className="flex items-center gap-3">
-                <span className="font-medium text-secondary">
-                  Scroll or move cursor to surf{" "}
-                  <span className="font-mono tabular-nums text-on-surface">
-                    16
-                  </span>{" "}
-                  looks
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant/60 bg-card/90 px-3 py-1 text-xs font-semibold text-on-surface backdrop-blur-md">
-                  <span className="h-2 w-2 rounded-full bg-success" />
-                  <span>All Systems Online</span>
-                </span>
-              </div>
             </div>
           </section>
 
@@ -272,32 +198,9 @@ export function Login({ redirect }: LoginProps) {
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      aria-pressed={autoGlide}
-                      onClick={() => setAutoGlide((prev) => !prev)}
-                      aria-label={
-                        autoGlide ? "Pause runway glide" : "Play runway glide"
-                      }
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-outline-variant/60 bg-card px-2.5 py-1 text-xs font-semibold text-on-surface transition-colors hover:bg-surface-container"
-                    >
-                      {autoGlide ? (
-                        <>
-                          <Pause className="h-3 w-3 text-primary" />
-                          <span>Glide</span>
-                        </>
-                      ) : (
-                        <>
-                          <Play className="h-3 w-3 text-success" />
-                          <span>Paused</span>
-                        </>
-                      )}
-                    </button>
-                    <span className="rounded-full border border-outline-variant/50 bg-success-surface px-2.5 py-1 text-xs font-semibold text-success">
-                      5 Free Shoots
-                    </span>
-                  </div>
+                  <span className="rounded-full border border-outline-variant/50 bg-success-surface px-2.5 py-1 text-xs font-semibold text-success">
+                    5 Free Shoots
+                  </span>
                 </div>
 
                 {/* Mode Switcher Tabs */}
