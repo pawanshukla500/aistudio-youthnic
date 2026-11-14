@@ -51,6 +51,11 @@ Deno.test("Shockproof resilience contracts: safety fallbacks, retries, and delay
   assertEquals(indexSource.includes("function appendSafetyVisionFallbacks("), true);
   assertEquals(indexSource.includes("return qwenVisionJson(effectiveRoute, parts, timeoutMs);"), true);
   assertEquals(indexSource.includes("async function fetchAssetBlobWithRetry("), true);
+  assertEquals(indexSource.includes("await response.body?.cancel().catch(() => {});"), true);
+  assertEquals(indexSource.includes("if (!retryable) break;"), true);
   assertEquals(indexSource.includes("body: buildImageGenerationFormData(args),"), true);
-  assertEquals(indexSource.includes("await sleep(wakeupDelayMs);"), true);
+  assertEquals(indexSource.includes("while (Date.now() < targetWakeMs)"), true);
+
+  const studioSource = Deno.readTextFileSync(new URL("../../../../src/features/studio/Studio.tsx", import.meta.url)).replace(/\r\n/g, "\n");
+  assertEquals(studioSource.includes("!hasRequiredSareeReferences(productReferences)"), true);
 });

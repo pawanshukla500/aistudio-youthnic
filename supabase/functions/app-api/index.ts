@@ -252,19 +252,16 @@ async function fetchAssetBlobWithRetry(url: string, label: string): Promise<Blob
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
       if (response.ok) return await response.blob();
-      const retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
-      if (retryable && attempt < 3) {
-        await response.body?.cancel().catch(() => {});
-        await sleep(300 * 2 ** (attempt - 1));
-        continue;
-      }
-      throw new Error(`${label} failed (${response.status}).`);
+      const status = response.status;
+      await response.body?.cancel().catch(() => {});
+      lastError = new Error(`${label} failed (${status}).`);
+      const retryable = [408, 429, 500, 502, 503, 504].includes(status);
+      if (!retryable) break;
     } catch (error) {
       lastError = error;
-      if (attempt < 3) {
-        await sleep(300 * 2 ** (attempt - 1));
-        continue;
-      }
+    }
+    if (attempt < 3) {
+      await sleep(300 * 2 ** (attempt - 1));
     }
   }
   throw lastError instanceof Error ? lastError : new Error(`${label} failed.`);
@@ -2994,9 +2991,13 @@ async function deferPoseRetry(args: {
       generation_status: "queued", error_message: retryMessage, updated_at: now,
     }).eq("id", args.job.planning_request_id),
   ]);
-  const wakeupDelayMs = Math.min(delayMs + 500, 120_000);
+  const targetWakeMs = Date.now() + delayMs + 500;
   scheduleBackground((async () => {
-    await sleep(wakeupDelayMs);
+    // Railway Deno.serve persists across delayed retries up to retryDelayMs (max 5m);
+    // re-arm in <=120s segments until availableAt is reached so kickWorker never fires early.
+    while (Date.now() < targetWakeMs) {
+      await sleep(Math.min(120_000, Math.max(0, targetWakeMs - Date.now())));
+    }
     await kickWorker(String(args.job.job_id));
   })());
   return { processed: true, deferred: true, jobId: args.job.job_id, pose: args.pose.pose_index, availableAt, error: args.message };

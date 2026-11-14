@@ -303,10 +303,11 @@ export const OPENAI_TERRA_VISION_ROUTE = {
 } as const satisfies NormalizedAiModelRoute;
 
 /**
- * Studio Analyze uses `supabase.functions.invoke("app-api")`. Without an
- * explicit client timeout the browser/SDK aborts around 55–60s, so the Studio
- * client waits `STUDIO_ANALYZE_TIMEOUT_MS` (240s) and the product-truth chain
- * is budgeted inside that wait.
+ * Studio Analyze calls the self-hosted `app-api` Deno Edge Gateway on Railway
+ * (bypassing hosted Supabase Envoy's 150s gateway limit). Without an explicit
+ * client timeout the browser/SDK aborts around 55–60s, so the Studio client
+ * waits `STUDIO_ANALYZE_TIMEOUT_MS` (240s) and the product-truth chain is
+ * budgeted inside that wait.
  */
 export const STUDIO_ANALYZE_TIMEOUT_MS = 240_000;
 export const STUDIO_INVOKE_BUDGET_MS = STUDIO_ANALYZE_TIMEOUT_MS;
@@ -425,7 +426,7 @@ export function clampProductTruthHopThinking(
 
 /**
  * Cap product-truth at the Studio client wait even when
- * `VISION_GATEWAY_BUDGET_MS` is 185s. Returning after the client has
+ * `VISION_GATEWAY_BUDGET_MS` is 240s. Returning after the client has
  * disconnected still drops hop 2.
  *
  * The cap holds back `VISION_REQUEST_OVERHEAD_MS` rather than spending the whole

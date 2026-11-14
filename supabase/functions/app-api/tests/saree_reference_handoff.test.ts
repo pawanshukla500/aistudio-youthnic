@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
+  hasRequiredSareeReferences,
   promoteLegacySareeReference,
   remapDetectedSareeReferences,
 } from "../../../../src/features/studio/sareeReferenceHandoff.ts";
@@ -35,4 +36,26 @@ Deno.test("pallu evidence is promoted only by an explicit member action", () => 
   assertEquals(promoted.saree_pallu_spread?.role, "saree_pallu_spread");
   assertEquals(promoted.saree_pallu_spread?.id, "pallu");
   assertEquals(promoted.saree_pallu_spread?.uploadedId, undefined);
+});
+
+Deno.test("hasRequiredSareeReferences requires full drape, pallu spread, and body/fabric evidence", () => {
+  assertEquals(hasRequiredSareeReferences({ front: reference("f", "front"), back: reference("b", "back") } as any), false);
+  assertEquals(
+    hasRequiredSareeReferences({
+      front: reference("f", "front"),
+      back: reference("b", "back"),
+      saree_pallu_spread: reference("p", "saree_pallu_spread"),
+      fabric_pattern: reference("d", "fabric_pattern"),
+    } as any),
+    true,
+  );
+  assertEquals(
+    hasRequiredSareeReferences({
+      saree_front_drape: reference("f", "saree_front_drape"),
+      saree_back_drape: reference("b", "saree_back_drape"),
+      saree_pallu_spread: reference("p", "saree_pallu_spread"),
+      saree_body_detail: reference("d", "saree_body_detail"),
+    } as any),
+    true,
+  );
 });

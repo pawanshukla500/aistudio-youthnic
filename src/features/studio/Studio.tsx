@@ -12,7 +12,7 @@ import { OutputSettings } from "./components/OutputSettings";
 import { PosePlan } from "./components/PosePlan";
 import { ModelFaceReference, ProductReferences, StyleReferences } from "./components/ProductReferences";
 import { sareeProfilePresentation } from "./sareeProfilePresentation";
-import { promoteLegacySareeReference, remapDetectedSareeReferences } from "./sareeReferenceHandoff";
+import { hasRequiredSareeReferences, promoteLegacySareeReference, remapDetectedSareeReferences } from "./sareeReferenceHandoff";
 import { StylingPlanEditor } from "../../components/ui/StylingPlanEditor";
 import { normalizePlan, type StylingPlan } from "../../lib/stylingPlan";
 import { generationDeliveryProgress } from "../../lib/generationProgress";
@@ -310,12 +310,7 @@ export function Studio() {
   }, []);
   const isSareeCategory = category === "saree";
   const requiredReady = isSareeCategory
-    ? Boolean(
-      (productReferences.saree_front_drape || productReferences.front) &&
-      (productReferences.saree_back_drape || productReferences.back) &&
-      productReferences.saree_pallu_spread &&
-      (productReferences.saree_body_detail || productReferences.fabric_pattern),
-    )
+    ? hasRequiredSareeReferences(productReferences)
     : Boolean(productReferences.front && productReferences.back);
   const effectiveSkuId = skuId.trim() || `studio-${(productReferences.saree_front_drape || productReferences.front)?.id.slice(0, 8) || "draft"}`;
   const effectiveSkuName = skuName.trim() || skuId.trim() || "Untitled studio product";
@@ -568,7 +563,7 @@ export function Studio() {
         })),
       };
       const detectedSaree = result.productIdentity.garmentFamily?.trim().toLowerCase() === "saree";
-      if (detectedSaree && !isSareeCategory && (result.requiresSareeEvidence || !result.sessionId)) {
+      if (detectedSaree && !isSareeCategory && (!hasRequiredSareeReferences(productReferences) || result.requiresSareeEvidence || !result.sessionId)) {
         promoteDetectedSareeReferences();
         setCategory("saree");
         setAnalysisSourceKey(null);
