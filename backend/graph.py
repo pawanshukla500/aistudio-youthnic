@@ -19,6 +19,9 @@ supervisor = SupervisorOrchestratorAgent()
 _postgres_checkpointer = None
 _checkpointer_initialized = False
 _checkpointer_pool_gen = -1
+_compiled_graph = None
+_compiled_graph_pool_gen = -2
+_topology_graph = None
 _checkpointer_lock = threading.Lock()
 
 
@@ -163,16 +166,45 @@ def get_postgres_checkpointer():
         return _postgres_checkpointer
 
 
+def reset_compiled_graph() -> None:
+    """Release cached checkpointer and compiled graph references during idle pool cleanup."""
+    global _postgres_checkpointer, _checkpointer_pool_gen, _compiled_graph, _compiled_graph_pool_gen
+    with _checkpointer_lock:
+        _postgres_checkpointer = None
+        _checkpointer_pool_gen = -1
+        _compiled_graph = None
+        _compiled_graph_pool_gen = -2
+
+
+def get_topology_graph():
+    """Return a lightweight checkpointer-free compiled graph for static topology inspection."""
+    global _topology_graph
+    if _topology_graph is None:
+        with _checkpointer_lock:
+            if _topology_graph is None:
+                _topology_graph = build_studio_graph(checkpointer=None)
+    return _topology_graph
+
+
 def get_compiled_graph():
-    """Build compiled LangGraph workflow with persistent PostgresSaver (or MemorySaver offline)."""
+    """Build or reuse compiled LangGraph workflow with persistent PostgresSaver (or MemorySaver offline)."""
+    global _compiled_graph, _compiled_graph_pool_gen
     try:
         checkpointer = get_postgres_checkpointer()
     except Exception as e:
         logger.warning(f"Could not initialize PostgresSaver, falling back to MemorySaver: {e}")
         checkpointer = None
-    if checkpointer is None:
-        checkpointer = MemorySaver()
-    return build_studio_graph(checkpointer=checkpointer)
+    with _checkpointer_lock:
+        if checkpointer is not None:
+            gen = get_pool_generation()
+            if _compiled_graph is None or _compiled_graph_pool_gen != gen:
+                _compiled_graph = build_studio_graph(checkpointer=checkpointer)
+                _compiled_graph_pool_gen = gen
+            return _compiled_graph
+        if _compiled_graph is None or _compiled_graph_pool_gen != -1:
+            _compiled_graph = build_studio_graph(checkpointer=MemorySaver())
+            _compiled_graph_pool_gen = -1
+        return _compiled_graph
 
 
 def list_workflow_threads(limit: int = 30, organization_id: Optional[str] = None) -> List[Dict[str, Any]]:

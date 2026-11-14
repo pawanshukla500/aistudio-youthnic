@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { Database } from "../database.types";
 import { supabase } from "./supabase";
 import { resolveCatalogAssetUrl } from "./catalogStorage";
 import { visibleGenerationDetailedStatus } from "./generationStatus";
@@ -11,30 +12,87 @@ import { ANALYSIS_RUN_KINDS, GENERATION_RUN_KIND, QA_RUN_KIND, attributeJobCostR
 export type Id<_Table extends string> = string;
 export type BackendEndpoint = string;
 
+export type GenerationJobRow = Database["public"]["Tables"]["generation_jobs"]["Row"];
+export type SessionGenerationRow = Database["public"]["Tables"]["session_generations"]["Row"];
+export type CatalogSessionRow = Database["public"]["Tables"]["catalog_sessions"]["Row"];
+export type PlanningBatchRow = Database["public"]["Tables"]["planning_batches"]["Row"];
+export type PlanningRequestRow = Database["public"]["Tables"]["planning_requests"]["Row"];
+export type PlanningAssetRow = Database["public"]["Tables"]["planning_assets"]["Row"];
+export type CatalogWorkItemRow = Database["public"]["Tables"]["catalog_work_items"]["Row"];
+export type ProductDnaVersionRow = Database["public"]["Tables"]["product_dna_versions"]["Row"];
+export type QaAssessmentRow = Database["public"]["Tables"]["qa_assessments"]["Row"];
+export type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
+
+export interface ProductDnaBottomWear {
+  has_bottom_wear?: boolean;
+  cut_class?: string;
+  main_color?: string;
+  pattern?: string;
+  surface_detail?: string;
+  taper_rule?: string;
+  leg_architecture?: string;
+  hem_finish?: string;
+}
+
 export interface ProductDnaSummary {
+  sku_id?: string;
+  sku_name?: string;
+  organization_id?: string;
   version: number;
   approved: boolean;
+  approved_by?: string | null;
+  source_fingerprint?: string;
   status?: string;
+  category?: string;
   garment_family?: string;
   main_color?: string;
+  secondary_colors?: string[];
+  color_blocking?: Record<string, string>;
+  silhouette?: string;
+  length_class?: string;
+  neckline?: string;
+  sleeve_type?: string;
+  sleeve_length?: string;
+  embroidery_zones?: string[];
+  print_zones?: string[];
+  border_details?: string;
+  closure_details?: string;
   fabric_type?: string;
-  bottom_wear?: {
-    has_bottom_wear?: boolean;
-    cut_class?: string;
-  };
+  drape_behavior?: string;
+  fabric_sheen?: string;
+  transparency?: string;
+  dupatta_present?: boolean;
+  dupatta_details?: string;
+  bottom_wear?: ProductDnaBottomWear;
   explicit_invariants?: string[];
   prohibited_changes?: string[];
   confidence_score?: number;
   metadata?: Record<string, unknown>;
 }
 
+export interface PlannedPoseSpec {
+  pose_number: number;
+  pose_type: string;
+  title: string;
+  prompt: string;
+  framing_focus?: string;
+  highlight_zone?: string;
+}
+
 export interface ProductDnaExtractResult {
+  status?: string;
   thread_id?: string;
   persisted?: boolean;
+  approved?: boolean;
   product_dna?: ProductDnaSummary | null;
+  pose_plans?: PlannedPoseSpec[];
+  scene_lock?: Record<string, unknown> | null;
+  model_lock?: Record<string, unknown> | null;
+  retrieved_guidance_count?: number;
 }
 
 export interface WorkflowOverviewResult {
+  status?: string;
   engine?: string;
   checkpointer?: {
     backend?: string;
@@ -44,6 +102,32 @@ export interface WorkflowOverviewResult {
   };
   nodes?: string[];
   providers_configured?: Record<string, boolean>;
+  valkey_connected?: boolean;
+}
+
+export interface WorkflowCheckpointsResult {
+  status: string;
+  thread_id: string;
+  count: number;
+  checkpoints: Array<{
+    checkpoint_id: string;
+    step: number;
+    source: string;
+    status: string;
+    dna_version?: number | null;
+    dna_approved?: boolean | null;
+    pose_plans_count: number;
+    generated_poses_count: number;
+    corrections_count: number;
+    requires_human_review?: boolean | null;
+    error?: string | null;
+  }>;
+}
+
+export interface UseQueryResult<T = any> {
+  data: T;
+  error: Error | null;
+  isLoading: boolean;
 }
 
 export const api = {
@@ -675,11 +759,11 @@ async function getCatalog(catalogId: string) {
     ].filter(Boolean);
     const readinessStatus = variant.generation_status === "completed" ? "completed"
       : variant.generation_status === "failed" ? "needs_review"
-      : ["queued", "processing"].includes(String(variant.generation_status)) ? "generating"
-      : variant.analysis_status === "analyzing" ? "analyzing"
-      : variant.analysis_status === "failed" ? "blocked"
-      : readinessReasons.length ? "incomplete"
-      : "ready";
+        : ["queued", "processing"].includes(String(variant.generation_status)) ? "generating"
+          : variant.analysis_status === "analyzing" ? "analyzing"
+            : variant.analysis_status === "failed" ? "blocked"
+              : readinessReasons.length ? "incomplete"
+                : "ready";
     return {
       ...variant,
       _id: variant.id,
@@ -954,9 +1038,81 @@ async function mutateBackend(endpoint: BackendEndpoint, args: Record<string, any
   }
 }
 
-export function useQuery(endpoint: BackendEndpoint, args: Record<string, any> | "skip", options: { poll?: boolean } = {}): any {
+const ACTIVE_POLL_STATUSES = new Set([
+  "queued",
+  "pending",
+  "processing",
+  "cancelling",
+  "generating",
+  "retrying",
+  "qa_pending",
+  "analyzing",
+  "running",
+]);
+
+/**
+ * Determines whether a query endpoint currently has in-flight work that justifies
+ * 2.5s background polling. Returning false when all jobs/catalogs are terminal allows
+ * Railway services (Envoy, Postgrest, Postgres, Functions) to enter Serverless Sleep.
+ */
+export function shouldPollEndpoint(endpoint: BackendEndpoint, currentValue: unknown): boolean {
+  if (currentValue === undefined || currentValue === null) return false;
+  if (endpoint === api.jobs.getQueuePosition) {
+    return Number(currentValue) > 0;
+  }
+  if (endpoint === api.jobs.get) {
+    const job = record(currentValue);
+    if (ACTIVE_POLL_STATUSES.has(String(job.status || ""))) return true;
+    const poses = Array.isArray(job.poses) ? job.poses : [];
+    return poses.some((pose) => ACTIVE_POLL_STATUSES.has(String(record(pose).status || "")));
+  }
+  if (endpoint === api.jobs.list) {
+    const payload = record(currentValue);
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    return items.some((item) => ACTIVE_POLL_STATUSES.has(String(record(item).status || "")));
+  }
+  if (endpoint === api.catalog.list) {
+    const catalogs = Array.isArray(currentValue) ? currentValue : [];
+    return catalogs.some((catalog) => {
+      const entry = record(catalog);
+      return ACTIVE_POLL_STATUSES.has(String(entry.status || ""))
+        || ACTIVE_POLL_STATUSES.has(String(entry.schedule_status || ""))
+        || ACTIVE_POLL_STATUSES.has(String(entry.queue_status || ""));
+    });
+  }
+  if (endpoint === api.catalog.get) {
+    const catalog = record(currentValue);
+    if (
+      ACTIVE_POLL_STATUSES.has(String(catalog.status || ""))
+      || ACTIVE_POLL_STATUSES.has(String(catalog.schedule_status || ""))
+      || ACTIVE_POLL_STATUSES.has(String(catalog.queue_status || ""))
+    ) {
+      return true;
+    }
+    const variants = Array.isArray(catalog.variants) ? catalog.variants : [];
+    return variants.some((variant) => {
+      const v = record(variant);
+      const isVariantActivelyAnalyzing =
+        v.analysisStatus === "analyzing"
+        || v.readinessStatus === "analyzing"
+        || (v.analysisStatus === "pending" && Boolean(v.frontUrl && v.backUrl));
+      return isVariantActivelyAnalyzing
+        || v.readinessStatus === "generating"
+        || ACTIVE_POLL_STATUSES.has(String(v.status || ""))
+        || ACTIVE_POLL_STATUSES.has(String(v.jobStatus || ""));
+    });
+  }
+  return false;
+}
+
+export function useQuery<T = any>(
+  endpoint: BackendEndpoint,
+  args: Record<string, any> | "skip",
+  options: { poll?: boolean } = {},
+): UseQueryResult<T> {
   const [value, setValue] = useState<any>(undefined);
   const [error, setError] = useState<Error | null>(null);
+  const valueRef = useRef<any>(undefined);
   // Read through a ref so switching polling off (e.g. once a job is finished)
   // stops the timer's requests without re-running the effect and blanking data.
   const pollRef = useRef(options.poll !== false);
@@ -965,10 +1121,12 @@ export function useQuery(endpoint: BackendEndpoint, args: Record<string, any> | 
 
   useEffect(() => {
     if (serializedArgs === "skip") {
+      valueRef.current = undefined;
       setValue(undefined);
       setError(null);
       return;
     }
+    valueRef.current = undefined;
     setValue(undefined);
     setError(null);
     let active = true;
@@ -979,7 +1137,11 @@ export function useQuery(endpoint: BackendEndpoint, args: Record<string, any> | 
       if (inFlight) return;
       inFlight = true;
       void queryBackend(endpoint, JSON.parse(serializedArgs)).then((next) => {
-        if (active) { setValue(next); setError(null); }
+        if (active) {
+          valueRef.current = next;
+          setValue(next);
+          setError(null);
+        }
       }).catch((reason) => {
         if (active) setError(reason instanceof Error ? reason : new Error(String(reason)));
       }).finally(() => {
@@ -987,29 +1149,34 @@ export function useQuery(endpoint: BackendEndpoint, args: Record<string, any> | 
       });
     };
     load();
-    const dynamic = endpoint.startsWith("jobs.") || endpoint === api.notifications.list || endpoint.startsWith("catalog.");
-    // Hidden tabs stop polling and catch up as soon as they are visible again.
-    const poll = () => { if (!document.hidden && pollRef.current) load(); };
+    const refreshOnVisible = endpoint.startsWith("jobs.") || endpoint === api.notifications.list || endpoint.startsWith("catalog.");
+    const pollableEndpoint = endpoint.startsWith("jobs.") || endpoint.startsWith("catalog.");
+    // Hidden tabs and idle states stop polling so Railway services can enter Serverless Sleep.
+    const poll = () => {
+      if (!document.hidden && pollRef.current && shouldPollEndpoint(endpoint, valueRef.current)) {
+        load();
+      }
+    };
     const onVisible = () => { if (!document.hidden) load(); };
-    const interval = dynamic ? window.setInterval(poll, 2500) : undefined;
-    if (dynamic) document.addEventListener("visibilitychange", onVisible);
+    const interval = pollableEndpoint ? window.setInterval(poll, 2500) : undefined;
+    if (refreshOnVisible) document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("supabase-backend-refresh", load);
     return () => {
       active = false;
       if (interval) window.clearInterval(interval);
-      if (dynamic) document.removeEventListener("visibilitychange", onVisible);
+      if (refreshOnVisible) document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("supabase-backend-refresh", load);
     };
   }, [endpoint, serializedArgs]);
 
-  return { data: value, error, isLoading: value === undefined && !error };
+  return { data: value as T, error, isLoading: value === undefined && !error };
 }
 
-export function useMutation(endpoint: BackendEndpoint) {
-  return async (args: Record<string, any>) => {
-    const result = await mutateBackend(endpoint, args || {});
+export function useMutation<TResult = any, TArgs extends Record<string, any> = Record<string, any>>(endpoint: BackendEndpoint) {
+  return async (args?: TArgs): Promise<TResult> => {
+    const result = await mutateBackend(endpoint, (args || {}) as Record<string, any>);
     refreshBackend();
-    return result as any;
+    return result as TResult;
   };
 }
 

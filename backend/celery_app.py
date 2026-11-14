@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 from celery import Celery
 from config import settings
 from cache import distributed_lock, cache_manager
-from database import get_db, get_latest_dna_version, get_references_for_sku
+from database import get_db, get_latest_dna_version, get_references_for_sku, release_process_memory
 from firebase_service import upload_bytes
 from services.ai_clients import generate_catalog_image, load_reference_image
 from agents.pose_planning_agent import CreativePosePlanningAgent
@@ -49,6 +49,10 @@ celery.conf.update(
     redis_socket_timeout=5,
     redis_retry_on_timeout=True,
     worker_enable_remote_control=False,
+    worker_hijack_root_logger=False,
+    worker_send_task_events=False,
+    task_send_sent_event=False,
+    result_expires=300,
 )
 
 qa_agent = ComputerVisionQAAgent()
@@ -191,6 +195,8 @@ def process_generation_job_task(self, job_id: str, org_id: str, sku_id: str):
             finally:
                 cache_manager.release_job_active(org_id, sku_id, expected_job_id=job_id)
         raise self.retry(exc=exc, countdown=15)
+    finally:
+        release_process_memory()
 
 
 @celery.task(bind=True, max_retries=3, default_retry_delay=15)
@@ -385,6 +391,8 @@ def process_pose_generation_task(self, generation_id: str, job_id: str, pose_ind
         if not updated and claim_token and not image_committed:
             return {"status": "stale_claim_ignored", "generation_id": generation_id}
         raise self.retry(exc=exc, countdown=20)
+    finally:
+        release_process_memory()
 
 
 def _flush_pending_learning_for_pose(
@@ -629,3 +637,5 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
             except Exception:
                 pass
         raise self.retry(exc=exc, countdown=15)
+    finally:
+        release_process_memory()

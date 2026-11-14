@@ -1,5 +1,8 @@
+import ctypes
+import gc
 import json
 import logging
+import sys
 import threading
 import uuid
 from typing import Optional, Dict, Any, List, Tuple
@@ -17,19 +20,38 @@ _pool_lock = threading.Lock()
 _pool_generation = 0
 
 
+def release_process_memory() -> bool:
+    """Run Python GC and return freed glibc heap arenas to the OS kernel on Linux."""
+    gc.collect()
+    if sys.platform.startswith("linux"):
+        try:
+            libc = ctypes.CDLL("libc.so.6")
+            libc.malloc_trim(0)
+            return True
+        except Exception:
+            return False
+    return False
+
+
+def is_pool_open() -> bool:
+    """Return True when the shared PostgreSQL ConnectionPool is currently initialized and open."""
+    with _pool_lock:
+        return _pool is not None and not getattr(_pool, "closed", False)
+
+
 def get_pool() -> ConnectionPool:
     global _pool, _pool_generation
     if not settings.DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not configured.")
     with _pool_lock:
         if _pool is None or _pool.closed:
-            # Zero idle connections + fast idle reap + disabled TCP keepalives
-            # allow Railway Postgres/FastAPI/worker services to enter sleep mode.
+            # Zero idle connections + bounded max_size + disabled TCP keepalives
+            # allow Railway Postgres/FastAPI/worker services to enter sleep mode cleanly.
             _pool = ConnectionPool(
                 conninfo=settings.DATABASE_URL,
                 min_size=0,
-                max_size=15,
-                max_idle=60.0,
+                max_size=max(1, int(getattr(settings, "DB_POOL_MAX_SIZE", 5))),
+                max_idle=float(getattr(settings, "DB_POOL_MAX_IDLE_SECONDS", 60.0)),
                 reconnect_timeout=60.0,
                 open=True,
                 kwargs={
@@ -46,13 +68,17 @@ def get_pool() -> ConnectionPool:
 def close_pool() -> None:
     """Close shared PostgreSQL pool cleanly so idle processes hold zero open sockets."""
     global _pool
+    pool_to_close: Optional[ConnectionPool] = None
     with _pool_lock:
         if _pool is not None and not _pool.closed:
-            try:
-                _pool.close()
-            except Exception:
-                pass
+            pool_to_close = _pool
         _pool = None
+    if pool_to_close is not None:
+        try:
+            pool_to_close.close()
+        except Exception:
+            pass
+        release_process_memory()
 
 
 def get_pool_generation() -> int:

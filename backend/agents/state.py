@@ -8,6 +8,20 @@ class AgentWorkflowState(TypedDict, total=False):
     job_id: str
     session_id: str
 
+    # Garment metadata & extraction parameters
+    category: str
+    garment_family: str
+    main_color: str
+    secondary_colors: List[str]
+    fabric_type: str
+    allow_local_references: bool
+    extra_instructions: str
+    requested_model: Optional[str]
+    quality: str
+    pose_qa: bool
+    aspect_ratio: str
+    image_size: str
+
     # Reference evidence & DNA
     references: List[Dict[str, Any]]
     source_fingerprint: str

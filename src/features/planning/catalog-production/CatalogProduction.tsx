@@ -73,6 +73,10 @@ export function CatalogProduction() {
     sort: "active",
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const hasInProgressRef = useRef(false);
+  hasInProgressRef.current = workItems.some(
+    (item) => item.workflow_stage === "generation_in_progress" || item.generation_status === "generating",
+  );
 
   const canManagePlanning = workspace.isAdmin || workspace.permissions.includes("planning.manage");
   const canGenerate = workspace.isAdmin || workspace.permissions.includes("planning.generate_images");
@@ -122,7 +126,11 @@ export function CatalogProduction() {
       .on("postgres_changes", { event: "*", schema: "public", table: "catalog_work_item_events", filter: `organization_id=eq.${workspace.organization.id}` }, refreshSoon)
       .on("postgres_changes", { event: "*", schema: "public", table: "catalog_listing_handoffs", filter: `organization_id=eq.${workspace.organization.id}` }, refreshSoon)
       .subscribe();
-    const interval = window.setInterval(() => void fetchWorkItems(true), 60_000);
+    const interval = window.setInterval(() => {
+      if (!document.hidden && hasInProgressRef.current) {
+        void fetchWorkItems(true);
+      }
+    }, 60_000);
     const refresh = () => void fetchWorkItems(true);
     window.addEventListener("focus", refresh);
     return () => {

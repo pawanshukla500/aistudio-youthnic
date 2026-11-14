@@ -28,26 +28,35 @@ from typing import Any, Callable, Optional
 
 import redis
 
-from cache import reset_valkey
+from cache import cache_manager, reset_valkey
 from config import settings
-from database import close_pool, get_db
+from database import close_pool, get_db, release_process_memory
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-DEFAULT_CELERY_CMD = [
-    sys.executable,
-    "-m",
-    "celery",
-    "-A",
-    "celery_app.celery",
-    "worker",
-    "--loglevel=info",
-    "--concurrency=2",
-    "--without-gossip",
-    "--without-mingle",
-    "--without-heartbeat",
-]
+
+def build_default_celery_cmd() -> list[str]:
+    """Build low-RAM single-process Celery worker command (threads pool avoids prefork memory duplication)."""
+    pool = (getattr(settings, "CELERY_WORKER_POOL", "threads") or "threads").strip() or "threads"
+    concurrency = max(1, int(getattr(settings, "CELERY_WORKER_CONCURRENCY", 2) or 2))
+    return [
+        sys.executable,
+        "-m",
+        "celery",
+        "-A",
+        "celery_app.celery",
+        "worker",
+        "--loglevel=info",
+        f"--pool={pool}",
+        f"--concurrency={concurrency}",
+        "--without-gossip",
+        "--without-mingle",
+        "--without-heartbeat",
+    ]
+
+
+DEFAULT_CELERY_CMD = build_default_celery_cmd()
 
 
 def default_queue_depth() -> Optional[int]:
@@ -95,8 +104,10 @@ def default_active_jobs_count() -> Optional[int]:
 
 
 def default_cleanup() -> None:
+    cache_manager.clear_local_fallback()
     reset_valkey()
     close_pool()
+    release_process_memory()
 
 
 class WorkerSupervisor:
@@ -122,6 +133,7 @@ class WorkerSupervisor:
         self._cleanup_fn = cleanup_fn
 
         self._lock = threading.Lock()
+        self._lifecycle_lock = threading.Lock()
         self._wake_event = threading.Event()
         self._stop_event = threading.Event()
         self._proc: Any = None
@@ -143,14 +155,15 @@ class WorkerSupervisor:
 
     def wake(self) -> int:
         """Ensure Celery subprocess is running and reset the idle timer."""
-        with self._lock:
-            now = time.monotonic()
-            self._last_activity_at = now
-            self._last_idle_seen_at = None
-            if self._proc is None or self._proc.poll() is not None:
-                logger.info("Waking on-demand Celery worker subprocess.")
-                self._proc = self._spawn_fn()
-            pid = int(getattr(self._proc, "pid", 0) or 0)
+        with self._lifecycle_lock:
+            with self._lock:
+                now = time.monotonic()
+                self._last_activity_at = now
+                self._last_idle_seen_at = None
+                if self._proc is None or self._proc.poll() is not None:
+                    logger.info("Waking on-demand Celery worker subprocess.")
+                    self._proc = self._spawn_fn()
+                pid = int(getattr(self._proc, "pid", 0) or 0)
         self._wake_event.set()
         return pid
 
@@ -183,49 +196,53 @@ class WorkerSupervisor:
                 self._last_idle_seen_at = None
             return False
 
-        confirm_now = time.monotonic()
-        with self._lock:
-            if (confirm_now - self._last_activity_at) < self.idle_timeout_seconds:
+        with self._lifecycle_lock:
+            confirm_now = time.monotonic()
+            with self._lock:
+                if (confirm_now - self._last_activity_at) < self.idle_timeout_seconds:
+                    self._last_idle_seen_at = None
+                    return False
+                if self._last_idle_seen_at is None:
+                    self._last_idle_seen_at = confirm_now
+                    return False
+                if (confirm_now - self._last_idle_seen_at) < min(self.poll_interval_seconds, 10.0):
+                    return False
+                proc = self._proc
+                self._proc = None
                 self._last_idle_seen_at = None
-                return False
-            if self._last_idle_seen_at is None:
-                self._last_idle_seen_at = confirm_now
-                return False
-            if (confirm_now - self._last_idle_seen_at) < min(self.poll_interval_seconds, 10.0):
-                return False
-            proc = self._proc
-            self._proc = None
-            self._last_idle_seen_at = None
 
-        if proc is not None and proc.poll() is None:
-            logger.info("Celery queue and jobs empty; stopping worker subprocess for zero-idle sleep.")
-            try:
-                proc.terminate()
-                proc.wait(timeout=30)
-            except Exception:
+            if proc is not None and proc.poll() is None:
+                logger.info("Celery queue and jobs empty; stopping worker subprocess for zero-idle sleep.")
                 try:
-                    proc.kill()
+                    proc.terminate()
+                    proc.wait(timeout=30)
                 except Exception:
-                    pass
-        self._cleanup_fn()
-        return True
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=5)
+                    except Exception:
+                        pass
+            self._cleanup_fn()
+            return True
 
     def stop(self) -> None:
         self._stop_event.set()
         self._wake_event.set()
-        with self._lock:
-            proc = self._proc
-            self._proc = None
-        if proc is not None and proc.poll() is None:
-            try:
-                proc.terminate()
-                proc.wait(timeout=15)
-            except Exception:
+        with self._lifecycle_lock:
+            with self._lock:
+                proc = self._proc
+                self._proc = None
+            if proc is not None and proc.poll() is None:
                 try:
-                    proc.kill()
+                    proc.terminate()
+                    proc.wait(timeout=15)
                 except Exception:
-                    pass
-        self._cleanup_fn()
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=5)
+                    except Exception:
+                        pass
+            self._cleanup_fn()
 
     def _monitor_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -311,7 +328,7 @@ def _check_initial_backlog(supervisor: WorkerSupervisor) -> None:
         if supervisor.has_pending_work(unknown_is_busy=False):
             supervisor.wake()
         else:
-            default_cleanup()
+            supervisor._cleanup_fn()
     except Exception as exc:
         logger.debug("Initial backlog check skipped: %s", exc)
 

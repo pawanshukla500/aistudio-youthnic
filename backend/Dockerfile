@@ -4,6 +4,10 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONOPTIMIZE=1 \
+    MALLOC_ARENA_MAX=2 \
+    MALLOC_TRIM_THRESHOLD_=65536 \
+    MALLOC_MMAP_THRESHOLD_=65536 \
     PORT=8000
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -18,4 +22,4 @@ COPY . ./
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then python worker_supervisor.py; else uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
+CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"worker\" ]; then python worker_supervisor.py; else uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log --timeout-keep-alive 5 --limit-concurrency 32; fi"]
