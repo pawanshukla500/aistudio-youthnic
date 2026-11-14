@@ -33,7 +33,7 @@ def test_meta_muse_spark_sibling_retry_uses_canonical_input(monkeypatch):
 
         def post(self, url, headers=None, json=None):
             calls.append({"url": url, "json": json})
-            if json["model"] == "muse-spark-1.2-contributor":
+            if json["model"] == "muse-spark-1.3-contributor":
                 return FakeResp(404, {"error": {"message": "Model not found"}})
             return FakeResp(
                 200,
@@ -50,13 +50,15 @@ def test_meta_muse_spark_sibling_retry_uses_canonical_input(monkeypatch):
     )
     assert result is not None
     assert result["provider"] == "meta"
-    assert result["model"] == "muse-spark-1.3-contributor"
-    assert result["reasoning"] == "high"
+    assert result["model"] == "muse-spark-1.2-contributor"
+    assert result["reasoning"] == "medium"
+    assert calls[0]["json"]["model"] == "muse-spark-1.3-contributor"
+    assert calls[1]["json"]["model"] == "muse-spark-1.2-contributor"
     assert calls[0]["json"]["input"][0]["role"] == "user"
-    assert calls[0]["json"]["reasoning"] == {"effort": "high"}
+    assert calls[0]["json"]["reasoning"] == {"effort": "medium"}
 
 
-def test_invoke_vision_json_falls_back_to_gpt61_terra_high_for_analysis(monkeypatch):
+def test_invoke_vision_json_falls_back_to_gpt61_terra_medium_for_analysis(monkeypatch):
     monkeypatch.setattr(settings, "META_MODEL_API_KEY", "meta_test_key")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test-key")
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
@@ -66,7 +68,7 @@ def test_invoke_vision_json_falls_back_to_gpt61_terra_high_for_analysis(monkeypa
 
     openai_calls = []
 
-    def fake_openai(prompt, images, model="gpt-5.6-luna", reasoning_effort="high", timeout_s=60):
+    def fake_openai(prompt, images, model="gpt-5.6-luna", reasoning_effort="medium", timeout_s=60):
         openai_calls.append((model, reasoning_effort))
         return {
             "provider": "openai",
@@ -86,8 +88,8 @@ def test_invoke_vision_json_falls_back_to_gpt61_terra_high_for_analysis(monkeypa
     assert result is not None
     assert result["provider"] == "openai"
     assert result["model"] == "gpt-6.1-terra"
-    assert result["reasoning"] == "high"
-    assert openai_calls == [("gpt-6.1-terra", "high")]
+    assert result["reasoning"] == "medium"
+    assert openai_calls == [("gpt-6.1-terra", "medium")]
 
 
 def test_generate_catalog_image_gpt_2_6_multipart_and_size(monkeypatch):

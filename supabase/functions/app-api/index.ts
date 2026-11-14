@@ -621,7 +621,7 @@ function defaultVisionFallbacks(args: { purpose: VisionPurpose }): NormalizedAiM
         { strictJson: true },
       ),
       assertAllowedAiModelRoute(
-        LUNA_HIGH_THINKING_VISION_ROUTE,
+        CHEAP_OPENAI_VISION_ROUTE,
         args.purpose,
         { strictJson: true },
       ),
@@ -748,7 +748,7 @@ async function resolveVisionPolicy(orgId: string, args: {
     fallback.provider === "openai"
   ) {
     if (fallback.model === "gpt-6.1-terra" && !fallbacks.some((f) => f.model === "gpt-5.6-luna")) {
-      fallbacks.push(assertAllowedAiModelRoute(LUNA_HIGH_THINKING_VISION_ROUTE, args.purpose, { strictJson: true }));
+      fallbacks.push(assertAllowedAiModelRoute(CHEAP_OPENAI_VISION_ROUTE, args.purpose, { strictJson: true }));
     } else if (fallback.model === "gpt-5.6-luna" && !fallbacks.some((f) => f.model === "gpt-6.1-terra")) {
       fallbacks.push(assertAllowedAiModelRoute(OPENAI_TERRA_VISION_ROUTE, args.purpose, { strictJson: true }));
     }
@@ -1540,48 +1540,92 @@ async function metaResponsesVisionJson(
   const startedAt = Date.now();
 
   for (const modelCandidate of modelCandidates) {
-    const elapsed = Date.now() - startedAt;
-    const remainingMs = timeoutMs - elapsed;
-    if (remainingMs < 2_000) {
-      throw lastError || visionHopTimeoutError("Meta Responses API timed out.");
-    }
-    const response = await fetch("https://api.meta.ai/v1/responses", {
-      method: "POST",
-      signal: AbortSignal.timeout(remainingMs),
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${requiredEnv("META_MODEL_API_KEY")}`,
-      },
-      body: JSON.stringify({
-        model: modelCandidate,
-        input,
-        reasoning: { effort },
-        max_output_tokens: 16384,
-      }),
-    });
-    const data = await response.json().catch(() => ({})) as JsonRecord;
-    if (!response.ok) {
-      const providerError = data.error as JsonRecord | undefined;
-      const rawErrText = String(providerError?.message || data.message || data.detail || "");
-      const rawErrCode = String(providerError?.code || providerError?.type || "");
-      lastError = visionProviderError({ ...route, model: modelCandidate }, {
-        status: response.status,
-        message: rawErrText || `Meta Muse Spark vision request failed (${response.status}).`,
-        code: rawErrCode,
-      });
-      const isModelUnavailable =
-        (lastError instanceof VisionProviderError && lastError.failure.code === "provider_unavailable") ||
-        response.status === 404 ||
-        /not found|not available|does not exist|model_not_found|unsupported\s+model|model\s+(?:is\s+)?unsupported/i.test(`${rawErrCode} ${rawErrText}`);
-      // If 404 or model not available, try sibling model if one remains
-      if (isModelUnavailable && modelCandidate === modelCandidates[0] && modelCandidates.length > 1) {
-        continue;
+    for (let transientAttempt = 0; transientAttempt < 2; transientAttempt += 1) {
+      const elapsed = Date.now() - startedAt;
+      const remainingMs = timeoutMs - elapsed;
+      if (remainingMs < 2_000) {
+        throw lastError || visionHopTimeoutError("Meta Responses API timed out.");
       }
-      throw lastError;
+      let response: Response;
+      try {
+        response = await fetch("https://api.meta.ai/v1/responses", {
+          method: "POST",
+          signal: AbortSignal.timeout(remainingMs),
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${requiredEnv("META_MODEL_API_KEY")}`,
+          },
+          body: JSON.stringify({
+            model: modelCandidate,
+            input,
+            reasoning: { effort },
+            max_output_tokens: 16384,
+          }),
+        });
+      } catch (fetchErr) {
+        lastError = fetchErr;
+        const postElapsed = Date.now() - startedAt;
+        const postRemainingMs = timeoutMs - postElapsed;
+        const fastNetworkError =
+          postElapsed < 10_000 &&
+          postRemainingMs >= 30_000 &&
+          (fetchErr as { name?: string })?.name !== "TimeoutError";
+        console.error(
+          `[metaResponsesVisionJson] model=${modelCandidate} fetch_error elapsedMs=${postElapsed} msg=${errorMessage(fetchErr).slice(0, 200)}`,
+        );
+        if (fastNetworkError && transientAttempt === 0) {
+          await sleep(750);
+          continue;
+        }
+        if (fastNetworkError && modelCandidate === modelCandidates[0] && modelCandidates.length > 1) {
+          break;
+        }
+        throw fetchErr;
+      }
+
+      const rawBodyText = await response.text().catch(() => "");
+      let data: JsonRecord = {};
+      if (rawBodyText) {
+        try {
+          data = JSON.parse(rawBodyText) as JsonRecord;
+        } catch {
+          data = {};
+        }
+      }
+      if (!response.ok) {
+        const postElapsed = Date.now() - startedAt;
+        const postRemainingMs = timeoutMs - postElapsed;
+        const providerError = data.error as JsonRecord | undefined;
+        const rawErrText = String(providerError?.message || data.message || data.detail || rawBodyText.slice(0, 240) || "");
+        const rawErrCode = String(providerError?.code || providerError?.type || "");
+        console.error(
+          `[metaResponsesVisionJson] model=${modelCandidate} status=${response.status} code=${rawErrCode || "none"} elapsedMs=${postElapsed} msg=${rawErrText.slice(0, 200)}`,
+        );
+        lastError = visionProviderError({ ...route, model: modelCandidate }, {
+          status: response.status,
+          message: rawErrText || `Meta Muse Spark vision request failed (${response.status}).`,
+          code: rawErrCode,
+        });
+        const isTransient = response.status === 429 || response.status >= 500;
+        const canRetryQuickly = isTransient && postElapsed < 10_000 && postRemainingMs >= 30_000;
+        if (canRetryQuickly && transientAttempt === 0) {
+          await sleep(750);
+          continue;
+        }
+        const isModelUnavailable =
+          (lastError instanceof VisionProviderError && lastError.failure.code === "provider_unavailable" && response.status < 500) ||
+          response.status === 404 ||
+          /not found|not available|does not exist|model_not_found|unsupported\s+model|model\s+(?:is\s+)?unsupported/i.test(`${rawErrCode} ${rawErrText}`);
+        // If 404/unavailable (or fast transient exhausted), try sibling model if one remains.
+        if ((isModelUnavailable || canRetryQuickly) && modelCandidate === modelCandidates[0] && modelCandidates.length > 1) {
+          break;
+        }
+        throw lastError;
+      }
+      const text = extractResponseApiText(data);
+      if (!text) throw visionProviderError({ ...route, model: modelCandidate }, { message: "meta returned no structured visual response." });
+      return { raw: data, text, json: parseJsonResponse(text), actualModel: modelCandidate };
     }
-    const text = extractResponseApiText(data);
-    if (!text) throw visionProviderError({ ...route, model: modelCandidate }, { message: "meta returned no structured visual response." });
-    return { raw: data, text, json: parseJsonResponse(text), actualModel: modelCandidate };
   }
   throw lastError;
 }
@@ -1738,6 +1782,7 @@ async function visionJson(
           } catch (error) {
             const providerError = asVisionProviderError(error, route);
             if (
+              route.provider !== "meta" &&
               providerError.failure.retryable &&
               attempt < 2 &&
               shouldRetrySameVisionRoute(providerError.failure)

@@ -554,8 +554,8 @@ export function Admin() {
     if (purpose === "product_truth") {
       if (provider === "meta" || (provider === "openai" && (modelId === "gpt-6.1-terra" || modelId === "gpt-5.6-luna"))) {
         if (current && levels.includes(current)) return current;
-        if ((provider === "meta" || modelId === "gpt-6.1-terra") && levels.includes("high")) return "high";
-        return levels.includes("high") ? "high" : levels.includes("low") ? "low" : levels[0] || "low";
+        if ((provider === "meta" || modelId === "gpt-6.1-terra") && levels.includes("medium")) return "medium";
+        return levels.includes("low") ? "low" : levels.includes("high") ? "high" : levels[0] || "low";
       }
       if (current && ["none", "minimal", "low"].includes(current) && levels.includes(current)) {
         return current;
@@ -585,7 +585,9 @@ export function Admin() {
       primaryModel?.id || "",
       purpose,
       purpose === "product_truth"
-        ? ((defaultPrimaryProvider === "meta" || primaryModel?.id === "gpt-6.1-terra") && primaryModel?.thinkingLevels.includes("high")
+        ? ((defaultPrimaryProvider === "meta" || primaryModel?.id === "gpt-6.1-terra") && primaryModel?.thinkingLevels.includes("medium")
+          ? "medium"
+          : (defaultPrimaryProvider === "meta" || primaryModel?.id === "gpt-6.1-terra") && primaryModel?.thinkingLevels.includes("high")
           ? "high"
           : (primaryModel?.thinkingLevels.includes("low") ? "low" : primaryModel?.thinkingLevels[0]))
         : purpose === "qa"
@@ -597,8 +599,12 @@ export function Admin() {
           fallback.provider,
           fallbackModel.id,
           purpose,
-          purpose === "product_truth" && (fallbackModel.id === "gpt-6.1-terra" || fallbackModel.id === "gpt-5.6-luna") && fallbackModel.thinkingLevels.includes("high")
-            ? "high"
+          purpose === "product_truth" && (fallbackModel.id === "gpt-6.1-terra" || fallbackModel.id === "gpt-5.6-luna")
+            ? (fallbackModel.thinkingLevels.includes("medium")
+              ? "medium"
+              : fallbackModel.thinkingLevels.includes("high")
+              ? "high"
+              : fallbackModel.thinkingLevels[0])
             : purpose === "qa" && fallbackModel.thinkingLevels.includes("low")
             ? "low"
             : fallbackModel.thinkingLevels[0],
@@ -653,8 +659,8 @@ export function Admin() {
       return;
     }
     const metaModel =
-      metaModels.find((model) => model.id === "muse-spark-1.2-contributor") ||
       metaModels.find((model) => model.id === "muse-spark-1.3-contributor") ||
+      metaModels.find((model) => model.id === "muse-spark-1.2-contributor") ||
       metaModels.find((model) => model.id === "muse-spark-1.3") ||
       metaModels.find((model) => model.id === "muse-spark-1.2") ||
       metaModels[0];
@@ -667,11 +673,11 @@ export function Admin() {
       ...current,
       primaryProvider: "meta",
       primaryModel: metaModel.id,
-      primaryThinking: normalizedThinking("meta", metaModel.id, "product_truth", "high"),
+      primaryThinking: normalizedThinking("meta", metaModel.id, "product_truth", "medium"),
       fallbackEnabled: true,
       fallbackProvider: "openai",
       fallbackModel: openAiModel.id,
-      fallbackThinking: normalizedThinking("openai", openAiModel.id, "product_truth", "high"),
+      fallbackThinking: normalizedThinking("openai", openAiModel.id, "product_truth", "medium"),
     }));
   };
 

@@ -542,12 +542,12 @@ Deno.test("product truth runs exactly the Administration primary, then its fallb
     "meta:muse-spark-1.3-contributor:high",
   ]);
   assertEquals(chain(CHEAP_OPENAI_VISION_ROUTE), ["openai:gpt-5.6-luna:low"]);
-  // Meta Muse Contributor (high) primary -> GPT 6.1 Terra (high) fallback + Luna secondary fallback
+  // Meta Muse Contributor (medium) primary -> GPT 6.1 Terra (medium) fallback + Luna secondary fallback
   assertEquals(
     chain(FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE, [OPENAI_TERRA_VISION_ROUTE, LUNA_HIGH_THINKING_VISION_ROUTE]),
     [
-      "meta:muse-spark-1.2-contributor:high",
-      "openai:gpt-6.1-terra:high",
+      "meta:muse-spark-1.3-contributor:medium",
+      "openai:gpt-6.1-terra:medium",
       "openai:gpt-5.6-luna:high",
     ],
   );
@@ -561,9 +561,9 @@ Deno.test("product truth runs exactly the Administration primary, then its fallb
     provider: "qwen",
     model: "qwen3.8-max",
     thinkingLevel: "none",
-  }), ["meta:muse-spark-1.3:high", "qwen:qwen3.8-max:none"]);
+  }), ["meta:muse-spark-1.3:medium", "qwen:qwen3.8-max:none"]);
   // A fallback identical to the primary runs once.
-  assertEquals(chain(OPENAI_TERRA_VISION_ROUTE, { provider: "openai", model: "gpt-6.1-terra", thinkingLevel: "high" }), ["openai:gpt-6.1-terra:high"]);
+  assertEquals(chain(OPENAI_TERRA_VISION_ROUTE, { provider: "openai", model: "gpt-6.1-terra", thinkingLevel: "medium" }), ["openai:gpt-6.1-terra:medium"]);
 });
 
 Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
@@ -1074,7 +1074,7 @@ Deno.test("the first vision protocol keeps the whole hop", () => {
   assertEquals(visionProtocolOrder("openai", false), ["chat", "responses"]);
 });
 
-Deno.test("clampProductTruthHopThinking clamps high reasoning when hop timeout is under 60s", () => {
+Deno.test("clampProductTruthHopThinking clamps medium/high reasoning when hop timeout is under 60s", () => {
   // Luna with high thinking under 45s fallback hop is clamped to low
   const lunaHigh = { provider: "openai" as const, model: "gpt-5.6-luna", thinkingLevel: "high" as const };
   assertEquals(clampProductTruthHopThinking(lunaHigh, 45_000), {
@@ -1082,6 +1082,26 @@ Deno.test("clampProductTruthHopThinking clamps high reasoning when hop timeout i
     model: "gpt-5.6-luna",
     thinkingLevel: "low",
   });
+
+  // Terra / Muse with medium thinking under 45s emergency hop is clamped to low, but preserves medium at >= 60s
+  const terraMedium = { provider: "openai" as const, model: "gpt-6.1-terra", thinkingLevel: "medium" as const };
+  assertEquals(clampProductTruthHopThinking(terraMedium, 45_000), {
+    provider: "openai",
+    model: "gpt-6.1-terra",
+    thinkingLevel: "low",
+  });
+  assertEquals(clampProductTruthHopThinking(terraMedium, 80_000), terraMedium);
+
+  const museMedium = { provider: "meta" as const, model: "muse-spark-1.3-contributor", thinkingLevel: "medium" as const };
+  assertEquals(clampProductTruthHopThinking(museMedium, 120_000), museMedium);
+  assertEquals(
+    clampProductTruthThinking({ provider: "meta", model: "muse-spark-1.3-contributor", thinkingLevel: "medium" }),
+    "medium",
+  );
+  assertEquals(
+    clampProductTruthThinking({ provider: "openai", model: "gpt-6.1-terra", thinkingLevel: "medium" }),
+    "medium",
+  );
 
   // Luna with high thinking under full 80s primary hop preserves high
   assertEquals(clampProductTruthHopThinking(lunaHigh, 80_000), lunaHigh);
@@ -1092,6 +1112,43 @@ Deno.test("clampProductTruthHopThinking clamps high reasoning when hop timeout i
 
   const museNone = { provider: "meta" as const, model: "muse-spark-1.3", thinkingLevel: "none" as const };
   assertEquals(clampProductTruthHopThinking(museNone, 30_000), museNone);
+});
+
+Deno.test("classifyVisionProviderFailure keeps HTTP 5xx not-available errors retryable instead of mislabeling API key access", () => {
+  const transient503 = classifyVisionProviderFailure("meta", {
+    status: 503,
+    message: "Service is not available right now",
+  });
+  assertEquals(transient503.code, "provider_unavailable");
+  assertEquals(transient503.retryable, true);
+  assertEquals(transient503.fallbackEligible, true);
+  assert(!transient503.message.includes("not available to the configured API key"));
+
+  const missing404 = classifyVisionProviderFailure("meta", {
+    status: 404,
+    message: "This model is not available",
+  });
+  assertEquals(missing404.code, "provider_unavailable");
+  assertEquals(missing404.retryable, false);
+  assertEquals(missing404.fallbackEligible, true);
+  assert(missing404.message.includes("not available to the configured API key"));
+
+  const missing400 = classifyVisionProviderFailure("openai", {
+    status: 400,
+    code: "model_not_found",
+    message: "The model does not exist or you do not have access to it",
+  });
+  assertEquals(missing400.code, "provider_unavailable");
+  assertEquals(missing400.retryable, false);
+  assertEquals(missing400.fallbackEligible, true);
+
+  const payment402 = classifyVisionProviderFailure("meta", {
+    status: 402,
+    message: "Payment required",
+  });
+  assertEquals(payment402.code, "provider_budget_exhausted");
+  assertEquals(payment402.retryable, false);
+  assertEquals(payment402.fallbackEligible, true);
 });
 
 Deno.test("runVisionProviderChain clamps fallback thinking for product truth in telemetry and returned route", async () => {

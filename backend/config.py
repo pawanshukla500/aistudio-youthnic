@@ -55,7 +55,7 @@ class Settings(BaseSettings):
 
     # Budgets & Timeouts
     MAX_JOB_COST_USD: float = 2.50
-    VISION_TIMEOUT_SECONDS: int = 120
+    VISION_TIMEOUT_SECONDS: int = 180
     IMAGE_GEN_TIMEOUT_SECONDS: int = 180
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

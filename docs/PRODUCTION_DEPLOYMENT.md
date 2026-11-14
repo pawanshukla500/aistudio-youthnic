@@ -24,27 +24,27 @@ GitHub URL redirect. Do not ship another GitHub-URL stub entrypoint.
 ### Live Product Truth policy (`AI Studio App` / Railway + Supabase)
 
 Studio analyze/plan **honors** `organization_ai_model_policies` purpose
-`product_truth`. The runtime default chain runs **Meta Muse Spark (`high`) → OpenAI `gpt-6.1-terra` (`high`) → OpenAI `gpt-5.6-luna` (`high`) → Gemini 3.8 Flash**, keeping `high` reasoning for Meta Muse Spark, `gpt-6.1-terra`, and `gpt-5.6-luna` during analysis & pose planning (dropping to `low` only when under an emergency `< 60s` remaining gateway hop budget). For a saved policy, `resolveVisionPolicy` runs the saved primary first, the saved fallback second, and—when the primary is Meta and the fallback is OpenAI—appends one OpenAI safety-net (`gpt-5.6-luna` or `gpt-6.1-terra`) after the saved fallback. Each hop is capped by the remaining gateway budget even if the provider adapter ignores `timeoutMs`. Product-truth hops do not retry the same route (aside from Meta's transient in-provider 404 sibling retry `1.2-contributor` <-> `1.3-contributor`). Each hop writes its own `ai_runs` row **before the next hop starts**.
+`product_truth`. The runtime default chain runs **Meta Muse Spark (`medium`) → OpenAI `gpt-6.1-terra` (`medium`) → OpenAI `gpt-5.6-luna` (`low`) → Gemini 3.8 Flash**, defaulting to `medium` (while still honoring explicit `high` for Meta Muse Spark, `gpt-6.1-terra`, and `gpt-5.6-luna` during analysis & pose planning, dropping to `low` when under an emergency `< 60s` remaining gateway hop budget). For a saved policy, `resolveVisionPolicy` runs the saved primary first, the saved fallback second, and—when the primary is Meta and the fallback is OpenAI—appends one OpenAI safety-net (`gpt-5.6-luna:low` or `gpt-6.1-terra:low`) after the saved fallback. Each hop is capped by the remaining gateway budget even if the provider adapter ignores `timeoutMs`. Product-truth hops do not retry the same route (aside from Meta's fast transient retry and in-provider sibling retry `1.3-contributor` <-> `1.2-contributor`). Each hop writes its own `ai_runs` row **before the next hop starts**.
 
 Recommended stored policy:
 
 | purpose | primary | stored fallback |
 | --- | --- | --- |
-| `product_truth` | `meta` / `muse-spark-1.2-contributor` (`high`) | `openai` / `gpt-6.1-terra` (`high`) |
-| `qa` | `meta` / `muse-spark-1.2-contributor` (`low`) | `openai` / `gpt-5.6-luna` (`low`) |
+| `product_truth` | `meta` / `muse-spark-1.3-contributor` (`medium`) | `openai` / `gpt-6.1-terra` (`medium`) |
+| `qa` | `meta` / `muse-spark-1.3-contributor` (`low`) | `openai` / `gpt-5.6-luna` (`low`) |
 | `image_generation` | `openai` / `gpt-image-2.6-sunburst` (`none`) | none |
 
 ```sql
--- Product truth: Meta Muse Spark Contributor (High) -> OpenAI GPT 6.1 Terra (High) fallback.
+-- Product truth: Meta Muse Spark 1.3 Contributor (Medium) -> OpenAI GPT 6.1 Terra (Medium) fallback.
 UPDATE public.organization_ai_model_policies
 SET
   primary_provider = 'meta',
-  primary_model = 'muse-spark-1.2-contributor',
-  primary_reasoning = 'high',
+  primary_model = 'muse-spark-1.3-contributor',
+  primary_reasoning = 'medium',
   fallback_enabled = true,
   fallback_provider = 'openai',
   fallback_model = 'gpt-6.1-terra',
-  fallback_reasoning = 'high',
+  fallback_reasoning = 'medium',
   updated_at = now()
 WHERE purpose = 'product_truth';
 ```
@@ -54,7 +54,7 @@ the repo. Required backend secrets: `META_MODEL_API_KEY`, `OPENAI_API_KEY`,
 `GEMINI_API_KEY`, `INTERNAL_API_SECRET`.
 
 After a Studio Analyze, `ai_runs` contains **one row per hop**. A Muse timeout
-then GPT 6.1 Terra success looks like `meta` / `muse-spark-1.2-contributor` **failed** plus
+then GPT 6.1 Terra success looks like `meta` / `muse-spark-1.3-contributor` **failed** plus
 `openai` / `gpt-6.1-terra` **completed**. Failed rows store `error_message`.
 
 Configure server-only Edge secrets. Never add their values to Vite variables or GitHub build arguments.

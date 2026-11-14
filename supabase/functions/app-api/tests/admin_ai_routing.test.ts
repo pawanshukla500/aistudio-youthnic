@@ -48,8 +48,8 @@ Deno.test("fallback model lists stay on the selected provider", () => {
   );
 });
 
-Deno.test("preferred vision models are Muse Spark Contributor and GPT 6.1 Terra, falling back to Luna", () => {
-  assertEquals(preferredModelId("meta", registry.find((entry) => entry.provider === "meta")!.models), "muse-spark-1.2-contributor");
+Deno.test("preferred vision models are Muse Spark 1.3 Contributor and GPT 6.1 Terra, falling back to Luna", () => {
+  assertEquals(preferredModelId("meta", registry.find((entry) => entry.provider === "meta")!.models), "muse-spark-1.3-contributor");
   const openAiModels = modelsForProviderPurpose(registry, "openai", "product_truth");
   assertEquals(preferredModelId("openai", openAiModels), "gpt-6.1-terra");
   assertEquals(preferredModelId("openai", openAiModels, "qa"), "gpt-5.6-luna");
@@ -72,12 +72,12 @@ Deno.test("OpenAI fallback cannot keep a Gemini model id", () => {
   assertEquals(coerced.repairRequired, true);
 });
 
-Deno.test("product truth routing prefers Meta Muse Spark as primary and OpenAI GPT 6.1 Terra as fallback when both are configured", () => {
+Deno.test("product truth routing prefers Meta Muse Spark 1.3 Contributor as primary and OpenAI GPT 6.1 Terra as fallback when both are configured", () => {
   const primary = preferredConfiguredProvider(registry, "product_truth");
   assertEquals(primary?.provider, "meta");
   assertEquals(
     preferredModelId("meta", modelsForProviderPurpose(registry, "meta", "product_truth")),
-    "muse-spark-1.2-contributor",
+    "muse-spark-1.3-contributor",
   );
   const fallback = preferredConfiguredProvider(registry, "product_truth", {
     exclude: primary?.provider,
@@ -97,7 +97,30 @@ Deno.test("preferred image generation model is 2.6 Sunburst over Flare and legac
   );
 });
 
-Deno.test("product truth policy coercion preserves Meta high and GPT 6.1 Terra high thinking", () => {
+Deno.test("product truth policy coercion preserves Meta medium/high and GPT 6.1 Terra medium/high thinking", () => {
+  const metaMediumPolicy = coerceAdminAiPolicy({
+    purpose: "product_truth",
+    primaryProvider: "meta",
+    primaryModel: "muse-spark-1.3-contributor",
+    primaryThinking: "medium",
+    fallbackEnabled: true,
+    fallbackProvider: "openai",
+    fallbackModel: "gpt-6.1-terra",
+    fallbackThinking: "medium",
+  }, [
+    ...registry.filter((r) => r.provider !== "meta"),
+    {
+      provider: "meta",
+      configured: true,
+      models: [
+        { id: "muse-spark-1.3-contributor", label: "Contributor 1.3", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "medium", "high"] },
+      ],
+    },
+  ]);
+  assertEquals(metaMediumPolicy.primaryThinking, "medium");
+  assertEquals(metaMediumPolicy.fallbackModel, "gpt-6.1-terra");
+  assertEquals(metaMediumPolicy.fallbackThinking, "medium");
+
   const metaPolicy = coerceAdminAiPolicy({
     purpose: "product_truth",
     primaryProvider: "meta",

@@ -276,8 +276,8 @@ def load_reference_image(
 def _meta_vision_json(
     prompt: str,
     images: List[Dict[str, Any]],
-    timeout_s: int = 60,
-    effort: str = "high",
+    timeout_s: int = 115,
+    effort: str = "medium",
     deadline: Optional[float] = None,
 ) -> Dict[str, Any]:
     api_key = (settings.META_MODEL_API_KEY or "").strip()
@@ -294,49 +294,88 @@ def _meta_vision_json(
     content_items.append({"type": "input_text", "text": prompt})
 
     last_err: Optional[Exception] = None
-    for model_name in ("muse-spark-1.2-contributor", "muse-spark-1.3-contributor"):
-        remaining = (deadline - time.monotonic()) if deadline is not None else float(timeout_s)
-        if remaining < 5:
-            last_err = last_err or RuntimeError("Meta vision deadline exhausted before retry")
+    started_at = time.monotonic()
+    should_stop = False
+    for model_name in ("muse-spark-1.3-contributor", "muse-spark-1.2-contributor"):
+        if should_stop:
             break
-        per_call_timeout = int(max(5, min(float(timeout_s), remaining)))
-        try:
-            with httpx.Client(timeout=per_call_timeout) as client:
-                resp = client.post(
-                    "https://api.meta.ai/v1/responses",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": model_name,
-                        "input": [{"role": "user", "content": content_items}],
-                        "reasoning": {"effort": effort},
-                        "max_output_tokens": 16384,
-                    },
-                )
-            data = _safe_resp_json(resp)
-            if resp.status_code >= 400:
-                msg = str((data.get("error") or {}).get("message") or data.get("message") or f"Meta HTTP {resp.status_code}")
-                last_err = RuntimeError(msg)
-                if resp.status_code == 404 or "not found" in msg.lower() or "not available" in msg.lower():
-                    continue
+        for transient_attempt in range(2):
+            elapsed = time.monotonic() - started_at
+            remaining = (deadline - time.monotonic()) if deadline is not None else float(timeout_s)
+            if remaining < 5:
+                last_err = last_err or RuntimeError("Meta vision deadline exhausted before retry")
+                should_stop = True
                 break
+            per_call_timeout = int(max(5, min(float(timeout_s), remaining)))
+            try:
+                with httpx.Client(timeout=per_call_timeout) as client:
+                    resp = client.post(
+                        "https://api.meta.ai/v1/responses",
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": model_name,
+                            "input": [{"role": "user", "content": content_items}],
+                            "reasoning": {"effort": effort},
+                            "max_output_tokens": 16384,
+                        },
+                    )
+                data = _safe_resp_json(resp)
+                if resp.status_code >= 400:
+                    msg = str((data.get("error") or {}).get("message") or data.get("message") or f"Meta HTTP {resp.status_code}")
+                    last_err = RuntimeError(msg)
+                    now_elapsed = time.monotonic() - started_at
+                    remaining_after = (deadline - time.monotonic()) if deadline is not None else max(0.0, float(timeout_s) - now_elapsed)
+                    is_transient = resp.status_code == 429 or resp.status_code >= 500
+                    can_retry_fast = is_transient and now_elapsed < 10.0 and remaining_after >= 30.0
+                    if can_retry_fast and transient_attempt == 0:
+                        time.sleep(0.5)
+                        continue
+                    lower_msg = msg.lower()
+                    is_unavailable = (
+                        resp.status_code == 404
+                        or (
+                            resp.status_code < 500
+                            and (
+                                "not found" in lower_msg
+                                or "not available" in lower_msg
+                                or "does not exist" in lower_msg
+                                or "model_not_found" in lower_msg
+                                or "unsupported model" in lower_msg
+                                or "model is unsupported" in lower_msg
+                            )
+                        )
+                    )
+                    if not (is_unavailable or can_retry_fast):
+                        should_stop = True
+                    break
 
-            text = _extract_responses_text(data)
-            parsed = parse_json_payload(text)
-            if not parsed:
-                raise RuntimeError(f"Meta {model_name} returned empty/non-JSON output")
-            cache_manager.record_provider_result("meta", True)
-            return {
-                "provider": "meta",
-                "model": model_name,
-                "reasoning": effort,
-                "data": parsed,
-            }
-        except Exception as exc:
-            last_err = exc
-            break
+                text = _extract_responses_text(data)
+                parsed = parse_json_payload(text)
+                if not parsed:
+                    last_err = RuntimeError(f"Meta {model_name} returned empty/non-JSON output")
+                    should_stop = True
+                    break
+                cache_manager.record_provider_result("meta", True)
+                return {
+                    "provider": "meta",
+                    "model": model_name,
+                    "reasoning": effort,
+                    "data": parsed,
+                }
+            except Exception as exc:
+                last_err = exc
+                now_elapsed = time.monotonic() - started_at
+                remaining_after = (deadline - time.monotonic()) if deadline is not None else max(0.0, float(timeout_s) - now_elapsed)
+                fast_network_err = now_elapsed < 10.0 and remaining_after >= 30.0
+                if not should_stop and fast_network_err and transient_attempt == 0:
+                    time.sleep(0.5)
+                    continue
+                if not (fast_network_err and model_name == "muse-spark-1.3-contributor"):
+                    should_stop = True
+                break
     if last_err is not None:
         cache_manager.record_provider_result("meta", False, str(last_err))
     raise RuntimeError(f"Meta vision call failed: {last_err}")
@@ -442,7 +481,7 @@ def invoke_vision_json(
     images: List[Dict[str, Any]],
     purpose: str = "product_truth",
 ) -> Optional[Dict[str, Any]]:
-    """Call Meta Muse Spark (high for analysis/pose_planning) -> GPT 6.1 Terra (high) / Luna -> Gemini.
+    """Call Meta Muse Spark (medium for analysis/pose_planning) -> GPT 6.1 Terra (medium) / Luna -> Gemini.
 
     Returns None ONLY when no provider keys are configured (offline tests).
     """
@@ -454,13 +493,13 @@ def invoke_vision_json(
         return None
 
     is_analysis = purpose in ("product_truth", "pose_planning")
-    meta_effort = "high" if is_analysis else "low"
+    meta_effort = "medium" if is_analysis else "low"
     deadline = time.monotonic() + float(max(30, settings.VISION_TIMEOUT_SECONDS))
     errors: List[str] = []
 
     if has_meta:
         remaining = deadline - time.monotonic()
-        meta_cap = 60 if is_analysis else 25
+        meta_cap = 115 if is_analysis else 25
         meta_timeout = int(max(12, min(meta_cap, remaining)))
         meta_deadline = min(deadline, time.monotonic() + float(meta_timeout))
         try:
@@ -477,7 +516,7 @@ def invoke_vision_json(
 
     if has_openai:
         openai_candidates = (
-            (("gpt-6.1-terra", "high"), ("gpt-5.6-luna", "high"), ("gpt-5.6-terra", "low"))
+            (("gpt-6.1-terra", "medium"), ("gpt-5.6-luna", "medium"), ("gpt-5.6-terra", "low"))
             if is_analysis
             else (("gpt-5.6-luna", "low"), ("gpt-6.1-terra", "low"))
         )
@@ -487,7 +526,7 @@ def invoke_vision_json(
                 break
             has_later_hop = idx < len(openai_candidates) - 1 or has_gemini
             hop_budget = (remaining - 15) if (has_later_hop and remaining > 25) else remaining
-            if model_name in ("gpt-6.1-terra", "gpt-5.6-luna") and default_effort == "high" and remaining < 60:
+            if model_name in ("gpt-6.1-terra", "gpt-5.6-luna") and default_effort in ("medium", "high") and hop_budget < 60:
                 effort = "low"
             else:
                 effort = default_effort

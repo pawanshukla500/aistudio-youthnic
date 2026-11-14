@@ -52,8 +52,8 @@ export function preferredModelId(
   if (provider === "openai" && purpose === "qa" && ids.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
   if (provider === "openai" && ids.includes("gpt-6.1-terra")) return "gpt-6.1-terra";
   if (provider === "openai" && ids.includes("gpt-5.6-luna")) return "gpt-5.6-luna";
-  if (provider === "meta" && ids.includes("muse-spark-1.2-contributor")) return "muse-spark-1.2-contributor";
   if (provider === "meta" && ids.includes("muse-spark-1.3-contributor")) return "muse-spark-1.3-contributor";
+  if (provider === "meta" && ids.includes("muse-spark-1.2-contributor")) return "muse-spark-1.2-contributor";
   if (provider === "meta" && ids.includes("muse-spark-1.3")) return "muse-spark-1.3";
   if (provider === "meta" && ids.includes("muse-spark-1.2")) return "muse-spark-1.2";
   if (provider === "gemini" && models.length && ids.includes("gemini-3.8-flash")) return "gemini-3.8-flash";
@@ -101,7 +101,7 @@ function thinkingFor(
   if (purpose === "product_truth") {
     if (provider === "meta" || (provider === "openai" && (modelId === "gpt-6.1-terra" || modelId === "gpt-5.6-luna"))) {
       if (current && levels.includes(current)) return current;
-      if ((provider === "meta" || modelId === "gpt-6.1-terra") && levels.includes("high")) return "high";
+      if ((provider === "meta" || modelId === "gpt-6.1-terra") && levels.includes("medium")) return "medium";
       if (levels.includes("low")) return "low";
       if (levels.includes("high")) return "high";
     }

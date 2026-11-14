@@ -6,7 +6,7 @@ How a six-pose shoot moves from references to delivered images, how **LangGraph 
 
 The studio pairs an Edge Gateway queue (`supabase/functions/app-api`) with a multi-agent **LangGraph** service (`backend/`, deployed on Railway as `FastAPI` + `celery-worker` + `Valkey`):
 
-1. **Analyse & Product DNA V2** (`studio.analyze` / `/api/v1/dna/extract`). Runs Meta Muse Spark (`high` thinking) with OpenAI `gpt-6.1-terra` (`high` thinking) fallback to extract immutable evidence-linked Product DNA V2 (`dna_versions`), shared Creative Direction (the set), Model Identity, and a tailored six-pose plan (isolating Farshi 4-inch upper-hem taper strictly to Farshi SKUs, Gen-Z saree draping, and top-only vs. multi-piece kurti sets). Results are SHA-256 fingerprinted and cached in Postgres & Valkey.
+1. **Analyse & Product DNA V2** (`studio.analyze` / `/api/v1/dna/extract`). Runs Meta Muse Spark (`muse-spark-1.3-contributor`, `medium` thinking) with OpenAI `gpt-6.1-terra` (`medium` thinking) fallback to extract immutable evidence-linked Product DNA V2 (`dna_versions`), shared Creative Direction (the set), Model Identity, and a tailored six-pose plan (isolating Farshi 4-inch upper-hem taper strictly to Farshi SKUs, Gen-Z saree draping, and top-only vs. multi-piece kurti sets). Results are SHA-256 fingerprinted and cached in Postgres & Valkey.
 2. **Queue.** `generation_jobs` gets one row and `session_generations` gets one row per pose; asynchronous agent tasks can dispatch through Celery + Valkey (`celery-worker`).
 3. **Generate, one pose per worker call.** `claim_next_generation_job` leases the job. The worker builds each pose prompt with `gpt-image-2.6-sunburst` (default 3:4 at 2K, `medium` quality), runs optional Computer Vision QA, and either commits the image or schedules a retry with `available_at` backoff.
 4. **Deliver.** The image is uploaded under a unique Firebase Storage path and appended to `planning_assets`.
@@ -54,14 +54,14 @@ Image and QA `ai_runs` rows now carry `generation_epoch`, `attempt_number` and `
 The agentic workflow runs in `backend/graph.py` on **FastAPI** (Railway `FastAPI` service, configured with scale-to-zero `sleepApplication: true` for zero idle cost) with **`PostgresSaver`** checkpointing and **`Valkey`** caching/Celery task execution:
 
 - **Supervisor / Evidence / Product DNA Agents (`agents/supervisor.py`, `agents/evidence_agent.py`, `agents/dna_agent.py`, `models/dna_v2.py`):** Verify reference roles, quarantine style-reference outfits, enforce strict bottom-wear invariants across DNA, QA, and correction (`agents/dna_agent.py`, `agents/qa_agent.py`, `agents/correction_agent.py`), and persist immutable `dna_versions` keyed by source SHA-256 hashes.
-- **Knowledge & Pose Planning Agents (`agents/memory_agent.py`, `agents/pose_planning_agent.py`):** Apply historical approvals/corrections and build category-aware 6-pose shoots (Pose 5 primary craftsmanship detail; Pose 6 non-duplicate showcase) using Meta Muse Spark `high` -> `gpt-6.1-terra:high`.
+- **Knowledge & Pose Planning Agents (`agents/memory_agent.py`, `agents/pose_planning_agent.py`):** Apply historical approvals/corrections and build category-aware 6-pose shoots (Pose 5 primary craftsmanship detail; Pose 6 non-duplicate showcase) using Meta Muse Spark `medium` -> `gpt-6.1-terra:medium`.
 - **CV QA & Correction Agents (`agents/qa_agent.py`, `agents/correction_agent.py`):** Detect anatomical duplication (must remain 2 arms, 2 hands), Farshi hem fidelity, and background continuity before final approval.
 
 See `AGENTS.md` and `MEMORY.md` for mandatory `/ponytail` and `/graphify` engineering workflows when modifying the orchestrator.
 
 ## Which models run
 
-The vision models for analysis (`muse-spark-1.2-contributor:high` -> `gpt-6.1-terra:high`) and QA, and the image model (`gpt-image-2.6-sunburst` default), come from Administration → AI models, exactly as saved. See [AI model routing](AI_MODEL_ROUTING.md).
+The vision models for analysis (`muse-spark-1.3-contributor:medium` -> `gpt-6.1-terra:medium`) and QA, and the image model (`gpt-image-2.6-sunburst` default), come from Administration → AI models, exactly as saved. See [AI model routing](AI_MODEL_ROUTING.md).
 
 ## Defaults
 

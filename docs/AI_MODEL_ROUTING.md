@@ -58,9 +58,9 @@ message naming the secret (`META_MODEL_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_K
 ## Reasoning effort for product analysis
 
 Product analysis is one large multimodal JSON call that must finish inside Studio's 180s wait.
-- **Meta Muse Spark** (`muse-spark-1.2-contributor` / `1.3-contributor` / `1.3` / `1.2`), **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra`), and **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna`) preserve **high** thinking (`clampProductTruthThinking`) during `product_truth` analysis & pose planning for deep chain-of-thought reasoning across garment construction, Farshi/saree drape taxonomy, styling, and 6-pose choreography.
+- **Meta Muse Spark** (`muse-spark-1.3-contributor` / `1.2-contributor` / `1.3` / `1.2`), **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra`), and **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna`) default to **medium** thinking (`clampProductTruthThinking`, ~103s full-prompt extraction) and preserve explicit **high** or **medium** thinking during `product_truth` analysis & pose planning for deep chain-of-thought reasoning across garment construction, Farshi/saree drape taxonomy, styling, and 6-pose choreography.
 - Legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, `gemini-*`) run at **low** reasoning (or lowest supported level; explicit `"none"` or `"minimal"` is preserved; Qwen runs with thinking off).
-- When any hop runs under an emergency tight deadline (`timeoutMs < 60s`), thinking is dynamically clamped to **low** (`clampProductTruthHopThinking`) to avoid timeout cascades while still letting Meta/Terra run at `high` under standard failover budgets.
+- When any hop runs under an emergency tight deadline (`timeoutMs < 60s`), thinking is dynamically clamped to **low** (`clampProductTruthHopThinking`) to avoid timeout cascades while still letting Meta/Terra run at `medium` (or `high`) under standard failover budgets.
 QA keeps its saved reasoning, except that Gemini Flash models run at low.
 
 ## Time budget (product analysis)
@@ -91,7 +91,7 @@ this purpose in Administration."
 OpenAI and Meta Muse Spark vision calls support dual protocols. The first protocol gets the whole hop (`dualProtocolPrimaryTimeoutMs`).
 - **Product photos** (Meta and OpenAI) use the Responses API (`/v1/responses`).
   - Meta uses the canonical `input: [{ role: "user", content }]` payload schema to eliminate 400 Bad Request retry delays.
-  - Meta includes in-provider sibling candidate retry: if `muse-spark-1.2-contributor` encounters a 404 (model not found / unavailable in that account tier), it immediately retries with `muse-spark-1.3-contributor` (and vice-versa) before ever declaring provider failure or falling back to OpenAI.
+  - Meta includes in-provider sibling candidate retry: if `muse-spark-1.3-contributor` encounters a 404 (model not found / unavailable in that account tier) or a fast `<10s` transient 429/5xx, it retries/switches immediately to `muse-spark-1.2-contributor` (and vice-versa) before declaring provider failure or falling back to OpenAI.
   - When image parts are present, Chat Completions is bypassed on Meta because Chat Completions does not support multimodal images; this prevents corrupting error logs with misleading 404s.
 - **OpenAI text probes** try Chat Completions first, then the Responses API. When Chat Completions rejects the model (404 or 400), the error reported is the Responses API's.
 
@@ -116,9 +116,9 @@ OpenAI and Meta Muse Spark vision calls support dual protocols. The first protoc
 
 | Purpose | Primary | Fallback |
 | --- | --- | --- |
-| `product_truth` | Meta `muse-spark-1.2-contributor` (`high`), or OpenAI `gpt-6.1-terra` (`high`) when Meta key is not set | Hop 1: OpenAI `gpt-6.1-terra` (`high`) · Hop 2: OpenAI `gpt-5.6-luna` (`high`/`low`) |
-| `qa` | Meta `muse-spark-1.2-contributor` (`low`) or OpenAI `gpt-5.6-luna` | OpenAI `gpt-5.6-luna` / `gpt-6.1-terra` |
-| `image_generation` | OpenAI `gpt-image-2.6-sunburst` | — |
+| `product_truth` | Meta `muse-spark-1.3-contributor` (`medium`), or OpenAI `gpt-6.1-terra` (`medium`) when Meta key is not set | Hop 1: OpenAI `gpt-6.1-terra` (`medium`) · Hop 2: OpenAI `gpt-5.6-luna` (`low`) |
+| `qa` | Meta `muse-spark-1.3-contributor` (`low`) or OpenAI `gpt-5.6-luna` | OpenAI `gpt-5.6-luna` / `gpt-6.1-terra` |
+| `image_generation` | OpenAI `gpt-image-2.6-sunburst` (`none`) | — |
 
 See [MEMORY.md](../MEMORY.md) and [AGENTS.md](../AGENTS.md) for core architectural memory and PR 131 product truth contracts.
 

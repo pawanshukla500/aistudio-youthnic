@@ -40,7 +40,7 @@ graph TD
 - **Object Storage**: Firebase Storage buckets (`ai-studio-app-be068.firebasestorage.app`).
 
 ### Generative AI Pipeline
-- **Vision & Pose Extraction**: Meta Muse Spark (`muse-spark-1.2-contributor:high` / `1.3-contributor:high`) primary -> OpenAI **GPT 6.1 Terra** (`gpt-6.1-terra:high`) fallback -> OpenAI Luna (`gpt-5.6-luna`) / Gemini Flash (`gemini-3.8-flash`).
+- **Vision & Pose Extraction**: Meta Muse Spark (`muse-spark-1.3-contributor:medium` / `1.2-contributor:medium`) primary -> OpenAI **GPT 6.1 Terra** (`gpt-6.1-terra:medium`) fallback -> OpenAI Luna (`gpt-5.6-luna:low`) / Gemini Flash (`gemini-3.8-flash`).
 - **Image Synthesis**: OpenAI **GPT Image 2.6 Sunburst** (`gpt-image-2.6-sunburst`, default 3:4 at 2K / `1536x2048`) via `/v1/images/edits` with role-isolated reference manifests and scene locks.
 - **Automated CV QA**: Cut-isolated anatomical checks (strictly 2 arms, 2 hands), Farshi 4-inch upper-hem taper verification (strictly isolated to Farshi SKUs), and set continuity validation.
 

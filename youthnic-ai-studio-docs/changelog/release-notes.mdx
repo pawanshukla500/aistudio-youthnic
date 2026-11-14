@@ -11,9 +11,9 @@ Stay up to date with new features, model upgrades, and workflow improvements int
 
 ## November 2026 — v3.0 Release
 
-### Agentic LangGraph + Product DNA V2 & High-Reasoning Models
-- **Default Meta Muse Spark (`high` Thinking) + OpenAI GPT 6.1 Terra (`high`) Fallback**: Product Truth analysis and 6-pose planning now default to **high thinking** on Meta Muse Spark (`muse-spark-1.2-contributor` / `1.3-contributor`) with OpenAI **GPT 6.1 Terra** (`gpt-6.1-terra:high`) fallback for deeper garment geometry, drape, and styling accuracy (saved policies in Administration → AI models take precedence, fallback can be disabled, and emergency `< 60s` hop budgets clamp reasoning to `low`).
-- **Flagship Image Generation Default (`gpt-image-2.6-sunburst`)**: Defaulted Studio and Catalog generation to `gpt-image-2.6-sunburst` (3:4, 2K `1536x2048`) with deep latent textile weave reproduction.
+### Agentic LangGraph + Product DNA V2 & Medium-Reasoning Vision Routing
+- **Default Meta Muse Spark 1.3 Contributor (`medium` Thinking) + OpenAI GPT 6.1 Terra (`medium`) Fallback**: Product Truth analysis and 6-pose planning default to **medium thinking** on **Meta Muse Spark 1.3 Contributor** (`muse-spark-1.3-contributor`, with sibling fallback to `1.2-contributor`) and **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra:medium`), balancing deep garment geometry, drape, and styling accuracy with reliable latency inside the 180s gateway budget (saved policies in Administration → AI models take precedence, `high` remains selectable, and emergency `< 60s` hop budgets clamp reasoning to `low`).
+- **Flagship Image Generation Default (`gpt-image-2.6-sunburst`)**: Verified and defaulted Studio, Catalog, and newly enrolled seller workspaces to `gpt-image-2.6-sunburst` (3:4, 2K `1536x2048`, `primary_reasoning = 'none'`), delivering sharper zari/zardozi weave reproduction than `gpt-image-2.5-sunburst`.
 - **Cut-Isolated Farshi, Gen-Z Saree & Kurti Set Intelligence**: Isolated Farshi salwar two-leg gathers, waist-side narrowing, and 4-inch upper-hem taper strictly to Farshi SKUs; upgraded Gen-Z saree draping and top-only vs. multi-piece kurti set pose choreography.
 - **LangGraph + FastAPI + Postgres Checkpointing & Valkey Caching**: Deployed Python FastAPI LangGraph multi-agent orchestration with Postgres checkpoints (`PostgresSaver`), immutable SHA-256 Product DNA V2 versions (`dna_versions`), Valkey caching & Celery brokerage, and background workers alongside the Edge API.
 

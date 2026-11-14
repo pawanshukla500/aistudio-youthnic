@@ -12,6 +12,6 @@ EXPOSE 9000
 
 ENV PORT=9000 \
     MALLOC_ARENA_MAX=2 \
-    DENO_V8_FLAGS="--max-old-space-size=256 --optimize-for-size"
+    DENO_V8_FLAGS="--max-old-space-size=256,--optimize-for-size"
 
 CMD ["run", "-A", "supabase/functions/app-api/index.ts"]

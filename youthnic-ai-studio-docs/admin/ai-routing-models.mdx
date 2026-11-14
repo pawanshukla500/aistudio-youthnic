@@ -33,7 +33,7 @@ provider** and choose the fallback's provider, model and thinking.
 
 [SCREENSHOT REQUIRED:
 Page: Administration → AI models
-Exact State: Product truth & pose planning card with Primary Meta Muse Spark 1.2 Contributor (High thinking) and fallback OpenAI GPT 6.1 Terra (High thinking), both CONFIGURED.
+Exact State: Product truth & pose planning card with Primary Meta Muse Spark 1.3 Contributor (Medium thinking) and fallback OpenAI GPT 6.1 Terra (Medium thinking), both CONFIGURED.
 Exact UI Section: Primary provider and fallback settings.
 Recommended Crop: 760x560
 Recommended Dimensions: 760x560
@@ -55,7 +55,7 @@ If the request itself is invalid, for example a rejected image, the fallback is 
 A different model would not fix the product photos.
 
 <Note>
-**High thinking is enabled for deep Product Truth & Pose Planning** on Meta Muse Spark (`muse-spark-1.2-contributor` / `1.3-contributor` / `1.3` / `1.2`), OpenAI **GPT 6.1 Terra** (`gpt-6.1-terra`), and OpenAI Luna (`gpt-5.6-luna`). Legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, Gemini Flash) run at **Low** (explicit "none" or "minimal" is preserved; Qwen runs with thinking off). Only if a chain falls into an emergency tight deadline (`< 60s` remaining) is thinking dynamically clamped to **Low** so fallbacks still finish without timing out.
+**Medium thinking is the recommended default for Product Truth & Pose Planning** on Meta Muse Spark (`muse-spark-1.3-contributor` / `1.2-contributor` / `1.3` / `1.2`), OpenAI **GPT 6.1 Terra** (`gpt-6.1-terra`), and OpenAI Luna (`gpt-5.6-luna`), finishing full 6-photo analysis comfortably inside the gateway window while still preserving explicit **High** thinking when chosen in Administration. Legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, Gemini Flash) run at **Low** (explicit "none" or "minimal" is preserved; Qwen runs with thinking off). Only if a chain falls into an emergency tight deadline (`< 60s` remaining) is thinking dynamically clamped to **Low** so fallbacks still finish without timing out.
 </Note>
 
 ---
