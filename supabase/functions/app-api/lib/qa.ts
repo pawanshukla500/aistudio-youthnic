@@ -120,11 +120,16 @@ export function qaStorageDisposition(args: { qaEnabled: boolean; qaUnavailable: 
 
 export function hasAnatomicalDefectText(text: string): boolean {
   if (!text) return false;
-  const matches = text.matchAll(/\b(?:(?:three|3|extra|duplicate|phantom|floating|third)\s+(?:hands?|arms?|limbs?|wrists?)|(?:severed\s+limb)|(?:extra|fused|malformed|six|6)\s+fingers)\b/gi);
+  const matches = text.matchAll(/\b(?:(?:three|3|extra|duplicate|phantom|floating|third|missing|detached)\s+(?:[a-z]+\s+)?(?:hands?|arms?|limbs?|wrists?)|(?:severed\s+limb)|(?:extra|fused|malformed|detached|six|6)\s+(?:[a-z]+\s+)?fingers?)\b/gi);
   for (const match of matches) {
     const idx = match.index ?? 0;
     const prefix = text.slice(Math.max(0, idx - 60), idx).toLowerCase();
-    if (/\b(?:no|zero|without|neither|never|free\s+of)\b[^.;!?]*$/i.test(prefix)) {
+    // Scope negation to the immediate trailing clause so "No extra fingers, but a third hand..." still vetoes.
+    const clause = prefix.split(/[.,;!?]|\b(?:but|however|although|though)\b/i).pop() ?? "";
+    if (
+      !/\bnot\s+(?:free\s+of|without)\b/i.test(clause) &&
+      /\b(?:no|zero|without|neither|never|not|free\s+of)\b/i.test(clause)
+    ) {
       continue;
     }
     return true;

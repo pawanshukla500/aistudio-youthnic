@@ -438,6 +438,76 @@ def _langchain_openai_vision_json(
     }
 
 
+_TRANSIENT_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
+
+
+def _parse_retry_after_seconds(resp: httpx.Response) -> float:
+    headers = getattr(resp, "headers", None) or {}
+    raw = str(headers.get("retry-after") or headers.get("Retry-After") or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 0.0
+
+
+def _post_httpx_with_retry(
+    url: str,
+    *,
+    headers: Dict[str, str],
+    timeout_s: float,
+    max_attempts: int = 3,
+    json_body: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, Any]] = None,
+    files: Optional[List[Any]] = None,
+    min_retry_budget_s: float = 0.0,
+) -> httpx.Response:
+    """Post via httpx with bounded retries on transient HTTP 408/429/5xx and transport errors."""
+    started = time.monotonic()
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, max_attempts + 1):
+        elapsed = time.monotonic() - started
+        remaining = float(timeout_s) - elapsed
+        if attempt > 1 and min_retry_budget_s > 0 and remaining < min_retry_budget_s:
+            break
+        per_call_timeout = max(5.0, min(float(timeout_s), remaining)) if attempt > 1 else float(timeout_s)
+        try:
+            with httpx.Client(timeout=per_call_timeout) as client:
+                post_kwargs: Dict[str, Any] = {"headers": headers}
+                if json_body is not None:
+                    post_kwargs["json"] = json_body
+                if data is not None:
+                    post_kwargs["data"] = data
+                if files is not None:
+                    post_kwargs["files"] = files
+                resp = client.post(url, **post_kwargs)
+            retry_after_s = _parse_retry_after_seconds(resp)
+            is_transient_status = (
+                resp.status_code in _TRANSIENT_HTTP_STATUSES
+                and (resp.status_code != 429 or retry_after_s <= 10.0)
+            )
+            if is_transient_status and attempt < max_attempts:
+                wait_s = min(10.0, max(retry_after_s, 1.0 * attempt))
+                if min_retry_budget_s <= 0 or (float(timeout_s) - (time.monotonic() - started) - wait_s) >= min_retry_budget_s:
+                    time.sleep(wait_s)
+                    continue
+            return resp
+        except (httpx.TransportError, httpx.TimeoutException) as exc:
+            last_exc = exc
+            if isinstance(exc, httpx.TimeoutException) and (time.monotonic() - started) >= float(timeout_s) * 0.65:
+                raise
+            if attempt < max_attempts:
+                wait_s = 1.0 * attempt
+                if min_retry_budget_s <= 0 or (float(timeout_s) - (time.monotonic() - started) - wait_s) >= min_retry_budget_s:
+                    time.sleep(wait_s)
+                    continue
+            raise
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"POST {url} failed after {max_attempts} attempts")
+
+
 def _gemini_vision_json(prompt: str, images: List[Dict[str, Any]], timeout_s: int = 45) -> Dict[str, Any]:
     api_key = (settings.GEMINI_API_KEY or "").strip()
     if not api_key:
@@ -450,18 +520,20 @@ def _gemini_vision_json(prompt: str, images: List[Dict[str, Any]], timeout_s: in
     parts.append({"text": prompt})
 
     model_name = "gemini-3.8-flash"
-    with httpx.Client(timeout=timeout_s) as client:
-        resp = client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json={
-                "contents": [{"role": "user", "parts": parts}],
-                "generationConfig": {
-                    "responseMimeType": "application/json",
-                    "thinkingConfig": {"thinkingLevel": "low"},
-                },
+    resp = _post_httpx_with_retry(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
+        headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+        json_body={
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "thinkingConfig": {"thinkingLevel": "low"},
             },
-        )
+        },
+        timeout_s=timeout_s,
+        max_attempts=2,
+        min_retry_budget_s=15.0,
+    )
     data = _safe_resp_json(resp)
     if resp.status_code >= 400:
         msg = str((data.get("error") or {}).get("message") or f"Gemini HTTP {resp.status_code}")
@@ -537,7 +609,16 @@ def invoke_vision_json(
             if remaining < 5:
                 break
             has_later_hop = idx < len(openai_candidates) - 1 or has_gemini
-            hop_budget = (remaining - 15) if (has_later_hop and remaining > 25) else remaining
+            # Hold back runway for secondary OpenAI/Gemini hops without dropping
+            # a default 80s budget below the 60s medium-effort threshold on gpt-6.1-terra.
+            reserve = (
+                35.0
+                if remaining >= 95.0
+                else 18.0
+                if remaining >= 78.0
+                else max(12.0, min(20.0, remaining * 0.35))
+            )
+            hop_budget = (remaining - reserve) if (has_later_hop and remaining > reserve + 8.0) else remaining
             if model_name in ("gpt-6.1-terra", "gpt-5.6-luna") and default_effort in ("medium", "high") and hop_budget < 60:
                 effort = "low"
             else:
@@ -672,21 +753,30 @@ def generate_catalog_image(
         }
         if model in {"gpt-image-1.5", "gpt-image-1"}:
             form_data["input_fidelity"] = "high"
-        with httpx.Client(timeout=settings.IMAGE_GEN_TIMEOUT_SECONDS) as client:
-            resp = client.post("https://api.openai.com/v1/images/edits", headers=headers, data=form_data, files=files)
+        resp = _post_httpx_with_retry(
+            "https://api.openai.com/v1/images/edits",
+            headers=headers,
+            data=form_data,
+            files=files,
+            timeout_s=settings.IMAGE_GEN_TIMEOUT_SECONDS,
+            max_attempts=3,
+            min_retry_budget_s=30.0,
+        )
     else:
-        with httpx.Client(timeout=settings.IMAGE_GEN_TIMEOUT_SECONDS) as client:
-            resp = client.post(
-                "https://api.openai.com/v1/images/generations",
-                headers={**headers, "Content-Type": "application/json"},
-                json={
-                    "model": model,
-                    "prompt": bounded_prompt,
-                    "size": size,
-                    "quality": quality,
-                    "output_format": "jpeg",
-                },
-            )
+        resp = _post_httpx_with_retry(
+            "https://api.openai.com/v1/images/generations",
+            headers={**headers, "Content-Type": "application/json"},
+            json_body={
+                "model": model,
+                "prompt": bounded_prompt,
+                "size": size,
+                "quality": quality,
+                "output_format": "jpeg",
+            },
+            timeout_s=settings.IMAGE_GEN_TIMEOUT_SECONDS,
+            max_attempts=3,
+            min_retry_budget_s=30.0,
+        )
 
     payload = _safe_resp_json(resp)
     if resp.status_code >= 400:
@@ -700,7 +790,16 @@ def generate_catalog_image(
     if first.get("b64_json"):
         img_bytes = base64.b64decode(first["b64_json"])
     elif first.get("url"):
-        img_bytes = _download_public_image_bounded(first["url"], timeout_s=60)
+        img_bytes = b""
+        for dl_attempt in range(1, 3):
+            try:
+                img_bytes = _download_public_image_bounded(first["url"], timeout_s=60)
+                if img_bytes:
+                    break
+            except Exception:
+                if dl_attempt >= 2:
+                    raise
+            time.sleep(1.0)
         if not img_bytes:
             raise RuntimeError("OpenAI image URL download returned no bytes")
     else:

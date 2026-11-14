@@ -568,12 +568,12 @@ export function Studio() {
         })),
       };
       const detectedSaree = result.productIdentity.garmentFamily?.trim().toLowerCase() === "saree";
-      if (detectedSaree && !isSareeCategory) {
+      if (detectedSaree && !isSareeCategory && (result.requiresSareeEvidence || !result.sessionId)) {
         promoteDetectedSareeReferences();
         setCategory("saree");
         setAnalysisSourceKey(null);
         const missingEvidence = result.sareeEvidenceIssues?.join(", ") || "fully spread pallu";
-        setNotice({ tone: "success", text: `Saree detected. Front and rear references were preserved; now confirm or upload: ${missingEvidence}. Gemini will reanalyse before generation.` });
+        setNotice({ tone: "success", text: `Saree detected. Front and rear references were preserved; now confirm or upload: ${missingEvidence}. Vision AI will reanalyse before generation.` });
       } else {
         lastDnaParamsRef.current = dnaParams;
         void runDnaExtraction(dnaParams, requestId, forceRefresh);

@@ -305,10 +305,10 @@ export const OPENAI_TERRA_VISION_ROUTE = {
 /**
  * Studio Analyze uses `supabase.functions.invoke("app-api")`. Without an
  * explicit client timeout the browser/SDK aborts around 55–60s, so the Studio
- * client waits `STUDIO_ANALYZE_TIMEOUT_MS` (180s) and the product-truth chain
+ * client waits `STUDIO_ANALYZE_TIMEOUT_MS` (240s) and the product-truth chain
  * is budgeted inside that wait.
  */
-export const STUDIO_ANALYZE_TIMEOUT_MS = 180_000;
+export const STUDIO_ANALYZE_TIMEOUT_MS = 240_000;
 export const STUDIO_INVOKE_BUDGET_MS = STUDIO_ANALYZE_TIMEOUT_MS;
 export const PRODUCT_TRUTH_TIMEOUT_MS = 40_000;
 /**
@@ -316,9 +316,9 @@ export const PRODUCT_TRUTH_TIMEOUT_MS = 40_000;
  * the primary runs. A primary that fails fast (a 404, a missing key) hands the
  * fallback almost the whole wait; a primary that hangs cannot starve it.
  */
-export const PRODUCT_TRUTH_FALLBACK_RESERVE_MS = 45_000;
+export const PRODUCT_TRUTH_FALLBACK_RESERVE_MS = 60_000;
 export const VISION_PROVIDER_TIMEOUT_MS = 50_000;
-export const VISION_GATEWAY_BUDGET_MS = 185_000;
+export const VISION_GATEWAY_BUDGET_MS = 240_000;
 /** Held back inside the chain: parsing a hop's reply and recording the attempt. */
 export const VISION_GATEWAY_RESERVE_MS = 5_000;
 /**
@@ -518,9 +518,15 @@ export function remainingVisionTimeoutMs(args: {
   // Muse, Luna and Terra each hit their deadline.
   if (args.purpose === "product_truth") {
     if (args.remainingRouteCount <= 1) return remainingWall;
+    // When multiple fallbacks remain inside a tight reserve window after an
+    // earlier hop timed out, share the remaining budget rather than collapsing
+    // the intermediate fallback down to 10s.
+    const reserve = remainingWall > PRODUCT_TRUTH_FALLBACK_RESERVE_MS + PRODUCT_TRUTH_MIN_SLICE_MS
+      ? PRODUCT_TRUTH_FALLBACK_RESERVE_MS
+      : Math.max(20_000, Math.min(PRODUCT_TRUTH_FALLBACK_RESERVE_MS, Math.floor(remainingWall * 0.4)));
     return Math.max(
       Math.min(PRODUCT_TRUTH_MIN_SLICE_MS, remainingWall),
-      remainingWall - PRODUCT_TRUTH_FALLBACK_RESERVE_MS,
+      remainingWall - reserve,
     );
   }
   const preferred = args.preferredTimeoutMs ?? VISION_PROVIDER_TIMEOUT_MS;
