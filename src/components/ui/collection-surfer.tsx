@@ -21,121 +21,125 @@ export interface CollectionItem {
 export type CollectionSurferVariant = "magnetic" | "uplift" | "simple";
 
 const FALLBACK_EDITORIAL_IMAGES = [
-  "/images/editorial/editorial-saree-front.webp",
-  "/images/editorial/editorial-saree-back.webp",
-  "/images/editorial/editorial-saree-detail.webp",
-  "/images/editorial/editorial-ref-1.webp",
+  "https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&w=800&q=80",
+  "https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=800&q=80",
+  "https://images.unsplash.com/photo-1617627143750-d86bc21e42bb?auto=format&fit=crop&w=800&q=80",
+  "https://images.unsplash.com/photo-1509631179647-0177331693ae?auto=format&fit=crop&w=800&q=80",
 ];
 
-// Default items blending real Youthnic studio renders with verified high-resolution fashion editorials
+// Curated high-resolution fashion editorial lookbook (zero raw warehouse mannequin shots)
 const ITEMS: CollectionItem[] = [
   {
     id: 1,
-    image: "/images/editorial/editorial-saree-front.webp",
-    title: "HERITAGE 01",
-    subtitle: "Hero Front · Silk Saree Drape",
+    image:
+      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80",
+    title: "Look 01",
+    subtitle: "Editorial Portrait, Natural Studio Light",
   },
   {
     id: 2,
-    image: "/images/editorial/editorial-saree-back.webp",
-    title: "HERITAGE 02",
-    subtitle: "True Back · Pallu & Blouse Architecture",
+    image:
+      "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80",
+    title: "Look 02",
+    subtitle: "Couture Silhouette, Full-Frame Hero",
   },
   {
     id: 3,
-    image: "/images/editorial/editorial-saree-detail.webp",
-    title: "HERITAGE 03",
-    subtitle: "Craft Macro · Zari Border Fidelity",
+    image:
+      "https://images.unsplash.com/photo-1485230895905-ec40ba36b9bc?auto=format&fit=crop&w=800&q=80",
+    title: "Look 03",
+    subtitle: "Atelier Tailoring, Clean Drape",
   },
   {
     id: 4,
-    image: "/images/editorial/editorial-ref-1.webp",
-    title: "HERITAGE 04",
-    subtitle: "Studio Set · Editorial Lighting Lock",
+    image:
+      "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=800&q=80",
+    title: "Look 04",
+    subtitle: "Studio Set, Warm Daylight Mood",
   },
   {
     id: 5,
     image:
       "https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?auto=format&fit=crop&w=800&q=80",
-    title: "HERITAGE 05",
-    subtitle: "Banarasi Brocade · Festive Edit",
+    title: "Look 05",
+    subtitle: "Banarasi Brocade, Festive Edit",
   },
   {
     id: 6,
     image:
       "https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=800&q=80",
-    title: "HERITAGE 06",
-    subtitle: "Handloom Silk · Royal Drape",
+    title: "Look 06",
+    subtitle: "Handloom Silk, Royal Drape",
   },
   {
     id: 7,
     image:
       "https://images.unsplash.com/photo-1583391733975-207936a6e5a6?auto=format&fit=crop&w=800&q=80",
-    title: "HERITAGE 07",
-    subtitle: "Farshi Salwar · 4-Inch Taper Cut",
+    title: "Look 07",
+    subtitle: "Farshi Salwar, 4-Inch Taper Cut",
   },
   {
     id: 8,
     image:
       "https://images.unsplash.com/photo-1617627143750-d86bc21e42bb?auto=format&fit=crop&w=800&q=80",
-    title: "HERITAGE 08",
-    subtitle: "Zardozi Couture · Bridal Lehenga",
+    title: "Look 08",
+    subtitle: "Zardozi Couture, Bridal Lehenga",
   },
   {
     id: 9,
     image:
       "https://images.unsplash.com/photo-1509631179647-0177331693ae?auto=format&fit=crop&w=800&q=80",
-    title: "HERITAGE 09",
-    subtitle: "Atelier Silhouette · Full Length",
+    title: "Look 09",
+    subtitle: "Atelier Silhouette, Full Length",
   },
   {
     id: 10,
     image:
       "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=800&q=80",
-    title: "HERITAGE 10",
-    subtitle: "Contemporary Fusion · Lookbook",
+    title: "Look 10",
+    subtitle: "Contemporary Fusion, Lookbook",
   },
   {
     id: 11,
     image:
       "https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=800&q=80",
-    title: "HERITAGE 11",
-    subtitle: "Editorial Portrait · Natural Skin",
+    title: "Look 11",
+    subtitle: "Editorial Portrait, Natural Skin",
   },
   {
     id: 12,
     image:
       "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=800&q=80",
-    title: "HERITAGE 12",
-    subtitle: "Studio Motion · Showcase Frame",
+    title: "Look 12",
+    subtitle: "Studio Motion, Showcase Frame",
   },
   {
     id: 13,
     image:
       "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=800&q=80",
-    title: "HERITAGE 13",
-    subtitle: "Chanderi Weave · Textile Truth",
+    title: "Look 13",
+    subtitle: "Chanderi Weave, Textile Truth",
   },
   {
     id: 14,
     image:
       "https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=800&q=80",
-    title: "HERITAGE 14",
-    subtitle: "Runway Direction · High Contrast",
+    title: "Look 14",
+    subtitle: "Runway Direction, High Contrast",
   },
   {
     id: 15,
     image:
       "https://images.unsplash.com/photo-1502716119720-b23a93e5fe1b?auto=format&fit=crop&w=800&q=80",
-    title: "HERITAGE 15",
-    subtitle: "Organza Dupatta · Drape Physics",
+    title: "Look 15",
+    subtitle: "Organza Drape, Textile Physics",
   },
   {
     id: 16,
     image:
       "https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=800&q=80",
-    title: "HERITAGE 16",
-    subtitle: "Resort Edit · Warm Daylight",
+    title: "Look 16",
+    subtitle: "Resort Edit, Warm Daylight",
   },
 ];
 
@@ -155,8 +159,8 @@ export function CollectionSurfer({
   items = ITEMS,
   variant = "magnetic",
   className = "",
-  title = "HERITAGE FW25/26",
-  subtitle = "COLLECTION",
+  title = "Heritage FW25/26",
+  subtitle = "Collection",
   showOverlays = true,
   autoPlay = false,
   autoPlaySpeed = 48,
@@ -304,7 +308,7 @@ export function CollectionSurfer({
 
   return (
     <div
-      className={`relative bg-[#070609] min-h-screen text-white w-full ${className}`}
+      className={`relative min-h-screen w-full bg-background text-on-surface ${className}`}
     >
       {/* 3. Infinite Spacer for standalone scroll mode */}
       {showOverlays && (
@@ -315,28 +319,24 @@ export function CollectionSurfer({
       )}
 
       {/* Fixed viewport */}
-      <div className="fixed inset-0 w-full h-screen overflow-hidden flex items-center justify-center perspective-container">
-        {/* Ambient Studio Runway Lighting Glows */}
-        <div className="pointer-events-none absolute -left-32 top-1/4 h-[520px] w-[520px] rounded-full bg-[#970046]/20 blur-[130px]" />
-        <div className="pointer-events-none absolute right-1/4 -bottom-24 h-[460px] w-[460px] rounded-full bg-[#be185d]/15 blur-[120px]" />
-
+      <div className="fixed inset-0 flex h-screen w-full items-center justify-center overflow-hidden perspective-container">
         {/* UI Overlays (when used standalone) */}
         {showOverlays && (
           <>
-            <div className="absolute top-[3vw] left-[3vw] z-50 pointer-events-none mix-blend-difference">
-              <h1 className="font-syne font-bold text-[clamp(2rem,6vw,5rem)] leading-[0.9] tracking-tighter ml-[4vw]">
+            <div className="pointer-events-none absolute left-[3vw] top-[3vw] z-50">
+              <h1 className="ml-[4vw] font-syne text-[clamp(2rem,6vw,5rem)] font-bold leading-[0.9] tracking-tighter text-on-surface">
                 {title}
               </h1>
-              <h1 className="font-syne font-bold text-[clamp(2rem,6vw,5rem)] leading-[0.9] tracking-tighter">
+              <h1 className="font-syne text-[clamp(2rem,6vw,5rem)] font-bold leading-[0.9] tracking-tighter text-on-surface">
                 {subtitle}
-                <span className="text-[0.4em] align-top relative top-[0.6em] ml-2 font-mono tabular-nums">
+                <span className="relative top-[0.6em] ml-2 align-top font-mono text-[0.4em] tabular-nums text-primary">
                   ({safeItems.length})
                 </span>
               </h1>
             </div>
 
-            <div className="absolute bottom-[3vw] right-[3vw] z-50 font-mono text-xs tracking-wider uppercase opacity-70 pointer-events-none">
-              scroll to surf
+            <div className="pointer-events-none absolute bottom-[3vw] right-[3vw] z-50 text-xs font-medium text-secondary">
+              Scroll to surf collection
             </div>
           </>
         )}
@@ -351,7 +351,7 @@ export function CollectionSurfer({
         >
           {/* Animated Track */}
           <motion.div
-            className="relative w-0 h-0"
+            className="relative h-0 w-0"
             style={{
               x,
               y,
@@ -370,7 +370,6 @@ export function CollectionSurfer({
                 stepZ={stepZ}
                 mouseX={mouseX}
                 mouseY={mouseY}
-                scrollSpring={combinedScroll}
                 variant={variant}
               />
             ))}
@@ -390,7 +389,6 @@ function Card({
   stepZ,
   mouseX,
   mouseY,
-  scrollSpring,
   variant,
 }: {
   item: CollectionItem;
@@ -401,13 +399,12 @@ function Card({
   stepZ: number;
   mouseX: MotionValue<number>;
   mouseY: MotionValue<number>;
-  scrollSpring: MotionValue<number>;
   variant: CollectionSurferVariant;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
   // Calculate distance from mouse to center of card (short-circuit when cursor is parked/ignored)
-  const distance = useTransform([mouseX, mouseY, scrollSpring], (values) => {
+  const distance = useTransform([mouseX, mouseY], (values) => {
     const [x, y] = values as number[];
     if (!ref.current || variant === "simple" || x < -1000 || y < -1000) {
       return 400;
@@ -419,7 +416,7 @@ function Card({
   });
 
   // --- Magnetic Variant ---
-  const targetScale = useTransform(distance, [0, 380], [1.42, 1]);
+  const targetScale = useTransform(distance, [0, 380], [1.38, 1]);
   const springScale = useSpring(targetScale, {
     mass: 0.5,
     stiffness: 280,
@@ -463,22 +460,24 @@ function Card({
   return (
     <motion.div
       ref={ref}
-      className="absolute w-[290px] h-[390px] sm:w-[310px] sm:h-[415px] rounded-2xl border border-white/15 bg-neutral-900/90 shadow-[0_28px_60px_rgba(0,0,0,0.78)] transition-colors duration-500 ease-out group"
+      className="group absolute h-[390px] w-[290px] rounded-2xl border border-outline-variant/50 bg-card transition-colors duration-300 ease-out sm:h-[415px] sm:w-[310px]"
       style={{
         transform,
         transformStyle: "preserve-3d",
       }}
     >
       {/* Floating Index Header above card */}
-      <div className="absolute -top-7 left-0 right-0 flex items-center justify-between px-1 text-white font-mono text-[11px] tracking-widest opacity-55 transition-opacity group-hover:opacity-100">
-        <span>{displayIndex}</span>
-        <span className="truncate max-w-[180px] text-[10px] uppercase text-white/75">
+      <div className="absolute -top-7 left-0 right-0 flex items-center justify-between px-1 text-[11px] text-secondary opacity-70 transition-opacity duration-300 group-hover:opacity-100">
+        <span className="font-mono tabular-nums text-on-surface">
+          {displayIndex}
+        </span>
+        <span className="max-w-[180px] truncate text-xs font-medium text-secondary">
           {item.title}
         </span>
       </div>
 
       {/* Image Frame */}
-      <div className="relative w-full h-full overflow-hidden rounded-2xl brightness-[0.84] group-hover:brightness-105 transition-all duration-500">
+      <div className="relative h-full w-full overflow-hidden rounded-2xl bg-surface-container-low">
         <img
           src={item.image}
           alt={item.title}
@@ -489,18 +488,15 @@ function Card({
               target.src = fallbackSrc;
             }
           }}
-          className="w-full h-full object-cover object-top transition-transform duration-700 group-hover:scale-105"
-          loading="lazy"
+          className="h-full w-full object-cover object-top"
+          loading={i < 4 ? "eager" : "lazy"}
         />
 
-        {/* Subtle Inner Couture Gradient & Caption */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/15 to-transparent pointer-events-none" />
-        <div className="absolute inset-x-0 bottom-0 p-4 pointer-events-none">
-          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#ff8ab5]">
-            {item.title}
-          </p>
+        {/* Editorial Caption Strip */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 border-t border-outline-variant/35 bg-card/90 p-3.5 backdrop-blur-md">
+          <p className="text-xs font-semibold text-primary">{item.title}</p>
           {item.subtitle && (
-            <p className="mt-0.5 text-xs font-medium text-white/90 truncate">
+            <p className="mt-0.5 truncate text-xs font-medium text-on-surface">
               {item.subtitle}
             </p>
           )}
