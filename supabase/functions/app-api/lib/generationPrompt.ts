@@ -825,7 +825,9 @@ const RELAXED_HANDS = "Both hands relaxed and clear of the garment, holding noth
 const CALM_EXPRESSION = "Calm natural expression.";
 const SET_PROPS_ONLY = "Set props only. Do not copy objects held in the style or model photo.";
 const PLANTED_DISTINCTION = "Distinct from the other frames. Both feet stay planted and close.";
+const PLANTED_DISTINCTION_CROPPED = "Distinct from the other frames, matching the planned editorial crop.";
 const PLANTED_VISIBILITY = "The named feature stays readable. Both feet stay planted and close.";
+const PLANTED_VISIBILITY_CROPPED = "The named feature stays readable within the planned editorial crop.";
 
 const CREATIVE_BODY_KEYS = new Set(["bodyposition", "body_position", "prompt", "description"]);
 const CREATIVE_HAND_KEYS = new Set(["handplacement", "hand_placement"]);
@@ -939,8 +941,13 @@ function sanitizeCreativeDirection(
   value: JsonRecord,
   pose: { id: string; poseNumber: number },
   sitting: boolean,
+  croppedAboveAnkles = false,
 ): JsonRecord {
-  const planted = plantedPoseReplacement(pose, sitting);
+  const planted = plantedPoseReplacement(pose, sitting, croppedAboveAnkles);
+  const distinctionFallback = croppedAboveAnkles ? PLANTED_DISTINCTION_CROPPED : PLANTED_DISTINCTION;
+  const visibilityFallback = croppedAboveAnkles ? PLANTED_VISIBILITY_CROPPED : PLANTED_VISIBILITY;
+  const cleanIfCropped = (text: string, fallback: string) =>
+    croppedAboveAnkles ? (stripGroundedFeetForCroppedFrame(text) || fallback) : text;
   const visit = (input: unknown): unknown => {
     if (Array.isArray(input)) return input.map((entry) => visit(entry));
     if (!input || typeof input !== "object") return input;
@@ -949,7 +956,7 @@ function sanitizeCreativeDirection(
       const normalized = creativeDirectionKey(key);
       if (typeof entry === "string") {
         if (CREATIVE_BODY_KEYS.has(normalized)) {
-          output[key] = catalogPoseText(entry, planted, sitting);
+          output[key] = cleanIfCropped(catalogPoseText(entry, planted, sitting), planted);
           continue;
         }
         if (CREATIVE_HAND_KEYS.has(normalized)) {
@@ -961,7 +968,7 @@ function sanitizeCreativeDirection(
           continue;
         }
         if (CREATIVE_DISTINCTION_KEYS.has(normalized)) {
-          output[key] = catalogPoseText(entry, PLANTED_DISTINCTION, sitting);
+          output[key] = cleanIfCropped(catalogPoseText(entry, distinctionFallback, sitting), distinctionFallback);
           continue;
         }
         if (CREATIVE_HELD_KEYS.has(normalized)) {
@@ -978,7 +985,11 @@ function sanitizeCreativeDirection(
         }
       }
       if (CREATIVE_VISIBILITY_KEYS.has(normalized) && Array.isArray(entry)) {
-        output[key] = entry.map((item) => typeof item === "string" ? catalogPoseText(item, PLANTED_VISIBILITY, sitting) : visit(item));
+        output[key] = entry.map((item) =>
+          typeof item === "string"
+            ? cleanIfCropped(catalogPoseText(item, visibilityFallback, sitting), visibilityFallback)
+            : visit(item)
+        );
         continue;
       }
       output[key] = visit(entry);
@@ -1059,7 +1070,12 @@ export function composeGenerationPrompt(args: {
     creative,
     stylingNotes: styling?.stylingNotes,
   });
-  const directedCreative = sanitizeCreativeDirection(creative, args.pose, isSittingDemanded);
+  const resolvedAspectRatio = resolveAspectRatioLabel(args.aspectRatio);
+  const resolvedOrientation = resolveAspectRatioOrientation(resolvedAspectRatio);
+  const orientationDescriptor = resolvedOrientation === "portrait" ? "vertical portrait" : resolvedOrientation;
+  const aspectSafePose = sanitizePoseDirectionForAspectRatio(args.pose, resolvedAspectRatio) as StudioPose & { poseNumber: number };
+  const isPose4CroppedAboveAnkles = isPose4 && !isSittingDemanded && isAboveAnkleCropFraming(aspectSafePose);
+  const directedCreative = sanitizeCreativeDirection(creative, args.pose, isSittingDemanded, isPose4CroppedAboveAnkles);
   // Exact garmentFamily drives the saree truth blocks; the pose taxonomy is
   // broader, and a shoot either taxonomy calls a saree has no bottom wear.
   const isSareeShoot = isSaree || isSareePoseFamily(poseFamily);
@@ -1134,11 +1150,6 @@ export function composeGenerationPrompt(args: {
     : isTrueBack
       ? "The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face MUST match the MODEL FACE REFERENCE, or the STYLE REFERENCE when no separate model photo was uploaded. APPROVED POSE 1 is the room only: do not copy its pose or objects in the hands. Never substitute a different person or face."
       : "This frame is a PRODUCT-DETAIL close-up. Do not force a full beauty-face crop. If any portion of the face appears it MUST match the identity lock - same jawline, eyes, skin texture with visible pores, and makeup. Prefer filling the frame with the named product selling detail; omit or crop the face when a full face would make that detail too small to read.";
-  const resolvedAspectRatio = resolveAspectRatioLabel(args.aspectRatio);
-  const resolvedOrientation = resolveAspectRatioOrientation(resolvedAspectRatio);
-  const orientationDescriptor = resolvedOrientation === "portrait" ? "vertical portrait" : resolvedOrientation;
-  const aspectSafePose = sanitizePoseDirectionForAspectRatio(args.pose, resolvedAspectRatio) as StudioPose & { poseNumber: number };
-  const isPose4CroppedAboveAnkles = isPose4 && !isSittingDemanded && isAboveAnkleCropFraming(aspectSafePose);
   const plantedStance = plantedPoseReplacement(args.pose, isSittingDemanded, isPose4CroppedAboveAnkles);
   const cleanPoseText = (rawValue: unknown) => {
     const base = catalogPoseText(rawValue, plantedStance, isSittingDemanded);

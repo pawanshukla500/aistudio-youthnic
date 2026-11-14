@@ -2008,7 +2008,12 @@ Deno.test("composeGenerationPrompt removes conflicting grounded-feet text when P
         garmentFamily: "kurta_or_kurti_set",
         mainColor: "maroon",
       },
-      creativeDirection: { seatedPoseRequired: "no" },
+      creativeDirection: {
+        seatedPoseRequired: "no",
+        bodyPosition: "walking motion with both feet grounded and close",
+        distinctFrom: "walking forward",
+        visibilityRules: ["keep walking", "feet grounded and close"],
+      },
     },
     references: [{ role: "front" }, { role: "style_reference" }],
   });
@@ -2019,6 +2024,7 @@ Deno.test("composeGenerationPrompt removes conflicting grounded-feet text when P
   assertStringIncludes(croppedPose4, "shoulders softly angled");
   assertStringIncludes(croppedPose4, "Frame cleanly to the planned editorial crop without forcing out-of-frame feet.");
   assertEquals(croppedPose4.includes("Natural editorial stance. Both feet stay planted and close."), false);
+  assertEquals(croppedPose4.includes("Distinct from the other frames. Both feet stay planted and close."), false);
   assertEquals(/feet grounded/i.test(croppedPose4), false);
 });
 
