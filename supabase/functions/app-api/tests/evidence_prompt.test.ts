@@ -1987,3 +1987,38 @@ Deno.test("composeGenerationPrompt normalizes upstream square framing for 3:4 po
   assertEquals(landscapePrompt.includes("16:9 vertical portrait"), false);
 });
 
+Deno.test("composeGenerationPrompt removes conflicting grounded-feet text when Pose 4 uses an above-ankle knees-up editorial crop", () => {
+  const croppedPose4 = composeGenerationPrompt({
+    skuName: "SAREE-POSE4-CROP",
+    productDetails: "Maroon embroidered saree with zari border",
+    aspectRatio: "3:4",
+    pose: {
+      id: "creative",
+      title: "Relaxed Pallu Editorial",
+      poseNumber: 4,
+      enabled: true,
+      framing: "Portrait, approximately knees-up with room for the shoulder fall.",
+      bodyPosition: "Stand in gentle contrapposto with feet grounded and close, shoulders softly angled.",
+      description: "Relaxed contrapposto editorial with both feet grounded and close.",
+      prompt: "Knees-up editorial frame with gentle contrapposto and feet grounded and close.",
+      productVisibilityRules: ["Pallu clearly visible", "Both feet grounded and close"],
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "maroon",
+      },
+      creativeDirection: { seatedPoseRequired: "no" },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+
+  assertStringIncludes(croppedPose4, "CURRENT FRAME (POSE 4 - NATURAL EDITORIAL STANCE):");
+  assertStringIncludes(croppedPose4, "POSE CATEGORY RULES (DYNAMIC):");
+  assertStringIncludes(croppedPose4, "NATURAL EDITORIAL POSE (CROPPED FRAME):");
+  assertStringIncludes(croppedPose4, "shoulders softly angled");
+  assertStringIncludes(croppedPose4, "Frame cleanly to the planned editorial crop without forcing out-of-frame feet.");
+  assertEquals(croppedPose4.includes("Natural editorial stance. Both feet stay planted and close."), false);
+  assertEquals(/feet grounded/i.test(croppedPose4), false);
+});
+

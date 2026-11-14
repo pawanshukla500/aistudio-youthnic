@@ -151,7 +151,7 @@ const DEFAULT_IMAGE_QUALITY = "medium";
 // regenerations, so it must not drop earlier ones after a single epoch's worth;
 // the bound only keeps the row finite.
 const REJECTED_ATTEMPT_HISTORY_LIMIT = 100;
-const QA_VERSION = "saree-qa-v15-aspect-styling-salvage";
+const QA_VERSION = "saree-qa-v16-crop-footwear-back-hair";
 const WORKER_LEASE_MS = 4 * 60_000;
 const WORKER_LEASE_HEARTBEAT_MS = 60_000;
 const PREFLIGHT_FAILED_RETRY_MS = 6 * 60 * 60_000;
