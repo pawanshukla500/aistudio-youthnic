@@ -3848,7 +3848,13 @@ async function processWorker(request: Request, args: JsonRecord) {
         productDetails: String(salvageProductRecord.productDetails ?? salvageProductRecord.product_details ?? (job.job_data as JsonRecord | undefined)?.productDetails ?? ""),
         hasBottomReference: loadedReferences.some((entry) => entry.role === "bottom"),
       }).includesBottomWear;
-      if (canSalvageExhaustedPoseQa(qa, { garmentFamily: salvageGarmentFamily, poseType: poseData.id, hasBottomWear: salvageHasBottomWear })) {
+      if (canSalvageExhaustedPoseQa(qa, {
+        garmentFamily: salvageGarmentFamily,
+        poseType: poseData.id,
+        hasBottomWear: salvageHasBottomWear,
+        creativeDirection: sessionData.creativeDirection,
+        poseDirection: poseData,
+      })) {
         salvagedAfterMaxAttempts = true;
         qa = {
           ...qa,

@@ -2235,15 +2235,40 @@ export function sanitizePoseDirectionForAspectRatio<T>(pose: T, aspectRatio?: un
   return (next as T) ?? pose;
 }
 
-const ABOVE_ANKLE_CROP_PATTERN = /\b(?:knees?-up|knee-up|mid-?calf|below-?knee|mid-?thigh|thigh-up|waist-up|hip-up|bust-up|half-?body|upper-?body|editorial\s+waist\s+crop|(?:three-quarter|3\/4)\s+(?:body\s+)?crop)\b/i;
+const FULL_LENGTH_FRAMING_PATTERN = /\b(?:full[-_ ]body|full[-_ ]length|head[- ]to[- ]toe|head[- ]to[- ]hem|head[- ]to[- ]feet)\b/i;
+const NEGATED_FULL_LENGTH_PATTERN = /\b(?:never|no|not|avoid|without|do\s+not|don't)\b[^.;,\n]{0,25}?\b(?:full[-_ ]body|full[-_ ]length|head[- ]to[- ]toe|head[- ]to[- ]hem|head[- ]to[- ]feet)\b/gi;
+const ABOVE_ANKLE_CROP_TERM = "(?:knees?-up|knee-up|mid-?calf|below-?knee|mid-?thigh|thigh-up|waist-up|hip-up|bust-up|half-?body|upper-?body|editorial\\s+waist\\s+crop|(?:three-quarter|3\\/4)\\s+(?:body\\s+)?crop)";
+const NEGATABLE_CROP_TERM = `(?:${ABOVE_ANKLE_CROP_TERM}(?:\\s+crop(?:ped|s)?)?|macro(?:[-_ ]?detail)?(?:\\s+(?:crops?|shots?))?|close[-_ ]?ups?(?:\\s+(?:crops?|shots?))?|half[-_ ]?body[-_ ]?detail|crop(?:ped|s)?)`;
+const NEGATED_CROP_CLAUSE_PATTERN = new RegExp(
+  `\\b(?:never|no|not|avoid|without|do\\s+not|don't|rather\\s+than|instead\\s+of)\\b[^.;,\\n]{0,40}?\\b${NEGATABLE_CROP_TERM}(?:\\s*(?:,|/|\\bor\\b|\\band\\b)\\s*(?:a\\s+|an\\s+)?\\b${NEGATABLE_CROP_TERM})*\\b`,
+  "gi",
+);
+const ABOVE_ANKLE_CROP_PATTERN = new RegExp(`\\b${ABOVE_ANKLE_CROP_TERM}\\b`, "i");
+const TIGHT_CROP_PATTERN = /\b(?:macro(?:[-_ ]?detail)?|close[-_ ]?up|bust[-_ ]?up|waist[-_ ]?up|half[-_ ]?body(?:[-_ ]?detail)?|upper[-_ ]?body)\b/i;
 const FEET_GROUNDED_CLAUSE_PATTERN = /(?:\bwith\s+)?\b(?:both\s+)?feet\s+(?:stay\s+)?(?:grounded|planted)(?:\s+and\s+close)?\b/gi;
+
+function stripNegatedCropClauses(value: unknown): string {
+  return String(value ?? "").replace(NEGATED_CROP_CLAUSE_PATTERN, " ");
+}
+
+function matchesPlannedFramingPattern(pose: unknown, pattern: RegExp): boolean {
+  if (!pose || typeof pose !== "object") return false;
+  const record = pose as Record<string, unknown>;
+  const framing = stripNegatedCropClauses(record.framing);
+  if (pattern.test(framing)) return true;
+  if (FULL_LENGTH_FRAMING_PATTERN.test(framing.replace(NEGATED_FULL_LENGTH_PATTERN, " "))) return false;
+  const combined = `${framing} ${stripNegatedCropClauses(record.description)} ${stripNegatedCropClauses(record.prompt)}`;
+  return pattern.test(combined);
+}
 
 /** Return true when a pose's planned framing intentionally crops above the ankles. */
 export function isAboveAnkleCropFraming(pose: unknown): boolean {
-  if (!pose || typeof pose !== "object") return false;
-  const record = pose as Record<string, unknown>;
-  const combined = `${String(record.framing ?? "")} ${String(record.description ?? "")} ${String(record.prompt ?? "")}`;
-  return ABOVE_ANKLE_CROP_PATTERN.test(combined);
+  return matchesPlannedFramingPattern(pose, ABOVE_ANKLE_CROP_PATTERN);
+}
+
+/** Return true when a pose's planned framing is a tight macro or upper-body crop. */
+export function isTightCropFraming(pose: unknown): boolean {
+  return matchesPlannedFramingPattern(pose, TIGHT_CROP_PATTERN);
 }
 
 /** Strip contradictory grounded-feet clauses from pose copy framed above the ankles. */

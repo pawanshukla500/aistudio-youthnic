@@ -10,7 +10,7 @@ import {
   compactFullPromptSafely,
   composeGenerationPrompt,
 } from "../lib/generationPrompt.ts";
-import { normalizeAnalysis } from "../lib/profiles.ts";
+import { isAboveAnkleCropFraming, isTightCropFraming, normalizeAnalysis } from "../lib/profiles.ts";
 import { buildGenerationMemory, formatGenerationMemoryBrief } from "../lib/generationMemory.ts";
 
 Deno.test("Garment Truth Contract: Legacy placement and absence locks are preserved when garmentEvidence is populated", () => {
@@ -2028,3 +2028,133 @@ Deno.test("composeGenerationPrompt removes conflicting grounded-feet text when P
   assertEquals(/feet grounded/i.test(croppedPose4), false);
 });
 
+
+
+Deno.test("isAboveAnkleCropFraming and isTightCropFraming respect explicit full-length framing and ignore negated crop phrases", () => {
+  assertEquals(
+    isAboveAnkleCropFraming({
+      framing: "Full-length studio shot",
+      description: "Editorial contrast, waist-up contrast notes.",
+    }),
+    false,
+  );
+  assertEquals(
+    isAboveAnkleCropFraming({
+      framing: "Full-body head-to-toe",
+      description: "Avoid knees-up or half-body crops.",
+    }),
+    false,
+  );
+  assertEquals(
+    isAboveAnkleCropFraming({
+      framing: "full_length",
+      description: "Full standing saree, never a waist-up or knees-up crop.",
+    }),
+    false,
+  );
+  assertEquals(
+    isTightCropFraming({
+      framing: "Full-length studio frame, never a waist-up crop or close-up",
+      description: "Show complete saree fall.",
+    }),
+    false,
+  );
+  assertEquals(
+    isAboveAnkleCropFraming({
+      framing: "Three-quarter knees-up editorial crop",
+      description: "Model framed from knees up",
+    }),
+    true,
+  );
+  assertEquals(
+    isTightCropFraming({
+      framing: "Three-quarter knees-up editorial crop",
+      description: "Model framed from knees up",
+    }),
+    false,
+  );
+  assertEquals(
+    isTightCropFraming({
+      framing: "Waist-up editorial crop",
+      description: "Half-body portrait",
+    }),
+    true,
+  );
+});
+
+Deno.test("Cropped Pose 4 omits grounded-feet and footwear requirements from garmentPoseDirection for short_kurti_top and western_casual while full-length Pose 1 keeps them", () => {
+  const croppedPose = {
+    id: "creative",
+    title: "Creative Pose",
+    poseNumber: 4,
+    framing: "Three-quarter knees-up editorial crop",
+    description: "Three-quarter knees-up frame.",
+    bodyPosition: "Three-quarter stance angled slightly toward camera.",
+    handPlacement: "One hand relaxed at pocket height",
+    expression: "Soft warm expression",
+    highlightedDetails: ["Neckline embroidery"],
+    productVisibilityRules: ["Keep full bodice and hem readable"],
+    primaryReference: "front",
+    purpose: "Editorial variety",
+    consistencyNotes: "Lock colors and print",
+    prompt: "Frame knees-up with natural posture.",
+    enabled: true,
+  };
+  const fullFrontPose = {
+    ...croppedPose,
+    id: "full_front",
+    title: "Hero Front",
+    poseNumber: 1,
+    framing: "Full-length standing frame",
+    description: "Head-to-toe standing catalog frame.",
+  };
+
+  const shortKurtiSession = {
+    category: "top",
+    productIdentity: {
+      garmentFamily: "kurta_or_kurti_set",
+      length: "cropped waist-length",
+      bottomWearDetails: "none - standalone garment",
+    },
+  };
+  const shortFullPrompt = composeGenerationPrompt({
+    skuName: "SHORT-TOP-1",
+    productDetails: "Printed short kurti top",
+    bottomWearMode: "top_only",
+    pose: fullFrontPose as never,
+    session: shortKurtiSession,
+    references: [{ role: "front" }],
+  });
+  const shortCroppedPrompt = composeGenerationPrompt({
+    skuName: "SHORT-TOP-1",
+    productDetails: "Printed short kurti top",
+    bottomWearMode: "top_only",
+    pose: croppedPose as never,
+    session: shortKurtiSession,
+    references: [{ role: "front" }],
+  });
+  assertStringIncludes(shortFullPrompt, "both feet stay planted and close");
+  assertEquals(shortCroppedPrompt.includes("both feet stay planted"), false);
+  assertEquals(/feet grounded/i.test(shortCroppedPrompt), false);
+
+  const westernSession = {
+    category: "western",
+    productIdentity: { garmentFamily: "western_or_casual", category: "western co-ord set" },
+  };
+  const westernFullPrompt = composeGenerationPrompt({
+    skuName: "WESTERN-1",
+    productDetails: "Printed western co-ord set",
+    pose: fullFrontPose as never,
+    session: westernSession,
+    references: [{ role: "front" }],
+  });
+  const westernCroppedPrompt = composeGenerationPrompt({
+    skuName: "WESTERN-1",
+    productDetails: "Printed western co-ord set",
+    pose: croppedPose as never,
+    session: westernSession,
+    references: [{ role: "front" }],
+  });
+  assertStringIncludes(westernFullPrompt, "footwear all stay in frame");
+  assertEquals(westernCroppedPrompt.includes("footwear all stay in frame"), false);
+});

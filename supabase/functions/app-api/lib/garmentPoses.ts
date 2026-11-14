@@ -408,7 +408,11 @@ export function garmentPoseFamilyLabel(family: GarmentPoseFamily) {
  * garment colour, print, construction or fit, which stay owned by the product
  * truth blocks.
  */
-export function garmentPoseDirection(family: GarmentPoseFamily): string {
+export function garmentPoseDirection(
+  family: GarmentPoseFamily,
+  options: { croppedAboveAnkles?: boolean } = {},
+): string {
+  const cropped = options.croppedAboveAnkles === true;
   return {
     saree_bengali:
       `- BENGALI SAREE POSE GRAMMAR: pose with the quiet, upright grace this drape is photographed with. Shoulders open and level, spine tall, chin level, weight settled on one leg, movement small and deliberate.
@@ -420,29 +424,43 @@ export function garmentPoseDirection(family: GarmentPoseFamily): string {
 - PALLU PLACEMENT: follow the recorded drape plan exactly for shoulder side, open-or-pleated pallu, fall direction and visible length. The pallu reads as one continuous placed panel with its artwork and border legible; never duplicate it into extra loose panels, never let it fall behind the body out of frame.
 - PLEATS AND BORDER: front pleats stay flat, even and vertical; upper and lower borders stay continuous and identical in width; the hem border stays level.
 - HANDS: strictly exactly two arms and two hands. Keep hands away from the pallu artwork, border and pleat stack. When one hand holds the pallu edge open, low and flat so the artwork stays readable, the other hand must be positioned naturally at the side or hip. NEVER render three hands, extra arms, duplicate hands, or floating hands.`,
-    kurta_set:
-      `- KURTA / KURTI SET POSE GRAMMAR: every frame must sell the complete set. Keep the full length of the kurta from shoulder seam to hem in frame, and keep the bottom wear visible from waistband to hem with the footwear grounded.
+    kurta_set: cropped
+      ? `- KURTA / KURTI SET POSE GRAMMAR: frame this look within the planned crop so the kurta neckline, yoke, sleeves, torso fit, side detail, and any visible upper bottom wear read clearly without forcing out-of-frame ankles or footwear.
+- FIT AND LENGTH: stance must show the garment's true fit and silhouette within the crop - no bunching at the waist and no arm crossing the torso to hide the side seam or embroidery.
+- SLEEVES: keep both sleeves readable - sleeve length, cuff, and any sleeve embroidery stay unobstructed. Arms stay away from the body far enough that the sleeve silhouette does not collapse against the torso.
+- DUPATTA: if a dupatta ships with the set, drape it so it never covers the yoke embroidery, the front placket, the side slit or any visible bottom wear.`
+      : `- KURTA / KURTI SET POSE GRAMMAR: every frame must sell the complete set. Keep the full length of the kurta from shoulder seam to hem in frame, and keep the bottom wear visible from waistband to hem with the footwear grounded.
 - FIT AND LENGTH: stance must show the garment's true fit and true length - no hitching the hem up, no bunching at the waist, no arm crossing the torso to hide the side seam or the hem line.
 - SLEEVES: keep both sleeves readable - sleeve length, cuff, and any sleeve embroidery stay unobstructed. Arms stay away from the body far enough that the sleeve silhouette does not collapse against the torso.
 - DUPATTA: if a dupatta ships with the set, drape it so it never covers the yoke embroidery, the front placket, the side slit or the bottom wear. Front frames keep it off the centre front; back frames keep it forward over the arms.`,
-    long_kurti:
-      `- LONG KURTI POSE GRAMMAR: the frame sells fit, fall and length. Keep the complete hem line inside the frame and show the garment hanging naturally at its true length.
+    long_kurti: cropped
+      ? `- LONG KURTI POSE GRAMMAR: the planned crop highlights bodice fit, neckline, sleeves, and upper drape cleanly without forcing out-of-frame lower hem or feet.
+- FIT AND LENGTH: keep the upper silhouette smooth and upright so side seams hang naturally with no bunching or twisting.
+- SLEEVES AND DETAIL: keep both sleeves, the neckline, the placket and any visible embroidery or slit readable; arms stay clear of the yoke and print.`
+      : `- LONG KURTI POSE GRAMMAR: the frame sells fit, fall and length. Keep the complete hem line inside the frame and show the garment hanging naturally at its true length.
 - FIT AND LENGTH: stance is relaxed and grounded so the side seams hang straight and the hem stays level. Never hitch, tuck, gather, or hold the hem in a way that shortens the garment.
 - SLEEVES AND DETAIL: keep both sleeves, the neckline, the placket and any side slit readable; arms stay clear of the yoke, print and slit.`,
     short_kurti_top:
       `- SHORT KURTI / TOP POSE GRAMMAR: keep the pose natural and wearable. Use a small weight shift, a gentle turn, a shoulder tilt, or a lean into the set that is already there. Do not freeze a laugh, a walking stride, or a wide leg split.
-- MATCH THE POSE TO THE SET: both feet stay planted and close. A lean may use a wall already in the room. Do not sit because the style photo sits, and do not invent furniture.
+- MATCH THE POSE TO THE SET: ${cropped ? "maintain balanced, natural posture aligned with the set." : "both feet stay planted and close."} A lean may use a wall already in the room. Do not sit because the style photo sits, and do not invent furniture.
 - KEEP THE PRODUCT READABLE: the top's hem line, neckline, sleeve shape, fit and print must all stay unobstructed and in frame. The pose must not crumple, twist or hide the garment.
 - EXPRESSION: calm and genuine - a small smile or an easy glance - never a frozen mid-laugh or a stiff corporate stare.`,
-    lehenga:
-      `- LEHENGA SET POSE GRAMMAR: show the full silhouette - choli, dupatta and the complete skirt flare from waist to hem - with the hem inside the frame.
+    lehenga: cropped
+      ? `- LEHENGA SET POSE GRAMMAR: highlight the choli, dupatta drape, waist detail, and visible upper skirt volume within this pose's planned crop without forcing out-of-frame floor hem or feet.
+- SKIRT VOLUME: the visible skirt keeps its true flare and panel structure without flattening or hand-crushing.
+- DUPATTA: drape it so it frames rather than hides the choli and visible skirt border work.`
+      : `- LEHENGA SET POSE GRAMMAR: show the full silhouette - choli, dupatta and the complete skirt flare from waist to hem - with the hem inside the frame.
 - SKIRT VOLUME: the skirt keeps its true flare, panel structure and hem weight. Never flatten the volume, and never let a hand or dupatta collapse the silhouette.
 - DUPATTA: drape it so it frames rather than hides the choli and the skirt's border work.`,
-    dress:
-      `- DRESS POSE GRAMMAR: show the complete silhouette from shoulder to hem with the hemline level and inside the frame. Posture is relaxed and elongating so the waist seam, skirt fall and any slit read correctly.
+    dress: cropped
+      ? `- DRESS POSE GRAMMAR: keep the bodice, neckline, waist seam, and visible skirt fall readable within this pose's planned crop without forcing out-of-frame hemline or feet. Posture is relaxed and elongating.
+- Keep arms clear of the bodice, waist seam and any side detail.`
+      : `- DRESS POSE GRAMMAR: show the complete silhouette from shoulder to hem with the hemline level and inside the frame. Posture is relaxed and elongating so the waist seam, skirt fall and any slit read correctly.
 - Keep arms clear of the bodice, waist seam and any side detail.`,
-    western_casual:
-      `- WESTERN / CASUAL POSE GRAMMAR: relaxed, current, natural street-style body language with easy weight shifts and candid movement.
+    western_casual: cropped
+      ? `- WESTERN / CASUAL POSE GRAMMAR: relaxed, current, natural street-style body language with easy weight shifts and candid movement.
+- Keep the visible outfit readable within this pose's planned crop: top hem, waistline, and visible upper bottom-wear cut stay unobstructed without forcing out-of-frame ankles or footwear.`
+      : `- WESTERN / CASUAL POSE GRAMMAR: relaxed, current, natural street-style body language with easy weight shifts and candid movement.
 - Keep the full outfit readable: top hem, waistline, bottom-wear cut and footwear all stay in frame and unobstructed.`,
     other:
       `- GENERAL POSE GRAMMAR: natural, confident, catalog-appropriate body language that keeps the complete garment silhouette, hem and construction readable in every frame.`,

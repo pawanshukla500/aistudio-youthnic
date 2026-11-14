@@ -1437,7 +1437,7 @@ Visibility rules: ${visibilityRules}
 Purpose: ${posePurpose}
 Consistency notes: ${poseConsistency}
 GARMENT POSE GRAMMAR (${garmentPoseFamilyHeading(poseFamily)}) - body language and framing only; it never changes the garment's design, print, colour, fit or construction:
-${garmentPoseDirection(poseFamily)}
+${garmentPoseDirection(poseFamily, { croppedAboveAnkles: isPose4CroppedAboveAnkles })}
 ${isShowcase
     ? (showcaseShot
       ? showcasePlanHardRule({

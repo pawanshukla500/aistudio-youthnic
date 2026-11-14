@@ -1,6 +1,7 @@
 import {
   CLOSEUP_PRODUCT_DETAIL,
   isAboveAnkleCropFraming,
+  isTightCropFraming,
   parseJsonResponse,
   resolveAspectRatioLabel,
   resolveAspectRatioOrientation,
@@ -79,8 +80,13 @@ function rearOnlyQaProductIdentity(value: unknown) {
   };
 }
 
+function isSareeGarmentFamily(garmentFamily = ""): boolean {
+  const normalized = garmentFamily.trim().toLowerCase();
+  return normalized === "saree" || normalized.startsWith("saree_");
+}
+
 function qaKeys(garmentFamily = "", poseType = "", hasBottomWear = false, showcaseTightCrop = false) {
-  const isSaree = garmentFamily.toLowerCase() === "saree";
+  const isSaree = isSareeGarmentFamily(garmentFamily);
   // A front/back score matters for every pose, but it becomes an SKU-critical
   // gate only when the output claims to be the true rear. This avoids making
   // legacy/front-only QA responses fail for an attribute that is not visible,
@@ -226,6 +232,13 @@ export function buildPoseQaPrompt(args: {
           next[key] = stripGroundedFeetForCroppedFrame(String(next[key])) || next[key];
         }
       }
+      if (Array.isArray(next.productVisibilityRules)) {
+        next.productVisibilityRules = next.productVisibilityRules
+          .map((rule) =>
+            typeof rule === "string" ? stripGroundedFeetForCroppedFrame(rule) : rule
+          )
+          .filter((rule) => !(typeof rule === "string" && rule.trim().length === 0));
+      }
       return next;
     })()
     : qaPoseDirection;
@@ -353,7 +366,14 @@ export function canSalvageExhaustedPoseQa(
     correction?: string;
     anatomicalDefectDetected?: boolean;
   },
-  options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean } = {},
+  options: {
+    garmentFamily?: string;
+    poseType?: string;
+    hasBottomWear?: boolean;
+    creativeDirection?: unknown;
+    poseDirection?: unknown;
+    isTightShowcaseCrop?: boolean;
+  } = {},
 ): boolean {
   if (!qa || typeof qa !== "object") return false;
   if (qa.anatomicalDefectDetected === true) return false;
@@ -369,20 +389,40 @@ export function canSalvageExhaustedPoseQa(
     return false;
   }
   if (failed.some((key) => SALVAGE_HARD_FAIL_KEYS.has(key))) return false;
-  const normalizedFamily = String(options.garmentFamily || "").trim().toLowerCase();
-  const isSareeFamily = normalizedFamily === "saree" || normalizedFamily.startsWith("saree_");
+  const isSareeFamily = isSareeGarmentFamily(String(options.garmentFamily || ""));
   if (isSareeFamily && failed.includes("bottom_wear")) return false;
   if (options.hasBottomWear && Number(scores.bottom_wear ?? 100) < 85) return false;
-  // On wide/editorial saree frames (never Pose 5 close-ups), camera distance
-  // slightly softens small lattice repeats even when color, motifs, pallu, and
-  // borders match at >= 92%; allow those pattern fields down to 80% for human QC.
+  const showcaseShot = options.poseType === "showcase"
+    ? effectiveShowcaseShot(record(options.creativeDirection), { includesBottomWear: Boolean(options.hasBottomWear) })
+    : null;
+  const rawShowcaseShotType = String(
+    showcaseShot?.shotType ??
+      record(options.creativeDirection).showcaseShotType ??
+      record(options.creativeDirection).shotType ??
+      "",
+  ).trim().toLowerCase();
+  const isTightDetailShowcase = options.poseType === "showcase" && (
+    options.isTightShowcaseCrop === true ||
+    rawShowcaseShotType === "macro_detail" ||
+    rawShowcaseShotType === "half_body_detail"
+  );
+  const isTightFramingCrop = isTightCropFraming(options.poseDirection) ||
+    isTightCropFraming(options.creativeDirection);
+  // On wide/editorial saree frames (never Pose 5 close-ups or tight Pose 6 detail crops),
+  // camera distance slightly softens small lattice repeats even when color, motifs, pallu,
+  // and borders match at >= 92%; allow those pattern fields down to 80% for human QC.
   const canAllowWideSareePatternSoftening = isSareeFamily &&
     options.poseType !== "closeup" &&
+    !isTightDetailShowcase &&
+    !isTightFramingCrop &&
     Number(qa.productFidelity ?? 0) >= 92 &&
     Number(scores.garment_identity ?? 100) >= 92 &&
     Number(scores.colors ?? 100) >= 92 &&
     !failed.includes("colors") &&
-    SAREE_CORE_LOCK_CHECKS.every((key) => Number(scores[key] ?? 100) >= 92 && !failed.includes(key));
+    SAREE_CORE_LOCK_CHECKS.every((key) => {
+      const score = scores[key];
+      return typeof score === "number" && Number.isFinite(score) && score >= 92 && !failed.includes(key);
+    });
   for (const [key, value] of Object.entries(scores)) {
     const floor = SALVAGE_TOLERABLE_BORDERLINE_CHECKS.has(key)
       ? 75
