@@ -774,7 +774,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       id: "full_front",
       title: "Full Front Product View",
       framing: "3:4 portrait, head-to-toe with footwear and garment hem fully inside frame",
-      bodyPosition: "Square to camera with balanced weight and a natural, relaxed catalog stance establishing full outfit silhouette from head to hem; both feet planted and close so a joined hem stays closed, arms relaxed, never stiff or robotic",
+      bodyPosition: "Straight-on toward camera (shoulders and hips evenly aligned forward) with balanced weight and a natural, relaxed catalog stance establishing full outfit silhouette from head to hem; both feet planted and close so a joined hem stays closed, arms relaxed, never stiff or robotic",
       handPlacement: "Hands relaxed beside the body without covering neckline, waist, pockets, or trims",
       expression: "Natural, warm, approachable expression with a soft, genuine smile or calm composed glance; never a forced, stiff, or artificial toothy smile",
       productVisibilityRules: [
@@ -1771,7 +1771,7 @@ MODEL EXPRESSIONS & SMILES: Model expressions and smiles must look natural, rela
 
 STYLING PLAN - decide what this model wears alongside the garment, and fill stylingPlan. Read ALL sources before choosing: scan EVERY uploaded product slot (front, back, mannequin/flat-lay, bottom, additional_product) to detect whether a dupatta, stole, scarf, or accessory ships with the SKU — never ignore a folded or laid-out dupatta in mannequin or additional_product! If a dupatta/stole appears in ANY product photo, record it in productIdentity.accessoriesIncluded AND in stylingPlan.ornaments (exact colour/ombré, fabric, border/gota lace trim, and natural multi-pose drape: gracefully over one shoulder/forearm in front/angled poses leaving neckline/butti work clear, and draped forward over both arms/elbows on pose 3 back so the rear neckline/ties stay 100% unobstructed); never write "no dupatta" when one is uploaded! For style reference inputs: read the footwear, earrings/jhumkas, bangles, belt, and editorial mood from STYLE REFERENCE when those items are not already part of the product. State each choice specifically enough that a stylist could pull it from a shelf and repeat it identically in every frame - "gold chandbalis with tiny pearls and a delicate stack of thin gold bangles on the right wrist" is usable, "ethnic jewellery" is not.
 - footwear: one specific pair - style (e.g. flat juttis, mojaris, block-heel mules), heel height (flat / low / mid), overall colour & finish (e.g. antique-gold or champagne-beige ethnic flat juttis) - that suits the garment length and hem (harmonizing with the style reference's editorial footwear mood when appropriate). Say if the product references already show footwear that must be kept instead. When footwear is a styling addition (not uploaded in the product references), describe it by silhouette, heel height, and general metallic/neutral colour rather than over-specifying micro-ornamentation density (avoid phrases like "minimal tonal embroidery only").
-- jewellery: PRODUCT FIRST, STYLE REFERENCE SECOND. If the product already includes jewellery, keep those pieces. Otherwise, if the STYLE REFERENCE shows jewellery/ornaments the vision analysis considers complementary (metal, count, placement) and they do not hide neckline/embroidery, lock those exact pieces into stylingPlan.jewellery. Pick the metal and family deliberately - oxidised silver, temple or antique gold, polished gold, kundan or polki, pearl, contemporary minimal - and name each piece worn (earrings, neckpiece, bangles, rings, maang tikka, nose ring). Never invent a second competing jewellery story on top of the style-reference pieces, and never add a heavy neckpiece over an embroidered neckline/yoke/strap detail unless the style reference clearly uses that AND the neckline stays readable. If the style reference is jewellery-free, keep jewellery minimal or none.
+- jewellery: PRODUCT FIRST, STYLE REFERENCE SECOND. If the product already includes jewellery, keep those pieces. Otherwise, inspect the STYLE REFERENCE head-to-wrist carefully (earlobes, forehead/bindi, wrists, neck, fingers) and record EVERY visible ornament in stylingPlan.jewellery / ornaments / makeup so QA expects what the scene naturally carries (for example, if the style reference wears slim red and green bangles plus small stud/jhumka earrings and a tiny red bindi, list ALL of those explicitly instead of omitting earrings or bindi). Pick the metal and family deliberately - oxidised silver, temple or antique gold, polished gold, kundan or polki, pearl, contemporary minimal - and name each piece worn (earrings, neckpiece, bangles, rings, maang tikka, nose ring). Never invent a second competing jewellery story on top of the style-reference pieces, and never add a heavy neckpiece over an embroidered neckline/yoke/strap detail unless the style reference clearly uses that AND the neckline stays readable. If the style reference is jewellery-free, keep jewellery minimal or none.
 - ornaments: ALL product-included accessories (especially any uploaded dupatta/stole/scarf from mannequin or additional_product, with exact colour, border/gota trim, and forward/back drape rules) PLUS any complementary style-reference ornaments (belt, potli/bag, waist chain, hair pin). Use "none" only when NEITHER the product references NOR the style reference shows any dupatta, stole, or ornament.
 - makeup and hair: one look each, held across all six frames.
 - stylingNotes: the rule a stylist would need to avoid mistakes on this specific product, for example "keep the right wrist bare so the sleeve embroidery stays visible" or "no neckpiece over the embroidered yoke".
@@ -1803,7 +1803,7 @@ In every family the pose may only change body position, angle, framing and expre
 
 Create exactly six product-specific camera setups in one coherent commercial coverage sequence with MANDATORY PHYSICAL VARIATION across all 6 slots, in this order and with these ids: full_front, angled, back, creative, closeup, showcase. They are NOT repeats of each other. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints. Every individual prompt must (1) describe THIS product's exact colour, fabric, construction and selling details from the product references, and (2) direct the model's stance, angle, action, and expression, while creativeDirection must rebuild the photoshoot backdrop, wall, floor, lighting and furniture from the STYLE REFERENCE only.
 
-- full_front: square, unobstructed head-to-toe hero; establishes face/hair/styling/footwear/scene/lighting anchor with balanced weight, natural catalog composure, and an authentic gentle smile or relaxed glance (never a stiff stance or artificial smile).
+- full_front: straight-on (shoulders and hips facing forward), unobstructed head-to-toe hero matching the requested output aspect ratio (use "straight-on" or the matching portrait/landscape framing terminology; never describe framing or the frame itself as "square" unless 1:1 output is requested); establishes face/hair/styling/footwear/scene/lighting anchor with balanced weight, natural catalog composure, and an authentic gentle smile or relaxed glance (never a stiff stance or artificial smile).
 - angled: mandatory 35 to 45 degree intentional turn of torso and hips with both feet planted and close, clearly revealing side construction, garment depth, side seam, and sleeve silhouette. Never a walking stride or a lifted foot, and never open a joined Farshi hem. Must be visibly turned away from flat frontal — NEVER a static frontal standing repeat! Natural, effortless glance following the angle with an authentic soft smile or composed editorial look (never an exaggerated or frozen stock smile). Do not copy the pose or the handheld props from the style or model-face photo.
 - back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees. For outfits with a dupatta or shawl, the dupatta must be draped forward over arms or front so the rear garment (neckline, back panel, embroidery, hem) is 100% unobstructed and visible. Hair swept forward or in an updo. The studio set, backdrop wall, lighting, and model identity must strictly match the other poses.
 - creative:
@@ -1918,7 +1918,7 @@ export const CONSISTENCY_RULES = [
 // v32 encodes the Farshi narrow-from-waist + 4-inch inward taper rule strictly for Farshi
 // bottoms, keeps non-Farshi bottoms isolated, scans mannequin/additional slots for
 // dupattas, and refines Gen-Z saree, top-only kurti, and kurti-set pose plans.
-export const ANALYSIS_VERSION = "generation-session-v32-farshi-dupatta-styling";
+export const ANALYSIS_VERSION = "generation-session-v33-aspect-styling-qa";
 
 export function smallHash(value: string) {
   let hash = 2166136261;
@@ -2154,4 +2154,83 @@ export function mergeVariantColorways(
 
   return cloned;
 }
+
+const VALID_ASPECT_RATIOS = new Set(["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9"]);
+
+/**
+ * Normalize an output aspect ratio string into a supported catalog ratio (defaulting to "3:4").
+ */
+export function resolveAspectRatioLabel(aspectRatio?: unknown): string {
+  const cleaned = String(aspectRatio || "").trim();
+  return VALID_ASPECT_RATIOS.has(cleaned) ? cleaned : "3:4";
+}
+
+export type AspectRatioOrientation = "square" | "portrait" | "landscape";
+
+/**
+ * Determine whether a supported aspect ratio represents square, portrait, or landscape framing,
+ * matching the dimensions selected by `normalizeImageSize`.
+ */
+export function resolveAspectRatioOrientation(aspectRatio?: unknown): AspectRatioOrientation {
+  const ratio = resolveAspectRatioLabel(aspectRatio);
+  const [wStr, hStr] = ratio.split(":");
+  const w = Number(wStr);
+  const h = Number(hStr);
+  if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+    if (w === h) return "square";
+    return w > h ? "landscape" : "portrait";
+  }
+  return "portrait";
+}
+
+/**
+ * Rewrite framing/orientation uses of "square" into aspect-safe phrasing when
+ * generating non-1:1 portrait/landscape outputs, without ever altering garment
+ * construction phrases like "square neckline" or "square yoke".
+ */
+export function normalizePoseAspectText(text: string, aspectRatio?: unknown): string {
+  const value = String(text || "");
+  if (!value) return value;
+  const ratio = resolveAspectRatioLabel(aspectRatio);
+  const orientation = resolveAspectRatioOrientation(ratio);
+  if (orientation === "square") return value;
+  return value
+    .replace(/^\s*square\.?\s*$/i, `${ratio} ${orientation}, head-to-toe.`)
+    .replace(/\bSquare,\s*(unobstructed\b)/g, "Straight-on, $1")
+    .replace(/\bsquare,\s*(unobstructed\b)/g, "straight-on, $1")
+    .replace(/\b(Photorealistic|Studio|Editorial|Full-body|Catalog)\s+square\s+(head-to-toe|full[- ]front|portrait|hero)\b/gi, `$1 ${ratio} ${orientation} $2`)
+    .replace(/\bSquare,?\s+(head-to-toe|full[- ]front)\b/g, "Straight-on $1")
+    .replace(/\bsquare,?\s+(head-to-toe|full[- ]front)\b/g, "straight-on $1")
+    .replace(/\bSquare-on\b/g, "Straight-on")
+    .replace(/\bsquare-on\b/g, "straight-on")
+    .replace(/\bSquare\s+to\s+camera\b/g, "Straight-on toward camera")
+    .replace(/\bsquare\s+to\s+camera\b/g, "straight-on toward camera")
+    .replace(/\bSquare\s+front\s+hero\b/g, "Straight-on front hero")
+    .replace(/\bsquare\s+front\s+hero\b/g, "straight-on front hero")
+    .replace(/\bsquare\s+framing\b/gi, `${ratio} ${orientation} framing`);
+}
+
+/**
+ * Return a shallow copy of a pose direction object with aspect-contradictory
+ * "square" framing/pose phrasing normalized for the requested output aspect ratio.
+ */
+export function sanitizePoseDirectionForAspectRatio<T>(pose: T, aspectRatio?: unknown): T {
+  if (!pose || typeof pose !== "object") return pose;
+  const ratio = resolveAspectRatioLabel(aspectRatio);
+  if (ratio === "1:1") return pose;
+  const record = pose as Record<string, unknown>;
+  const fields = ["framing", "bodyPosition", "description", "prompt", "title", "purpose"] as const;
+  let next: Record<string, unknown> | null = null;
+  for (const field of fields) {
+    const raw = record[field];
+    if (typeof raw !== "string" || !raw) continue;
+    const normalized = normalizePoseAspectText(raw, ratio);
+    if (normalized !== raw) {
+      if (!next) next = { ...record };
+      next[field] = normalized;
+    }
+  }
+  return (next as T) ?? pose;
+}
+
 

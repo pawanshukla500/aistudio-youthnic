@@ -27,7 +27,7 @@ import {
   type StudioPose,
   type StylingPlanProfile,
 } from "./profiles.ts";
-import { appendRejectedAttemptHistory, buildPoseQaPrompt, parseQaResponse, qaStorageDisposition, unavailableQaResult } from "./qa.ts";
+import { appendRejectedAttemptHistory, buildPoseQaPrompt, canSalvageExhaustedPoseQa, parseQaResponse, qaStorageDisposition, unavailableQaResult } from "./qa.ts";
 import { assertGenerationPromptWithinLimit, composeGenerationPrompt } from "./lib/generationPrompt.ts";
 import {
   AI_MODEL_REGISTRY,
@@ -151,7 +151,7 @@ const DEFAULT_IMAGE_QUALITY = "medium";
 // regenerations, so it must not drop earlier ones after a single epoch's worth;
 // the bound only keeps the row finite.
 const REJECTED_ATTEMPT_HISTORY_LIMIT = 100;
-const QA_VERSION = "saree-qa-v14-listing-grade";
+const QA_VERSION = "saree-qa-v15-aspect-styling-salvage";
 const WORKER_LEASE_MS = 4 * 60_000;
 const WORKER_LEASE_HEARTBEAT_MS = 60_000;
 const PREFLIGHT_FAILED_RETRY_MS = 6 * 60 * 60_000;
@@ -2265,6 +2265,7 @@ function generationFailureCode(error: unknown, message: string) {
 async function validatePose(args: {
   generated: { base64: string; mimeType: string }; references: LoadedReference[];
   approved: LoadedReference[]; session: JsonRecord; pose: StudioPose & { poseNumber: number }; organizationId: string;
+  aspectRatio?: string;
 }) {
   const garmentFamily = String((args.session.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
   const qaRefs = await withInlineBase64(
@@ -2276,6 +2277,7 @@ async function validatePose(args: {
     productIdentity: args.session.productIdentity, creativeDirection: args.session.creativeDirection,
     modelIdentity: args.session.modelIdentity, garmentFamily,
     bottomWearMode: args.session.bottomWearMode,
+    aspectRatio: args.aspectRatio,
     consistencyRules: [
       ...((args.session.consistencyRules as string[]) || CONSISTENCY_RULES),
       ...(styling
@@ -3575,6 +3577,7 @@ async function compilePosePrompt(
     productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
     references: selected, correction: promptCorrection(), learnings: combinedLearnings, fashionKnowledge,
     bottomWearMode: sessionData.bottomWearMode ?? (job.job_data as JsonRecord | undefined)?.bottomWearMode,
+    aspectRatio: String(job.aspect_ratio || "3:4"),
     generationMemory: formatGenerationMemoryBrief({
       references: selected,
       memory: sessionGenerationMemory(sessionData, {
@@ -3756,7 +3759,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     if (poseQaEnabled) {
       try {
         qaStarted = Date.now();
-        qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData, organizationId: String(job.org_id) });
+        qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData, organizationId: String(job.org_id), aspectRatio: String(job.aspect_ratio || "3:4") });
         qaLatencyMs = Date.now() - qaStarted;
       } catch (error) {
         qaUnavailable = errorMessage(error);
@@ -3832,6 +3835,31 @@ async function processWorker(request: Request, args: JsonRecord) {
          cost_usd: calculated.costUsd, cost_source: calculated.costSource,
        });
     }
+    let salvagedAfterMaxAttempts = false;
+    if (!qa.pass && attempt >= MAX_GENERATION_ATTEMPTS) {
+      const salvageProductRecord = (sessionData.productIdentity && typeof sessionData.productIdentity === "object"
+        ? sessionData.productIdentity as JsonRecord
+        : {});
+      const salvageGarmentFamily = String(salvageProductRecord.garmentFamily || "");
+      const salvageHasBottomWear = resolveBottomWearPresentation({
+        mode: sessionData.bottomWearMode ?? (job.job_data as JsonRecord | undefined)?.bottomWearMode,
+        productIdentity: sessionData.productIdentity,
+        skuName: String(salvageProductRecord.skuName ?? salvageProductRecord.sku_name ?? job.sku_name ?? ""),
+        productDetails: String(salvageProductRecord.productDetails ?? salvageProductRecord.product_details ?? (job.job_data as JsonRecord | undefined)?.productDetails ?? ""),
+        hasBottomReference: loadedReferences.some((entry) => entry.role === "bottom"),
+      }).includesBottomWear;
+      if (canSalvageExhaustedPoseQa(qa, { garmentFamily: salvageGarmentFamily, poseType: poseData.id, hasBottomWear: salvageHasBottomWear })) {
+        salvagedAfterMaxAttempts = true;
+        qa = {
+          ...qa,
+          pass: true,
+          automaticallyVerified: false,
+          outcome: "requires_human_review",
+          reviewRecommended: true,
+          reason: `Salvaged on attempt ${attempt}/${MAX_GENERATION_ATTEMPTS} for human review (${qa.productFidelity}% fidelity; zero anatomical or core garment defects): ${qa.reason}`,
+        };
+      }
+    }
     if (!qa.pass) {
       const defect = [
         qa.correction || qa.reason,
@@ -3873,7 +3901,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     await Promise.all([
       service.from("session_generations").update({
         status: "completed", output_url: stored.downloadUrl, storage_path: stored.storagePath, storage_backend: stored.storageBackend,
-        qa_status: qaStatus, qa_payload: { ...qa, qaUnavailable, qaVersion: QA_VERSION, qaEnabled: poseQaEnabled },
+        qa_status: qaStatus, qa_payload: { ...qa, qaUnavailable, qaVersion: QA_VERSION, qaEnabled: poseQaEnabled, ...(salvagedAfterMaxAttempts ? { salvagedAfterMaxAttempts: true } : {}) },
         error: qaUnavailable ? `Delivered without automatic consistency QA: ${qaUnavailable}`.slice(0, 1000) : "", updated_at: completedAt,
         // A review decision belongs to the image it was made on. The earlier
         // version keeps its archive row; this new image has not been reviewed.
@@ -3897,6 +3925,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         sku_matched: true, asset_role: "generated", storage_backend: stored.storageBackend,
         metadata: {
           poseIndex: pose.pose_index, poseType: pose.pose_type, qa, qaStatus, qaVersion: QA_VERSION, qaEnabled: poseQaEnabled,
+          ...(salvagedAfterMaxAttempts ? { salvagedAfterMaxAttempts: true } : {}),
           model: imageGenerationRoute.model, provider: imageGenerationRoute.provider, quality: job.quality,
           providerRequestId: generated.requestId, usage: generated.usage.raw, actualCostUsd: attemptCost,
           generationId: pose.generation_id, generationEpoch, attempt, timing: versionTiming,
@@ -3913,7 +3942,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         score: qa.score, passed: !qaUnavailable && poseQaEnabled && qa.automaticallyVerified,
         issues: qaUnavailable ? ["qa_unavailable"] : !poseQaEnabled ? ["qa_disabled"] : qa.failed,
         notes: qa.reason, qa_version: QA_VERSION, outcome: qaStatus,
-        generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt, metadata: { qa, qaUnavailable },
+        generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt, metadata: { qa, qaUnavailable, ...(salvagedAfterMaxAttempts ? { salvagedAfterMaxAttempts: true } : {}) },
       }),
     ]);
     const { data: allPoses, error: allPosesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
@@ -4377,7 +4406,7 @@ async function rerunPoseQa(request: Request, args: JsonRecord) {
   const reviewedAt = new Date().toISOString();
   let qa: Awaited<ReturnType<typeof validatePose>>;
   try {
-    qa = await validatePose({ generated, references, approved: [], session: sessionData, pose: poseData, organizationId: workspace.organization.id });
+    qa = await validatePose({ generated, references, approved: [], session: sessionData, pose: poseData, organizationId: workspace.organization.id, aspectRatio: String(job.aspect_ratio || "3:4") });
   } catch (error) {
     const message = errorMessage(error);
     const unavailable = unavailableQaResult(`Automatic consistency QA could not run: ${message}`);

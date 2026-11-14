@@ -4,11 +4,14 @@ import {
   effectiveShowcaseIntent,
   isSeatedEditorialPoseDemanded,
   normalizeStylingPlan,
+  resolveAspectRatioLabel,
+  resolveAspectRatioOrientation,
   resolveCloseupMode,
   type JsonRecord,
   type ShowcaseIntent,
   type StudioPose,
   sanitizeDetailPlacementMap,
+  sanitizePoseDirectionForAspectRatio,
 } from "./profiles.ts";
 import {
   effectiveShowcaseShot,
@@ -691,7 +694,7 @@ function poseVariationDirective(): string {
   return [
     "6-POSE PLAN VARIATION DIRECTIVE (MANDATORY PHYSICAL DIVERGENCE):",
     "Every shoot executes a distinct 6-pose plan where each frame has a unique physical geometry and purpose. Under NO circumstances should any frame repeat a static frontal standing pose:",
-    "- Pose 1 (full_front): Natural square-on catalog hero, weight slightly on one leg, shoulders relaxed, complete silhouette readable.",
+    "- Pose 1 (full_front): Natural straight-on catalog hero in the requested output aspect ratio, weight slightly on one leg, shoulders relaxed, complete silhouette readable.",
     "- Pose 2 (angled): Mandatory 35-to-45 degree turn of torso and hips, both feet planted and close. Never a walking stride or a lifted foot. Keep a joined hem closed.",
     "- Pose 3 (back): 180° true full rear view, shoulders and hips facing fully away; hair and dupatta swept forward for 100% unobstructed rear view. Same face identity and the same style-reference backdrop.",
     "- Pose 4 (creative): A natural editorial stance that is clearly not Pose 1 - relaxed contrapposto or a soft lean, both feet grounded and close, or a seated editorial only when the product notes demand sitting. Never copy the style photo's pose. Never a frozen walking stride, a spin, or a wide leg split.",
@@ -703,7 +706,7 @@ function poseVariationDirective(): string {
 function currentFrameLine(pose: StudioPose & { poseNumber: number }, isSittingDemanded: boolean): string {
   const poseNum = pose.poseNumber;
   if (poseNum === 1 || pose.id === "full_front") {
-    return "CURRENT FRAME (POSE 1 - SQUARE HERO): Natural straight-on catalog hero. Weight settles slightly on one leg, shoulders and arms stay relaxed, and the full outfit reads from head to hem. A calm expression or a small genuine smile. Never a rigid mannequin stance or a wide stock-photo grin.";
+    return "CURRENT FRAME (POSE 1 - STRAIGHT-ON HERO): Natural straight-on catalog hero in the requested output aspect ratio. Weight settles slightly on one leg, shoulders and arms stay relaxed, and the full outfit reads from head to hem. A calm expression or a small genuine smile. Never a rigid mannequin stance or a wide stock-photo grin.";
   }
   if (poseNum === 2 || pose.id === "angled") {
     return "CURRENT FRAME (POSE 2 - MANDATORY 3/4 TURN): Torso and hips MUST physically rotate 35 to 45 degrees. Both feet stay planted and close; never a walking stride or a lifted foot. DO NOT render a flat frontal standing pose or repeat Pose 1. Reveal side silhouette, garment depth, side seams, and sleeve shape.";
@@ -967,7 +970,7 @@ function sanitizeCreativeDirection(
 export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
   session: JsonRecord; references: PromptReference[]; correction?: string; learnings?: string; fashionKnowledge?: string;
-  generationMemory?: string; bottomWearMode?: unknown;
+  generationMemory?: string; bottomWearMode?: unknown; aspectRatio?: string;
 }) {
   const product = objectValue(args.session.productIdentity);
   const creative = objectValue(args.session.creativeDirection);
@@ -1111,12 +1114,16 @@ export function composeGenerationPrompt(args: {
       : "This frame is a PRODUCT-DETAIL close-up. Do not force a full beauty-face crop. If any portion of the face appears it MUST match the identity lock - same jawline, eyes, skin texture with visible pores, and makeup. Prefer filling the frame with the named product selling detail; omit or crop the face when a full face would make that detail too small to read.";
   const plantedStance = plantedPoseReplacement(args.pose, isSittingDemanded);
   const poseTitle = boundedText(poseTitleText(args.pose.title, isSittingDemanded), 160);
-  const poseDescription = boundedText(catalogPoseText(args.pose.description, plantedStance, isSittingDemanded), 600);
-  const posePrompt = boundedText(catalogPoseText(args.pose.prompt, plantedStance, isSittingDemanded), 1_200);
-  const poseCamera = boundedText(poseInstructionText(args.pose.cameraAngle, isSittingDemanded, "Eye-level catalog angle."), 360);
-  const poseFraming = boundedText(poseInstructionText(args.pose.framing, isSittingDemanded, "Catalog framing."), 360);
-  const posePurpose = boundedText(poseInstructionText(args.pose.purpose, isSittingDemanded, "Show the garment clearly."), 420);
-  const poseConsistency = boundedText(poseInstructionText(args.pose.consistencyNotes, isSittingDemanded, "Same model, product, and backdrop as the other frames."), 600);
+  const resolvedAspectRatio = resolveAspectRatioLabel(args.aspectRatio);
+  const resolvedOrientation = resolveAspectRatioOrientation(resolvedAspectRatio);
+  const orientationDescriptor = resolvedOrientation === "portrait" ? "vertical portrait" : resolvedOrientation;
+  const aspectSafePose = sanitizePoseDirectionForAspectRatio(args.pose, resolvedAspectRatio) as StudioPose & { poseNumber: number };
+  const poseDescription = boundedText(catalogPoseText(aspectSafePose.description, plantedStance, isSittingDemanded), 600);
+  const posePrompt = boundedText(catalogPoseText(aspectSafePose.prompt, plantedStance, isSittingDemanded), 1_200);
+  const poseCamera = boundedText(poseInstructionText(aspectSafePose.cameraAngle, isSittingDemanded, "Eye-level catalog angle."), 360);
+  const poseFraming = boundedText(poseInstructionText(aspectSafePose.framing, isSittingDemanded, "Catalog framing."), 360);
+  const posePurpose = boundedText(poseInstructionText(aspectSafePose.purpose, isSittingDemanded, "Show the garment clearly."), 420);
+  const poseConsistency = boundedText(poseInstructionText(aspectSafePose.consistencyNotes, isSittingDemanded, "Same model, product, and backdrop as the other frames."), 600);
   const stylingNotes = styling
     ? poseInstructionText(styling.stylingNotes, isSittingDemanded, "")
     : "";
@@ -1125,10 +1132,11 @@ export function composeGenerationPrompt(args: {
     : "";
 
   const allowedDelta = [
-    `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(catalogPoseText(args.pose.bodyPosition, plantedStance, isSittingDemanded), 360)}`,
+    `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(catalogPoseText(aspectSafePose.bodyPosition, plantedStance, isSittingDemanded), 360)}`,
     `camera angle: ${poseCamera}`,
     `framing: ${poseFraming}`,
-    `expression: ${boundedText(catalogPoseText(args.pose.expression, CALM_EXPRESSION, isSittingDemanded), 360)}`,
+    `output aspect ratio: ${resolvedAspectRatio} ${orientationDescriptor} framing`,
+    `expression: ${boundedText(catalogPoseText(aspectSafePose.expression, CALM_EXPRESSION, isSittingDemanded), 360)}`,
   ];
   const correction = boundedText(args.correction, 1_200);
   const learnings = boundedText(args.learnings, 900);

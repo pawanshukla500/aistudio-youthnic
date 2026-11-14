@@ -1934,3 +1934,56 @@ Deno.test("true-back pose for non-farshi bottom does not enforce farshi-specific
   assertEquals(prompt.includes("6-inch joined hem panel with 4-inch taper"), false);
   assertEquals(prompt.includes("two distinct flared legs"), false);
 });
+
+Deno.test("composeGenerationPrompt normalizes upstream square framing for 3:4 portrait without mutating square neckline craft", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "ASPECT-KURTI-SKU",
+    productDetails: "Teal kurti with square neckline yoke",
+    aspectRatio: "3:4",
+    pose: {
+      id: "full_front",
+      title: "Front Hero",
+      poseNumber: 1,
+      enabled: true,
+      framing: "Square, unobstructed head to toe.",
+      bodyPosition: "Square to camera.",
+      description: "Square front hero showing full silhouette.",
+      prompt: "Photorealistic square head-to-toe shot highlighting the square neckline yoke.",
+    } as any,
+    session: {
+      productIdentity: {
+        garmentFamily: "kurta_or_kurti_set",
+        mainColor: "teal",
+      },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+
+  assertStringIncludes(prompt, "POSE 1 - STRAIGHT-ON HERO");
+  assertStringIncludes(prompt, "output aspect ratio: 3:4 vertical portrait framing");
+  assertStringIncludes(prompt, "Straight-on, unobstructed head to toe.");
+  assertStringIncludes(prompt, "3:4 portrait head-to-toe");
+  assertStringIncludes(prompt, "square neckline yoke");
+  assertEquals(prompt.includes("POSE 1 - SQUARE HERO"), false);
+  assertEquals(prompt.includes("Square, unobstructed"), false);
+
+  const landscapePrompt = composeGenerationPrompt({
+    skuName: "ASPECT-KURTI-16X9",
+    productDetails: "Teal kurti",
+    aspectRatio: "16:9",
+    pose: {
+      id: "full_front",
+      title: "Wide Hero",
+      poseNumber: 1,
+      enabled: true,
+      framing: "Square, unobstructed head to toe.",
+      prompt: "Photorealistic square head-to-toe shot.",
+    } as any,
+    session: { productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "teal" } },
+    references: [{ role: "front" }, { role: "style_reference" }],
+  });
+  assertStringIncludes(landscapePrompt, "output aspect ratio: 16:9 landscape framing");
+  assertStringIncludes(landscapePrompt, "16:9 landscape head-to-toe");
+  assertEquals(landscapePrompt.includes("16:9 vertical portrait"), false);
+});
+

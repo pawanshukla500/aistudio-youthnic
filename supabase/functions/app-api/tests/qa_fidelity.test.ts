@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { normalizeAnalysis } from "../lib/profiles.ts";
-import { buildPoseQaPrompt, hasAnatomicalDefectText, normalizePoseQaResult } from "../lib/qa.ts";
+import { normalizeAnalysis, normalizePoseAspectText, sanitizePoseDirectionForAspectRatio } from "../lib/profiles.ts";
+import { buildPoseQaPrompt, canSalvageExhaustedPoseQa, hasAnatomicalDefectText, normalizePoseQaResult } from "../lib/qa.ts";
 
 const genericCritical = [
   "garment_identity",
@@ -378,6 +378,194 @@ Deno.test("Pose 6 macro QA applies the anatomy veto even when the face is absent
   assertEquals(result.automaticallyVerified, false);
   assertEquals(result.failed.includes("pose_requirement"), true);
 });
+
+Deno.test("buildPoseQaPrompt normalizes upstream square framing for 3:4 portrait while keeping square neckline craft and subtle style-reference earrings/bindi", () => {
+  const prompt = buildPoseQaPrompt({
+    poseNumber: 1,
+    poseType: "full_front",
+    poseTitle: "Front Hero",
+    poseDirection: {
+      id: "full_front",
+      framing: "Square, unobstructed head to toe.",
+      bodyPosition: "Square to camera.",
+      prompt: "Photorealistic square head-to-toe fashion photograph showcasing the square neckline yoke.",
+    },
+    productIdentity: { garmentFamily: "saree_ethnic", mainColor: "teal" },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "saree_ethnic",
+    consistencyRules: [],
+    hasApprovedAnchor: false,
+    hasModelReference: false,
+    referenceManifest: [
+      "IMAGE 1: SAREE FRONT DRAPE",
+      "IMAGE 2: STYLE REFERENCE - backdrop, wall, floor, set dressing, mood and lighting only; never copy clothing or pose",
+    ],
+    aspectRatio: "3:4",
+  });
+
+  assertStringIncludes(prompt, "Requested Output Aspect Ratio: 3:4 (vertical portrait canvas");
+  assertStringIncludes(prompt, "Straight-on, unobstructed head to toe.");
+  assertStringIncludes(prompt, "Straight-on toward camera.");
+  assertStringIncludes(prompt, "3:4 portrait head-to-toe");
+  assertStringIncludes(prompt, "square neckline yoke");
+  assertEquals(prompt.includes("Square, unobstructed"), false);
+  assertStringIncludes(prompt, "Do NOT fail absence_constraints or details_and_branding for stylist-worn personal accessories");
+  assertStringIncludes(prompt, "subtle personal accents consistent with the STYLE REFERENCE (such as small stud/minimal earrings, a small forehead bindi");
+
+  assertEquals(normalizePoseAspectText("Square, unobstructed head to toe.", "1:1"), "Square, unobstructed head to toe.");
+  const unchanged1x1 = sanitizePoseDirectionForAspectRatio({ framing: "Square, unobstructed" }, "1:1");
+  assertEquals(unchanged1x1.framing, "Square, unobstructed");
+});
+
+Deno.test("saree 25-check QA only flags flat-cluster escalation when at least 18 critical scores cluster below 95", () => {
+  const sareeChecksList = [
+    "garment_identity", "colors", "pattern_geometry", "print_pattern", "embroidery_geometry",
+    "detail_placement", "side_construction", "trim_location", "unknown_region_invention",
+    "print_embroidery_continuation", "front_back_design", "absence_constraints", "bottom_wear",
+    "body_pallu_boundary", "duplicate_pallu", "drape_physics", "blouse_invention",
+    "saree_body_color", "saree_weave_geometry", "saree_motif_inventory", "saree_motif_scale",
+    "saree_motif_placement", "saree_pallu_artwork", "saree_border_geometry", "saree_tassels",
+    "saree_blouse_construction", "saree_transparency_shine", "saree_drape_physics", "face_realism", "model_face",
+  ];
+  const normalPassScores: Record<string, number> = {};
+  sareeChecksList.forEach((key, idx) => {
+    normalPassScores[key] = idx < 12 ? 94 : 96;
+  });
+  const normalResult = normalizePoseQaResult({
+    pass: true,
+    score: 95,
+    checks: Object.fromEntries(sareeChecksList.map((k) => [k, "pass"])),
+    scores: normalPassScores,
+    failed: [],
+    reason: "Accurate teal ikat saree.",
+    correction: "",
+  }, { garmentFamily: "saree", poseType: "full_front" });
+  assertEquals(normalResult.requiresIndependentRecheck, false);
+
+  const flatScores = Object.fromEntries(sareeChecksList.map((k) => [k, 93]));
+  const flatResult = normalizePoseQaResult({
+    pass: true,
+    score: 93,
+    checks: Object.fromEntries(sareeChecksList.map((k) => [k, "pass"])),
+    scores: flatScores,
+    failed: [],
+    reason: "Hedged flat scores.",
+    correction: "",
+  }, { garmentFamily: "saree", poseType: "full_front" });
+  assertEquals(flatResult.requiresIndependentRecheck, true);
+});
+
+Deno.test("canSalvageExhaustedPoseQa rescues borderline high-fidelity frames while strictly vetoing anatomy, identity, back, and bottom defects", () => {
+  const baseQa = {
+    productFidelity: 93,
+    scores: {
+      pose_requirement: 85,
+      fit_silhouette: 86,
+      absence_constraints: 78,
+      styling_addition: 80,
+      garment_identity: 98,
+      pattern_geometry: 95,
+      saree_body_color: 96,
+      face_realism: 94,
+    },
+    failed: ["pose_requirement", "absence_constraints", "styling_addition"],
+    severe: [] as string[],
+    reason: "Portrait orientation differed from requested square wording and subtle stud earrings appeared.",
+    correction: "",
+  };
+  assertEquals(canSalvageExhaustedPoseQa(baseQa, { garmentFamily: "saree_ethnic", poseType: "full_front" }), true);
+
+  assertEquals(
+    canSalvageExhaustedPoseQa({ ...baseQa, reason: "Three hands visible on waist." }, { garmentFamily: "saree_ethnic", poseType: "full_front" }),
+    false,
+  );
+  assertEquals(
+    canSalvageExhaustedPoseQa({ ...baseQa, failed: ["garment_identity"] }, { garmentFamily: "saree_ethnic", poseType: "full_front" }),
+    false,
+  );
+  assertEquals(
+    canSalvageExhaustedPoseQa({ ...baseQa, failed: ["blouse_invention"] }, { garmentFamily: "saree_ethnic", poseType: "full_front" }),
+    false,
+  );
+  assertEquals(
+    canSalvageExhaustedPoseQa({ ...baseQa, failed: ["duplicate_pallu"] }, { garmentFamily: "saree_ethnic", poseType: "full_front" }),
+    false,
+  );
+  assertEquals(
+    canSalvageExhaustedPoseQa(
+      { ...baseQa, scores: { ...baseQa.scores, front_back_design: 72 } },
+      { garmentFamily: "saree_ethnic", poseType: "back" },
+    ),
+    false,
+  );
+  assertEquals(
+    canSalvageExhaustedPoseQa(
+      { ...baseQa, scores: { ...baseQa.scores, bottom_wear: 70 } },
+      { garmentFamily: "kurta_or_kurti_set", poseType: "full_front", hasBottomWear: true },
+    ),
+    false,
+  );
+  assertEquals(
+    canSalvageExhaustedPoseQa({ ...baseQa, productFidelity: 84 }, { garmentFamily: "saree_ethnic", poseType: "full_front" }),
+    false,
+  );
+});
+
+Deno.test("normalizePoseQaResult retains structured anatomy defect flag beyond 500-char reason truncation so salvage rejects it", () => {
+  const longReason = `${"A".repeat(560)} An extra third hand appears near the pleats.`;
+  const normalized = normalizePoseQaResult({
+    pass: false,
+    score: 96,
+    checks: {
+      ...Object.fromEntries(genericCritical.map((k) => [k, "pass"])),
+      pose_requirement: "pass",
+    },
+    scores: {
+      ...Object.fromEntries(genericCritical.map((k) => [k, 98])),
+      pose_requirement: 85,
+    },
+    failed: [],
+    reason: longReason,
+    correction: "",
+  }, { garmentFamily: "kurta_or_kurti_set", poseType: "full_front" });
+
+  assertEquals(normalized.anatomicalDefectDetected, true);
+  assertEquals(normalized.scores.pose_requirement, 40);
+  assertEquals(hasAnatomicalDefectText(normalized.reason), false);
+  assertEquals(
+    canSalvageExhaustedPoseQa(normalized, { garmentFamily: "kurta_or_kurti_set", poseType: "full_front" }),
+    false,
+  );
+});
+
+Deno.test("landscape 16:9 ratio uses landscape orientation in normalizePoseAspectText and buildPoseQaPrompt instead of portrait", () => {
+  const qaPrompt16x9 = buildPoseQaPrompt({
+    poseNumber: 1,
+    poseType: "full_front",
+    poseTitle: "Wide Editorial",
+    poseDirection: {
+      id: "full_front",
+      framing: "Square, unobstructed head to toe.",
+      prompt: "Photorealistic square head-to-toe shot.",
+    },
+    productIdentity: { garmentFamily: "kurta_or_kurti_set" },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "kurta_or_kurti_set",
+    consistencyRules: [],
+    hasApprovedAnchor: false,
+    hasModelReference: false,
+    referenceManifest: ["IMAGE 1: FRONT"],
+    aspectRatio: "16:9",
+  });
+
+  assertStringIncludes(qaPrompt16x9, "Requested Output Aspect Ratio: 16:9 (landscape canvas - evaluate full-body framing in 16:9 landscape orientation");
+  assertStringIncludes(qaPrompt16x9, "16:9 landscape head-to-toe");
+  assertEquals(qaPrompt16x9.includes("16:9 portrait"), false);
+  assertEquals(qaPrompt16x9.includes("vertical portrait"), false);
+});
+
 Deno.test("hasAnatomicalDefectText detects positive defect mentions and respects negative phrases", () => {
   // Happy path: no defects mentioned
   assertEquals(hasAnatomicalDefectText("Model looks natural with relaxed arms."), false);
