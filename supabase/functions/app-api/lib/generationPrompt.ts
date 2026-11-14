@@ -2,6 +2,7 @@ import {
   CLOSEUP_PRODUCT_DETAIL,
   CONSISTENCY_RULES,
   effectiveShowcaseIntent,
+  isAboveAnkleCropFraming,
   isSeatedEditorialPoseDemanded,
   normalizeStylingPlan,
   resolveAspectRatioLabel,
@@ -12,6 +13,7 @@ import {
   type StudioPose,
   sanitizeDetailPlacementMap,
   sanitizePoseDirectionForAspectRatio,
+  stripGroundedFeetForCroppedFrame,
 } from "./profiles.ts";
 import {
   effectiveShowcaseShot,
@@ -456,7 +458,7 @@ function detectPoseCategory(text: string) {
   return "generic";
 }
 
-function poseCategoryRules(category: string) {
+function poseCategoryRules(category: string, options: { croppedAboveAnkles?: boolean } = {}) {
   return {
     side: `
 - SIDE PROFILE POSE: The model's body must be turned exactly 90 degrees to camera.
@@ -497,7 +499,12 @@ function poseCategoryRules(category: string) {
 - THREE-QUARTER TURN: Rotate the torso and hips 35 to 45 degrees. This is not a flat front and not a 90-degree profile.
 - Both feet stay planted and close. Never a staggered stride, a lifted foot, or a stance that opens a joined hem.
 - Show the side seam and sleeve from that angle. Keep the same face and the same backdrop.`,
-    dynamic: `
+    dynamic: options.croppedAboveAnkles
+      ? `
+- NATURAL EDITORIAL POSE (CROPPED FRAME): A relaxed editorial knees-up or upper-body stance that is clearly not the hero pose.
+- Use a soft torso angle, gentle contrapposto shoulder shift, or soft lean that belongs to the set while honoring the planned framing crop.
+- Do not freeze a walking stride, a spin, or a wide leg split. Fabric hangs naturally with gravity.`
+      : `
 - NATURAL EDITORIAL POSE: A relaxed catalog stance that is clearly not the hero pose.
 - Use a small weight shift, a gentle shoulder angle, or a soft lean that already belongs to the set. Both feet stay grounded and close enough that trouser hems, pleats, and a joined Farshi hem remain closed.
 - Do not freeze a walking stride, a spin, or a wide leg split. Fabric hangs with gravity, not with motion blur.`,
@@ -690,20 +697,26 @@ const SEATED_EDITORIAL_REQUIREMENT = `SEATED EDITORIAL POSE REQUIREMENT (POSE 4)
 - Both legs, bottom wear (farshi/trousers/pleats), hemline, and footwear MUST remain fully visible, untangled, and unbunched.
 - Posture must be upright, poised, and relaxed editorial - showcasing garment fit and draping without wrinkling or obscuring key details.`;
 
-function poseVariationDirective(): string {
+function poseVariationDirective(pose4CroppedAboveAnkles = false): string {
   return [
     "6-POSE PLAN VARIATION DIRECTIVE (MANDATORY PHYSICAL DIVERGENCE):",
     "Every shoot executes a distinct 6-pose plan where each frame has a unique physical geometry and purpose. Under NO circumstances should any frame repeat a static frontal standing pose:",
     "- Pose 1 (full_front): Natural straight-on catalog hero in the requested output aspect ratio, weight slightly on one leg, shoulders relaxed, complete silhouette readable.",
     "- Pose 2 (angled): Mandatory 35-to-45 degree turn of torso and hips, both feet planted and close. Never a walking stride or a lifted foot. Keep a joined hem closed.",
     "- Pose 3 (back): 180° true full rear view, shoulders and hips facing fully away; hair and dupatta swept forward for 100% unobstructed rear view. Same face identity and the same style-reference backdrop.",
-    "- Pose 4 (creative): A natural editorial stance that is clearly not Pose 1 - relaxed contrapposto or a soft lean, both feet grounded and close, or a seated editorial only when the product notes demand sitting. Never copy the style photo's pose. Never a frozen walking stride, a spin, or a wide leg split.",
+    pose4CroppedAboveAnkles
+      ? "- Pose 4 (creative): A natural editorial stance that is clearly not Pose 1 - relaxed contrapposto or a soft lean honoring the planned editorial crop, or a seated editorial only when the product notes demand sitting. Never copy the style photo's pose. Never a frozen walking stride, a spin, or a wide leg split."
+      : "- Pose 4 (creative): A natural editorial stance that is clearly not Pose 1 - relaxed contrapposto or a soft lean, both feet grounded and close, or a seated editorial only when the product notes demand sitting. Never copy the style photo's pose. Never a frozen walking stride, a spin, or a wide leg split.",
     "- Pose 5 (closeup): Genuinely zoomed-in detail crop (face-and-detail or tight product-detail); strictly prohibit full-body hero repeat.",
     "- Pose 6 (showcase): A distinct natural catalog stance and framing that sells the named feature without repeating Pose 1. Keep the feet close enough that a joined or tapered hem stays intact.",
   ].join("\n");
 }
 
-function currentFrameLine(pose: StudioPose & { poseNumber: number }, isSittingDemanded: boolean): string {
+function currentFrameLine(
+  pose: StudioPose & { poseNumber: number },
+  isSittingDemanded: boolean,
+  croppedAboveAnkles = false,
+): string {
   const poseNum = pose.poseNumber;
   if (poseNum === 1 || pose.id === "full_front") {
     return "CURRENT FRAME (POSE 1 - STRAIGHT-ON HERO): Natural straight-on catalog hero in the requested output aspect ratio. Weight settles slightly on one leg, shoulders and arms stay relaxed, and the full outfit reads from head to hem. A calm expression or a small genuine smile. Never a rigid mannequin stance or a wide stock-photo grin.";
@@ -715,8 +728,11 @@ function currentFrameLine(pose: StudioPose & { poseNumber: number }, isSittingDe
     return "CURRENT FRAME (POSE 3 - 180° REAR VIEW): Model faces fully away from camera. Shoulders and hips square to rear. Hair swept forward, dupatta draped forward over arms/front so rear construction is 100% visible.";
   }
   if (poseNum === 4 || pose.id === "creative") {
-    return isSittingDemanded
-      ? "CURRENT FRAME (POSE 4 - SEATED EDITORIAL): Elegant seated editorial posture on a minimal studio bench or architectural step from the established set. Both legs, bottom wear volume, hemline, and footwear remain fully visible and beautifully arranged."
+    if (isSittingDemanded) {
+      return "CURRENT FRAME (POSE 4 - SEATED EDITORIAL): Elegant seated editorial posture on a minimal studio bench or architectural step from the established set. Both legs, bottom wear volume, hemline, and footwear remain fully visible and beautifully arranged.";
+    }
+    return croppedAboveAnkles
+      ? "CURRENT FRAME (POSE 4 - NATURAL EDITORIAL STANCE): A relaxed catalog pose that is clearly not Pose 1: contrapposto or a soft three-quarter lean matching the planned editorial crop, garment hanging with gravity. NEVER a frozen mid-step, a spin, a wide leg split, or a repeat of the flat hero stance."
       : "CURRENT FRAME (POSE 4 - NATURAL EDITORIAL STANCE): A relaxed catalog pose that is clearly not Pose 1: contrapposto or a soft three-quarter lean, both feet grounded and close, garment hanging with gravity. NEVER a frozen mid-step, a spin, a wide leg split, or a repeat of the flat hero stance. A joined Farshi hem stays closed.";
   }
   if (poseNum === 5 || pose.id === "closeup") {
@@ -770,7 +786,11 @@ const UNPLANTED_POSE_PATTERN = /\b(?:walk(?:ing|s)?|strides?|mid-step|stepped|li
 const COPIED_SITTING_PATTERN = /\b(?:sit|sits|sitting|seated)\b/i;
 const HELD_OBJECT_PATTERN = /\b(?:sparklers?|fireworks?|handheld props?|handheld objects?|bags?|purses?|clutch(?:es)?|flowers?|bouquets?|diya[s]?|candles?|umbrellas?)\b/i;
 
-function plantedPoseReplacement(pose: { id: string; poseNumber: number }, sitting: boolean): string {
+function plantedPoseReplacement(
+  pose: { id: string; poseNumber: number },
+  sitting: boolean,
+  croppedAboveAnkles = false,
+): string {
   const poseNumber = pose.poseNumber;
   const id = pose.id;
   if (poseNumber === 2 || id === "angled") {
@@ -780,7 +800,9 @@ function plantedPoseReplacement(pose: { id: string; poseNumber: number }, sittin
     return "Elegant seated editorial. Hem and footwear stay visible.";
   }
   if (poseNumber === 4 || id === "creative") {
-    return "Natural editorial stance. Both feet stay planted and close.";
+    return croppedAboveAnkles
+      ? "Natural editorial stance with relaxed contrapposto matching the planned crop."
+      : "Natural editorial stance. Both feet stay planted and close.";
   }
   if (poseNumber === 6 || id === "showcase") {
     return "Planted weight shift. Both feet stay close.";
@@ -803,7 +825,9 @@ const RELAXED_HANDS = "Both hands relaxed and clear of the garment, holding noth
 const CALM_EXPRESSION = "Calm natural expression.";
 const SET_PROPS_ONLY = "Set props only. Do not copy objects held in the style or model photo.";
 const PLANTED_DISTINCTION = "Distinct from the other frames. Both feet stay planted and close.";
+const PLANTED_DISTINCTION_CROPPED = "Distinct from the other frames, matching the planned editorial crop.";
 const PLANTED_VISIBILITY = "The named feature stays readable. Both feet stay planted and close.";
+const PLANTED_VISIBILITY_CROPPED = "The named feature stays readable within the planned editorial crop.";
 
 const CREATIVE_BODY_KEYS = new Set(["bodyposition", "body_position", "prompt", "description"]);
 const CREATIVE_HAND_KEYS = new Set(["handplacement", "hand_placement"]);
@@ -917,8 +941,13 @@ function sanitizeCreativeDirection(
   value: JsonRecord,
   pose: { id: string; poseNumber: number },
   sitting: boolean,
+  croppedAboveAnkles = false,
 ): JsonRecord {
-  const planted = plantedPoseReplacement(pose, sitting);
+  const planted = plantedPoseReplacement(pose, sitting, croppedAboveAnkles);
+  const distinctionFallback = croppedAboveAnkles ? PLANTED_DISTINCTION_CROPPED : PLANTED_DISTINCTION;
+  const visibilityFallback = croppedAboveAnkles ? PLANTED_VISIBILITY_CROPPED : PLANTED_VISIBILITY;
+  const cleanIfCropped = (text: string, fallback: string) =>
+    croppedAboveAnkles ? (stripGroundedFeetForCroppedFrame(text) || fallback) : text;
   const visit = (input: unknown): unknown => {
     if (Array.isArray(input)) return input.map((entry) => visit(entry));
     if (!input || typeof input !== "object") return input;
@@ -927,7 +956,7 @@ function sanitizeCreativeDirection(
       const normalized = creativeDirectionKey(key);
       if (typeof entry === "string") {
         if (CREATIVE_BODY_KEYS.has(normalized)) {
-          output[key] = catalogPoseText(entry, planted, sitting);
+          output[key] = cleanIfCropped(catalogPoseText(entry, planted, sitting), planted);
           continue;
         }
         if (CREATIVE_HAND_KEYS.has(normalized)) {
@@ -939,7 +968,7 @@ function sanitizeCreativeDirection(
           continue;
         }
         if (CREATIVE_DISTINCTION_KEYS.has(normalized)) {
-          output[key] = catalogPoseText(entry, PLANTED_DISTINCTION, sitting);
+          output[key] = cleanIfCropped(catalogPoseText(entry, distinctionFallback, sitting), distinctionFallback);
           continue;
         }
         if (CREATIVE_HELD_KEYS.has(normalized)) {
@@ -956,7 +985,11 @@ function sanitizeCreativeDirection(
         }
       }
       if (CREATIVE_VISIBILITY_KEYS.has(normalized) && Array.isArray(entry)) {
-        output[key] = entry.map((item) => typeof item === "string" ? catalogPoseText(item, PLANTED_VISIBILITY, sitting) : visit(item));
+        output[key] = entry.map((item) =>
+          typeof item === "string"
+            ? cleanIfCropped(catalogPoseText(item, visibilityFallback, sitting), visibilityFallback)
+            : visit(item)
+        );
         continue;
       }
       output[key] = visit(entry);
@@ -1037,7 +1070,12 @@ export function composeGenerationPrompt(args: {
     creative,
     stylingNotes: styling?.stylingNotes,
   });
-  const directedCreative = sanitizeCreativeDirection(creative, args.pose, isSittingDemanded);
+  const resolvedAspectRatio = resolveAspectRatioLabel(args.aspectRatio);
+  const resolvedOrientation = resolveAspectRatioOrientation(resolvedAspectRatio);
+  const orientationDescriptor = resolvedOrientation === "portrait" ? "vertical portrait" : resolvedOrientation;
+  const aspectSafePose = sanitizePoseDirectionForAspectRatio(args.pose, resolvedAspectRatio) as StudioPose & { poseNumber: number };
+  const isPose4CroppedAboveAnkles = isPose4 && !isSittingDemanded && isAboveAnkleCropFraming(aspectSafePose);
+  const directedCreative = sanitizeCreativeDirection(creative, args.pose, isSittingDemanded, isPose4CroppedAboveAnkles);
   // Exact garmentFamily drives the saree truth blocks; the pose taxonomy is
   // broader, and a shoot either taxonomy calls a saree has no bottom wear.
   const isSareeShoot = isSaree || isSareePoseFamily(poseFamily);
@@ -1112,14 +1150,14 @@ export function composeGenerationPrompt(args: {
     : isTrueBack
       ? "The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face MUST match the MODEL FACE REFERENCE, or the STYLE REFERENCE when no separate model photo was uploaded. APPROVED POSE 1 is the room only: do not copy its pose or objects in the hands. Never substitute a different person or face."
       : "This frame is a PRODUCT-DETAIL close-up. Do not force a full beauty-face crop. If any portion of the face appears it MUST match the identity lock - same jawline, eyes, skin texture with visible pores, and makeup. Prefer filling the frame with the named product selling detail; omit or crop the face when a full face would make that detail too small to read.";
-  const plantedStance = plantedPoseReplacement(args.pose, isSittingDemanded);
+  const plantedStance = plantedPoseReplacement(args.pose, isSittingDemanded, isPose4CroppedAboveAnkles);
+  const cleanPoseText = (rawValue: unknown) => {
+    const base = catalogPoseText(rawValue, plantedStance, isSittingDemanded);
+    return isPose4CroppedAboveAnkles ? (stripGroundedFeetForCroppedFrame(base) || plantedStance) : base;
+  };
   const poseTitle = boundedText(poseTitleText(args.pose.title, isSittingDemanded), 160);
-  const resolvedAspectRatio = resolveAspectRatioLabel(args.aspectRatio);
-  const resolvedOrientation = resolveAspectRatioOrientation(resolvedAspectRatio);
-  const orientationDescriptor = resolvedOrientation === "portrait" ? "vertical portrait" : resolvedOrientation;
-  const aspectSafePose = sanitizePoseDirectionForAspectRatio(args.pose, resolvedAspectRatio) as StudioPose & { poseNumber: number };
-  const poseDescription = boundedText(catalogPoseText(aspectSafePose.description, plantedStance, isSittingDemanded), 600);
-  const posePrompt = boundedText(catalogPoseText(aspectSafePose.prompt, plantedStance, isSittingDemanded), 1_200);
+  const poseDescription = boundedText(cleanPoseText(aspectSafePose.description), 600);
+  const posePrompt = boundedText(cleanPoseText(aspectSafePose.prompt), 1_200);
   const poseCamera = boundedText(poseInstructionText(aspectSafePose.cameraAngle, isSittingDemanded, "Eye-level catalog angle."), 360);
   const poseFraming = boundedText(poseInstructionText(aspectSafePose.framing, isSittingDemanded, "Catalog framing."), 360);
   const posePurpose = boundedText(poseInstructionText(aspectSafePose.purpose, isSittingDemanded, "Show the garment clearly."), 420);
@@ -1132,7 +1170,7 @@ export function composeGenerationPrompt(args: {
     : "";
 
   const allowedDelta = [
-    `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(catalogPoseText(aspectSafePose.bodyPosition, plantedStance, isSittingDemanded), 360)}`,
+    `pose/body position: ${isPose4 && isSittingDemanded ? "Elegant seated editorial pose on a minimal studio bench, architectural plinth/cube, or clean studio step that already belongs to the established set (no new furniture); complete garment, bottom-wear volume, and footwear clearly visible and styled" : boundedText(cleanPoseText(aspectSafePose.bodyPosition), 360)}`,
     `camera angle: ${poseCamera}`,
     `framing: ${poseFraming}`,
     `output aspect ratio: ${resolvedAspectRatio} ${orientationDescriptor} framing`,
@@ -1144,7 +1182,10 @@ export function composeGenerationPrompt(args: {
   const generationMemory = boundedText(args.generationMemory, 900);
   const recordedVisibility = boundedStrings(
     (Array.isArray(args.pose.productVisibilityRules) ? args.pose.productVisibilityRules : [])
-      .map((item) => poseListItem(item, isSittingDemanded))
+      .map((item) => {
+        const cleaned = poseListItem(item, isSittingDemanded);
+        return isPose4CroppedAboveAnkles ? stripGroundedFeetForCroppedFrame(cleaned) : cleaned;
+      })
       .filter(Boolean),
     12,
     260,
@@ -1188,15 +1229,15 @@ export function composeGenerationPrompt(args: {
                     posePrompt,
                     catalogPoseText(args.pose.bodyPosition, plantedStance, isSittingDemanded),
                   ].join(" "));
-  const categoryRules = poseCategoryRules(poseCategory);
+  const categoryRules = poseCategoryRules(poseCategory, { croppedAboveAnkles: isPose4CroppedAboveAnkles });
   // Compaction keeps the first 1,400 characters of this block. The current
   // frame and the seated rules have to lead, or a long six-pose summary
   // deletes them and leaves only the raw pose prompt.
   const poseRequirementLead = [
-    currentFrameLine(args.pose, isSittingDemanded),
+    currentFrameLine(args.pose, isSittingDemanded, isPose4CroppedAboveAnkles),
     isPose4 && isSittingDemanded ? SEATED_EDITORIAL_REQUIREMENT : "",
     categoryRules ? `POSE CATEGORY RULES (${poseCategory.toUpperCase()}):\n${categoryRules}` : "",
-    poseVariationDirective(),
+    poseVariationDirective(isPose4CroppedAboveAnkles),
   ].filter(Boolean).join("\n");
   const evidenceLines = promptEvidence.slice(0, 16).map((entry) => {
     const row = objectValue(entry);
@@ -1396,7 +1437,7 @@ Visibility rules: ${visibilityRules}
 Purpose: ${posePurpose}
 Consistency notes: ${poseConsistency}
 GARMENT POSE GRAMMAR (${garmentPoseFamilyHeading(poseFamily)}) - body language and framing only; it never changes the garment's design, print, colour, fit or construction:
-${garmentPoseDirection(poseFamily)}
+${garmentPoseDirection(poseFamily, { croppedAboveAnkles: isPose4CroppedAboveAnkles })}
 ${isShowcase
     ? (showcaseShot
       ? showcasePlanHardRule({
@@ -1446,7 +1487,7 @@ PROHIBITED UNRELATED CHANGES:
 - STRICT PRODUCT ISOLATION RULE: Never copy, transfer, or borrow the clothing, saree, dress, colors, prints, or embroidery from the STYLE REFERENCE image. Dress the model ONLY in the uploaded product.
 - STRICT PROHIBITION ON COPYING PRE-SHOOT BACKGROUNDS: Never copy or reproduce pre-shoot background walls, terracotta arches, urns, clay pots, plants, courtyard structures, or outdoor scenery from the product reference images into the generated image.
 - Never render duplicate or identical frontal standing poses across different pose slots (Poses 2, 4, and 6 must visibly physically diverge from Pose 1).
-- Never freeze a walking stride, a spin, a mid-laugh, or a wide leg split. Use a natural catalog stance with both feet grounded. A joined or tapered hem stays closed.
+- Never freeze a walking stride, a spin, a mid-laugh, or a wide leg split.${isPose4CroppedAboveAnkles ? " Frame cleanly to the planned editorial crop without forcing out-of-frame feet." : " Use a natural catalog stance with both feet grounded. A joined or tapered hem stays closed."}
 ${bottomWear.includesBottomWear
     ? "- ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION: it is strictly forbidden to alter or replace the recorded bottom-wear cut, silhouette, volume, colour or print, or to reduce bold motifs to solid colour or tiny dots. Customers buy the complete set and expect the exact silhouette, colour and motif pattern shown in the product references."
     : isSareeShoot

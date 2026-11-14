@@ -626,3 +626,208 @@ Deno.test("buildPoseQaPrompt allows minor embroidery variation on stylist-added 
   assertStringIncludes(prompt, "do NOT fail styling_addition or unexpected_changes merely for minor embroidery density variations");
   assertStringIncludes(prompt, "within the approved footwear family");
 });
+
+Deno.test("buildPoseQaPrompt adds floor-length footwear, above-ankle crop, back hair, and wide saree weave calibration", () => {
+  const croppedPose4Qa = buildPoseQaPrompt({
+    poseNumber: 4,
+    poseType: "creative",
+    poseTitle: "Editorial Contrapposto",
+    poseDirection: {
+      id: "creative",
+      title: "Editorial Contrapposto",
+      framing: "Portrait, approximately knees-up with room for shoulder fall.",
+      bodyPosition: "Stand in gentle contrapposto with feet grounded and close.",
+    },
+    productIdentity: { garmentFamily: "saree", mainColor: "deep pink" },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "saree",
+    consistencyRules: [],
+    hasApprovedAnchor: true,
+    hasModelReference: false,
+    referenceManifest: [
+      "IMAGE 1: SAREE FRONT FULL DRAPE PRODUCT",
+      "IMAGE 2: SAREE BODY WEAVE MACRO",
+      "IMAGE 3: STYLE REFERENCE",
+      "IMAGE 4: APPROVED POSE 1",
+    ],
+  });
+  assertStringIncludes(croppedPose4Qa, "ABOVE-ANKLE CROP EXEMPTION:");
+  assertStringIncludes(croppedPose4Qa, "hidden underneath a floor-length saree");
+  assertStringIncludes(croppedPose4Qa, "compare across BOTH full-drape product images AND any close-up fabric swatches");
+  assertEquals(/feet grounded/i.test(croppedPose4Qa), false);
+
+  const backQa = buildPoseQaPrompt({
+    poseNumber: 3,
+    poseType: "back",
+    poseTitle: "True Back View",
+    poseDirection: { id: "back", title: "True Back View", framing: "Full body rear view." },
+    productIdentity: { garmentFamily: "saree", mainColor: "deep pink" },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "saree",
+    consistencyRules: [],
+    hasApprovedAnchor: true,
+    hasModelReference: false,
+    referenceManifest: ["IMAGE 1: SAREE REAR-BACK DRAPE PRODUCT", "IMAGE 2: STYLE REFERENCE"],
+  });
+  assertStringIncludes(backQa, "On a true back pose, do NOT fail pose_requirement");
+  assertStringIncludes(backQa, "nape-length hair sitting cleanly above an unobstructed rear blouse neckline");
+});
+
+Deno.test("canSalvageExhaustedPoseQa tolerates >= 80 wide-saree pattern softening only at >= 92 core fidelity and rejects low-fidelity or closeup deficits", () => {
+  const highFidelityWideSaree = {
+    productFidelity: 93,
+    scores: {
+      garment_identity: 94,
+      colors: 94,
+      saree_body_color: 95,
+      saree_motif_inventory: 95,
+      saree_pallu_artwork: 95,
+      saree_border_geometry: 95,
+      saree_blouse_construction: 94,
+      saree_weave_geometry: 81,
+      saree_motif_scale: 80,
+      print_pattern: 82,
+      pattern_geometry: 82,
+      pose_requirement: 82,
+      styling_addition: 86,
+      face_realism: 96,
+      model_face: 95,
+    },
+    failed: ["saree_weave_geometry", "saree_motif_scale", "print_pattern", "pattern_geometry", "pose_requirement"],
+    severe: [] as string[],
+    reason: "Wide knees-up saree frame shows subtle distance softening on lattice weave.",
+    correction: "",
+  };
+
+  assertEquals(canSalvageExhaustedPoseQa(highFidelityWideSaree, { garmentFamily: "saree", poseType: "creative" }), true);
+  assertEquals(canSalvageExhaustedPoseQa(highFidelityWideSaree, { garmentFamily: "saree", poseType: "closeup" }), false);
+  assertEquals(
+    canSalvageExhaustedPoseQa(
+      { ...highFidelityWideSaree, scores: { ...highFidelityWideSaree.scores, saree_motif_inventory: 88 } },
+      { garmentFamily: "saree", poseType: "creative" },
+    ),
+    false,
+  );
+  assertEquals(
+    canSalvageExhaustedPoseQa(
+      { ...highFidelityWideSaree, scores: { ...highFidelityWideSaree.scores, saree_weave_geometry: 78 } },
+      { garmentFamily: "saree", poseType: "creative" },
+    ),
+    false,
+  );
+});
+
+
+Deno.test("buildPoseQaPrompt activates saree checks for saree_* families and strips grounded-feet clauses from cropped productVisibilityRules", () => {
+  const sareeQaPrompt = buildPoseQaPrompt({
+    poseNumber: 4,
+    poseType: "creative",
+    poseTitle: "Pose 4",
+    poseDirection: {
+      id: "creative",
+      title: "Creative Pose",
+      framing: "Three-quarter knees-up editorial crop",
+      bodyPosition: "Relaxed asymmetrical stance with both feet grounded on studio stone",
+      description: "Three-quarter knees-up frame.",
+      productVisibilityRules: [
+        "Keep pallu border and weaves sharp",
+        "Both feet stay grounded and close",
+      ],
+      prompt: "Frame knees-up with both feet planted.",
+    },
+    productIdentity: { garmentFamily: "saree_bengali" },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "saree_bengali",
+    consistencyRules: [],
+    hasApprovedAnchor: true,
+    hasModelReference: false,
+    referenceManifest: ["1. FRONT PRODUCT REFERENCE"],
+  });
+  assertStringIncludes(sareeQaPrompt, "saree_pallu_artwork");
+  assertStringIncludes(sareeQaPrompt, "saree_border_geometry");
+  assertStringIncludes(sareeQaPrompt, "Keep pallu border and weaves sharp");
+  assertEquals(/both feet stay grounded/i.test(sareeQaPrompt), false);
+  assertEquals(/with both feet grounded/i.test(sareeQaPrompt), false);
+});
+
+Deno.test("canSalvageExhaustedPoseQa requires explicit saree core lock scores on saree_* and disables wide-saree pattern softening on tight showcase and waist-up frames", () => {
+  const missingCoreSaree = {
+    productFidelity: 95,
+    scores: {
+      garment_identity: 95,
+      colors: 95,
+      saree_body_color: 95,
+      pattern_geometry: 81,
+    },
+    failed: ["pattern_geometry"],
+    severe: [],
+    reason: "Minor weave softness only.",
+    correction: "Sharpen lattice repeat.",
+    anatomicalDefectDetected: false,
+  };
+  assertEquals(
+    canSalvageExhaustedPoseQa(missingCoreSaree, { garmentFamily: "saree_bengali", poseType: "creative" }),
+    false,
+  );
+
+  const completeCoreSaree = {
+    ...missingCoreSaree,
+    scores: {
+      garment_identity: 96,
+      colors: 95,
+      saree_body_color: 96,
+      saree_motif_inventory: 94,
+      saree_pallu_artwork: 93,
+      saree_border_geometry: 95,
+      saree_blouse_construction: 94,
+      pattern_geometry: 81,
+    },
+  };
+  assertEquals(
+    canSalvageExhaustedPoseQa(completeCoreSaree, {
+      garmentFamily: "saree_ethnic",
+      poseType: "showcase",
+      creativeDirection: {
+        showcasePlan: { heroFeature: "pallu zari motif", featureRegion: "pallu", shotType: "macro_detail" },
+      },
+      poseDirection: { framing: "Tight macro detail crop" },
+    }),
+    false,
+  );
+  assertEquals(
+    canSalvageExhaustedPoseQa(completeCoreSaree, {
+      garmentFamily: "saree_ethnic",
+      poseType: "showcase",
+      creativeDirection: {
+        showcasePlan: { heroFeature: "bodice border work", featureRegion: "neckline", shotType: "half_body_detail" },
+      },
+      poseDirection: { framing: "Half-body detail crop" },
+    }),
+    false,
+  );
+  assertEquals(
+    canSalvageExhaustedPoseQa(completeCoreSaree, {
+      garmentFamily: "saree",
+      poseType: "creative",
+      poseDirection: { framing: "Waist-up editorial crop", description: "Waist-up portrait" },
+    }),
+    false,
+  );
+  assertEquals(
+    canSalvageExhaustedPoseQa(completeCoreSaree, {
+      garmentFamily: "saree_ethnic",
+      poseType: "showcase",
+      creativeDirection: {
+        showcasePlan: { heroFeature: "full saree fall", featureRegion: "pallu", shotType: "full_body_feature" },
+      },
+      poseDirection: {
+        framing: "Full-length wide editorial shot, never a waist-up crop",
+        description: "Wide studio walk",
+      },
+    }),
+    true,
+  );
+});

@@ -1,10 +1,13 @@
 import {
   CLOSEUP_PRODUCT_DETAIL,
+  isAboveAnkleCropFraming,
+  isTightCropFraming,
   parseJsonResponse,
   resolveAspectRatioLabel,
   resolveAspectRatioOrientation,
   resolveCloseupMode,
   sanitizePoseDirectionForAspectRatio,
+  stripGroundedFeetForCroppedFrame,
   type JsonRecord,
 } from "./profiles.ts";
 import { effectiveBottomCutClass, FARSHI_SILHOUETTE_STRUCTURE, resolveBottomWearPresentation } from "./garmentPoses.ts";
@@ -77,8 +80,13 @@ function rearOnlyQaProductIdentity(value: unknown) {
   };
 }
 
+function isSareeGarmentFamily(garmentFamily = ""): boolean {
+  const normalized = garmentFamily.trim().toLowerCase();
+  return normalized === "saree" || normalized.startsWith("saree_");
+}
+
 function qaKeys(garmentFamily = "", poseType = "", hasBottomWear = false, showcaseTightCrop = false) {
-  const isSaree = garmentFamily.toLowerCase() === "saree";
+  const isSaree = isSareeGarmentFamily(garmentFamily);
   // A front/back score matters for every pose, but it becomes an SKU-critical
   // gate only when the output claims to be the true rear. This avoids making
   // legacy/front-only QA responses fail for an attribute that is not visible,
@@ -213,6 +221,27 @@ export function buildPoseQaPrompt(args: {
   const resolvedOrientation = resolveAspectRatioOrientation(resolvedAspectRatio);
   const orientationDescriptor = resolvedOrientation === "portrait" ? "vertical portrait" : resolvedOrientation;
   const qaPoseDirection = sanitizePoseDirectionForAspectRatio(args.poseDirection, resolvedAspectRatio);
+  const isCroppedAboveAnklesPose = args.poseType === "closeup" ||
+    showcaseTightCrop ||
+    isAboveAnkleCropFraming(qaPoseDirection);
+  const sanitizedQaPoseDirection = isCroppedAboveAnklesPose && qaPoseDirection && typeof qaPoseDirection === "object"
+    ? (() => {
+      const next = { ...(qaPoseDirection as Record<string, unknown>) };
+      for (const key of ["bodyPosition", "description", "prompt"] as const) {
+        if (typeof next[key] === "string" && next[key]) {
+          next[key] = stripGroundedFeetForCroppedFrame(String(next[key])) || next[key];
+        }
+      }
+      if (Array.isArray(next.productVisibilityRules)) {
+        next.productVisibilityRules = next.productVisibilityRules
+          .map((rule) =>
+            typeof rule === "string" ? stripGroundedFeetForCroppedFrame(rule) : rule
+          )
+          .filter((rule) => !(typeof rule === "string" && rule.trim().length === 0));
+      }
+      return next;
+    })()
+    : qaPoseDirection;
   return `You are a strict fashion e-commerce consistency validator.
 
 Review IMAGE A (the newly generated pose) against every labeled source image that follows it.
@@ -220,7 +249,7 @@ SOURCE PRIORITY: original region-labeled product references are authoritative fo
 
 Pose ${args.poseNumber}: ${args.poseTitle} (${args.poseType})
 Requested Output Aspect Ratio: ${resolvedAspectRatio} (${orientationDescriptor} canvas - evaluate full-body framing in ${resolvedAspectRatio} ${resolvedOrientation} orientation; ${resolvedOrientation === "square" ? "evaluate 1:1 square framing directly" : `never fail pose_requirement or fit_silhouette merely because ${resolvedAspectRatio} is ${resolvedOrientation} rather than 1:1 square, or because a directional note used 'square' to mean straight-on to camera`}).
-Approved pose requirement: ${JSON.stringify(qaPoseDirection)}
+Approved pose requirement: ${JSON.stringify(sanitizedQaPoseDirection)}
 Product Identity Profile: ${JSON.stringify(qaProductIdentity)}
 Creative Direction Profile: ${JSON.stringify(args.creativeDirection)}
 Model Identity Lock: ${JSON.stringify(args.modelIdentity)}
@@ -260,9 +289,9 @@ PRODUCT FIDELITY - the failure mode that matters most here is a garment that rea
 - blouse_invention: for sarees, fail if a stitched blouse back is invented when only an unstitched piece was shown.
 ${isSaree ? `SAREE LISTING-GRADE CHECKS - compare each named field directly with the ORIGINAL region-specific product evidence, never with APPROVED POSE 1:
 - saree_body_color: exact base and secondary colours, including colour treatment under the same lighting.
-- saree_weave_geometry: exact weave/lattice family, unit geometry, scale and repeat.
+- saree_weave_geometry: exact weave/lattice family, unit geometry, scale and repeat (compare across BOTH full-drape product images AND any close-up fabric swatches; on wide full-body or knees-up frames allow normal camera-distance softening plus authentic chest/pallu-transition motif shifts visible on the full-drape product reference).
 - saree_motif_inventory: every peacock, floral and other motif present or confirmed absent.
-- saree_motif_scale: motif size relative to the body and border.
+- saree_motif_scale: motif size relative to the body and border (allowing normal camera-distance softening on wide full-body or knees-up frames so long as macro scale matches the full-drape product reference).
 - saree_motif_placement: orientation, repeat, density and region placement across body, pleats, pallu and borders.
 - saree_pallu_artwork: pallu start boundary, artwork, motif inventory, orientation and density.
 - saree_border_geometry: separate upper/lower widths, colours, construction, motif geometry and continuity.
@@ -279,9 +308,9 @@ SCORING SCALE - anchor every number to these meanings, and never hand several at
 - 40: a different product in the same category.
 Only 95-100 is eligible for automatic verification. A critical score of 90-94 requires human review. A critical score below 90 fails automatic QA and requires a specific correction. A named critical failure always fails even when the average is high. Do not hand many critical fields nearly identical hedged scores; inspect each region independently.
 
-Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face when a recognizable face is in frame. Fail any invented or moved garment construction/surface detail (button, tassel/latkan, closure, trim, pocket, logo, embroidery, garment-sewn beadwork/jewelry, or hardware) under absence_constraints or details_and_branding. Do NOT fail absence_constraints or details_and_branding for stylist-worn personal accessories (earrings, bangles, bindi, footwear); evaluate wearer accessories strictly under styling_addition and styling_continuity below. For a back pose, fail unless it is a true back view matching the uploaded BACK; face_realism automatically passes for a back pose since the face is not visible. ${pose5Rule}${pose6Rule ? `${pose5Rule ? " " : ""}${pose6Rule}` : ""} Judge styling_addition against the approved styling plan in the session rules above: fail it when a listed primary piece is missing, when a prominent unapproved accessory appears that the plan does not list and the STYLE REFERENCE does not show (such as an invented heavy necklace, belt, bag, nose ring, maang tikka or statement hair ornament), when the footwear category/heel height or metal family clearly contradicts the plan (sneaker or tall heel where flat jutti is specified, or oxidised silver where gold is specified), when accessories or footwear change noticeably between poses, or when it hides or replaces a garment detail, bottom wear or footwear from the product references. ${hasStyleReference ? "When a STYLE REFERENCE is present and the model wears subtle personal accents consistent with the STYLE REFERENCE (such as small stud/minimal earrings, a small forehead bindi, or slight bangle count variation within the approved colour/metal family) that do not obscure any garment neckline/embroidery/border, do NOT fail styling_addition, absence_constraints, details_and_branding, or unexpected_changes merely for those subtle style-reference accents. " : ""}When footwear is a stylist addition rather than an uploaded product photo, do NOT fail styling_addition or unexpected_changes merely for minor embroidery density variations within the approved footwear family, colour, and silhouette. Pass it when the frame aligns with the plan at category, colour/metal, and silhouette level, or when no plan and no suggestion were provided and nothing was invented.
+Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face when a recognizable face is in frame. Fail any invented or moved garment construction/surface detail (button, tassel/latkan, closure, trim, pocket, logo, embroidery, garment-sewn beadwork/jewelry, or hardware) under absence_constraints or details_and_branding. Do NOT fail absence_constraints or details_and_branding for stylist-worn personal accessories (earrings, bangles, bindi, footwear); evaluate wearer accessories strictly under styling_addition and styling_continuity below. For a back pose, fail unless it is a true back view matching the uploaded BACK; face_realism automatically passes for a back pose since the face is not visible. On a true back pose, do NOT fail pose_requirement, styling_addition, or styling_continuity for natural short or nape-length hair sitting cleanly above an unobstructed rear blouse neckline, cutout, tie/dori, back embroidery, and pallu—only fail back hair placement when hair actually drapes across and conceals rear construction details. ${pose5Rule}${pose6Rule ? `${pose5Rule ? " " : ""}${pose6Rule}` : ""} Judge styling_addition against the approved styling plan in the session rules above: fail it when a listed primary piece is missing, when a prominent unapproved accessory appears that the plan does not list and the STYLE REFERENCE does not show (such as an invented heavy necklace, belt, bag, nose ring, maang tikka or statement hair ornament), when the footwear category/heel height or metal family clearly contradicts the plan (sneaker or tall heel where flat jutti is specified, or oxidised silver where gold is specified), when accessories or footwear change noticeably between poses, or when it hides or replaces a garment detail, bottom wear or footwear from the product references. ${hasStyleReference ? "When a STYLE REFERENCE is present and the model wears subtle personal accents consistent with the STYLE REFERENCE (such as small stud/minimal earrings, a small forehead bindi, or slight bangle count variation within the approved colour/metal family) that do not obscure any garment neckline/embroidery/border, do NOT fail styling_addition, absence_constraints, details_and_branding, or unexpected_changes merely for those subtle style-reference accents. " : ""}When footwear is a stylist addition rather than an uploaded product photo, do NOT fail styling_addition or unexpected_changes merely for minor embroidery density variations within the approved footwear family, colour, and silhouette. Do NOT fail styling_addition, styling_continuity, unexpected_changes, or pose_requirement merely because approved footwear is naturally hidden underneath a floor-length saree, lehenga, gown, or anarkali hem, or lies outside an approved knees-up/half-body/detail crop—only fail footwear when visible footwear contradicts the approved plan or changes noticeably where shoes are shown. Pass it when the frame aligns with the plan at category, colour/metal, and silhouette level, or when no plan and no suggestion were provided and nothing was invented.
 
-Fail pose_requirement when the body is frozen in a walking stride, one foot is lifted mid-step, or the legs are split wide enough to open a joined hem. A planted three-quarter turn is valid.
+Fail pose_requirement when the body is frozen in a walking stride, one foot is lifted mid-step, or the legs are split wide enough to open a joined hem. A planted three-quarter turn is valid.${isCroppedAboveAnklesPose ? " ABOVE-ANKLE CROP EXEMPTION: Because the planned framing or category intentionally crops above the ankles (e.g., knees-up, three-quarter, waist-up, or detail crop), do NOT fail pose_requirement, bottom_wear, styling_addition, or unexpected_changes merely because feet, lower pleats, or footwear lie below the crop edge." : ""}
 Fail pose_requirement when the stance or the objects in the hands are copied from the STYLE REFERENCE, the MODEL FACE photo, or APPROVED POSE 1. Those images supply the room and the face, not a pose to repeat and not handheld props.
 ANATOMICAL REALISM - apply to every pose and every crop, including true back views and faceless macro/detail frames. Inspect every visible arm, forearm, wrist, hand, finger, and other limb. Fail pose_requirement for THREE HANDS, EXTRA HANDS, EXTRA ARMS, DUPLICATE OR PHANTOM LIMBS, duplicate wrists, malformed or extra fingers, or floating hands resting on waist/hip/drape without a continuous anatomical forearm connection. Do not fail merely because a limb is naturally occluded or outside the crop. This anatomy veto is independent of face visibility and still applies when model_face and face_realism pass automatically.
 
@@ -300,6 +329,19 @@ const SALVAGE_TOLERABLE_BORDERLINE_CHECKS = new Set([
   "unexpected_changes",
   "styling_continuity",
 ]);
+const WIDE_SAREE_PATTERN_SOFTENING_CHECKS = new Set([
+  "saree_weave_geometry",
+  "saree_motif_scale",
+  "print_pattern",
+  "pattern_geometry",
+]);
+const SAREE_CORE_LOCK_CHECKS = [
+  "saree_body_color",
+  "saree_motif_inventory",
+  "saree_pallu_artwork",
+  "saree_border_geometry",
+  "saree_blouse_construction",
+] as const;
 const SALVAGE_HARD_FAIL_KEYS = new Set([
   "garment_identity",
   "duplicate_pallu",
@@ -324,7 +366,14 @@ export function canSalvageExhaustedPoseQa(
     correction?: string;
     anatomicalDefectDetected?: boolean;
   },
-  options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean } = {},
+  options: {
+    garmentFamily?: string;
+    poseType?: string;
+    hasBottomWear?: boolean;
+    creativeDirection?: unknown;
+    poseDirection?: unknown;
+    isTightShowcaseCrop?: boolean;
+  } = {},
 ): boolean {
   if (!qa || typeof qa !== "object") return false;
   if (qa.anatomicalDefectDetected === true) return false;
@@ -340,10 +389,46 @@ export function canSalvageExhaustedPoseQa(
     return false;
   }
   if (failed.some((key) => SALVAGE_HARD_FAIL_KEYS.has(key))) return false;
-  if (String(options.garmentFamily || "").trim().toLowerCase() === "saree" && failed.includes("bottom_wear")) return false;
+  const isSareeFamily = isSareeGarmentFamily(String(options.garmentFamily || ""));
+  if (isSareeFamily && failed.includes("bottom_wear")) return false;
   if (options.hasBottomWear && Number(scores.bottom_wear ?? 100) < 85) return false;
+  const showcaseShot = options.poseType === "showcase"
+    ? effectiveShowcaseShot(record(options.creativeDirection), { includesBottomWear: Boolean(options.hasBottomWear) })
+    : null;
+  const rawShowcaseShotType = String(
+    showcaseShot?.shotType ??
+      record(options.creativeDirection).showcaseShotType ??
+      record(options.creativeDirection).shotType ??
+      "",
+  ).trim().toLowerCase();
+  const isTightDetailShowcase = options.poseType === "showcase" && (
+    options.isTightShowcaseCrop === true ||
+    rawShowcaseShotType === "macro_detail" ||
+    rawShowcaseShotType === "half_body_detail"
+  );
+  const isTightFramingCrop = isTightCropFraming(options.poseDirection) ||
+    isTightCropFraming(options.creativeDirection);
+  // On wide/editorial saree frames (never Pose 5 close-ups or tight Pose 6 detail crops),
+  // camera distance slightly softens small lattice repeats even when color, motifs, pallu,
+  // and borders match at >= 92%; allow those pattern fields down to 80% for human QC.
+  const canAllowWideSareePatternSoftening = isSareeFamily &&
+    options.poseType !== "closeup" &&
+    !isTightDetailShowcase &&
+    !isTightFramingCrop &&
+    Number(qa.productFidelity ?? 0) >= 92 &&
+    Number(scores.garment_identity ?? 100) >= 92 &&
+    Number(scores.colors ?? 100) >= 92 &&
+    !failed.includes("colors") &&
+    SAREE_CORE_LOCK_CHECKS.every((key) => {
+      const score = scores[key];
+      return typeof score === "number" && Number.isFinite(score) && score >= 92 && !failed.includes(key);
+    });
   for (const [key, value] of Object.entries(scores)) {
-    const floor = SALVAGE_TOLERABLE_BORDERLINE_CHECKS.has(key) ? 75 : 85;
+    const floor = SALVAGE_TOLERABLE_BORDERLINE_CHECKS.has(key)
+      ? 75
+      : (canAllowWideSareePatternSoftening && WIDE_SAREE_PATTERN_SOFTENING_CHECKS.has(key))
+        ? 80
+        : 85;
     if (Number(value) < floor) return false;
   }
   return true;

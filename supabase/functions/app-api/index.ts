@@ -151,7 +151,7 @@ const DEFAULT_IMAGE_QUALITY = "medium";
 // regenerations, so it must not drop earlier ones after a single epoch's worth;
 // the bound only keeps the row finite.
 const REJECTED_ATTEMPT_HISTORY_LIMIT = 100;
-const QA_VERSION = "saree-qa-v15-aspect-styling-salvage";
+const QA_VERSION = "saree-qa-v16-crop-footwear-back-hair";
 const WORKER_LEASE_MS = 4 * 60_000;
 const WORKER_LEASE_HEARTBEAT_MS = 60_000;
 const PREFLIGHT_FAILED_RETRY_MS = 6 * 60 * 60_000;
@@ -3848,7 +3848,13 @@ async function processWorker(request: Request, args: JsonRecord) {
         productDetails: String(salvageProductRecord.productDetails ?? salvageProductRecord.product_details ?? (job.job_data as JsonRecord | undefined)?.productDetails ?? ""),
         hasBottomReference: loadedReferences.some((entry) => entry.role === "bottom"),
       }).includesBottomWear;
-      if (canSalvageExhaustedPoseQa(qa, { garmentFamily: salvageGarmentFamily, poseType: poseData.id, hasBottomWear: salvageHasBottomWear })) {
+      if (canSalvageExhaustedPoseQa(qa, {
+        garmentFamily: salvageGarmentFamily,
+        poseType: poseData.id,
+        hasBottomWear: salvageHasBottomWear,
+        creativeDirection: sessionData.creativeDirection,
+        poseDirection: poseData,
+      })) {
         salvagedAfterMaxAttempts = true;
         qa = {
           ...qa,

@@ -847,7 +847,7 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       id: "creative",
       title: "Natural Editorial Pose",
       framing: "3:4 portrait with a garment-appropriate full or three-quarter body editorial crop",
-      bodyPosition: "Relaxed editorial stance that is clearly not the hero pose: contrapposto or a soft three-quarter lean, both feet grounded and close so hems and pleats stay intact. Sit only when the product notes demand sitting. Never a frozen walking stride or a wide leg split",
+      bodyPosition: "Relaxed editorial stance that is clearly not the hero pose: contrapposto or a soft three-quarter lean with balanced weight (when framed full-length head-to-toe, keep both feet grounded and close so hems and pleats stay intact). Sit only when the product notes demand sitting. Never a frozen walking stride or a wide leg split",
       handPlacement: "Relaxed and intentional; hands must not cover the garment's key selling features or change its apparent shape",
       expression: "Calm, natural warmth — a small genuine smile or an easy glance; never a frozen laugh or an artificial grin",
       productVisibilityRules: isSaree
@@ -859,12 +859,12 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
           "if seated on a bench or architectural step, both trouser legs and footwear remain visible, unbunched, and fully displayed",
         ],
       consistencyNotes: "Borrow only art direction, backdrop, and jewellery/ornament taste from style references; garment, bottom wear, footwear, accessories that ship with the product, model, and shoot continuity remain locked",
-      description: "A natural editorial pose with both feet grounded and close, unless the product notes demand a seated frame.",
+      description: "A natural editorial pose clearly distinct from Pose 1 (head-to-toe with feet close, or an above-ankle editorial crop matching the planned framing), unless the product notes demand a seated frame.",
       cameraAngle: "Product-appropriate editorial angle",
       highlightedDetails: isSaree ? ["fabric movement", "fluidity", "creative direction"] : ["movement", "silhouette", "creative direction"],
       primaryReference: "front",
       purpose: "Campaign and social-commerce storytelling",
-      prompt: "Create a natural editorial catalog frame that is clearly not the hero pose — a relaxed contrapposto or soft three-quarter lean with both feet grounded and close, so hems and pleats stay intact. Sit only when the product notes demand sitting. Never copy a seated pose from the style photo. Never a frozen walking stride, a spin, or a wide leg split. Use a calm, natural expression. Preserve the complete product, bottom wear silhouette, and footwear. Rebuild the photoshoot backdrop, wall, floor, lighting, and jewellery from the style reference only - never from product-photo backgrounds.",
+      prompt: "Create a natural editorial catalog frame that is clearly not the hero pose — a relaxed contrapposto or soft three-quarter lean matching the planned full or editorial crop (when framed head-to-toe, keep both feet grounded and close so hems and pleats stay intact). Sit only when the product notes demand sitting. Never copy a seated pose from the style photo. Never a frozen walking stride, a spin, or a wide leg split. Use a calm, natural expression. Preserve the complete product, bottom wear silhouette, and footwear. Rebuild the photoshoot backdrop, wall, floor, lighting, and jewellery from the style reference only - never from product-photo backgrounds.",
       enabled: true,
     },
     {
@@ -1807,7 +1807,7 @@ Create exactly six product-specific camera setups in one coherent commercial cov
 - angled: mandatory 35 to 45 degree intentional turn of torso and hips with both feet planted and close, clearly revealing side construction, garment depth, side seam, and sleeve silhouette. Never a walking stride or a lifted foot, and never open a joined Farshi hem. Must be visibly turned away from flat frontal — NEVER a static frontal standing repeat! Natural, effortless glance following the angle with an authentic soft smile or composed editorial look (never an exaggerated or frozen stock smile). Do not copy the pose or the handheld props from the style or model-face photo.
 - back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees. For outfits with a dupatta or shawl, the dupatta must be draped forward over arms or front so the rear garment (neckline, back panel, embroidery, hem) is 100% unobstructed and visible. Hair swept forward or in an updo. The studio set, backdrop wall, lighting, and model identity must strictly match the other poses.
 - creative:
-  * SEATED POSE LOCK: Pose 4 sits only when the user product notes explicitly demand sitting. Set creativeDirection.seatedPoseRequired to "yes" only for that request, and seatedPoseReason to a one-line quote of the note. A person sitting in the STYLE REFERENCE, the MODEL FACE photo, a product photo, or APPROVED POSE 1 is not a request to sit: set seatedPoseRequired to "no" and do not copy that pose. When the notes demand sitting, this 4th pose is an elegant seated editorial on furniture that already belongs to the set, with the garment, bottom wear, hemline, and footwear fully visible. Otherwise design a natural editorial stance that is clearly not the hero pose - relaxed contrapposto or a soft three-quarter lean, both feet grounded and close so hems, pleats, and a joined Farshi hem stay intact. Never a frozen walking stride, a spin, or a wide leg split. Expression is calm and genuine - a small smile or an easy glance, never a frozen laugh.
+  * SEATED POSE LOCK: Pose 4 sits only when the user product notes explicitly demand sitting. Set creativeDirection.seatedPoseRequired to "yes" only for that request, and seatedPoseReason to a one-line quote of the note. A person sitting in the STYLE REFERENCE, the MODEL FACE photo, a product photo, or APPROVED POSE 1 is not a request to sit: set seatedPoseRequired to "no" and do not copy that pose. When the notes demand sitting, this 4th pose is an elegant seated editorial on furniture that already belongs to the set, with the garment, bottom wear, hemline, and footwear fully visible. Otherwise design a natural editorial stance that is clearly not the hero pose - relaxed contrapposto or a soft three-quarter lean. Keep framing, description, bodyPosition, and prompt 100% mutually consistent: use full-length head-to-toe framing (with both feet grounded and close so hems, pleats, and a joined Farshi hem stay intact) for Farshi or bottom-led sets; if using a knees-up or waist-up editorial crop (for sarees or upper garments after Poses 1 and 2 show the full drape), describe only the upper/torso contrapposto and NEVER write "feet grounded and close" inside a knees-up/waist-up crop. Never a frozen walking stride, a spin, or a wide leg split. Expression is calm and genuine - a small smile or an easy glance, never a frozen laugh.
 - closeup: THIS POSE SELLS PRODUCT DETAIL. First choose the single most important real selling detail from the PRIMARY UPLOADED PRODUCT GARMENT (e.g. kurti butti work, chest/yoke embroidery, neckline craftsmanship, handwork, sleeve craft, or weave) and record it in creativeDirection.closeupHeroDetail. CRITICAL: Pose 5 MUST highlight the primary garment's key signature detail (for example, if the kurti has butti work, Pose 5 must clearly showcase that work). It is STRICTLY FORBIDDEN to focus on or crop in on a secondary accessory like a dupatta, stole, or scarf when the primary garment has butti work, embroidery, or signature craft to showcase! (Only focus on a dupatta if the uploaded product is purely a standalone dupatta). Then choose framing and record it in creativeDirection.closeupMode:
   * "face_and_detail" when that detail sits at neckline/chest/yoke and stays LARGE beside the face: genuine zoomed-in face-to-chest or face-to-waist crop. Face is the locked identity with a calm natural expression (relaxed eyes, never a forced grin) AND the product detail occupies a large, catalog-readable portion of the frame - never a tiny hint of embroidery under a beauty close-up.
   * "product_detail" when a full face would shrink that selling detail below readable catalog size: crop to the product detail so it fills most of the frame. Face may be partial at the edge or omitted. Never a full-body hero repeat, and never a face-only beauty crop.
@@ -1918,7 +1918,9 @@ export const CONSISTENCY_RULES = [
 // v32 encodes the Farshi narrow-from-waist + 4-inch inward taper rule strictly for Farshi
 // bottoms, keeps non-Farshi bottoms isolated, scans mannequin/additional slots for
 // dupattas, and refines Gen-Z saree, top-only kurti, and kurti-set pose plans.
-export const ANALYSIS_VERSION = "generation-session-v33-aspect-styling-qa";
+// v34 aligns cropped editorial Pose 4 framing with posture text (eliminating
+// knees-up vs grounded-feet contradictions) and refreshes saree/back QA gates.
+export const ANALYSIS_VERSION = "generation-session-v34-crop-pose4-qa";
 
 export function smallHash(value: string) {
   let hash = 2166136261;
@@ -2231,6 +2233,54 @@ export function sanitizePoseDirectionForAspectRatio<T>(pose: T, aspectRatio?: un
     }
   }
   return (next as T) ?? pose;
+}
+
+const FULL_LENGTH_FRAMING_PATTERN = /\b(?:full[-_ ]body|full[-_ ]length|head[- ]to[- ]toe|head[- ]to[- ]hem|head[- ]to[- ]feet)\b/i;
+const NEGATED_FULL_LENGTH_PATTERN = /\b(?:never|no|not|avoid|without|do\s+not|don't)\b[^.;,\n]{0,25}?\b(?:full[-_ ]body|full[-_ ]length|head[- ]to[- ]toe|head[- ]to[- ]hem|head[- ]to[- ]feet)\b/gi;
+const ABOVE_ANKLE_CROP_TERM = "(?:knees?-up|knee-up|mid-?calf|below-?knee|mid-?thigh|thigh-up|waist-up|hip-up|bust-up|half-?body|upper-?body|editorial\\s+waist\\s+crop|(?:three-quarter|3\\/4)\\s+(?:body\\s+)?crop)";
+const NEGATABLE_CROP_TERM = `(?:${ABOVE_ANKLE_CROP_TERM}(?:\\s+crop(?:ped|s)?)?|macro(?:[-_ ]?detail)?(?:\\s+(?:crops?|shots?))?|close[-_ ]?ups?(?:\\s+(?:crops?|shots?))?|half[-_ ]?body[-_ ]?detail|crop(?:ped|s)?)`;
+const NEGATED_CROP_CLAUSE_PATTERN = new RegExp(
+  `\\b(?:never|no|not|avoid|without|do\\s+not|don't|rather\\s+than|instead\\s+of)\\b[^.;,\\n]{0,40}?\\b${NEGATABLE_CROP_TERM}(?:\\s*(?:,|/|\\bor\\b|\\band\\b)\\s*(?:a\\s+|an\\s+)?\\b${NEGATABLE_CROP_TERM})*\\b`,
+  "gi",
+);
+const ABOVE_ANKLE_CROP_PATTERN = new RegExp(`\\b${ABOVE_ANKLE_CROP_TERM}\\b`, "i");
+const TIGHT_CROP_PATTERN = /\b(?:macro(?:[-_ ]?detail)?|close[-_ ]?up|bust[-_ ]?up|waist[-_ ]?up|half[-_ ]?body(?:[-_ ]?detail)?|upper[-_ ]?body)\b/i;
+const FEET_GROUNDED_CLAUSE_PATTERN = /(?:\bwith\s+)?\b(?:both\s+)?feet\s+(?:stay\s+)?(?:grounded|planted)(?:\s+and\s+close)?\b/gi;
+
+function stripNegatedCropClauses(value: unknown): string {
+  return String(value ?? "").replace(NEGATED_CROP_CLAUSE_PATTERN, " ");
+}
+
+function matchesPlannedFramingPattern(pose: unknown, pattern: RegExp): boolean {
+  if (!pose || typeof pose !== "object") return false;
+  const record = pose as Record<string, unknown>;
+  const framing = stripNegatedCropClauses(record.framing);
+  if (pattern.test(framing)) return true;
+  if (FULL_LENGTH_FRAMING_PATTERN.test(framing.replace(NEGATED_FULL_LENGTH_PATTERN, " "))) return false;
+  const combined = `${framing} ${stripNegatedCropClauses(record.description)} ${stripNegatedCropClauses(record.prompt)}`;
+  return pattern.test(combined);
+}
+
+/** Return true when a pose's planned framing intentionally crops above the ankles. */
+export function isAboveAnkleCropFraming(pose: unknown): boolean {
+  return matchesPlannedFramingPattern(pose, ABOVE_ANKLE_CROP_PATTERN);
+}
+
+/** Return true when a pose's planned framing is a tight macro or upper-body crop. */
+export function isTightCropFraming(pose: unknown): boolean {
+  return matchesPlannedFramingPattern(pose, TIGHT_CROP_PATTERN);
+}
+
+/** Strip contradictory grounded-feet clauses from pose copy framed above the ankles. */
+export function stripGroundedFeetForCroppedFrame(text: string): string {
+  return text
+    .replace(FEET_GROUNDED_CLAUSE_PATTERN, "")
+    .replace(/\s+([,.;])/g, "$1")
+    .replace(/[,;]\s*([.])/g, "$1")
+    .replace(/\.\s*\./g, ".")
+    .replace(/^[\s,;:.–—-]+/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 
