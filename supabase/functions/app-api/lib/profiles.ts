@@ -594,20 +594,16 @@ function showcaseSlotFromPlan(
       "Warm, natural Gen-Z energy with the same face and hairstyle as every other frame, or no face at all when the crop is tight on the feature",
     productVisibilityRules: detailRules.slice(0, 8),
     consistencyNotes: "Same model identity, styling, footwear, set, backdrop and lighting as Pose 1; only the framing and posture change to sell this feature",
-    description: `A frame built around ${feature}${plan.whyItSells ? ` - ${plan.whyItSells}` : ""}${
-      garmentDetails.summary ? ` (${garmentDetails.summary})` : ""
+    description: `A frame built around ${feature}${plan.whyItSells ? ` - ${plan.whyItSells}` : ""}${garmentDetails.summary ? ` (${garmentDetails.summary})` : ""
     }. ${aestheticDirection}`,
     highlightedDetails: [feature, plan.featureRegion.replace(/_/g, " "), ...garmentDetails.highlights].slice(0, 6),
     primaryReference: plan.evidenceReference || (isSareePoseFamily(family) ? "saree_front_drape" : "front"),
     purpose: plan.whyItSells || "Sell the detail that makes this product worth buying",
-    prompt: `Create a catalog frame built entirely around ${feature}. ${shotDirection} ${aestheticDirection} ${
-      garmentDetails.summary ? `Verified garment details to render with 100% fidelity: ${garmentDetails.summary}. ` : ""
-    }${
-      shot.widenedFromCloseup
+    prompt: `Create a catalog frame built entirely around ${feature}. ${shotDirection} ${aestheticDirection} ${garmentDetails.summary ? `Verified garment details to render with 100% fidelity: ${garmentDetails.summary}. ` : ""
+      }${shot.widenedFromCloseup
         ? "Shoot it at this wider distance so it reads on the worn garment rather than as a repeat of the detail crop. "
         : ""
-    }${
-      plan.distinctFrom ? `It must differ from the other frames: ${plan.distinctFrom} ` : ""
+      }${plan.distinctFrom ? `It must differ from the other frames: ${plan.distinctFrom} ` : ""
     }Render the exact model face, hair, skin tone, makeup, jewellery and footwear described in the locked model identity and styling plan, the exact studio set, backdrop wall, flooring and lighting described in the locked creative direction, and the garment's design, print, colour, fit and construction exactly as the product references show.`,
     enabled: true,
   };
@@ -759,6 +755,9 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
     { includesBottomWear: hasBottoms },
   );
   const farshiBottom = bottomPresentation.cutClass === "farshi";
+  const isShortTop = family === "short_kurti_top";
+  const isLongKurti = family === "long_kurti";
+  const useCloserPose4 = !farshiBottom && (isSaree || isShortTop || isLongKurti || family === "kurta_set" || family === "western_casual");
   const frontBottomRule = farshiBottom
     ? "exact Farshi structure: three waist pleats each side, one large side-joint pleat each side, 6-inch joined hem with a 4-inch taper; never palazzo, lehenga, skirt, or a gathered salwar cuff; motifs stay at recorded scale"
     : "exact authentic bottom wear cut, volume, and print strictly preserved (farshi must never flatten into palazzo/lehenga/skirt; large motifs must never become solid or dots)";
@@ -773,58 +772,86 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
     {
       id: "full_front",
       title: "Full Front Product View",
-      framing: "3:4 portrait, head-to-toe with footwear and garment hem fully inside frame",
-      bodyPosition: "Straight-on toward camera (shoulders and hips evenly aligned forward) with balanced weight and a natural, relaxed catalog stance establishing full outfit silhouette from head to hem; both feet planted and close so a joined hem stays closed, arms relaxed, never stiff or robotic",
-      handPlacement: "Hands relaxed beside the body without covering neckline, waist, pockets, or trims",
-      expression: "Natural, warm, approachable expression with a soft, genuine smile or calm composed glance; never a forced, stiff, or artificial toothy smile",
-      productVisibilityRules: [
+      framing: isShortTop
+        ? "3:4 portrait, natural mid-thigh or balanced full hero centered close enough so the top fills most of the frame cleanly with true neckline, sleeves, and hem completely inside frame"
+        : "3:4 portrait, head-to-toe with footwear and garment hem fully inside frame, centered in an open studio floor zone with clean breathing room around the silhouette",
+      bodyPosition: isSaree
+        ? "Straight-on toward camera in an open studio floor zone away from foreground pillars, shoulders relaxed and spine tall, weight resting gently on one leg, feet planted and close; living-human poise rather than rigid mannequin symmetry"
+        : "Straight-on toward camera (shoulders and hips evenly aligned forward) with soft weight settled slightly on one leg so stance feels relaxed and human, both feet planted and close; never copy stiff mannequin arms or stand pinned behind a foreground pillar",
+      handPlacement: isSaree
+        ? "One arm relaxed cleanly beside the hip with soft natural fingers and the other hand resting lightly at the outer hip/pleat border edge from the outside — never copy splayed mannequin fingers and never poke a hand through a slit inside saree pleats"
+        : isShortTop
+          ? "One hand lightly relaxed near the waist/hip crease with soft natural fingers and the opposite arm relaxed beside the body — never dead-hanging symmetrically like a mannequin and never covering front prints or embroidery"
+          : "Asymmetric relaxed natural placement (one hand soft near hip or outer dupatta/garment edge, opposite arm relaxed clear of torso) — never dead straight mannequin arms, never emerging through fake dupatta/kurta slits, and never covering neckline or yoke craft",
+      expression: "Natural, warm, approachable expression with soft relaxed lips and a genuine slight smile or calm composed glance; never a forced, stiff, or artificial toothy grin",
+      productVisibilityRules: isShortTop
+        ? ["front construction, neckline, sleeves, and bottom hem completely unobstructed", "top framed prominently as primary visual subject", "no garment detail hidden by hands or hair"]
+        : [
         "front construction unobstructed",
         frontBottomRule,
-        "complete bottom wear visible from waist to hem",
+          ...(isSaree ? ["complete saree front drape, shoulder pallu, front pleats, and lower border clearly visible"] : ["complete bottom wear visible from waist to hem"]),
         "no garment detail hidden by hands or hair",
       ],
-      consistencyNotes: "Establish the model, face, hair, accessories, footwear, scene, lighting, and color-treatment anchor for poses 2-5",
-      description: "Straight-on full-body hero view with the complete product readable from head to hem.",
-      cameraAngle: "Eye-level straight-on full-body",
+      consistencyNotes: "Establish the model, face, hair, accessories, footwear, scene, lighting, and color-treatment anchor for poses 2-6",
+      description: isShortTop
+        ? "Straight-on front hero cropped cleanly around the top so fit, neckline, sleeves, and hemline read effortlessly."
+        : "Straight-on full-body hero view centered cleanly in the room with complete silhouette readable from head to hem.",
+      cameraAngle: isShortTop ? "Eye-level straight-on medium-full catalog hero" : "Eye-level straight-on full-body",
       highlightedDetails: ["front construction", "overall silhouette", "complete outfit"],
       primaryReference: "front",
       purpose: "Primary e-commerce listing image",
-      prompt: "Create a straight-on full-body front hero image. Show the complete outfit, preserving the authentic bottom wear silhouette (exact cut, volume, two distinct legs, pleating, and hem) plus the exact bottom-wear print and footwear, with a natural, effortless, composed catalog stance and a realistic, natural expression (not a forced or artificial smile).",
+      prompt: isShortTop
+        ? "Create a straight-on front hero photograph framed close enough that the top fills the frame cleanly from head to below the hip/thigh hem. Show true neckline, sleeve silhouette, print/embroidery, and clean hem fit paired with quiet understated neutral bottoms. Use relaxed, asymmetrical living-human arm placement and a soft, genuine expression (never rigid mannequin arms or artificial grins)."
+        : "Create a straight-on full-body front hero photograph positioned in an unobstructed open floor zone of the set (never pinned behind a foreground pillar). Show the complete outfit from head to hem, preserving authentic garment/saree/bottom wear silhouette and print truth with living-human weight shift, natural relaxed hands along exterior edges only, and an effortless calm expression (never mannequin stiff fingers or artificial smiles).",
       enabled: true,
     },
     {
       id: "angled",
       title: isSaree ? "Professional Drape & Fall View" : "Professional Side / 3/4 View",
-      framing: "3:4 portrait, full-body with clear side silhouette and no crop at hem or footwear",
-      bodyPosition: "Rotate torso and hips together 35 to 45 degrees into an intentional three-quarter angle, both feet planted and close, clearly displaying the side silhouette, garment depth, side seam, and sleeve drape without a walking stride or a lifted foot; do not stand flat-on to the camera",
-      handPlacement: "Keep hands away from the side seam, sleeve shape, pockets, waist treatment, and drape being demonstrated",
-      expression: "Same recognizable face and styling, with a relaxed, natural, and effortless glance following the three-quarter angle; authentic soft smile or composed editorial look, never an exaggerated or frozen stock smile",
+      framing: isShortTop
+        ? "3:4 portrait, three-quarter knees-up framing (head to mid-thigh/knee) zoomed noticeably closer than Pose 1 so sleeve cut, shoulder seam, neckline, and hip hem read crisply"
+        : "3:4 portrait, full-body at a slightly closer angled perspective down the room showing clear side silhouette depth with garment hem and footwear intact",
+      bodyPosition: "Rotate torso and hips together 35 to 45 degrees into an intentional three-quarter angle in a distinct perspective from Pose 1, both feet planted and close, clearly displaying side silhouette, garment depth, side seam, and sleeve/drape fall without a walking stride or lifted foot; do not stand flat-on to camera",
+      handPlacement: isSaree
+        ? "Front hand relaxed down beside the outer hip/border with natural curved fingers and rear arm eased slightly behind the waist so pallu shoulder drop and side pleats stay unobstructed — zero stiff mannequin fingers or mid-pleat slit hands"
+        : "Front hand relaxed lightly near the outer thigh or behind the hip crease with natural soft fingers so the side seam, slit, sleeve cuff, and waist fit remain 100% readable; never claw or grip the opposite forearm",
+      expression: "Same recognizable face and styling, with a relaxed, natural glance following the three-quarter turn; authentic subtle warmth, never an exaggerated or frozen stock smile",
       productVisibilityRules: isSaree
-        ? ["drape depth and pallu fall clearly visible", "silhouette is not compressed", "bottom wear remains unchanged and visible"]
+        ? ["drape depth and pallu fall clearly visible", "silhouette is not compressed", "model clearly rotated 35-45 degrees off Pose 1 angle"]
+        : isShortTop
+          ? ["sleeve shape, armhole, shoulder seam, and waist/hip hem clearly visible", "silhouette is not compressed", "framed knees-up so top construction fills the frame"]
         : [
-          "front and side construction remain readable",
+            "front and side construction and any side slit remain readable",
           "silhouette is not compressed",
           angledBottomRule,
           "bottom wear remains unchanged and visible",
         ],
       consistencyNotes: "Use Pose 1 only as the model and shoot anchor; preserve the original product references as garment truth",
-      description: isSaree ? "A professional three-quarter or side view that reveals the drape depth, pleat structure, and pallu fall." : "A professional three-quarter or side view that reveals depth, drape, fit, and side construction.",
-      cameraAngle: "Eye-level 35-50 degree three-quarter view",
-      highlightedDetails: isSaree ? ["drape depth", "pallu fall", "pleats"] : ["side silhouette", "fit", "drape and construction"],
+      description: isSaree
+        ? "A three-quarter angled view from a subtly shifted camera perspective revealing drape depth, pleat stack, and pallu fall."
+        : isShortTop
+          ? "A closer three-quarter knees-up angled view that showcases sleeve depth, side fit, and top hem construction clearly."
+          : "A three-quarter side view from a shifted angle revealing side seams, garment depth, fit, and silhouette volume.",
+      cameraAngle: "Eye-level 35-50 degree three-quarter perspective",
+      highlightedDetails: isSaree ? ["drape depth", "pallu fall", "pleats"] : isShortTop ? ["sleeve silhouette", "side fit", "hem finish"] : ["side silhouette", "fit", "drape and construction"],
       primaryReference: "front",
       purpose: "Show garment depth and fit",
-      prompt: "Create an intentional 35-to-45 degree three-quarter fashion pose that is visibly and physically turned from the hero pose, with both feet planted and close so a joined hem stays closed. Reveal side silhouette, drape depth, and sleeve shape while keeping the full outfit readable and preserving authentic bottom wear. Never a walking stride or a lifted foot. Model has a relaxed, natural glance and realistic, effortless expression — never a stiff stance or artificial smile.",
+      prompt: isShortTop
+        ? "Create a closer three-quarter knees-up catalog pose with torso and hips rotated 35 to 45 degrees away from Pose 1's frontal stance. Keep sleeves, shoulder construction, side profile, and hemline crisp and close enough to study easily over understated neutral bottoms, with relaxed soft hands clear of the garment and a genuine natural glance."
+        : "Create an intentional 35-to-45 degree three-quarter fashion pose clearly angled and distanced differently from Pose 1, with both feet planted and close so a joined hem stays closed. Reveal side silhouette, drape depth, side seams, and sleeve shape while keeping the full outfit readable and preserving authentic bottom wear or saree pleats. Natural living hands outside the garment perimeter; relaxed natural glance and effortless expression.",
       enabled: true,
     },
     {
       id: "back",
       title: "Full Back View",
-      framing: "3:4 portrait, head-to-toe true rear view with the full back and hem visible",
-      bodyPosition: "Model faces fully away from camera with shoulders and hips square, weight relaxed and natural; no three-quarter cheat",
-      handPlacement: "Hands placed naturally where they do not cover the back neckline, closure, embroidery, waist, or rear silhouette",
-      expression: "Face is not forced toward camera; preserve identity through hair, body, and styling continuity; if glancing back, face and profile must match identity anchor with a natural, effortless look",
+      framing: isShortTop
+        ? "3:4 portrait, three-quarter knees-up or full rear view clearly showing the back neckline, shoulders, and complete top back hem"
+        : "3:4 portrait, head-to-toe true rear view with the full back and hem visible",
+      bodyPosition: "Model faces fully away from camera with shoulders and hips square, weight relaxed on one hip and natural slight human posture; no three-quarter cheat",
+      handPlacement: "Arms slightly eased away from the torso sides with natural soft fingers so the entire back panel, waist shape, back hem, and side seams read cleanly",
+      expression: "Face is not forced toward camera; preserve identity through hair, body, and styling continuity; if glancing back, profile must match identity anchor naturally",
       productVisibilityRules: isSaree
-        ? ["uploaded back image is the sole back-design authority", "rear drape and pallu fall visible", "exact same backdrop wall, floor, and lighting from Pose 1 - zero new props"]
+        ? ["uploaded back image is the sole back-design authority", "rear drape and pallu fall visible", "hair swept forward or into an updo leaving upper back clear", "exact same backdrop wall, floor, and lighting from Pose 1 - zero new props"]
         : [
           "uploaded back image is the sole back-design authority",
           "entire rear construction visible from neckline to hem",
@@ -840,31 +867,50 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       highlightedDetails: isSaree ? ["rear drape", "pallu fall", "back blouse details"] : ["back construction", "back neckline", "rear pattern placement"],
       primaryReference: "back",
       purpose: "Document the real back design",
-      prompt: "Turn the model fully away from camera to capture the authentic rear garment design from the uploaded back reference. For outfits with a dupatta, shawl, or stole, drape it forward over the arms or front so the back panel, neckline, embroidery, seams, and fit remain 100% unobstructed and clearly visible. Preserve the exact model identity, styling, and the identical studio set, wall color, and lighting established in Pose 1.",
+      prompt: "Turn the model fully away from camera to capture the authentic rear garment design from the uploaded back reference. For outfits with a dupatta, shawl, or stole, drape it forward over the arms or front so the back panel, neckline, embroidery, seams, and fit remain 100% unobstructed and clearly visible. Sweep hair forward or into an updo. Preserve the exact model identity, styling, and the identical studio set, wall color, and lighting established in Pose 1.",
       enabled: true,
     },
     {
       id: "creative",
       title: "Natural Editorial Pose",
-      framing: "3:4 portrait with a garment-appropriate full or three-quarter body editorial crop",
-      bodyPosition: "Relaxed editorial stance that is clearly not the hero pose: contrapposto or a soft three-quarter lean with balanced weight (when framed full-length head-to-toe, keep both feet grounded and close so hems and pleats stay intact). Sit only when the product notes demand sitting. Never a frozen walking stride or a wide leg split",
-      handPlacement: "Relaxed and intentional; hands must not cover the garment's key selling features or change its apparent shape",
-      expression: "Calm, natural warmth — a small genuine smile or an easy glance; never a frozen laugh or an artificial grin",
+      framing: useCloserPose4
+        ? isShortTop
+          ? "3:4 portrait, waist-up to mid-thigh editorial framing noticeably closer than Pose 1 with natural set depth behind the model"
+          : "3:4 portrait, knees-up three-quarter editorial framing clearly closer and differently composed than Pose 1 while keeping upper drape, waist, and garment fall crisp"
+        : "3:4 portrait with full head-to-toe editorial framing in a shifted studio spot and distinct posture from Pose 1",
+      bodyPosition: useCloserPose4
+        ? "Relaxed editorial contrapposto or soft three-quarter shoulder lean clearly distinct from Pose 1's centered stance within the same room — upper body eased into a natural asymmetric weight shift matching the closer editorial crop; sit only when product notes demand sitting, never copy style-reference sitting or pillar-pinning, and never freeze a walking stride"
+        : "Relaxed full-length editorial stance in a distinct angle/spot of the room, far from Pose 1's pose: soft contrapposto weight shift with both feet grounded and close so hems, pleats, and joined Farshi hems stay intact. Sit only when the product notes demand sitting; never copy style-reference posture or freeze a walking stride",
+      handPlacement: isSaree
+        ? "One hand gracefully touches the exterior outer lower edge of the pallu/drape from outside while the other hand rests softly beside the hip/waistline with natural curved fingers — zero phantom hands emerging from inside pleats and zero stiff splayed fingers"
+        : "Intentional asymmetric relaxed editorial arms — for example one hand resting softly near a hip/pocket crease or lightly guiding the outer dupatta border while the other relaxes with a gentle elbow bend; never claw the opposite forearm or cover yoke embroidery",
+      expression: "Calm, natural editorial warmth — a soft genuine smile or easy unposed gaze; never a frozen laugh or an artificial stock grin",
       productVisibilityRules: isSaree
-        ? ["product remains the visual subject", "creative movement highlights fabric fluidity and pallu", "no prop or limb hides key drape features", "if seated, drape and pleats remain clean and readable"]
+        ? ["product remains the visual subject", "closer editorial crop shows chest pallu drape, border work, and pleat transitions clearly", "no prop or limb hides key drape features", "no handheld coffee/bag/sunglasses copied from style reference"]
+        : useCloserPose4
+          ? [
+            "product remains the visual subject within the planned knees-up/waist-up editorial crop",
+            "clear variation in camera distance and body language from Pose 1",
+            "no prop or limb hides neckline, sleeves, yoke, or garment construction",
+            "no handheld objects or style-reference clothing copied",
+          ]
         : [
           "product remains the visual subject",
           "no prop or limb hides key construction",
           "creative movement does not alter bottom wear cut, leg volume, fit, or silhouette",
           "if seated on a bench or architectural step, both trouser legs and footwear remain visible, unbunched, and fully displayed",
         ],
-      consistencyNotes: "Borrow only art direction, backdrop, and jewellery/ornament taste from style references; garment, bottom wear, footwear, accessories that ship with the product, model, and shoot continuity remain locked",
-      description: "A natural editorial pose clearly distinct from Pose 1 (head-to-toe with feet close, or an above-ankle editorial crop matching the planned framing), unless the product notes demand a seated frame.",
-      cameraAngle: "Product-appropriate editorial angle",
-      highlightedDetails: isSaree ? ["fabric movement", "fluidity", "creative direction"] : ["movement", "silhouette", "creative direction"],
+      consistencyNotes: "Borrow only art direction, backdrop, and subtle jewellery taste from style references; garment, footwear, model identity, and studio light continuity remain locked",
+      description: useCloserPose4
+        ? "A closer, distinct editorial pose (knees-up or waist-up three-quarter angle) clearly diverging in camera proximity and body language from Pose 1, unless product notes demand sitting."
+        : "A full-length natural editorial pose clearly distinct from Pose 1 (relaxed contrapposto with feet grounded and close), unless the product notes demand a seated frame.",
+      cameraAngle: useCloserPose4 ? "Intimate eye-level to slight editorial angle, knees-up or mid-thigh crop" : "Product-appropriate dynamic full-body editorial angle",
+      highlightedDetails: isSaree ? ["upper drape and border clarity", "fabric fluidity", "editorial poise"] : isShortTop ? ["bodice & sleeve fit up close", "editorial warmth", "neckline craft"] : ["movement and silhouette", "fabric drape", "editorial variety"],
       primaryReference: "front",
-      purpose: "Campaign and social-commerce storytelling",
-      prompt: "Create a natural editorial catalog frame that is clearly not the hero pose — a relaxed contrapposto or soft three-quarter lean matching the planned full or editorial crop (when framed head-to-toe, keep both feet grounded and close so hems and pleats stay intact). Sit only when the product notes demand sitting. Never copy a seated pose from the style photo. Never a frozen walking stride, a spin, or a wide leg split. Use a calm, natural expression. Preserve the complete product, bottom wear silhouette, and footwear. Rebuild the photoshoot backdrop, wall, floor, lighting, and jewellery from the style reference only - never from product-photo backgrounds.",
+      purpose: "Campaign and social-commerce storytelling with genuine compositional variety",
+      prompt: useCloserPose4
+        ? "Create a closer three-quarter editorial portrait (knees-up or waist-to-mid-thigh framing as planned) with a relaxed contrapposto shoulder/hip shift clearly distinct in distance and posture from Pose 1. Sit only if the product notes explicitly ask for a seated shot; never copy sitting, pillar-leaning, clothing, coffee cups, or tote bags from the style reference, and never freeze a walking stride. Keep both arms anatomically continuous outside garment edges with natural soft fingers clear of yoke craft and a warm, effortless expression. Maintain identical model identity, product truth, and studio set light."
+        : "Create a full-length natural editorial catalog frame clearly distinct in angle and posture from Pose 1 — a relaxed contrapposto stance with both feet grounded and close so hems, pleats, and joined Farshi hems stay intact. Sit only when the product notes explicitly demand sitting. Never copy a seated pose or handheld objects from the style photo, and never freeze a walking stride. Use a calm, natural expression, relaxed exterior hands, and identical model identity, product truth, and studio set light.",
       enabled: true,
     },
     {
@@ -872,21 +918,21 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       title: "Zoomed-In Product Detail Highlight",
       framing: "3:4 portrait, genuinely zoomed in - either a face-to-chest/face-to-waist crop with a LARGE readable product detail, or a tighter product-detail crop when a full face would make that detail too small - never a repeat of the full-body hero",
       bodyPosition: "Natural, relaxed upper-body or detail-crop angle that keeps the chosen selling detail large and sharp; include the face only when that still leaves the detail catalog-readable",
-      handPlacement: "Hands relaxed and natural - resting near the highlighted detail without covering it, or away from frame if the detail is elsewhere",
-      expression: "When the face is in frame: a soft, beautiful, natural expression with authentic warmth, gentle lips, and relaxed eyes; never a forced or exaggerated smile. When the crop is product-detail-first: expression is optional because the face may be partial or omitted",
+      handPlacement: "Keep hands relaxed OUT of the chest/yoke embroidery or primary craft zone (arms eased downward at sides or cropped cleanly out of frame) so zero fingers obscure, press flat on, or distract from the craftsmanship",
+      expression: "When the face is in frame: a soft, genuine, calm expression with relaxed eyes; never a forced grin. When product-detail-first: expression is optional because the face may be partial or omitted",
       productVisibilityRules: [
-        "the named product selling detail is large, sharp, and unobstructed - this is the subject of the frame",
+        "the named primary product selling detail is large, sharp, and 100% unobstructed - never covered by fingers, hands, or a dupatta",
         "never a full-body or wide hero repeat",
         "include a sharp face-to-chest or face-to-waist pairing only when that crop still makes the detail readable",
         "if embroidery, neckline craft, print scale, pallu/border, or fabric texture would be too small beside a full face, crop to the product detail instead of the face",
       ],
       consistencyNotes: "Keep the same identity, hair, makeup, jewellery, footwear, scene, lighting, and product truth from Pose 1; only the crop tightens around the selling detail",
-      description: "A zoomed-in shot that sells the product's most important real detail, with the face included only when it does not shrink that detail.",
-      cameraAngle: "Eye-level, zoomed in to a product-detail crop or a face-to-chest/face-to-waist crop that still leaves the detail large",
-      highlightedDetails: ["key product detail", "craftsmanship", "optional face"],
-      primaryReference: "fabric_pattern",
-      purpose: "Social-first product-detail shot that can also include the face when the craftsmanship stays readable",
-      prompt: "Create a genuinely zoomed-in product-detail photograph - clearly tighter than the full-body hero, never a repeat of it. Lead with one sharp, large, catalog-readable highlight of the product's most important real detail (embroidery, neckline, drape, print scale, or fabric texture). If the face is in frame it must be the locked model identity with a calm natural expression, in a face-to-chest or face-to-waist crop only when that still leaves the detail large. If a full face would make the selling detail too small, crop to the product detail and let the face be partial or omitted.",
+      description: "A zoomed-in macro shot selling the primary garment's signature craftsmanship with hands completely clear of the craft.",
+      cameraAngle: "Eye-level macro or tight detail crop centered squarely on the primary craft detail",
+      highlightedDetails: ["key primary garment detail", "craftsmanship and weave", "optional face"],
+      primaryReference: isSaree ? "saree_body_detail" : "fabric_pattern",
+      purpose: "Social-first product-detail shot proving primary fabric, weave, and embroidery quality",
+      prompt: "Create a genuinely zoomed-in product-detail macro photograph clearly tighter than Pose 1, focused on the primary garment's signature craft (kurti/top neckline, yoke embroidery, butti weave, or saree body weave & border — never hijacked by a secondary dupatta). Keep hands cleanly out of the embroidery zone (never pressing fingers flat across chest motifs). Include the locked face only in a face-to-chest crop if the detail stays large; otherwise crop tightly onto the garment craft itself inside the exact same room lighting.",
       enabled: true,
     },
     showcaseShot
@@ -1456,7 +1502,30 @@ export function assertSareeGenerationReady(session: unknown) {
   }
 }
 
-export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, options: { bottomWearMode?: unknown; skuName?: string; productDetails?: string } = {}) {
+const FORBIDDEN_HELD_OBJECT_CORE = String.raw`iced[-\s]?coffee|coffee|latte|matcha|boba|espresso|drinks?|beverages?|drinking\s+glass(?:es)?|tea[-\s]?(?:cup|mug|glass)s?|(?:coffee|tea|paper|plastic|takeaway|iced)[-\s]?cups?|mugs?|(?:water|plastic|drink|beverage|glass)[-\s]?bottles?(?!\s*green)|drinking\s+straws?|plastic\s+straws?|sipper\s+straws?|totes?|tote[-\s]?handles?|handbags?|shoulder[-\s]?bags?|sling[-\s]?bags?|backpacks?|wallets?|smartphones?|cell\s+phones?|phones?|sparklers?|fireworks?|handheld\s+props?|handheld\s+objects?|bags?|purses?|clutch(?:es)?|flowers?|bouquets?|diya[s]?|candles?|umbrellas?`;
+
+export const FORBIDDEN_NON_EYEWEAR_HELD_OBJECT_PATTERN = new RegExp(`\\b(?:${FORBIDDEN_HELD_OBJECT_CORE})\\b`, "i");
+export const FORBIDDEN_HELD_OBJECT_PATTERN = new RegExp(`\\b(?:${FORBIDDEN_HELD_OBJECT_CORE}|sunglass(?:es)?|eyewear|shades)\\b`, "i");
+
+export function sanitizeHeldObjectText(value: unknown, replacement: string, allowNotes = ""): string {
+  const raw = String(value ?? "");
+  if (!raw || !FORBIDDEN_HELD_OBJECT_PATTERN.test(raw)) return raw;
+  const allowLower = allowNotes.toLowerCase();
+  const clauses = raw.split(/(?<=[.!;])\s+/);
+  const kept = clauses.filter((clause) => {
+    const match = clause.match(FORBIDDEN_HELD_OBJECT_PATTERN);
+    if (!match) return true;
+    const token = match[0].toLowerCase().trim();
+    return Boolean(token && allowLower && allowLower.includes(token));
+  });
+  return kept.join(" ").trim() || replacement;
+}
+
+export function normalizeAnalysis(
+  raw: JsonRecord,
+  categoryFallback: string,
+  options: { bottomWearMode?: unknown; skuName?: string; productDetails?: string; modelDirection?: string } = {},
+) {
   const product = objectValue(raw.productIdentity ?? raw.product_identity);
   const creative = objectValue(raw.creativeDirection ?? raw.creative_direction);
   const model = objectValue(raw.modelIdentity ?? raw.model_identity);
@@ -1505,6 +1574,7 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     sareeTruth,
     sareeDrapePlan,
   };
+  const allowPropNotes = [options.skuName, options.productDetails].filter(Boolean).join(" ");
   const creativeDirection = {
     backgroundStyle: stringValue(creative.backgroundStyle ?? creative.background_style, "Clean premium catalog background"),
     studioEnvironment: stringValue(creative.studioEnvironment ?? creative.studio_environment, "Professional fashion shoot environment"),
@@ -1516,7 +1586,11 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     colorTreatment: stringValue(creative.colorTreatment ?? creative.color_treatment, "Natural product-accurate color"),
     modelStyling: stringValue(creative.modelStyling ?? creative.model_styling, "Minimal styling that does not obscure the product"),
     photographyStyle: stringValue(creative.photographyStyle ?? creative.photography_style, "Commercial fashion photography"),
-    propUsage: stringValue(creative.propUsage ?? creative.prop_usage, "No distracting props"),
+    propUsage: sanitizeHeldObjectText(
+      stringValue(creative.propUsage ?? creative.prop_usage, "No distracting props"),
+      "No handheld props; style-reference bags, cups, or objects excluded",
+      allowPropNotes,
+    ),
     shadowStyle: stringValue(creative.shadowStyle ?? creative.shadow_style, "Natural contact shadows"),
     editorialCommercialFeel: stringValue(creative.editorialCommercialFeel ?? creative.editorial_commercial_feel, "Premium e-commerce editorial"),
     lensAndCamera: stringValue(creative.lensAndCamera ?? creative.lens_and_camera, "One consistent full-frame fashion-camera perspective and natural lens rendering"),
@@ -1542,8 +1616,11 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
       raw.showcasePlan ?? raw.showcase_plan ?? creative.showcasePlan ?? creative.showcase_plan,
     ),
   };
+  const requestedCastingFallback = options.modelDirection && String(options.modelDirection).trim()
+    ? `${String(options.modelDirection).trim()} adult fashion model with a naturally warm, approachable face and realistic skin texture`
+    : "One consistent adult fashion model across every image in the set, reading as a youthful young adult with a naturally pretty, warm, approachable face";
   const modelIdentity = {
-    castingDirection: stringValue(model.castingDirection ?? model.casting_direction, "One consistent adult fashion model across every image in the set, reading as a youthful young adult with a naturally pretty, warm, approachable face"),
+    castingDirection: stringValue(model.castingDirection ?? model.casting_direction, requestedCastingFallback),
     face: stringValue(model.face, "Keep the exact same recognizable face across the complete set - identical face shape, eyes, eyebrows, nose, lips, and jawline as established in Pose 1"),
     faceRealism: stringValue(
       model.faceRealism ?? model.face_realism,
@@ -1581,18 +1658,22 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
     const candidate = objectValue(poses.find((pose) => objectValue(pose).id === fallback.id) ?? poses[index]);
     return {
       id: fallback.id, title: stringValue(candidate.title ?? candidate.name, fallback.title),
-      description: stringValue(candidate.description, fallback.description),
+      description: sanitizeHeldObjectText(stringValue(candidate.description, fallback.description), fallback.description, allowPropNotes),
       cameraAngle: stringValue(candidate.cameraAngle ?? candidate.camera_angle, fallback.cameraAngle),
       framing: stringValue(candidate.framing, fallback.framing),
       bodyPosition: stringValue(candidate.bodyPosition ?? candidate.body_position, fallback.bodyPosition),
-      handPlacement: stringValue(candidate.handPlacement ?? candidate.hand_placement, fallback.handPlacement),
+      handPlacement: sanitizeHeldObjectText(
+        stringValue(candidate.handPlacement ?? candidate.hand_placement, fallback.handPlacement),
+        fallback.handPlacement,
+        allowPropNotes,
+      ),
       expression: stringValue(candidate.expression, fallback.expression),
       highlightedDetails: stringArray(candidate.highlightedDetails ?? candidate.highlighted_details, [...fallback.highlightedDetails]),
       productVisibilityRules: stringArray(candidate.productVisibilityRules ?? candidate.product_visibility_rules, [...fallback.productVisibilityRules]),
       primaryReference: stringValue(candidate.primaryReference ?? candidate.primary_reference, fallback.primaryReference),
       purpose: stringValue(candidate.purpose, fallback.purpose),
       consistencyNotes: stringValue(candidate.consistencyNotes ?? candidate.consistency_notes, fallback.consistencyNotes),
-      prompt: stringValue(candidate.prompt, fallback.prompt), enabled: candidate.enabled !== false,
+      prompt: sanitizeHeldObjectText(stringValue(candidate.prompt, fallback.prompt), fallback.prompt, allowPropNotes), enabled: candidate.enabled !== false,
     };
   }).map((pose) => {
     // The model writes the prose for all six frames, but the sixth frame's
@@ -1659,8 +1740,10 @@ export function normalizeAnalysis(raw: JsonRecord, categoryFallback: string, opt
 export function buildCombinedAnalysisPrompt(args: {
   skuName: string; productDetails: string; category: string; modelDirection: string; sceneDirection: string;
   referenceManifest: Array<{ number: number; role: string }>; housePreferences?: string; fashionKnowledge?: string;
-  analysisLearning?: string; showcaseFeedback?: string;
+  analysisLearning?: string; showcaseFeedback?: string; hasModelReference?: boolean; useStyleAsModelFace?: boolean;
 }) {
+  const hasExplicitModelRef = Boolean(args.hasModelReference) || args.referenceManifest.some((item) => /^MODEL FACE REFERENCE\b/i.test(item.role) || item.role === "model_identity");
+  const useStyleAsModelFace = !hasExplicitModelRef && Boolean(args.useStyleAsModelFace);
   const manifest = args.referenceManifest.map(({ number, role }) => `IMAGE ${number}: ${role}`).join("\n");
   const positiveNotes = [
     positiveBottomWearPortion(args.skuName),
@@ -1682,9 +1765,9 @@ REFERENCE AUTHORITY (highest to lowest):
 6. MANNEQUIN / FLAT-LAY / DUPATTA SHOT - on a mannequin or dress form, authoritative for worn shape, fit, proportion and drape; laid flat or folded (such as a dupatta, stole, or garment piece), authoritative for piece identity, colour gradient/ombré, border/gota trim, construction, panel layout and length. Inspect this slot carefully for a dupatta, stole, scarf, or shawl packaged with the SKU!
 7. BOTTOM WEAR / FARSHI - when supplied, pixel-level authority for the trousers/skirt cut, volume, hem, color and print. Never copy upper-garment embroidery onto this panel.
 8. ADDITIONAL PRODUCT - another source of product truth, including supporting bottom-wear or included dupatta/stole evidence.
-9. STYLE REFERENCE - creative direction only. From the style reference, take the photoshoot backdrop, wall, floor, and lighting for all six poses. Do not copy that photo's pose, stance, framing, or handheld props into any pose. Take the model face from that image only when no MODEL FACE REFERENCE is supplied; when a MODEL FACE REFERENCE is supplied, discard the style-reference face, hair, and body. ABSOLUTE PROHIBITION ON COPYING THE PRODUCT FROM THE STYLE REFERENCE: The clothing, outfit, saree, dress, fabric, color, prints, or embroidery worn by the person in the style reference MUST BE 100% DISCARDED. Absolutely DO NOT copy, reproduce, or borrow the style reference's clothing. The product itself must stay based exclusively on uploaded product images and must not be redesigned. Never copy its garment, product color, bottoms, logos, or accessories.
+9. STYLE REFERENCE - creative direction only. From the style reference, take the photoshoot backdrop, wall, floor, and lighting for all six poses. Do not copy that photo's pose, stance, framing, or handheld props (no leaning/pillar posture, sunglasses, coffee cups, or tote bags) into any pose or creativeDirection. ${useStyleAsModelFace ? "Because the user uploaded this same image as MODEL FACE REFERENCE, take the model face from this image for all six poses." : "Take the model face from a dedicated MODEL FACE REFERENCE only when one is supplied; when no MODEL FACE REFERENCE is supplied, discard that person's face, hair, pillar-leaning stance, and objects in their hands (coffee cup, tote bag, handbag, sunglasses), and cast a fresh photorealistic model matching Requested model direction."} ABSOLUTE PROHIBITION ON COPYING THE PRODUCT FROM THE STYLE REFERENCE: The clothing, outfit, saree, dress, fabric, color, prints, or embroidery worn by the person in the style reference MUST BE 100% DISCARDED. Absolutely DO NOT copy, reproduce, or borrow the style reference's clothing. The product itself must stay based exclusively on uploaded product images and must not be redesigned. Never copy its garment, product color, bottoms, logos, coffee cups, tote bags, or accessories.
 
-Product references are frequently flat-lay, folded, pinned, or shot on a mannequin or dress form. Read the garment through that presentation: infer how each panel, hem, sleeve and closure behaves once it is worn on a live human body, and record that in the profile. The mannequin, dress form, hanger, clips, pins and the flat surface are photography apparatus, never part of the product - never describe them as garment features and never let them appear in the pose plan.
+Product references are frequently flat-lay, folded, pinned, or shot on a mannequin or dress form. Read the garment through that presentation: infer how each panel, hem, sleeve and closure behaves once it is worn on a live human body, and record that in the profile. The mannequin, dress form, hanger, clips, pins and the flat surface are photography apparatus, never part of the product - never describe them as garment features and never copy a mannequin's stiff straight arms, splayed plastic fingers, strapless bare chest wrap, or neck cutoff onto the human model.
 
 First, determine the garmentFamily from the references: "kurta_or_kurti_set", "saree", "dress", "western_or_casual", or "other".
 
@@ -1757,14 +1840,14 @@ Crucial Evidence Rules:
   - A rear/back entry in detailPlacementMap is allowed only when the matching rear region is "confirmed" and the named decoration/construction is explicitly visible in a direct BACK PRODUCT, REAR/BACK DRAPE, or matching BLOUSE BACK reference. Do not copy front lace, trim, borders, closures, or motifs into a rear placement lock.
   Fill detailPlacementMap with only source-supported region-specific hard locks and absenceConstraints with negative product facts as well for backward compatibility.
 
-SCENE AUTHORITY: when a STYLE REFERENCE image is supplied, that image defines the shoot. Describe what it actually shows - wall colour and finish, floor or ground surface, set dressing that stays in the room, plant or furniture presence, light direction and quality, camera height and distance, depth of field, colour grade - concretely enough to rebuild that set from the description alone. Do not record the pose or objects in the hands as set dressing. Never replace it with a generic "clean premium studio backdrop": a plain seamless-paper description when the reference shows a styled set is a failure of this analysis. A requested scene direction refines mood, styling and props on top of the referenced set; it does not replace the referenced backdrop. Only when no style reference is supplied does the requested scene direction define the scene by itself.
+SCENE AUTHORITY: when a STYLE REFERENCE image is supplied, that image defines the shoot. Describe what it actually shows - wall colour and finish, floor or ground surface, set dressing that stays in the room, plant or furniture presence, light direction and quality, camera height and distance, depth of field, colour grade - concretely enough to rebuild that set from the description alone. Do not record the pose, foreground pillar-leaning placement, or objects in the hands (such as iced coffee cups, drinks, tote bags, purses, phones, or sunglasses) as set dressing or propUsage. Keep the main standing zones open and unobstructed so full-length silhouettes have breathing room away from foreground columns. Never replace it with a generic "clean premium studio backdrop": a plain seamless-paper description when the reference shows a styled set is a failure of this analysis. A requested scene direction refines mood, styling and props on top of the referenced set; it does not replace the referenced backdrop. Only when no style reference is supplied does the requested scene direction define the scene by itself.
 PRODUCT vs STYLE DIVISION: Product references are garment/SKU truth only (cut, colour, print, embroidery, construction). The STYLE REFERENCE is the sole authority for photoshoot backdrop, room architecture, flooring, lighting, camera, mood, AND jewellery/ornament taste when those pieces are not already part of the product. THE CLOTHING WORN IN THE STYLE REFERENCE MUST BE 100% DISCARDED; NEVER DRESS THE MODEL IN THE STYLE REFERENCE'S CLOTHING OR BORROW ITS PRINTS/COLORS. Never mix a product-photo wall, arch, urn, pot, plant, or courtyard into creativeDirection.
 CRITICAL NEGATIVE RULE FOR SCENE & BACKGROUND: Product reference images (FRONT, BACK, BOTTOM, FABRIC, MANNEQUIN) frequently show the garment in an existing pre-shoot studio, outdoor location, archway, courtyard, terracotta pots/urns, plants, or furniture. You are STRICTLY FORBIDDEN from describing, extracting, or incorporating ANY background elements, walls, arches, urns, pots, plants, or furniture from the PRODUCT reference images into creativeDirection or backgroundStyle! The photoshoot scene MUST BE DERIVED 100% FROM THE STYLE REFERENCE (if supplied), or from the requested scene direction (if no style reference is supplied), or designed as a fresh, clean, elegant, neutral fashion studio.
 
-Build a Creative Direction Profile from style references, but never allow style to alter the product. Lock one lens family, camera height, perspective, exposure, white balance, color grade, light direction, shadow behavior, set geometry, and time-of-day so the results read as contact sheets from one real professional shoot. In realismRules, explicitly require natural skin texture with visible pores, strictly exactly two arms and two hands with zero extra or duplicate limbs, anatomically correct and naturally shaped eyes and teeth, and no synthetic AI artifacts.
+Build a Creative Direction Profile from style references, but never allow style to alter the product. Lock one lens family, camera height, perspective, exposure, white balance, color grade, light direction, shadow behavior, set geometry, and time-of-day so the results read as contact sheets from one real professional shoot. In realismRules, explicitly require natural skin texture with visible pores, strictly exactly two arms and two hands with soft relaxed human fingers (zero mannequin splayed hands, zero hands poking through fake garment/pleat slits, zero extra or duplicate limbs), anatomically correct and naturally shaped eyes and teeth, and no synthetic AI artifacts.
 
 Define one Model Identity Profile with concrete, specific facial detail - not generic filler. Describe visible appearance attributes only; never identify, name, or infer personal attributes of anyone depicted.
-CASTING BRIEF: an adult fashion model who reads as a youthful young adult - late teens to early twenties in appearance - with a naturally pretty, warm, approachable face and a genuine friendly expression rather than a severe or corporate look. Record this in modelIdentity.castingDirection. This brief describes the casting look only: when a MODEL FACE REFERENCE image is supplied, that face governs completely and must not be restyled, aged, slimmed, lightened or "improved" to fit the brief. If a MODEL FACE REFERENCE image is present in the manifest above, describe the face shape, eyebrow shape, nose, lips, and jawline visible in that image in modelIdentity.face - do not design a different face, and note in modelIdentity.face that these attributes must match the reference image exactly. If the eyes are covered, record the cover and do not invent eye color. If no MODEL FACE REFERENCE was supplied but a STYLE REFERENCE is attached, describe that photo's visible jaw, nose, lips, skin, and hair the same way, and record a cover instead of inventing eye color when the eyes are hidden. Design a face only when neither photo is attached, with enough concrete detail that the same person is recognizable in every pose. In modelIdentity.faceRealism, lock the photorealism bar for every pose: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, eyes kept as the identity photo shows them (including a cover when the eyes are hidden), and naturally aligned teeth (not uniformly perfect, no extra or missing teeth) - never a plastic, waxy, airbrushed, or symmetric "AI face". Lock skin tone, hair, makeup, body proportions, accessories and footwear the same way across all six images.
+CASTING BRIEF: an adult fashion model who reads as a youthful young adult matching Requested model direction (for example "${args.modelDirection || "South Asian - Female"}") - with a naturally warm, approachable, photorealistic face and genuine living composure rather than a severe or synthetic look. Record this in modelIdentity.castingDirection. ${hasExplicitModelRef || useStyleAsModelFace ? `A MODEL FACE identity image IS active in the manifest (${hasExplicitModelRef ? "MODEL FACE REFERENCE" : "STYLE REFERENCE duplicated as MODEL FACE REFERENCE"}): that exact face governs completely and must not be restyled, aged, slimmed, lightened, or replaced. Describe the visible face shape, eyebrow shape, nose, lips, and jawline in modelIdentity.face so every frame preserves that exact person. If the eyes are covered, record the cover and do not invent eye color.` : `NO MODEL FACE REFERENCE image is attached: design a fresh, original, believable adult fashion model consistent with Requested model direction, with concrete repeatable jawline, eyebrow, nose, lip, skin-tone, and hairstyle notes locked from Pose 1 across all six poses. Strictly DO NOT copy the STYLE REFERENCE model's face, hair, sunglasses, coffee cup, tote bag, or clothing.`} In modelIdentity.faceRealism, lock the photorealism bar for every pose: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, eyes kept naturally realistic (or covered when the explicit model-identity reference hides the eyes), and naturally aligned teeth (not uniformly perfect, no extra or missing teeth) - never a plastic, waxy, airbrushed, or symmetric "AI face". Lock skin tone, hair, makeup, body proportions, accessories and footwear the same way across all six images.
 
 Overall pose energy: every one of the six poses should look like a real marketplace catalog photograph of one person in one room - relaxed, natural, and believable, never stiff, robotic, frozen mid-stride, or a wide stock-photo grin.
 MODEL EXPRESSIONS & SMILES: Model expressions and smiles must look natural, relaxed, and realistic with soft lips, relaxed facial muscles, and subtle warmth, or calm composed poise. NEVER artificial, forced, stiff, wide, or frozen stock catalog smiles.
@@ -1793,21 +1876,22 @@ This records how earlier sixth frames for this category were received - which su
 Accessory styling suggestion: look at what footwear and accessories (if any) the product references actually show. If the product's own footwear/bag/accessories are missing, incomplete, or would not read well on camera, propose ONE tasteful, trend-right, Gen-Z-appropriate addition (for example a specific footwear style or a small bag) in creativeDirection.suggestedAccessories, described specifically enough for a stylist to execute identically across all six poses. Only suggest an addition when it genuinely fits the pose plan and category - if the product references already show adequate footwear/accessories, or nothing suits the shot, leave creativeDirection.suggestedAccessories empty. This is a styling addition only: it must never be treated as part of the garment, and it must never contradict detailPlacementMap or absenceConstraints.
 
 GARMENT-SPECIFIC POSE GRAMMAR - match every pose to what this garment actually is. Record the family you read in productIdentity.garmentFamily and let it drive body language in every pose prompt:
-- BENGALI SAREE (tant, taant, jamdani, dhakai, garad, korial, baluchari, swarnachari, kantha, lal-paar/red-and-white, shantipuri, begumpuri, or an aatpoure/Bengali drape): elegant, upright, serene posture with level shoulders and small, deliberate movement. The pallu/aanchal must be placed exactly as recorded - correct shoulder, correct fall direction, correct visible length - and stay open and readable. Front pleats flat, evenly stacked and vertical; upper and lower borders continuous and identical in width; hem border level. Hands never cross the pallu artwork or the border.
-- ETHNIC / TRADITIONAL & GEN-Z CONTEMPORARY SAREE (any regional, festive, or modern Gen-Z saree): choose graceful, current Gen-Z-aligned editorial poise that respects traditional pallu, pleat, and border discipline while giving each of the 6 frames distinct silhouette energy (clean crisp shoulder fall or pleated Nivi drape as proven by the saree references, relaxed modern collarbone poise, soft three-quarter turn revealing pallu drop and border depth, true rear blouse/pallu view, macro pallu/zari craft crop, and flowing editorial sweep — zero stiffness and zero trousers). The pallu stays one continuous placed panel, never duplicated into extra loose cloth.
-- KURTI / KURTA SET (top + bottom, and dupatta whenever present in any reference): poses must prove fit, true length, neckline/back construction, bottom-wear cut, and complete set harmony. Keep the top's full length and straps/sleeves readable, keep bottom wear visible waistband-to-hem preserving exact cut (apply the Farshi narrow-from-waist + 6-inch joined hem + 4-inch taper rule ONLY when cut is Farshi; keep palazzo, sharara, gharara, straight, and salwar pure to their own geometry), and drape any uploaded dupatta gracefully so front neckline/butti work and bottom silhouette remain readable (and swept forward over elbows on back pose!).
-- STANDALONE LONG KURTI OR TOP-ONLY SHORT KURTI: keep bottomWearDetails explicitly "none - standalone garment". Pair only with quiet, understated neutral styling bottoms in stylingPlan; poses prove top fall, true hem length, neckline, sleeves, and craftsmanship across distinct front, 45-degree turn, true rear, contrapposto, craft close-up, and showcase frames without ever inventing a matching bottom piece. Never hitch, tuck, or gather the hem.
+- BENGALI SAREE (tant, taant, jamdani, dhakai, garad, korial, baluchari, swarnachari, kantha, lal-paar/red-and-white, shantipuri, begumpuri, or an aatpoure/Bengali drape): elegant, upright, serene living-human posture centered in an open floor zone with level shoulders and small, deliberate movement. The pallu/aanchal must be placed exactly as recorded - correct shoulder, correct fall direction, correct visible length - and stay open and readable. Front pleats flat, evenly stacked and vertical; upper and lower borders continuous and identical in width; hem border level. Strictly exterior relaxed hands only — hands never emerge through a slit inside pleats and never cross pallu artwork or border. If saree references show a strapless knotted mannequin wrap without a stitched blouse, pair with a plain undecorated solid modest half/elbow-sleeve blouse with zero invented embroidery or ties.
+- ETHNIC / TRADITIONAL & GEN-Z CONTEMPORARY SAREE (any regional, festive, or modern Gen-Z saree): choose graceful, current Gen-Z-aligned editorial poise centered cleanly in an open unobstructed bay of the set (never squished behind or leaning on a foreground stone column) while giving Poses 1, 2, 4, and 6 clearly distinct camera proximity, torso turn, and composition (full centered hero, shifted 40-degree drape turn, true rear blouse/pallu view, closer knees-up editorial border/shoulder showcase, tight weave/border macro, open pallu showcase — zero stiffness, zero mannequin splayed fingers, zero phantom hands poking out of pleats, and zero trousers). If references show a blouseless strapless mannequin wrap, pair with a plain undecorated solid fitted half/elbow-sleeve blouse locked across all six frames without inventing motifs, borders, cutouts, or back ties. The pallu stays one continuous placed panel, never duplicated into extra loose cloth.
+- KURTI / KURTA SET (top + bottom, and dupatta whenever present in any reference): poses must vary torso turn, studio position, and camera distance across Poses 1, 2, 4, and 6 so Poses 1, 2, and 4 never repeat the exact same static frontal step/tile. Keep the top's full length and straps/sleeves readable, keep bottom wear visible waistband-to-hem preserving exact cut (apply the Farshi narrow-from-waist + 6-inch joined hem + 4-inch taper rule ONLY when cut is Farshi; keep palazzo, sharara, gharara, straight, and salwar pure to their own geometry), keep arms relaxed outside the kurta/dupatta perimeter (never poking a hand through a fake front slit or gripping the opposite forearm), and drape any uploaded dupatta gracefully so front neckline/butti work and bottom silhouette remain readable (and swept forward over forearms on back pose!).
+- SHORT KURTI / TOP-ONLY: frame Pose 1, Pose 2 (knees-up 40° turn), Pose 4 (waist-up/mid-thigh closer editorial), Pose 5 (macro craft detail with hands clear), and Pose 6 (sleeve/hem/backdrop showcase) tightly enough that the top fills the frame cleanly as the star — NEVER shrink a short top into 5 identical distant full-body pavement/shoe shots. Keep understated neutral bottoms clearly secondary.
+- STANDALONE LONG KURTI: keep bottomWearDetails explicitly "none - standalone garment". Pair only with quiet, understated neutral styling bottoms in stylingPlan; poses prove top fall, true hem length, neckline, sleeves, side slits, and craftsmanship across distinct front, 40-degree turn, true rear, knees-up editorial contrapposto, craft close-up, and full-length silhouette showcase frames without ever inventing a matching bottom piece. Never hitch, tuck, or gather the hem.
 - LEHENGA: show choli, dupatta and the complete skirt flare with the hem in frame and the skirt volume never flattened.
-- DRESS / GOWN / WESTERN-CASUAL: relaxed, current body language showing the complete silhouette from shoulder to hem, hem level and inside the frame.
-In every family the pose may only change body position, angle, framing and expression — AND Poses 1, 2, 4, 5, and 6 must be visually distinct in torso turn, camera distance, and arm placement (never repeat Pose 1's straight-on symmetric hero stance in Pose 2, 4, or 6!). It must never change the garment's design, print, motif scale, colour, fit, construction or bottom-wear silhouette.
+- DRESS / GOWN / WESTERN-CASUAL: relaxed, current body language showing distinct camera angles/distances while keeping silhouette and hem level and intact.
+In every family the pose may only change body position, angle, framing, studio floor placement, and natural expression — AND Poses 1, 2, 4, 5, and 6 must be visually distinct in torso turn, camera distance, and natural arm choreography (never copy style-reference coffee cups, tote bags, sunglasses, or dead-hanging mannequin arms!). It must never change the garment's design, print, motif scale, colour, fit, construction or bottom-wear silhouette.
 
-Create exactly six product-specific camera setups in one coherent commercial coverage sequence with MANDATORY PHYSICAL VARIATION across all 6 slots, in this order and with these ids: full_front, angled, back, creative, closeup, showcase. They are NOT repeats of each other. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints. Every individual prompt must (1) describe THIS product's exact colour, fabric, construction and selling details from the product references, and (2) direct the model's stance, angle, action, and expression, while creativeDirection must rebuild the photoshoot backdrop, wall, floor, lighting and furniture from the STYLE REFERENCE only.
+Create exactly six product-specific camera setups in one coherent commercial coverage sequence with MANDATORY PHYSICAL VARIATION across all 6 slots, in this order and with these ids: full_front, angled, back, creative, closeup, showcase. They are NOT repeats of each other. Every pose must specify exact framing, body position, hand placement, expression, product visibility rules, reference authority, highlighted details, purpose, consistency note, and a self-contained prompt that repeats the relevant location locks and absence constraints. Every individual prompt must (1) describe THIS product's exact colour, fabric, construction and selling details from the product references, and (2) direct the model's stance, angle, action, relaxed continuous natural hands, and calm expression, while creativeDirection must rebuild the photoshoot backdrop, wall, floor, lighting and furniture from the STYLE REFERENCE only.
 
-- full_front: straight-on (shoulders and hips facing forward), unobstructed head-to-toe hero matching the requested output aspect ratio (use "straight-on" or the matching portrait/landscape framing terminology; never describe framing or the frame itself as "square" unless 1:1 output is requested); establishes face/hair/styling/footwear/scene/lighting anchor with balanced weight, natural catalog composure, and an authentic gentle smile or relaxed glance (never a stiff stance or artificial smile).
-- angled: mandatory 35 to 45 degree intentional turn of torso and hips with both feet planted and close, clearly revealing side construction, garment depth, side seam, and sleeve silhouette. Never a walking stride or a lifted foot, and never open a joined Farshi hem. Must be visibly turned away from flat frontal — NEVER a static frontal standing repeat! Natural, effortless glance following the angle with an authentic soft smile or composed editorial look (never an exaggerated or frozen stock smile). Do not copy the pose or the handheld props from the style or model-face photo.
-- back: true head-to-toe rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees. For outfits with a dupatta or shawl, the dupatta must be draped forward over arms or front so the rear garment (neckline, back panel, embroidery, hem) is 100% unobstructed and visible. Hair swept forward or in an updo. The studio set, backdrop wall, lighting, and model identity must strictly match the other poses.
+- full_front: straight-on (shoulders and hips facing forward) positioned in an open floor zone with clean margins around the silhouette (never pinched against a foreground pillar), matching the requested output aspect ratio (tailored closer full/mid-thigh hero for short_kurti_top, head-to-toe for sets/kurtis/sarees; never describe framing itself as "square" unless 1:1 output is requested); establishes face/hair/styling/footwear/scene/lighting anchor with relaxed weight shift, asymmetric natural living hands clear of embroidery/pleat slits, and natural warm composure.
+- angled: mandatory 35 to 45 degree intentional turn of torso and hips from a visibly shifted perspective, with both feet planted and close (knees-up three-quarter framing for short_kurti_top so sleeves and fit shine up close; full-length for sarees/sets), clearly revealing side construction, garment depth, side seam/slit, and sleeve silhouette. Never a walking stride or lifted foot, never a flat frontal repeat, and never copy poses or handheld props (cups, totes, sunglasses, bags) from the style photo.
+- back: true full rear view, shoulders and hips fully away; uploaded BACK is the sole rear-construction authority, or rear drape for sarees. For outfits with a dupatta or shawl, the dupatta must be draped forward over arms or front so the rear garment (neckline, back panel, embroidery, hem) is 100% unobstructed and visible. Hair swept forward or in an updo. The studio set, backdrop wall, lighting, and model identity must strictly match the other poses.
 - creative:
-  * SEATED POSE LOCK: Pose 4 sits only when the user product notes explicitly demand sitting. Set creativeDirection.seatedPoseRequired to "yes" only for that request, and seatedPoseReason to a one-line quote of the note. A person sitting in the STYLE REFERENCE, the MODEL FACE photo, a product photo, or APPROVED POSE 1 is not a request to sit: set seatedPoseRequired to "no" and do not copy that pose. When the notes demand sitting, this 4th pose is an elegant seated editorial on furniture that already belongs to the set, with the garment, bottom wear, hemline, and footwear fully visible. Otherwise design a natural editorial stance that is clearly not the hero pose - relaxed contrapposto or a soft three-quarter lean. Keep framing, description, bodyPosition, and prompt 100% mutually consistent: use full-length head-to-toe framing (with both feet grounded and close so hems, pleats, and a joined Farshi hem stay intact) for Farshi or bottom-led sets; if using a knees-up or waist-up editorial crop (for sarees or upper garments after Poses 1 and 2 show the full drape), describe only the upper/torso contrapposto and NEVER write "feet grounded and close" inside a knees-up/waist-up crop. Never a frozen walking stride, a spin, or a wide leg split. Expression is calm and genuine - a small smile or an easy glance, never a frozen laugh.
+  * SEATED POSE LOCK: Pose 4 sits only when the user product notes explicitly demand sitting. Set creativeDirection.seatedPoseRequired to "yes" only for that request, and seatedPoseReason to a one-line quote of the note. A person sitting in the STYLE REFERENCE, the MODEL FACE photo, a product photo, or APPROVED POSE 1 is not a request to sit: set seatedPoseRequired to "no" and do not copy that pose, any coffee cup/tote bag, or any pillar-leaning head tilt. When the notes demand sitting, this 4th pose is an elegant seated editorial on furniture that already belongs to the set, with the garment, bottom wear, hemline, and footwear fully visible. Otherwise design a distinctly closer/different natural editorial stance that clearly diverges from Pose 1's tile and camera distance — full-length head-to-toe with feet grounded and close for Farshi bottom sets, OR a closer knees-up / waist-up three-quarter editorial contrapposto for sarees, short tops, standalone long kurtis, and non-Farshi sets (matching framing, description, bodyPosition, and prompt 100% consistently so "feet grounded" never appears inside an above-ankle crop). Keep both hands anatomically continuous outside garment pleats/seams with zero awkward forearm gripping. Expression is calm and genuine.
 - closeup: THIS POSE SELLS PRODUCT DETAIL. First choose the single most important real selling detail from the PRIMARY UPLOADED PRODUCT GARMENT (e.g. kurti butti work, chest/yoke embroidery, neckline craftsmanship, handwork, sleeve craft, or weave) and record it in creativeDirection.closeupHeroDetail. CRITICAL: Pose 5 MUST highlight the primary garment's key signature detail (for example, if the kurti has butti work, Pose 5 must clearly showcase that work). It is STRICTLY FORBIDDEN to focus on or crop in on a secondary accessory like a dupatta, stole, or scarf when the primary garment has butti work, embroidery, or signature craft to showcase! (Only focus on a dupatta if the uploaded product is purely a standalone dupatta). Then choose framing and record it in creativeDirection.closeupMode:
   * "face_and_detail" when that detail sits at neckline/chest/yoke and stays LARGE beside the face: genuine zoomed-in face-to-chest or face-to-waist crop. Face is the locked identity with a calm natural expression (relaxed eyes, never a forced grin) AND the product detail occupies a large, catalog-readable portion of the frame - never a tiny hint of embroidery under a beauty close-up.
   * "product_detail" when a full face would shrink that selling detail below readable catalog size: crop to the product detail so it fills most of the frame. Face may be partial at the edge or omitted. Never a full-body hero repeat, and never a face-only beauty crop.
@@ -1845,33 +1929,21 @@ Lock and remember all important details across all 6 images to avoid consistency
 - Ornaments & jewellery: Exact same pieces, metal type, count, and placement across all 6 frames.
 - Accessories & styling: Exact same bag, belt, dupatta drape treatment, hair, and makeup across all 6 frames.
 - Product layout & product design: Garment construction, cuts, seams, trims, embroidery geometry, pattern repeat, and bottom-wear architecture remain locked across all 6 frames.
-REFERENCE IMAGE SCOPE: Model face comes from the MODEL FACE REFERENCE when one is attached; otherwise it comes from the STYLE REFERENCE face. Backdrop, wall, floor, furniture, and lighting come from the STYLE REFERENCE on all six poses. Clothing comes only from the uploaded product photos. Discard the style-reference outfit, and discard every face and background inside the product photos. Do not copy that photo's pose.
+REFERENCE IMAGE SCOPE: ${hasExplicitModelRef || useStyleAsModelFace ? "Model face comes from the active MODEL FACE identity photo (or the duplicated STYLE REFERENCE image explicitly uploaded as MODEL FACE)." : "NO MODEL FACE REFERENCE is attached: Pose 1 casts a fresh photorealistic adult model matching Requested model direction and locks that face across poses 2-6; do NOT copy the STYLE REFERENCE person's face, pose, sitting/leaning stance, or handheld props."} Backdrop, wall, floor, furniture, and lighting come from the STYLE REFERENCE on all six poses. Clothing comes only from the uploaded product photos. Discard the style-reference outfit, and discard every face and background inside the product photos. Do not copy that photo's pose or objects in the hands.
 
 Return STRICT JSON only:
 {"productIdentity":{"garmentFamily":"","category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[],"garmentEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeTruth":{"body":{"mainFabric":"","weave":"","weaveGeometry":"","texture":"","transparency":"","shine":"","baseColor":"","secondaryColors":[],"pattern":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","motifPlacement":"","embellishment":"","bodyOrientation":""},"borders":{"upperBorder":"","lowerBorder":"","borderWidth":"","upperBorderWidth":"","lowerBorderWidth":"","borderColors":"","construction":"","motifGeometry":"","edgeTreatment":"","continuityRules":"","tasselColor":"","tasselConstruction":"","tasselSpacing":""},"pallu":{"hasDistinctPallu":false,"startingRegion":"","baseColor":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","borders":"","artwork":"","zari":"","embroidery":"","tassels":"","edgeTreatment":"","visualOrientation":"","evidenceReferences":"","uncertainty":""},"pleatZone":{"patternBehavior":"","borderBehavior":"","embellishmentBehavior":"","hasSpecialPanel":false},"blouse":{"hasBlouse":false,"color":"","fabric":"","frontConstruction":"","backConstruction":"","neckline":"","sleeves":"","ties":"","closure":"","embroidery":"","border":"","pattern":"","fit":"","isUnstitchedPiece":false},"physics":{"weight":"","stiffness":"","fluidity":"","transparency":"","shine":"","creaseBehavior":"","expectedFall":""},"regionEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeDrapePlan":{"baseDrapeFamily":"","shoulderSide":"","waistTuck":"","frontPleatTreatment":"","palluShoulderPlacement":"","openOrPleatedPallu":"","palluSpread":"","palluFallDirection":"","palluVisibleLength":"","handInteraction":"","movementAmount":"","pinningBehavior":"","borderVisibility":"","blouseVisibility":"","coverageConstraints":"","poseSpecificDrapeState":""},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":"","seatedPoseRequired":"no","seatedPoseReason":"","closeupMode":"face_and_detail","closeupHeroDetail":""},"showcasePlan":{"heroFeature":"","featureRegion":"","shotType":"","whyItSells":"","evidenceReference":"","framing":"","cameraAngle":"","bodyPosition":"","handPlacement":"","expression":"","distinctFrom":"","visibilityRules":[]},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"angled","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"back","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"creative","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"closeup","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"showcase","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""}]}  `;
 }
 
 export const CONSISTENCY_RULES = [
-  "Original product references always outrank generated images and style references.",
-  "Model face comes from the MODEL FACE REFERENCE when one is attached, otherwise from the STYLE REFERENCE face. Backdrop and lighting come from the STYLE REFERENCE on all six poses. The product itself stays based on uploaded product images and must not be redesigned.",
-  "Lock and hold identical photoshoot backdrop, wall finish, flooring, lighting, footwear, jewellery, ornaments, accessories, styling, makeup, hair, product layout, and product design across all six images.",
-  "Every shoot must execute a distinct 6-pose plan with clear physical variation across all 6 slots: natural full-front hero, 35-to-45 degree turn (never flat frontal), true rear view (hair and dupatta forward), a relaxed editorial stance or seated pose (never a frozen walking stride), tight product-detail close-up, and unique feature showcase.",
-  "Model expressions and smiles must look natural, relaxed, and realistic with soft lips and calm warmth — strictly avoid artificial, forced, stiff, or frozen stock catalog smiles.",
-  "If a MODEL FACE REFERENCE image was supplied, it is the exact, non-negotiable face and identity for the model in every pose, including pose 1 - reproduce it as closely as photographically possible and never substitute, average, or beautify a different face.",
-  "Keep the same model face, skin tone, hair, body proportions, makeup, accessories, and footwear across all six poses.",
-  "Every face must be photorealistic and anatomically correct: natural skin texture with visible pores, eyes as the identity photo shows them, including a cover, and naturally aligned teeth. Never render a distorted, warped, blurred, or plastic/waxy/mirror-symmetric \"AI face\".",
-  "Keep exact garment colors, fabric, texture, pattern scale and placement, print, embroidery, logos, stitching, trims, buttons, zippers, pockets, fit, silhouette, and length.",
-  "Keep the exact bottom wear cut, silhouette, volume, pleats, hem, fabric, color, and print shown in product references across all poses. Never substitute farshi/farsi pajama with palazzo, lehenga/skirt, dhoti, or salwar, and never drop or miniaturize the bottom-wear motifs.",
-  "Use the back product image as the sole authority for the back pose.",
-  "Style references control backdrop, lighting, and camera mood, not the pose, handheld props, or garment. When a style reference is provided, it is the sole authority for the photoshoot backdrop.",
-  "Product reference images are for the garment only: never copy or reproduce pre-shoot background walls, arches, urns, pots, plants, or furniture from product references into the generated images.",
-  "When a style reference shows jewellery or ornaments that complement this product, keep those exact pieces unless the product itself already includes jewellery; never invent a competing jewellery story.",
-  "Pose 5 must be a tight product-detail close-up, never a full-body hero repeat. Include a sharp face only when that crop still leaves the selling detail large and readable; otherwise crop to the product detail.",
-  "Never add text, random logos, extra layers, duplicate people, or unreferenced garment elements.",
-  "Treat detailPlacementMap and absenceConstraints as hard locks: never relocate, mirror, extend, add, or remove a garment detail.",
-  "Keep the identical studio backdrop wall color, texture, flooring, and lighting established in Pose 1 across all poses 2-6 without adding new props (no brass urlis, urns, flower petals, or altered staircases).",
-  "In back poses, dupattas or shawls must be draped over the arms or in front so the entire back of the garment is 100% visible and unobstructed.",
-  "The optional stylist accessory suggestion (creativeDirection.suggestedAccessories) may be added only when present, and must stay identical and product-appropriate across every pose - never invent a second, different accessory and never let it hide or replace any garment detail, bottom wear, or footwear shown in the product references.",
+  "Original product references always outrank generated images and style references; never reproduce pre-shoot backgrounds or props from product photos.",
+  "Model face comes from MODEL FACE REFERENCE when attached; otherwise Pose 1 casts one original photorealistic adult model matching the casting direction and anchors Poses 2-6 without copying the style-reference face.",
+  "Style references control backdrop, lighting, and mood across all six poses — never the outfit, pose, pillar-leaning posture, or handheld props (cups, totes, phones, sunglasses).",
+  "Lock identical backdrop, lighting, footwear, jewellery/ornaments, makeup, hair, and product construction across all six frames without adding unreferenced props.",
+  "Execute 6 physically distinct poses across camera distance, studio floor position, and torso angle: open-floor hero front, 35-45 deg turn, unobstructed true rear (hair & dupatta forward), closer contrapposto/seated editorial, primary-garment macro craft (hands clear, never hijacked by dupatta), and showcase feature.",
+  "Living-human realism: strictly two continuous exterior arms and relaxed hands (zero fake slit hands, forearm clawing, or stiff mannequin fingers), visible skin micro-texture, natural eyes, and calm genuine expressions.",
+  "Preserve exact garment colors, fabric, weave, print geometry, embroidery, necklines, sleeves, length, and bottom-wear silhouette (never swap farshi/palazzo/salwar/lehenga or drop bold motifs).",
+  "Treat detailPlacementMap, absenceConstraints, and suggestedAccessories as hard locks; never invent a competing jewellery story, text, or unreferenced elements.",
 ];
 
 // Bumping this invalidates cached/stored analyses (Studio's analysis_cache and each
@@ -1920,7 +1992,11 @@ export const CONSISTENCY_RULES = [
 // dupattas, and refines Gen-Z saree, top-only kurti, and kurti-set pose plans.
 // v34 aligns cropped editorial Pose 4 framing with posture text (eliminating
 // knees-up vs grounded-feet contradictions) and refreshes saree/back QA gates.
-export const ANALYSIS_VERSION = "generation-session-v34-crop-pose4-qa";
+// v35 quarantines STYLE REFERENCE face/posture/props when Face Lock is empty,
+// expands held-prop scrubbing (coffee cups, totes, sunglasses, bags), bans
+// mannequin splayed fingers and fake slit hands, anchors Pose 1 open-floor
+// placement, and tailors 6-pose framing/proximity per garment family.
+export const ANALYSIS_VERSION = "generation-session-v35-human-lineup";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

@@ -94,6 +94,8 @@ import {
   canUsePoseOneAnchor,
   canonicalReferences,
   collapseDuplicateUploads,
+  hasCollapsedModelIdentity,
+  hasExplicitModelIdentity,
   isDirectBackProductRole,
   isSareeReferenceSet,
   missingRequiredReferenceLabels,
@@ -1946,25 +1948,36 @@ async function analyze(request: Request, args: JsonRecord) {
     const { data: cached, error: cachedError } = await service.from("analysis_cache").select("payload").eq("org_key", orgId).eq("cache_kind", "studio_product_analysis").eq("cache_key", cacheKey).gt("expires_at", new Date().toISOString()).maybeSingle();
     if (cachedError) throw new Error(cachedError.message);
     if (cached?.payload) {
-      normalized = normalizeAnalysis(cached.payload as JsonRecord, String(args.category || "ethnic/fusion"));
+      normalized = normalizeAnalysis(cached.payload as JsonRecord, String(args.category || "ethnic/fusion"), {
+        modelDirection: String(args.modelDirection || ""),
+      });
       cacheHit = true;
     }
   }
   const started = Date.now();
   const analysisRunIds: string[] = [];
   if (!normalized) {
+    const rawHasModelReference = hasExplicitModelIdentity(references);
+    const useStyleAsModelFace = hasCollapsedModelIdentity(references);
     const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, String(args.category || ""));
     const manifest: Array<{ number: number; role: string }> = [];
     const parts: JsonRecord[] = [];
     loaded.forEach((reference, index) => {
-      manifest.push({ number: index + 1, role: roleLabel(reference.role) });
-      parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` });
+      const label = roleLabel(reference.role, {
+        useStyleAsModelFace,
+        hasModelReference: rawHasModelReference,
+        hasApprovedAnchor: false,
+      });
+      manifest.push({ number: index + 1, role: label });
+      parts.push({ text: `IMAGE ${index + 1}: ${label}` });
       parts.push({ inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
     });
     parts.push({ text: buildCombinedAnalysisPrompt({
       skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
       category: String(args.category || "ethnic/fusion"), modelDirection: String(args.modelDirection || ""),
       sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences, fashionKnowledge, analysisLearning, showcaseFeedback,
+      hasModelReference: rawHasModelReference,
+      useStyleAsModelFace,
     }) });
 
     let result: VisionResult;
@@ -2010,7 +2023,9 @@ async function analyze(request: Request, args: JsonRecord) {
       }
       throw error;
     }
-    normalized = normalizeAnalysis(result.json, String(args.category || "ethnic/fusion"));
+    normalized = normalizeAnalysis(result.json, String(args.category || "ethnic/fusion"), {
+      modelDirection: String(args.modelDirection || ""),
+    });
     await service.from("analysis_cache").upsert({
       organization_id: orgId, org_key: orgId, cache_kind: "studio_product_analysis", cache_key: cacheKey,
       sku_name: String(args.skuName || ""), product_category: String(args.category || ""), payload: normalized,
@@ -2271,6 +2286,13 @@ async function validatePose(args: {
   const qaRefs = await withInlineBase64(
     selectReferences(args.references, args.approved, args.pose.id, garmentFamily, MAX_REFERENCES, args.pose.primaryReference),
   );
+  const sessionReferences = Array.isArray(args.session.references)
+    ? (args.session.references as ReferenceInput[])
+    : [];
+  const qaHasModelReference = qaRefs.some((reference) => reference.role === "model_identity");
+  const useStyleAsModelFace = !qaHasModelReference &&
+    qaRefs.some((reference) => reference.role === "style_reference") &&
+    (hasCollapsedModelIdentity(sessionReferences) || hasCollapsedModelIdentity(args.references));
   const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
   const prompt = buildPoseQaPrompt({
     poseNumber: args.pose.poseNumber, poseType: args.pose.id, poseTitle: args.pose.title, poseDirection: args.pose,
@@ -2285,8 +2307,9 @@ async function validatePose(args: {
         : []),
     ],
     hasApprovedAnchor: args.approved.length > 0,
-    hasModelReference: qaRefs.some((reference) => reference.role === "model_identity"),
-    referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`),
+    hasModelReference: qaHasModelReference,
+    useStyleAsModelFace,
+    referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role, { useStyleAsModelFace, hasModelReference: qaHasModelReference, hasApprovedAnchor: args.approved.length > 0 })}`),
   });
   const baseParts: JsonRecord[] = [
     { text: prompt },
@@ -2294,7 +2317,7 @@ async function validatePose(args: {
     { inlineData: { mimeType: args.generated.mimeType, data: args.generated.base64 } },
   ];
   qaRefs.forEach((reference) => {
-    baseParts.push({ text: roleLabel(reference.role) });
+    baseParts.push({ text: roleLabel(reference.role, { useStyleAsModelFace, hasModelReference: qaHasModelReference, hasApprovedAnchor: args.approved.length > 0 }) });
     baseParts.push({ inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
   });
 
@@ -3099,12 +3122,19 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     }
   }
 
+  const rawHasModelReference = hasExplicitModelIdentity(references);
+  const useStyleAsModelFace = hasCollapsedModelIdentity(references);
   const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, String(inputs.category || ""));
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
   loaded.forEach((reference, index) => {
-    manifest.push({ number: index + 1, role: roleLabel(reference.role) });
-    parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
+    const label = roleLabel(reference.role, {
+      useStyleAsModelFace,
+      hasModelReference: rawHasModelReference,
+      hasApprovedAnchor: false,
+    });
+    manifest.push({ number: index + 1, role: label });
+    parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
   });
 
   parts.push({ text: buildCombinedAnalysisPrompt({
@@ -3123,11 +3153,14 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     ),
     analysisLearning: await analysisLearningBrief(orgId, category),
     showcaseFeedback: await showcaseFeedbackBrief(orgId, category),
+    hasModelReference: rawHasModelReference,
+    useStyleAsModelFace,
   }) });
 
   const result = await visionJson(policy, parts);
   const normalized = normalizeAnalysis(result.json, category, {
     bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+    modelDirection: String(settings.modelDirection || ""),
   });
 
   // Store baseAnalysis into catalog_memory
@@ -3572,12 +3605,20 @@ async function compilePosePrompt(
     ? `${learningSelection.guidance.slice(0, 430)}\n${outcomeSelection.guidance.slice(0, 430)}`
     : [learningSelection.guidance, outcomeSelection.guidance].filter(Boolean).join("\n");
 
+  const sessionRefs = Array.isArray(sessionData.references)
+    ? (sessionData.references as ReferenceInput[])
+    : [];
+  const useStyleReferenceAsModelIdentity =
+    !selected.some((reference) => reference.role === "model_identity") &&
+    hasCollapsedModelIdentity(sessionRefs);
+
   const prompt = composeGenerationPrompt({
     skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || "Untitled product"),
     productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
     references: selected, correction: promptCorrection(), learnings: combinedLearnings, fashionKnowledge,
     bottomWearMode: sessionData.bottomWearMode ?? (job.job_data as JsonRecord | undefined)?.bottomWearMode,
     aspectRatio: String(job.aspect_ratio || "3:4"),
+    useStyleReferenceAsModelIdentity,
     generationMemory: formatGenerationMemoryBrief({
       references: selected,
       memory: sessionGenerationMemory(sessionData, {
@@ -5900,17 +5941,25 @@ async function analyzeCatalogVariant(
     if (!cachedError && cached?.payload) {
       normalized = normalizeAnalysis(cached.payload as JsonRecord, category, {
         bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+        modelDirection: String(settings.modelDirection || ""),
       });
     }
   }
 
   if (!normalized) {
+    const rawHasModelReference = hasExplicitModelIdentity(references);
+    const useStyleAsModelFace = hasCollapsedModelIdentity(references);
     const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, category);
     const manifest: Array<{ number: number; role: string }> = [];
     const parts: JsonRecord[] = [];
     loaded.forEach((reference, index) => {
-      manifest.push({ number: index + 1, role: roleLabel(reference.role) });
-      parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
+      const label = roleLabel(reference.role, {
+        useStyleAsModelFace,
+        hasModelReference: rawHasModelReference,
+        hasApprovedAnchor: false,
+      });
+      manifest.push({ number: index + 1, role: label });
+      parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
     });
     parts.push({ text: buildCombinedAnalysisPrompt({
       skuName: String(variant.sku_name), productDetails: String(variant.product_description || ""), category,
@@ -5919,10 +5968,13 @@ async function analyzeCatalogVariant(
       fashionKnowledge,
       analysisLearning,
       showcaseFeedback,
+      hasModelReference: rawHasModelReference,
+      useStyleAsModelFace,
     }) });
     const result = await visionJson(policy, parts, { onAttempt });
     normalized = normalizeAnalysis(result.json, category, {
       bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+      modelDirection: String(settings.modelDirection || ""),
     });
     usedPolicy = result.policy;
     attempts = result.attempts;

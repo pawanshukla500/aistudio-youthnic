@@ -407,3 +407,83 @@ def test_farshi_taper_rule_isolated_from_non_farshi_and_top_only():
         model="muse-spark-1.2-contributor",
     )
     assert unknown_dna.bottom_wear.cut_class == "unknown"
+
+
+def test_pose_planning_top_only_and_open_floor_human_realism():
+    planner = CreativePosePlanningAgent()
+    top_poses = planner.process(
+        {
+            "product_dna": {
+                "sku_id": "TOP-201",
+                "sku_name": "Olive Pleated Crop Top",
+                "main_color": "olive",
+                "fabric_type": "cotton poplin",
+                "garment_family": "western_top",
+                "bottom_wear": {"has_bottom_wear": False, "cut_class": "none"},
+            }
+        }
+    )["pose_plans"]
+    assert len(top_poses) == 6
+    assert "knees-up" in top_poses[1]["framing"].lower()
+    assert "butti work" not in top_poses[4]["prompt"].lower()
+    assert "kurta" not in top_poses[4]["prompt"].lower()
+    assert "neckline construction" in top_poses[4]["prompt"].lower()
+    assert "open unobstructed studio space" in top_poses[0]["prompt"].lower()
+    assert "forearm clawing" in top_poses[1]["hand_placement"].lower()
+
+    saree_poses = planner.process(
+        {
+            "product_dna": {
+                "sku_id": "SAREE-201",
+                "sku_name": "Sky Floral Organza Saree",
+                "main_color": "sky blue",
+                "fabric_type": "organza",
+                "garment_family": "saree",
+            }
+        }
+    )["pose_plans"]
+    assert "not wedged behind a foreground pillar" in saree_poses[0]["prompt"].lower()
+    assert "plain undecorated solid matching" in saree_poses[0]["prompt"].lower()
+    assert "zero phantom slits" in saree_poses[0]["hand_placement"].lower()
+
+
+def test_pose_planning_dna_sig_invalidates_stale_planner_cache(monkeypatch):
+    from agents import pose_planning_agent as ppa
+
+    written: list[tuple[str, str, int, str, str]] = []
+    compiled_cache: dict[tuple[str, str, int, str], str] = {
+        (VALID_ORG_UUID, "SAREE-CACHE-01", num, "legacy-no-rev"): "STALE_PROMPT"
+        for num in range(1, 7)
+    }
+
+    def fake_set_prompt(org, sku, num, sig, prompt):
+        compiled_cache[(org, sku, num, sig)] = prompt
+        written.append((org, sku, num, sig, prompt))
+
+    monkeypatch.setattr(ppa.cache_manager, "get_scene_lock", lambda org, sku: {"dna_sig": "legacy-no-rev", "description": "STALE_SCENE"})
+    monkeypatch.setattr(ppa.cache_manager, "set_scene_lock", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ppa.cache_manager, "get_compiled_prompt", lambda org, sku, num, sig: compiled_cache.get((org, sku, num, sig)))
+    monkeypatch.setattr(ppa.cache_manager, "set_compiled_prompt", fake_set_prompt)
+
+    planner = CreativePosePlanningAgent()
+    payload = {
+        "organization_id": VALID_ORG_UUID,
+        "sku_id": "SAREE-CACHE-01",
+        "product_dna": {"sku_id": "SAREE-CACHE-01", "sku_name": "Saree", "garment_family": "saree"},
+    }
+    first = planner.process(payload)
+    assert "STALE_SCENE" not in first["scene_lock"]["description"]
+    assert all(pose["prompt"] != "STALE_PROMPT" for pose in first["pose_plans"])
+    assert len(written) == 6
+    sig_v1 = written[0][3]
+
+    # Same revision hits the newly populated cache instead of recomputing.
+    written.clear()
+    planner.process(payload)
+    assert len(written) == 0
+
+    # Bumping PLANNER_REVISION rotates dna_sig and invalidates cached prompts.
+    monkeypatch.setattr(ppa, "PLANNER_REVISION", "v-next-test-bump")
+    planner.process(payload)
+    assert len(written) == 6
+    assert written[0][3] != sig_v1

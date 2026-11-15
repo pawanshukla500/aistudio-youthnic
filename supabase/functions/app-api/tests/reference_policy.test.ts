@@ -2,6 +2,8 @@ import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import {
   MAX_IMAGE_REFERENCES,
   canUsePoseOneAnchor,
+  hasCollapsedModelIdentity,
+  hasExplicitModelIdentity,
   isNonProductEvidenceRole,
   isSareeReferenceSet,
   missingRequiredReferenceLabels,
@@ -376,4 +378,50 @@ Deno.test("missingRequiredReferenceLabels accepts standard front and back roles 
   ];
   const missing = missingRequiredReferenceLabels(references, "saree");
   assertEquals(missing.length, 0);
+});
+
+Deno.test("model identity helpers distinguish empty Face Lock from collapsed duplicate upload and quarantine style_reference label", () => {
+  const styleOnly = [
+    { role: "front", hash: "front-hash" },
+    { role: "style_reference", hash: "room-hash" },
+  ];
+  assertEquals(hasExplicitModelIdentity(styleOnly), false);
+  assertEquals(hasCollapsedModelIdentity(styleOnly), false);
+  assertStringIncludes(roleLabel("style_reference"), "do not copy the pose or objects in the hands (ignore the person's face");
+
+  const duplicateUpload = [
+    { role: "front", hash: "front-hash" },
+    { role: "model_identity", hash: "shared-hash" },
+    { role: "style_reference", hash: "shared-hash" },
+  ];
+  assertEquals(hasExplicitModelIdentity(duplicateUpload), true);
+  assertEquals(hasCollapsedModelIdentity(duplicateUpload), true);
+  assertStringIncludes(roleLabel("style_reference", { useStyleAsModelFace: true }), "also uploaded as MODEL FACE REFERENCE");
+
+  const distinctUploads = [
+    { role: "model_identity", hash: "face-hash" },
+    { role: "style_reference", hash: "room-hash" },
+  ];
+  assertEquals(hasExplicitModelIdentity(distinctUploads), true);
+  assertEquals(hasCollapsedModelIdentity(distinctUploads), false);
+});
+
+
+Deno.test("roleLabel appends fresh-cast cue on style_reference only when no face identity or approved anchor exists", () => {
+  assertStringIncludes(
+    roleLabel("style_reference", { hasModelReference: false, hasApprovedAnchor: false }),
+    "casting one fresh photorealistic adult model in Pose 1 locked across all six poses",
+  );
+  assertEquals(
+    roleLabel("style_reference", { hasModelReference: true }).includes("casting one fresh"),
+    false,
+  );
+  assertEquals(
+    roleLabel("style_reference", { hasModelReference: false, hasApprovedAnchor: true }).includes("casting one fresh"),
+    false,
+  );
+  assertEquals(
+    roleLabel("style_reference", { useStyleAsModelFace: true }).includes("casting one fresh"),
+    false,
+  );
 });

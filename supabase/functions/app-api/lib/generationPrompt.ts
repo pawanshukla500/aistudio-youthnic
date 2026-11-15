@@ -1,6 +1,8 @@
 import {
   CLOSEUP_PRODUCT_DETAIL,
   CONSISTENCY_RULES,
+  FORBIDDEN_HELD_OBJECT_PATTERN,
+  FORBIDDEN_NON_EYEWEAR_HELD_OBJECT_PATTERN,
   effectiveShowcaseIntent,
   isAboveAnkleCropFraming,
   isSeatedEditorialPoseDemanded,
@@ -12,6 +14,7 @@ import {
   type ShowcaseIntent,
   type StudioPose,
   sanitizeDetailPlacementMap,
+  sanitizeHeldObjectText,
   sanitizePoseDirectionForAspectRatio,
   stripGroundedFeetForCroppedFrame,
 } from "./profiles.ts";
@@ -267,8 +270,28 @@ function compactOptionalPromptContent(prompt: string) {
   compacted = compactPromptBlock(
     compacted,
     "\nPOSE REQUIREMENT:\n",
-    ["\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:", "\n\nPROMPT:"],
-    3_200,
+    [
+      "\nGARMENT POSE GRAMMAR (",
+      "\nDO NOT COPY THE STYLE POSE",
+      "\nFASHION KNOWLEDGE (",
+      "\nCONTINUOUS LEARNING ADVISORY",
+      "\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:",
+      "\n\nPROMPT:",
+    ],
+    2_400,
+  );
+  compacted = compactPromptBlock(
+    compacted,
+    "GARMENT POSE GRAMMAR (",
+    [
+      "\nDO NOT COPY THE STYLE POSE",
+      "\nSEATED EDITORIAL POSE REQUIREMENT",
+      "\nFASHION KNOWLEDGE (",
+      "\nCONTINUOUS LEARNING ADVISORY",
+      "\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:",
+      "\n\nPROMPT:",
+    ],
+    1_100,
   );
   compacted = compactPromptBlock(
     compacted,
@@ -340,15 +363,28 @@ export function compactFullPromptSafely(prompt: string): string {
   );
   compacted = compactPromptBlock(
     compacted,
+    "\nSTRICT HUMAN ANATOMY & NATURAL LIMB INTEGRITY (ZERO TOLERANCE FOR EXTRA LIMBS):\n",
+    ["\nPHOTOGRAPHIC REALISM", "\nLOCKED SUBJECT - MUST NOT CHANGE:"],
+    750,
+  );
+  compacted = compactPromptBlock(
+    compacted,
     "GARMENT POSE GRAMMAR (",
-    ["\nDO NOT COPY THE STYLE POSE", "\nSEATED EDITORIAL POSE REQUIREMENT", "\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:", "\n\nPROMPT:"],
+    [
+      "\nDO NOT COPY THE STYLE POSE",
+      "\nSEATED EDITORIAL POSE REQUIREMENT",
+      "\nFASHION KNOWLEDGE (",
+      "\nCONTINUOUS LEARNING ADVISORY",
+      "\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:",
+      "\n\nPROMPT:",
+    ],
     800,
   );
   compacted = compactPromptBlock(
     compacted,
     "\nPROHIBITED UNRELATED CHANGES:\n",
     ["\nProduct accuracy is more important than style matching."],
-    1_700,
+    1_300,
   );
   if (compacted.length <= IMAGE_PROMPT_SAFE_CHARS) return compacted;
 
@@ -392,7 +428,14 @@ export function compactFullPromptSafely(prompt: string): string {
   compacted = compactPromptBlock(
     compacted,
     "\nPOSE REQUIREMENT:\n",
-    ["\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:", "\n\nPROMPT:"],
+    [
+      "\nGARMENT POSE GRAMMAR (",
+      "\nDO NOT COPY THE STYLE POSE",
+      "\nFASHION KNOWLEDGE (",
+      "\nCONTINUOUS LEARNING ADVISORY",
+      "\nCORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:",
+      "\n\nPROMPT:",
+    ],
     1_800,
   );
   if (compacted.length <= IMAGE_PROMPT_SAFE_CHARS) return compacted;
@@ -632,8 +675,7 @@ function showcasePlanHardRule(args: {
 }) {
   const aesthetic = showcaseAestheticDirection(args.shotType, args.plan.featureRegion);
   const lines = [
-    `- SHOWCASE FRAME SUBJECT: ${args.plan.heroFeature}. This frame exists to sell that one feature${
-      args.plan.whyItSells ? ` - ${args.plan.whyItSells}` : ""
+    `- SHOWCASE FRAME SUBJECT: ${args.plan.heroFeature}. This frame exists to sell that one feature${args.plan.whyItSells ? ` - ${args.plan.whyItSells}` : ""
     }. It must be large, sharp, unobstructed, and unmistakably what the frame is about.`,
     `- SHOWCASE FRAME DISTANCE: ${showcaseShotDirection(args.shotType)}`,
     `- SHOWCASE AESTHETIC PHOTOSHOOT & DETAIL FIDELITY: ${aesthetic} Render every stitch, motif, border edge, and fabric fold of ${args.plan.heroFeature} at true physical scale and material sheen.`,
@@ -641,8 +683,7 @@ function showcasePlanHardRule(args: {
   ];
   if (args.closeupHeroDetail) {
     lines.push(
-      `- SHOWCASE FRAME MUST NOT REPEAT THE CLOSE-UP: Pose 5 already sells "${args.closeupHeroDetail}" in a tight crop. This frame must add coverage that pose does not give${
-        args.widenedFromCloseup
+      `- SHOWCASE FRAME MUST NOT REPEAT THE CLOSE-UP: Pose 5 already sells "${args.closeupHeroDetail}" in a tight crop. This frame must add coverage that pose does not give${args.widenedFromCloseup
           ? " - so shoot the named feature at a wider distance here, showing how it sits on the worn garment rather than re-cropping the same detail."
           : "."
       }`,
@@ -744,12 +785,14 @@ function currentFrameLine(
   return "";
 }
 
-function referenceImageScopeDirective(hasModelReference: boolean): string {
+function referenceImageScopeDirective(hasModelReference: boolean, useStyleAsModelIdentity = false): string {
   return [
     "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:",
     hasModelReference
       ? "- MODEL FACE: the MODEL FACE REFERENCE is the only face, hair, skin tone, and body-proportion source for all six poses. Discard the face, hair, and body in the STYLE REFERENCE and in every product photo. Do not average those faces together."
-      : "- MODEL FACE: no separate MODEL FACE REFERENCE is attached, so the STYLE REFERENCE face, hair, skin tone, and body proportions are the model identity for all six poses. Still discard that image's clothing.",
+      : useStyleAsModelIdentity
+        ? "- MODEL FACE: the user attached the same image as MODEL FACE REFERENCE and STYLE REFERENCE, so that person's face, hair, skin tone, and body proportions are the model identity for all six poses. Still discard that image's clothing, posture, and handheld objects."
+        : "- MODEL FACE: no MODEL FACE REFERENCE is attached. Cast an original photorealistic adult model matching Model Identity below in Pose 1, and keep that face, hair, skin tone, and body proportions identical across Poses 2-6. Discard the STYLE REFERENCE person's face, clothing, pose, pillar-leaning posture, and handheld props.",
     "- STYLE REFERENCE BACKDROP: the STYLE REFERENCE is the only source for the photoshoot backdrop, wall, floor, lighting, and camera mood on all six poses, including the back view and any crop. Discard its clothing completely.",
     "- ABSOLUTE PROHIBITION ON COPYING THE STYLE REFERENCE GARMENT: The clothing, outfit, saree, dress, fabric, color, embroidery, or prints shown on the person in the STYLE REFERENCE image MUST BE 100% DISCARDED. Absolutely DO NOT copy, borrow, blend, or reproduce the style reference's clothing onto the model.",
     "- PRODUCT INTEGRITY (SOLE TRUTH FROM UPLOADED PRODUCT IMAGES): the product itself (fabric, colors, prints, pattern geometry, neckline, sleeves, hem, embroidery, trims, closures, and complete bottom wear) MUST come exclusively from uploaded product references. The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows. If this written profile disagrees with the product photos on motif, neckline, sleeves, or hem, the photos win. Discard every face and every background inside those product photos.",
@@ -760,11 +803,10 @@ function referenceImageScopeDirective(hasModelReference: boolean): string {
 function anatomicalIntegrityDirective(): string {
   return [
     "STRICT HUMAN ANATOMY & NATURAL LIMB INTEGRITY (ZERO TOLERANCE FOR EXTRA LIMBS):",
-    "- EXACTLY TWO ARMS AND TWO HANDS: The model must have strictly and exactly TWO arms and TWO hands in total. It is STRICTLY FORBIDDEN to render a third hand, extra hand, extra arm, duplicate wrist, floating hand, or phantom limb anywhere on the body, garment, waist, drape, or set.",
-    "- COORDINATED HAND PLACEMENT: When one hand is holding, touching, or adjusting the garment/pallu/dupatta, the other hand must be naturally placed (e.g. resting at the side, on hip, or relaxed). NO THIRD HAND may appear resting on the waist, navel, or pleats. There must never be hands sprouting from the drape or floating disconnected from an arm.",
-    "- REAL ANATOMICAL CONNECTION: Every visible hand MUST connect seamlessly to a real, visible, anatomically correct forearm and arm belonging to the model. Knuckles, wrists, and elbows must bend naturally.",
-    "- NATURAL FINGERS: Each hand must have exactly five natural, cleanly formed fingers with realistic nails and knuckles — never fused, melted, webbed, mangled, missing, or extra fingers.",
-    "- PROHIBITED ANATOMICAL DEFECTS: Three hands, extra arms, duplicate hands, phantom hands, severed limbs, unnatural joint angles, or extra body parts under any circumstances.",
+    "- EXACTLY TWO ARMS AND TWO HANDS: The model must have strictly and exactly TWO arms and TWO hands in total. It is STRICTLY FORBIDDEN to render a third hand, extra hand, extra arm, duplicate wrist, floating hand, or phantom limb anywhere.",
+    "- CONTINUOUS EXTERIOR ANATOMY: Arms and hands stay outside the closed garment perimeter with soft human bends (never mannequin stiff straight arms, splayed plastic fingers, fake slit hands, forearm clawing, or fingers covering chest embroidery).",
+    "- COORDINATED HAND PLACEMENT: When one hand is holding, touching, or adjusting the garment/pallu/dupatta, the other hand must be naturally placed outside the closed perimeter. NO THIRD HAND may appear resting on the waist, navel, or pleats.",
+    "- NATURAL FINGERS: Render five cleanly separated natural fingers per hand (never fused, webbed, mangled, missing, or extra fingers).",
   ].join("\n");
 }
 
@@ -784,7 +826,7 @@ function lockedDetailsDirective(): string {
 // prompt and body position survive. Rewrite only those pose fields.
 const UNPLANTED_POSE_PATTERN = /\b(?:walk(?:ing|s)?|strides?|mid-step|stepped|lifted foot|foot lifted|step(?:s|ping)? forward|feet (?:naturally )?spaced|feet separated|feet apart|shoulder-width|shoulder width|legs spread|wide stance)\b/i;
 const COPIED_SITTING_PATTERN = /\b(?:sit|sits|sitting|seated)\b/i;
-const HELD_OBJECT_PATTERN = /\b(?:sparklers?|fireworks?|handheld props?|handheld objects?|bags?|purses?|clutch(?:es)?|flowers?|bouquets?|diya[s]?|candles?|umbrellas?)\b/i;
+const HELD_OBJECT_PATTERN = FORBIDDEN_HELD_OBJECT_PATTERN;
 
 function plantedPoseReplacement(
   pose: { id: string; poseNumber: number },
@@ -850,10 +892,8 @@ function creativeDirectionKey(key: string) {
   return key.trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
-function withoutHeldObjectClauses(value: string) {
-  if (!HELD_OBJECT_PATTERN.test(value)) return value;
-  const kept = value.split(/(?<=[.!;])\s+/).map((part) => part.trim()).filter((part) => part && !HELD_OBJECT_PATTERN.test(part));
-  return kept.join(" ").trim() || SET_PROPS_ONLY;
+function withoutHeldObjectClauses(value: string, allowNotes = "") {
+  return sanitizeHeldObjectText(value, SET_PROPS_ONLY, allowNotes);
 }
 
 // Stored sessions can still carry the older rule that demanded catchlights.
@@ -901,24 +941,43 @@ function poseListItem(value: unknown, sitting: boolean): string {
 }
 
 const IDENTITY_FACE_PATTERN = /\b(?:eyes?|sunglass(?:es)?|shades|cover(?:ed|ing)?|braid|jaw|nose|lips?|hair|skin|face)\b/i;
+const HELD_EYEWEAR_PATTERN = /\b(?:(?:holds?|holding|carries|carrying|gripping|clutching)\s+(?:a\s+|her\s+|his\s+|their\s+|the\s+|pair\s+of\s+)?(?:sunglass(?:es)?|eyewear|shades)|(?:sunglass(?:es)?|eyewear|shades)\s+(?:in\s+(?:her\s+|his\s+|their\s+|one\s+)?hands?|held))\b/i;
 
-function withoutCopiedPoseInIdentity(value: string, sitting: boolean): string {
+function globalRegex(pattern: RegExp): RegExp {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  return new RegExp(pattern.source, flags);
+}
+
+function withoutCopiedPoseInIdentity(
+  value: string,
+  sitting: boolean,
+  preserveFacialEyewear = false,
+): string {
   const dropSitting = !sitting;
+  const heldPattern = preserveFacialEyewear
+    ? FORBIDDEN_NON_EYEWEAR_HELD_OBJECT_PATTERN
+    : HELD_OBJECT_PATTERN;
   const poseLike = (part: string) => UNPLANTED_POSE_PATTERN.test(part)
-    || HELD_OBJECT_PATTERN.test(part)
+    || new RegExp(heldPattern.source, heldPattern.flags.replace(/g/g, "")).test(part)
+    || (preserveFacialEyewear && HELD_EYEWEAR_PATTERN.test(part))
     || (dropSitting && COPIED_SITTING_PATTERN.test(part));
   if (!poseLike(value)) return value;
   const kept = value.split(/(?<=[.!;])\s+/).map((part) => {
     const clause = part.trim();
     if (!clause || !poseLike(clause)) return clause;
     if (!IDENTITY_FACE_PATTERN.test(clause)) return "";
-    const text = (dropSitting ? clause.replace(COPIED_SITTING_PATTERN, "") : clause)
-      .replace(UNPLANTED_POSE_PATTERN, "")
-      .replace(HELD_OBJECT_PATTERN, "")
+    let text = (dropSitting ? clause.replace(globalRegex(COPIED_SITTING_PATTERN), "") : clause)
+      .replace(globalRegex(UNPLANTED_POSE_PATTERN), "")
+      .replace(globalRegex(heldPattern), "");
+    if (preserveFacialEyewear) {
+      text = text.replace(globalRegex(HELD_EYEWEAR_PATTERN), "");
+    }
+    text = text
       .replace(/\s{2,}/g, " ")
       .replace(/\s+([,.;])/g, "$1")
+      .replace(/^[,.;\s]+/, "")
       .trim();
-    return text;
+    return /[a-z0-9]/i.test(text) ? text : "";
   }).filter(Boolean);
   return kept.join(" ").trim() || "Eyes stay as the identity photo shows them, including a cover.";
 }
@@ -926,8 +985,9 @@ function withoutCopiedPoseInIdentity(value: string, sitting: boolean): string {
 function sanitizeIdentityText(model: JsonRecord, sitting: boolean): JsonRecord {
   const output: JsonRecord = {};
   for (const [key, value] of Object.entries(model)) {
+    const preserveFacialEyewear = key === "face" || key === "faceRealism";
     output[key] = typeof value === "string"
-      ? withoutCopiedPoseInIdentity(withoutInventedCatchlights(value), sitting)
+      ? withoutCopiedPoseInIdentity(withoutInventedCatchlights(value), sitting, preserveFacialEyewear)
       : value;
   }
   return output;
@@ -1003,7 +1063,7 @@ function sanitizeCreativeDirection(
 export function composeGenerationPrompt(args: {
   skuName: string; productDetails: string; pose: StudioPose & { poseNumber: number };
   session: JsonRecord; references: PromptReference[]; correction?: string; learnings?: string; fashionKnowledge?: string;
-  generationMemory?: string; bottomWearMode?: unknown; aspectRatio?: string;
+  generationMemory?: string; bottomWearMode?: unknown; aspectRatio?: string; useStyleReferenceAsModelIdentity?: boolean;
 }) {
   const product = objectValue(args.session.productIdentity);
   const creative = objectValue(args.session.creativeDirection);
@@ -1118,12 +1178,13 @@ export function composeGenerationPrompt(args: {
   if (isTrueBack && !promptReferences.some((ref) => isDirectBackProductRole(ref.role))) {
     throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
   }
-  const manifest = promptReferences.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`).join("\n");
-  const bottomRefIndex = promptReferences.findIndex((ref) => ref.role === "bottom");
-  const bottomImageTag = bottomRefIndex >= 0 ? `IMAGE ${bottomRefIndex + 1}` : null;
   const hasApprovedAnchor = promptReferences.some((reference) => reference.role === "approved_pose");
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
+  const useStyleModelIdentity = !hasModelReference && hasStyleReference && Boolean(args.useStyleReferenceAsModelIdentity);
+  const manifest = promptReferences.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role, { useStyleAsModelFace: useStyleModelIdentity, hasModelReference, hasApprovedAnchor })}`).join("\n");
+  const bottomRefIndex = promptReferences.findIndex((ref) => ref.role === "bottom");
+  const bottomImageTag = bottomRefIndex >= 0 ? `IMAGE ${bottomRefIndex + 1}` : null;
   const isCloseup = args.pose.id === "closeup";
   const highlightedDetails = boundedStrings(
     (Array.isArray(args.pose.highlightedDetails) ? args.pose.highlightedDetails : [])
@@ -1148,7 +1209,7 @@ export function composeGenerationPrompt(args: {
   const faceQualityInstruction = faceRequired
     ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, eyes kept as the identity photo shows them, including a cover that hides them, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
     : isTrueBack
-      ? "The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face MUST match the MODEL FACE REFERENCE, or the STYLE REFERENCE when no separate model photo was uploaded. APPROVED POSE 1 is the room only: do not copy its pose or objects in the hands. Never substitute a different person or face."
+      ? `The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face MUST match ${hasModelReference ? "the MODEL FACE REFERENCE" : useStyleModelIdentity ? "the STYLE REFERENCE face identity (duplicated upload)" : "APPROVED POSE 1 (never copy the STYLE REFERENCE person's face)"}. APPROVED POSE 1 is the room only: do not copy its pose or objects in the hands. Never substitute a different person or face.`
       : "This frame is a PRODUCT-DETAIL close-up. Do not force a full beauty-face crop. If any portion of the face appears it MUST match the identity lock - same jawline, eyes, skin texture with visible pores, and makeup. Prefer filling the frame with the named product selling detail; omit or crop the face when a full face would make that detail too small to read.";
   const plantedStance = plantedPoseReplacement(args.pose, isSittingDemanded, isPose4CroppedAboveAnkles);
   const cleanPoseText = (rawValue: unknown) => {
@@ -1285,8 +1346,8 @@ export function composeGenerationPrompt(args: {
   const prompt = `Create ONE real-camera fashion e-commerce photograph for ${boundedText(args.skuName, 160) || "this product"} that is indistinguishable from an unretouched frame of a professional catalog shoot.
 
 SHOOT AUTHORITY - APPLY BEFORE ANYTHING ELSE:
-- Model face and body: ${hasModelReference ? "IMAGE labeled MODEL FACE REFERENCE only. Ignore every other face, including the style reference and the product photos." : hasStyleReference ? "the STYLE REFERENCE face, hair, and body proportions, because no separate model-face photo was uploaded." : "the locked model identity described below, held identical in every frame."}
-- Backdrop and background: ${hasStyleReference ? "the STYLE REFERENCE only, on all six poses, including this one. Same wall, floor, and light. Never a product-photo background and never a generic white sweep." : "the locked creative direction, identical in all six poses."}
+- Model face and body: ${hasModelReference ? "IMAGE labeled MODEL FACE REFERENCE only. Ignore every other face, including the style reference and the product photos." : useStyleModelIdentity ? "the STYLE REFERENCE face, hair, and body proportions, because the user attached the same photo as both MODEL FACE REFERENCE and STYLE REFERENCE." : hasApprovedAnchor ? "the APPROVED POSE 1 model face, hair, and body proportions. Ignore the person's face, pose, and body in the STYLE REFERENCE." : "an original photorealistic adult fashion model matching the locked model identity below (never copy the STYLE REFERENCE person's face, body stance, or props), held identical across all six frames."}
+- Backdrop and background: ${hasStyleReference ? "the STYLE REFERENCE room/environment ONLY (wall, pillars, arches, floor, light) on all six poses, including this one. Do NOT wedge/pin the model behind a foreground pillar or copy the style-reference person's lean/sitting posture or handheld coffee cups/totes/bags. Never a product-photo background and never a generic white sweep." : "the locked creative direction, identical in all six poses."}
 - Product DNA: uploaded product photos only. Copy garment design, print, colour, embroidery, and construction exactly. A detail crop may omit the face, but any visible face is still this same person and any visible set is still this same backdrop.
 ${bottomWear.includesBottomWear && bottomImageTag ? `- Bottom wear truth: The trousers/bottom wear MUST be derived EXCLUSIVELY from ${bottomImageTag} (BOTTOM WEAR / FARSHI). Never copy upper-garment fabric/embroidery or style-reference clothing onto the bottom wear.` : ""}
 
@@ -1301,7 +1362,7 @@ ${generationMemory}
 EDIT GOAL:
 Place the exact uploaded product on one consistent professional adult fashion model and create Pose ${args.pose.poseNumber}: ${poseTitle}. The finished image must look like the same real professional photoshoot as every other frame in this set.
 CRITICAL PRODUCT INTEGRITY RULE: The product clothing (garment, fabric, colors, prints, embroidery, neckline, sleeves, and bottom wear) must be taken EXCLUSIVELY and EXACTLY from the UPLOADED PRODUCT reference images. The clothing/outfit worn by the person in the STYLE REFERENCE image is strictly ignored and 100% DISCARDED. Absolutely DO NOT copy, transfer, or blend the style reference image's garment onto the model. Dress the model ONLY in the uploaded product.${bottomWear.includesBottomWear && bottomImageTag ? ` The bottom wear must strictly replicate the fabric, print, cut, and silhouette of ${bottomImageTag} (BOTTOM WEAR / FARSHI) and must NOT match the kurta fabric or borrow from the style reference.` : ""}
-Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE${hasApprovedAnchor ? " as already photographed in APPROVED POSE 1 - rebuild exactly the set Pose 1 shows, including in a back view" : " (if supplied)"} and the SCENE LOCK below - never a different or generic set. STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
+Photoshoot environment authority: The physical studio set, backdrop wall, architectural features, flooring, and lighting MUST be derived solely from the STYLE REFERENCE${hasApprovedAnchor ? " as already photographed in APPROVED POSE 1 - rebuild exactly the set Pose 1 shows, including in a back view" : " (if supplied)"} and the SCENE LOCK below - never a different or generic set. Copy the room and lighting depth only: position the model cleanly in open unobstructed floor space in front of the architectural backdrop (NEVER pinned behind a foreground column/pillar, NEVER copying a coffee cup, tote bag, sunglass case, or leaning stance from the style photo). STRICTLY PROHIBITED: Do NOT copy, borrow, or reproduce any background walls, arches, urns, terracotta pots, plants, furniture, or outdoor locations visible behind the garment in the FRONT, BACK, BOTTOM, or other product reference photos. Those product backgrounds are pre-shoot noise and must be 100% discarded.
 
 ${sceneLock}
 
@@ -1323,15 +1384,15 @@ ${modelJson}
 FACE & IDENTITY LOCK - HIGHEST PRIORITY:
 ${hasModelReference
     ? `The image labeled MODEL FACE REFERENCE in the reference manifest above is the exact, non-negotiable face and identity for this model in EVERY pose, including this one - it outranks every other face source, including the approved-pose anchor. Reproduce it as close to pixel-identical as photographically possible: identical facial bone structure, eyes (shape, color, spacing), eyebrows, nose, lips, jawline, skin tone and texture, and hairstyle. Do not idealize, beautify, average, restyle, or blend it with any other face - this must read as the same real person from that reference photo, not merely a similar-looking model. If the eyes are hidden, keep that cover and the visible face. Do not invent a different person.${hasApprovedAnchor ? " Use the APPROVED POSE 1 image only for scene, lighting, and styling continuity - never as a face source." : ""}`
-    : hasStyleReference
-      ? `The STYLE REFERENCE image is the face for every pose, because no separate model-face photo was uploaded. Match the visible jaw, nose, lips, skin, and hair. If the eyes are hidden, keep that cover and the visible face. Do not invent a different person. Discard that image's clothing.${hasApprovedAnchor ? " APPROVED POSE 1 is scene continuity only, never a different face." : ""}`
+    : useStyleModelIdentity
+      ? `The STYLE REFERENCE image is the face for every pose, because the user attached the same photo in both Model Face and Style Ref. Match the visible jaw, nose, lips, skin, and hair. If the eyes are hidden, keep that cover and the visible face. Do not invent a different person. Discard that image's clothing, pose, pillar-leaning stance, and handheld objects.${hasApprovedAnchor ? " APPROVED POSE 1 is scene continuity only, never a different face." : ""}`
       : hasApprovedAnchor
-        ? "The image labeled APPROVED POSE 1 in the reference manifest above is the exact, non-negotiable ground truth for this model's identity. Reproduce the identical facial bone structure, eye shape and color, eyebrow shape, nose, lips, jawline, skin tone and texture, and hairstyle seen in that image - do not idealize, beautify, average, or drift toward a different face."
-        : "This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally attractive adult face with real individual character (not an idealized, airbrushed, symmetric stock face) exactly as described in modelIdentity above - every later pose in this set must reproduce this same face."}
+        ? "The image labeled APPROVED POSE 1 in the reference manifest above is the exact, non-negotiable ground truth for this model's identity. Reproduce the identical facial bone structure, eye shape and color, eyebrow shape, nose, lips, jawline, skin tone and texture, and hairstyle seen in that image - do not idealize, beautify, average, or drift toward a different face. Ignore any person visible in the STYLE REFERENCE."
+        : "This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally attractive adult face with real individual character (not an idealized, airbrushed, symmetric stock face) exactly as described in modelIdentity above — completely discarding the person's face, pose, and props in the STYLE REFERENCE — every later pose in this set must reproduce this same Pose 1 face."}
 ${faceQualityInstruction}
 
 LOCKED PRODUCT - MUST NOT CHANGE:
-${referenceImageScopeDirective(hasModelReference)}
+${referenceImageScopeDirective(hasModelReference, useStyleModelIdentity)}
 ${productCoreJson}
 ${isSaree ? (isTrueBack ? `SAREE REAR TRUTH - DIRECT EVIDENCE ONLY:
 ${sareeTruthJson}
@@ -1346,8 +1407,8 @@ Reference authority: ${isTrueBack
     : `original product images always outrank generated anchors and style references. FRONT controls front construction and, when bottoms are visible, bottom-wear cut and print; BACK solely controls rear construction including rear bottom-wear; FABRIC/PATTERN resolves UPPER-garment material, embroidery and small construction only unless that image itself shows the trousers/skirt; BOTTOM WEAR / FARSHI (if supplied) is the pixel-level authority for bottom-wear cut, volume, hem, color and print; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion, drape and bottom volume, while a FLAT-LAY resolves outline, construction, panel layout and length only, since flat cloth shows no worn drape. ADDITIONAL supports product truth including bottoms; STYLE controls art direction, photoshoot backdrop, room architecture, flooring, and lighting only - STYLE REFERENCE is the SOLE AUTHORITY for the photoshoot environment, never product identity. Product reference backgrounds must be 100% discarded.${isSaree ? " For sarees, FULL SAREE FRONT and REAR/BACK DRAPE control their complete worn regions; SAREE BODY/WEAVE controls body colour, weave and motif geometry; FULLY SPREAD PALLU alone controls the pallu boundary and artwork; BORDER/TASSELS controls edge geometry and tassel construction; BLOUSE FRONT/BACK controls only the matching blouse region. Never classify or treat the pallu spread as generic body fabric." : ""}`}
 - Product references may be flat-lay, folded, pinned or shot on a mannequin or dress form. Rebuild the garment as it falls on a live human body, and never render a mannequin, dress form, hanger, clip, pin, prop stand, or the flat background surface in the output.
 ${isSaree ? (isTrueBack
-    ? "- SAREE REAR RULE: read the visible pallu fall, border, tassels, weave and blouse-back only from the direct rear image. Never mirror or extend a front-only design into the back."
-    : "- SAREE SPECIFIC RULES: Pallu artwork stays on the pallu, never bleed the border into the main body, do not duplicate the pallu into multiple loose cloth panels, border width stays identical, follow the drape plan explicitly.") : ""}
+    ? "- SAREE REAR RULE: read the visible pallu fall, border, tassels, weave and blouse-back only from the direct rear image. When the direct rear reference is an unadorned mannequin wrap showing no ornate blouse back, render a clean, modest, undecorated plain solid tonal blouse back matching Pose 1 (no bare strapless chest/back, no invented dori/keyhole/cutout/embroidery). Never mirror or extend a front-only design into the back."
+    : "- SAREE SPECIFIC RULES: Pallu artwork stays on the pallu, never bleed the border into the main body, do not duplicate the pallu into multiple loose cloth panels, border width stays identical, follow the drape plan explicitly. NEVER render a bare/strapless mannequin upper-torso look: if product photos show the saree draped on a blouseless mannequin with no separate stitched blouse photo, dress the model in a clean, modest, plain undecorated tailored solid short/elbow-sleeve blouse in a cohesive matching/complementary tone with zero invented embroidery or embellishments.") : ""}
 
 GARMENT TRUTH CONTRACT (EVIDENCE BY REGION):
 ${evidenceLines}
@@ -1417,16 +1478,16 @@ ${themeInterpretation ? `- Theme being served: ${boundedText(themeInterpretation
 - Style the model with exactly these pieces - the same metal, the same count, the same placement in every frame. Do not add a necklace, bangle, ring, belt, bag, hair ornament or any other accessory this plan does not list, and do not drop one it does.
 - JEWELLERY & ORNAMENT LOCK: Wear exactly the jewellery and ornaments in this plan. If the plan copied style-reference ornaments, keep those pieces identical. Do not invent competing necklaces, maang tikkas, extra bangles, or hair jewellery. Product-included jewellery from the product references outranks style-reference jewellery when both exist, and nothing in this plan may hide neckline or embroidery.
 - This is styling only. It never becomes part of the garment, never hides or replaces a garment detail, bottom wear or footwear shown in the product references, and never contradicts the placement or absence locks above.
-${directedCreative.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${boundedText(withoutHeldObjectClauses(String(directedCreative.suggestedAccessories)), 420)}` : ""}`
+${directedCreative.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${boundedText(withoutHeldObjectClauses(String(directedCreative.suggestedAccessories), [args.skuName, args.productDetails].filter(Boolean).join(" ")), 420)}` : ""}`
   : `STYLING ADDITION (optional, locked once chosen):
-${directedCreative.suggestedAccessories ? `The stylist has proposed adding: ${boundedText(withoutHeldObjectClauses(String(directedCreative.suggestedAccessories)), 420)}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}
+${directedCreative.suggestedAccessories ? `The stylist has proposed adding: ${boundedText(withoutHeldObjectClauses(String(directedCreative.suggestedAccessories), [args.skuName, args.productDetails].filter(Boolean).join(" ")), 420)}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}
 - JEWELLERY & ORNAMENT LOCK: ${hasStyleReference
     ? "If the STYLE REFERENCE image in this manifest shows jewellery or ornaments that complement this product and the product itself does not already include competing pieces, keep those exact style-reference pieces identical across the set. Never invent a second jewellery story."
     : "No STYLE REFERENCE image is in this manifest. Use only jewellery/ornaments that ship with the product or were named in the approved styling plan. Do not invent jewellery from a missing style reference."}`}
 ${dupattaLock}
 ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
 ${allowedDelta.map((value) => `- ${value}`).join("\n")}
-- Hand placement: ${boundedText(catalogPoseText(args.pose.handPlacement, RELAXED_HANDS, isSittingDemanded), 360)}
+- Hand placement: ${boundedText(sanitizeHeldObjectText(catalogPoseText(args.pose.handPlacement, RELAXED_HANDS, isSittingDemanded), RELAXED_HANDS, [args.skuName, args.productDetails].filter(Boolean).join(" ")), 360)}
 - Everything not named here stays locked.
 
 POSE REQUIREMENT:
@@ -1450,7 +1511,7 @@ ${isShowcase
     : ""}
 ${isPose4 && hasStyleReference ? `
 DO NOT COPY THE STYLE POSE (POSE 4):
-- A person sitting in the STYLE REFERENCE does not make this frame seated. Copy the room only.
+- A person sitting in the STYLE REFERENCE does not make this frame seated. Also never copy a foreground pillar-leaning posture or handheld props from the STYLE REFERENCE.
 ` : ""}
 ${correction ? `
 CORRECTION REQUIRED FROM PREVIOUS QA ATTEMPT:
@@ -1476,32 +1537,29 @@ REALISTIC INTEGRATION:
 - Treat this as frame ${args.pose.poseNumber} from one photographed contact sheet, not a new image concept. Reuse the same physical set coordinates, time of day, camera family, exposure, white balance, light direction, shadow density, and color grade established by Pose 1.
 - Preserve natural fabric drape, folds, gravity, occlusion, thickness and construction for this exact material and fit.
 - Match locked lighting direction, color temperature, shadows, contact shadows, perspective, lens feel, depth and scene geometry.
-- Keep anatomy realistic and keep hands away from product details.
+- Keep anatomy realistic with continuous exterior arm/wrist paths and soft natural fingers kept clear of chest embroidery.
 - Preserve believable pores, flyaway hairs, fabric microtexture, seam depth, edge transitions, optical depth of field, and grounded foot/contact shadows. Avoid waxy skin, over-smoothed fabric, duplicated motifs, over-sharpening, floating garments, plastic texture, and other synthetic AI tells.
 ${faceRequired ? `- If the identity photo hides the eyes, keep that cover and the visible jaw, nose, lips, and hair. Do not invent an uncovered face. Eyes the photo shows stay naturally shaped and aligned.
 - Follow the planned expression; do not force a smile. If teeth show, render them naturally aligned in the correct count - never uniformly perfect, fused, extra, missing, or warped.
 - Skin must show real photographic micro-detail (pores, faint texture variation) rather than an airbrushed, plastic, or over-smoothed "beauty filter" look.` : ""}
 
 PROHIBITED UNRELATED CHANGES:
-- STRICT ANATOMICAL RULE: NEVER render three hands, extra arms, duplicate hands, floating hands, phantom limbs, or extra body parts. The model must have strictly and exactly two arms and two hands with five natural fingers each.
-- STRICT PRODUCT ISOLATION RULE: Never copy, transfer, or borrow the clothing, saree, dress, colors, prints, or embroidery from the STYLE REFERENCE image. Dress the model ONLY in the uploaded product.
-- STRICT PROHIBITION ON COPYING PRE-SHOOT BACKGROUNDS: Never copy or reproduce pre-shoot background walls, terracotta arches, urns, clay pots, plants, courtyard structures, or outdoor scenery from the product reference images into the generated image.
-- Never render duplicate or identical frontal standing poses across different pose slots (Poses 2, 4, and 6 must visibly physically diverge from Pose 1).
-- Never freeze a walking stride, a spin, a mid-laugh, or a wide leg split.${isPose4CroppedAboveAnkles ? " Frame cleanly to the planned editorial crop without forcing out-of-frame feet." : " Use a natural catalog stance with both feet grounded. A joined or tapered hem stays closed."}
+- STRICT ANATOMICAL RULE: NEVER render three hands, extra arms, duplicate hands, floating hands, phantom limbs, or extra body parts. Never render hands poking impossibly through mid-garment/pallu/dupatta slits, awkward forearm clawing, splayed stiff mannequin fingers, or fingers covering chest embroidery.
+- STRICT PRODUCT ISOLATION RULE: Never copy, transfer, or borrow the clothing, saree, dress, colors, prints, or embroidery from the STYLE REFERENCE image. Dress the model ONLY in the uploaded product. Also never copy handheld props (coffee cups, mugs, bottles, tote bags, handbags, sunglasses, phones) or foreground pillar-leaning postures.
+- STRICT PROHIBITION ON COPYING PRE-SHOOT BACKGROUNDS: Never reproduce pre-shoot background walls, terracotta arches, urns, pots, plants, or outdoor scenery from product reference images.
+- Never render duplicate or identical frontal standing poses across different pose slots (Poses 2, 4, and 6 must visibly physically diverge from Pose 1), and never freeze a walking stride, spin, or wide leg split.${isPose4CroppedAboveAnkles ? " Frame cleanly to the planned editorial crop without forcing out-of-frame feet." : " Keep both feet grounded in a natural catalog stance; a joined or tapered hem stays closed."}
 ${bottomWear.includesBottomWear
-    ? "- ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION: it is strictly forbidden to alter or replace the recorded bottom-wear cut, silhouette, volume, colour or print, or to reduce bold motifs to solid colour or tiny dots. Customers buy the complete set and expect the exact silhouette, colour and motif pattern shown in the product references."
+    ? "- ABSOLUTE PROHIBITION ON BOTTOM WEAR SUBSTITUTION: never alter the recorded bottom-wear cut, silhouette, volume, colour or print, or reduce bold motifs to solid colour or tiny dots."
     : isSareeShoot
-      ? "- Never substitute or restyle the saree drape, pallu placement, pleat stack or border geometry."
-      : "- ABSOLUTE PROHIBITION ON INVENTING A MATCHING SET: it is strictly forbidden to render coordinated bottom wear that repeats this product's print, motif, embroidery, border, colour blocking or fabric. The bottom stays plain, neutral and clearly styling, never a second product piece."}
-${(args.pose.id === "back" || isTrueBack) ? `- DUPATTA REAR VISIBILITY LOCK: If wearing a dupatta, scarf, stole, or shawl, it MUST be draped forward over both arms or held in front. The entire back of the kurti/dress (neckline, back panel, embroidery, seams, darts, and hem) must be 100% visible and NEVER covered or obstructed by the dupatta.
-- HAIR REAR VISIBILITY LOCK: Hair MUST be swept forward over the shoulders or styled in an updo/bun so the back neckline, rear embroidery, closures, and rear garment panel are completely unobstructed and fully visible.
-- TRUE BACK HARD RULE: shoulders and hips fully face away. Reproduce uploaded BACK exactly; never infer the rear from FRONT.` : ""}
-- Never change the backdrop wall color, texture, floor, or lighting from what was established in Pose 1.
-- Never add random background props (brass urlis, urns, flower petals, pedestals) not present in Pose 1.
-- Never render artificial, forced, stiff, or frozen stock catalog smiles.
-- Never redesign the product or copy garment details from the style reference.
-- Never complete, mirror, continue, relocate, add or remove decoration for symmetry.
-- Never add random text, branding, people, layers, props that hide the product, or substitute bottom wear.
+      ? `- Never substitute or restyle the saree drape, pallu placement, pleat stack or border geometry.
+- SAREE BLOUSE SAFEGUARD: NEVER render a bare/strapless mannequin upper-torso look. If product photos show a blouseless mannequin wrap with no separate stitched blouse photo, dress the model in a clean, modest, plain undecorated solid matching/complementary short/elbow-sleeve blouse locked across all poses.`
+      : "- ABSOLUTE PROHIBITION ON INVENTING A MATCHING SET: never render coordinated bottom wear that repeats this product's print, motif, embroidery, border, colour blocking or fabric. The bottom stays plain neutral styling."}
+${(args.pose.id === "back" || isTrueBack) ? `- DUPATTA REAR VISIBILITY LOCK: Drape any dupatta/shawl/stole forward over both arms so the entire back garment (neckline, embroidery, seams, hem) stays 100% unobstructed.
+- HAIR REAR VISIBILITY LOCK: Sweep hair forward or into an updo so back neckline, ties, and rear embroidery stay 100% visible.
+- TRUE BACK HARD RULE: shoulders and hips fully face away; reproduce uploaded BACK exactly without inferring rear details from FRONT.` : ""}
+- Never change the Pose 1 backdrop wall, floor, lighting, or add unreferenced props (urlis, urns, petals, pedestals), text, logos, or people.
+- Never render artificial, forced, stiff, or frozen stock catalog smiles, or dead stiff mannequin arms.
+- Never redesign the product or copy garment details from the style reference, and never add, complete, or relocate decoration for symmetry.
 ${rules.map((rule) => `- ${rule}`).join("\n")}
 
 Product accuracy is more important than style matching.

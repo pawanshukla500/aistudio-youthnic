@@ -415,54 +415,52 @@ export function garmentPoseDirection(
   const cropped = options.croppedAboveAnkles === true;
   return {
     saree_bengali:
-      `- BENGALI SAREE POSE GRAMMAR: pose with the quiet, upright grace this drape is photographed with. Shoulders open and level, spine tall, chin level, weight settled on one leg, movement small and deliberate.
+      `- BENGALI SAREE POSE GRAMMAR: pose with quiet, upright, living-human grace centered in an open floor clearing (never pinned behind or leaning against a foreground pillar). Shoulders relaxed, spine tall, chin level, weight settled naturally on one leg.
 - PALLU (AANCHAL) PLACEMENT: the pallu must read as a deliberately placed panel, not stray cloth. Keep its recorded shoulder side, fall direction and visible length exactly as the drape plan states. Where the drape is aatpoure/Bengali style, the pallu comes over the shoulder and its border and end-piece artwork stay readable; never bunch, twist, fold away, or hide the pallu behind an arm.
-- PLEATS AND BORDER: front pleats stay flat, evenly stacked and vertical; the upper and lower borders stay continuous and unbroken along the body and across the pallu edge; the lower border stays parallel to the floor and never rides up.
-- HANDS: keep both hands clear of the pallu artwork and the border. Strictly exactly two arms and two hands. If a hand touches the drape at all, it rests lightly at the pleat line or holds the pallu edge low and open so the artwork stays fully visible; the other hand rests naturally at the model's side. NEVER render a third hand, phantom hand, or disconnected hand on the pleats or waist.`,
+- PLEATS AND BORDER: front pleats stay flat, evenly stacked and vertical; the upper and lower borders stay continuous and unbroken along the body and across the pallu edge; the lower border stays parallel to the floor and never rides up. If references show a strapless mannequin wrap with no stitched blouse, pair with a plain undecorated solid modest half/elbow-sleeve blouse with zero invented motifs or ties.
+- HANDS: strictly two natural human arms with relaxed fingers (never copy mannequin straight arms or splayed plastic fingers). Every arm/wrist follows an exterior path outside the saree pleats — NEVER poke a hand through an imaginary mid-pleat or pallu slit, NEVER cover pallu artwork or border, and NEVER render a third/phantom hand.`,
     saree_ethnic:
-      `- ETHNIC SAREE POSE GRAMMAR: graceful, poised, unhurried posture that suits a traditional drape - tall spine, relaxed shoulders, soft weight shift, controlled movement that never disturbs the drape.
+      `- ETHNIC SAREE POSE GRAMMAR: graceful, poised, living-human editorial posture centered cleanly in an open floor zone with room breathing room (never jammed behind a foreground pillar or copying a seated/leaning reference pose) — tall spine, soft shoulders, easy weight shift, varied framing/angle across poses.
 - PALLU PLACEMENT: follow the recorded drape plan exactly for shoulder side, open-or-pleated pallu, fall direction and visible length. The pallu reads as one continuous placed panel with its artwork and border legible; never duplicate it into extra loose panels, never let it fall behind the body out of frame.
-- PLEATS AND BORDER: front pleats stay flat, even and vertical; upper and lower borders stay continuous and identical in width; the hem border stays level.
-- HANDS: strictly exactly two arms and two hands. Keep hands away from the pallu artwork, border and pleat stack. When one hand holds the pallu edge open, low and flat so the artwork stays readable, the other hand must be positioned naturally at the side or hip. NEVER render three hands, extra arms, duplicate hands, or floating hands.`,
+- PLEATS AND BORDER: front pleats stay flat, even and vertical; upper and lower borders stay continuous and identical in width; the hem border stays level. If product references show a strapless knotted mannequin wrap with no blouse, wear a plain undecorated modest basic short- or elbow-sleeve blouse in a cohesive solid shade locked across all poses without inventing embroidery, prints, cutouts, or ties.
+- HANDS: strictly two continuous exterior arms and hands with soft relaxed human fingers (zero splayed stiff plastic fingers, zero forearm clawing). Any hand touching the pallu/hem holds ONLY the exterior outer edge cleanly from outside — NEVER emerge hands through a phantom slit inside pleats or chest wrap, and keep hands clear of pallu artwork and border artwork.`,
     kurta_set: cropped
-      ? `- KURTA / KURTI SET POSE GRAMMAR: frame this look within the planned crop so the kurta neckline, yoke, sleeves, torso fit, side detail, and any visible upper bottom wear read clearly without forcing out-of-frame ankles or footwear.
-- FIT AND LENGTH: stance must show the garment's true fit and silhouette within the crop - no bunching at the waist and no arm crossing the torso to hide the side seam or embroidery.
-- SLEEVES: keep both sleeves readable - sleeve length, cuff, and any sleeve embroidery stay unobstructed. Arms stay away from the body far enough that the sleeve silhouette does not collapse against the torso.
-- DUPATTA: if a dupatta ships with the set, drape it so it never covers the yoke embroidery, the front placket, the side slit or any visible bottom wear.`
-      : `- KURTA / KURTI SET POSE GRAMMAR: every frame must sell the complete set. Keep the full length of the kurta from shoulder seam to hem in frame, and keep the bottom wear visible from waistband to hem with the footwear grounded.
-- FIT AND LENGTH: stance must show the garment's true fit and true length - no hitching the hem up, no bunching at the waist, no arm crossing the torso to hide the side seam or the hem line.
-- SLEEVES: keep both sleeves readable - sleeve length, cuff, and any sleeve embroidery stay unobstructed. Arms stay away from the body far enough that the sleeve silhouette does not collapse against the torso.
-- DUPATTA: if a dupatta ships with the set, drape it so it never covers the yoke embroidery, the front placket, the side slit or the bottom wear. Front frames keep it off the centre front; back frames keep it forward over the arms.`,
+      ? `- KURTA / KURTI SET POSE GRAMMAR: frame this look within the planned closer editorial crop so the kurta neckline, yoke, sleeves, torso fit, side detail, and any visible upper bottom wear read richly and vary camera proximity cleanly from Pose 1 without forcing out-of-frame ankles or footwear.
+- FIT AND HANDS: relaxed natural shoulder/elbow curve with both arms clearly outside the kurta and dupatta perimeter — never push a hand out through a closed front kurta or dupatta slit, never grip the opposite forearm awkwardly, and never cover yoke/chest craft with fingers.
+- SLEEVES: keep both sleeves readable - sleeve length, cuff, and any sleeve embroidery stay unobstructed. Arms stay clear of the torso enough for natural garment drape.
+- DUPATTA: if a dupatta ships with the set, drape it over one shoulder and clear forearm so it never hides yoke embroidery, center placket, side slits, or upper bottom wear.`
+      : `- KURTA / KURTI SET POSE GRAMMAR: every full-length frame must sell the complete set while visibly diverging in torso angle, camera distance, or studio floor placement across Poses 1, 2, 4, and 6. Keep the full length of the kurta from shoulder seam to hem and the bottom wear from waistband to hem readable with natural stance.
+- FIT AND HANDS: relaxed human weight shift with varied arm choreography (never identical robot straight arms in Poses 1, 2, 4). Arms stay outside the closed kurta/dupatta perimeter — NEVER poke a hand out through an imaginary kurta or dupatta slit, never claw the opposite forearm, and never cover yoke embroidery or hem lace.
+- SLEEVES: keep both sleeves readable - sleeve length, cuff, and sleeve embroidery stay unobstructed without pinching awkwardly into the waist.
+- DUPATTA: if a dupatta ships with the set, drape it smoothly so yoke craft, placket, side slits, and bottom wear stay clear. Front/angled frames keep the center clear; back frames sweep hair and dupatta cleanly forward over forearms.`,
     long_kurti: cropped
-      ? `- LONG KURTI POSE GRAMMAR: the planned crop highlights bodice fit, neckline, sleeves, and upper drape cleanly without forcing out-of-frame lower hem or feet.
-- FIT AND LENGTH: keep the upper silhouette smooth and upright so side seams hang naturally with no bunching or twisting.
-- SLEEVES AND DETAIL: keep both sleeves, the neckline, the placket and any visible embroidery or slit readable; arms stay clear of the yoke and print.`
-      : `- LONG KURTI POSE GRAMMAR: the frame sells fit, fall and length. Keep the complete hem line inside the frame and show the garment hanging naturally at its true length.
-- FIT AND LENGTH: stance is relaxed and grounded so the side seams hang straight and the hem stays level. Never hitch, tuck, gather, or hold the hem in a way that shortens the garment.
-- SLEEVES AND DETAIL: keep both sleeves, the neckline, the placket and any side slit readable; arms stay clear of the yoke, print and slit.`,
+      ? `- LONG KURTI POSE GRAMMAR: the planned closer editorial crop highlights bodice fit, neckline, sleeves, side drape, and natural human body language clearly without forcing out-of-frame lower hem or feet.
+- FIT AND HANDS: keep the upper silhouette smooth with natural relaxed fingers and elbows — never stiff straight arms or fingers covering chest/neckline craft; keep neutral bottoms understated and non-matching.`
+      : `- LONG KURTI POSE GRAMMAR: the frame sells fit, fall, side slits, and true length with varied camera angles across Poses 1, 2, 4, and 6 while keeping understated neutral bottoms clearly secondary. Keep the complete hem line inside the frame hanging cleanly at its true length.
+- FIT AND HANDS: relaxed living-human stance (never mannequin dead-hang arms) so side seams hang straight and hem stays level. Never hitch, tuck, gather, or shorten the hem, and never block neckline, placket, or side slits with hands.`,
     short_kurti_top:
-      `- SHORT KURTI / TOP POSE GRAMMAR: keep the pose natural and wearable. Use a small weight shift, a gentle turn, a shoulder tilt, or a lean into the set that is already there. Do not freeze a laugh, a walking stride, or a wide leg split.
-- MATCH THE POSE TO THE SET: ${cropped ? "maintain balanced, natural posture aligned with the set." : "both feet stay planted and close."} A lean may use a wall already in the room. Do not sit because the style photo sits, and do not invent furniture.
-- KEEP THE PRODUCT READABLE: the top's hem line, neckline, sleeve shape, fit and print must all stay unobstructed and in frame. The pose must not crumple, twist or hide the garment.
-- EXPRESSION: calm and genuine - a small smile or an easy glance - never a frozen mid-laugh or a stiff corporate stare.`,
+      `- SHORT KURTI / TOP POSE GRAMMAR: fill the frame purposefully around the top so neckline craft, sleeves, yoke, and waist/hip hem read close and crisp rather than shrinking the top into distant full-body pavement shots. Use varied gentle torso angles, natural shoulder tilt, or soft weight shifts across frames — never freeze a laugh, a walking stride, or a wide leg split.
+- MATCH THE POSE TO THE SET: ${cropped ? "maintain balanced, relaxed three-quarter/knees-up posture closer to the camera so top details shine." : "both feet stay planted and close, with the camera sized so the top remains the clear visual hero."} Do not sit because the style photo sits, do not lean behind foreground pillars, and do not invent furniture or handheld coffee/bags.
+- NATURAL HANDS & PRODUCT READABILITY: keep relaxed soft fingers with a continuous visible forearm/wrist path outside garment seams (one hand softly beside pocket/hip edge or gentle wrist curve; zero splayed stiff plastic fingers, zero forearm clawing, NEVER press fingers over chest embroidery, and NEVER lock both arms identically stiff at the sides across multiple poses). Top hem line, neckline, sleeve shape, fit, and print stay 100% unobstructed.
+- EXPRESSION: calm and genuine - a small relaxed smile or an easy glance - never a frozen mid-laugh or a stiff corporate stare.`,
     lehenga: cropped
       ? `- LEHENGA SET POSE GRAMMAR: highlight the choli, dupatta drape, waist detail, and visible upper skirt volume within this pose's planned crop without forcing out-of-frame floor hem or feet.
 - SKIRT VOLUME: the visible skirt keeps its true flare and panel structure without flattening or hand-crushing.
-- DUPATTA: drape it so it frames rather than hides the choli and visible skirt border work.`
+- DUPATTA & HANDS: drape it so it frames rather than hides the choli and visible skirt border work, with relaxed continuous arms outside the pleats.`
       : `- LEHENGA SET POSE GRAMMAR: show the full silhouette - choli, dupatta and the complete skirt flare from waist to hem - with the hem inside the frame.
 - SKIRT VOLUME: the skirt keeps its true flare, panel structure and hem weight. Never flatten the volume, and never let a hand or dupatta collapse the silhouette.
-- DUPATTA: drape it so it frames rather than hides the choli and the skirt's border work.`,
+- DUPATTA & HANDS: drape it so it frames rather than hides the choli and the skirt's border work, with natural living hands along exterior drape edges only.`,
     dress: cropped
-      ? `- DRESS POSE GRAMMAR: keep the bodice, neckline, waist seam, and visible skirt fall readable within this pose's planned crop without forcing out-of-frame hemline or feet. Posture is relaxed and elongating.
-- Keep arms clear of the bodice, waist seam and any side detail.`
+      ? `- DRESS POSE GRAMMAR: keep the bodice, neckline, waist seam, and visible skirt fall readable within this pose's planned crop without forcing out-of-frame hemline or feet. Posture is relaxed, warm, and elongating.
+- Keep natural relaxed arms clear of the bodice, waist seam and any side detail.`
       : `- DRESS POSE GRAMMAR: show the complete silhouette from shoulder to hem with the hemline level and inside the frame. Posture is relaxed and elongating so the waist seam, skirt fall and any slit read correctly.
-- Keep arms clear of the bodice, waist seam and any side detail.`,
+- Keep natural relaxed arms clear of the bodice, waist seam and any side detail.`,
     western_casual: cropped
-      ? `- WESTERN / CASUAL POSE GRAMMAR: relaxed, current, natural street-style body language with easy weight shifts and candid movement.
-- Keep the visible outfit readable within this pose's planned crop: top hem, waistline, and visible upper bottom-wear cut stay unobstructed without forcing out-of-frame ankles or footwear.`
+      ? `- WESTERN / CASUAL POSE GRAMMAR: relaxed, current, natural editorial body language with varied proximity and gentle shoulder/hip weight shifts.
+- Keep the visible outfit readable within this pose's planned crop: top hem, waistline, and visible upper bottom-wear cut stay unobstructed without forcing out-of-frame ankles or footwear. Keep hands natural without copied drinks/bags/phones.`
       : `- WESTERN / CASUAL POSE GRAMMAR: relaxed, current, natural street-style body language with easy weight shifts and candid movement.
-- Keep the full outfit readable: top hem, waistline, bottom-wear cut and footwear all stay in frame and unobstructed.`,
+- Keep the full outfit readable: top hem, waistline, bottom-wear cut and footwear all stay in frame and unobstructed. Never repeat identical hanging robot arms across poses.`,
     other:
-      `- GENERAL POSE GRAMMAR: natural, confident, catalog-appropriate body language that keeps the complete garment silhouette, hem and construction readable in every frame.`,
+      `- GENERAL POSE GRAMMAR: natural, living-human editorial body language with relaxed wrists/fingers and distinct angle/distance per pose that keeps the complete garment silhouette, hem and construction readable in every frame.`,
   }[family];
 }

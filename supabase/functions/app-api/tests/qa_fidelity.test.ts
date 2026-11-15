@@ -831,3 +831,49 @@ Deno.test("canSalvageExhaustedPoseQa requires explicit saree core lock scores on
     true,
   );
 });
+
+Deno.test("buildPoseQaPrompt quarantines style-reference face on Pose 1 unless useStyleAsModelFace is true and enforces realistic hand/blouse rules", () => {
+  const freshPose1 = buildPoseQaPrompt({
+    poseNumber: 1,
+    poseType: "full_front",
+    poseTitle: "Front Hero Stance",
+    poseDirection: { id: "full_front", title: "Front Hero Stance" },
+    productIdentity: { garmentFamily: "saree_ethnic", mainColor: "sky blue" },
+    creativeDirection: {},
+    modelIdentity: { ethnicity: "South Asian woman", expressionMood: "calm natural editorial confidence" },
+    garmentFamily: "saree_ethnic",
+    consistencyRules: [],
+    hasApprovedAnchor: false,
+    hasModelReference: false,
+    useStyleAsModelFace: false,
+    referenceManifest: [
+      "IMAGE 1: SAREE FRONT DRAPE",
+      "IMAGE 2: STYLE REFERENCE (photoshoot room/lighting/mood ONLY — ignore its outfit, face, and pose)",
+    ],
+  });
+  assertStringIncludes(freshPose1, "Never fail Pose 1 model_face because its face differs from the STYLE REFERENCE");
+  assertEquals(freshPose1.includes("Compare IMAGE A against the STYLE REFERENCE face"), false);
+  assertStringIncludes(freshPose1, "hands poking impossibly through phantom slits");
+  assertStringIncludes(freshPose1, "stiff splayed mannequin-like plastic arms/fingers");
+  assertStringIncludes(freshPose1, "plain, undecorated modest solid matching/tonal basic blouse");
+
+  const collapsedPose1 = buildPoseQaPrompt({
+    poseNumber: 1,
+    poseType: "full_front",
+    poseTitle: "Front Hero Stance",
+    poseDirection: { id: "full_front", title: "Front Hero Stance" },
+    productIdentity: { garmentFamily: "saree_ethnic", mainColor: "sky blue" },
+    creativeDirection: {},
+    modelIdentity: {},
+    garmentFamily: "saree_ethnic",
+    consistencyRules: [],
+    hasApprovedAnchor: false,
+    hasModelReference: false,
+    useStyleAsModelFace: true,
+    referenceManifest: [
+      "IMAGE 1: SAREE FRONT DRAPE",
+      "IMAGE 2: STYLE REFERENCE & MODEL FACE REFERENCE (copied identically in both slots)",
+    ],
+  });
+  assertStringIncludes(collapsedPose1, "Compare IMAGE A against the STYLE REFERENCE face (uploaded identically in both Face Lock and Style Ref)");
+});
