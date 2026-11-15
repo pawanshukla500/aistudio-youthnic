@@ -595,7 +595,7 @@ function showcaseSlotFromPlan(
     productVisibilityRules: detailRules.slice(0, 8),
     consistencyNotes: "Same model identity, styling, footwear, set, backdrop and lighting as Pose 1; only the framing and posture change to sell this feature",
     description: `A frame built around ${feature}${plan.whyItSells ? ` - ${plan.whyItSells}` : ""}${garmentDetails.summary ? ` (${garmentDetails.summary})` : ""
-      }. ${aestheticDirection}`,
+    }. ${aestheticDirection}`,
     highlightedDetails: [feature, plan.featureRegion.replace(/_/g, " "), ...garmentDetails.highlights].slice(0, 6),
     primaryReference: plan.evidenceReference || (isSareePoseFamily(family) ? "saree_front_drape" : "front"),
     purpose: plan.whyItSells || "Sell the detail that makes this product worth buying",
@@ -604,7 +604,7 @@ function showcaseSlotFromPlan(
         ? "Shoot it at this wider distance so it reads on the worn garment rather than as a repeat of the detail crop. "
         : ""
       }${plan.distinctFrom ? `It must differ from the other frames: ${plan.distinctFrom} ` : ""
-      }Render the exact model face, hair, skin tone, makeup, jewellery and footwear described in the locked model identity and styling plan, the exact studio set, backdrop wall, flooring and lighting described in the locked creative direction, and the garment's design, print, colour, fit and construction exactly as the product references show.`,
+    }Render the exact model face, hair, skin tone, makeup, jewellery and footwear described in the locked model identity and styling plan, the exact studio set, backdrop wall, flooring and lighting described in the locked creative direction, and the garment's design, print, colour, fit and construction exactly as the product references show.`,
     enabled: true,
   };
 }
@@ -787,11 +787,11 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
       productVisibilityRules: isShortTop
         ? ["front construction, neckline, sleeves, and bottom hem completely unobstructed", "top framed prominently as primary visual subject", "no garment detail hidden by hands or hair"]
         : [
-          "front construction unobstructed",
-          frontBottomRule,
+        "front construction unobstructed",
+        frontBottomRule,
           ...(isSaree ? ["complete saree front drape, shoulder pallu, front pleats, and lower border clearly visible"] : ["complete bottom wear visible from waist to hem"]),
-          "no garment detail hidden by hands or hair",
-        ],
+        "no garment detail hidden by hands or hair",
+      ],
       consistencyNotes: "Establish the model, face, hair, accessories, footwear, scene, lighting, and color-treatment anchor for poses 2-6",
       description: isShortTop
         ? "Straight-on front hero cropped cleanly around the top so fit, neckline, sleeves, and hemline read effortlessly."
@@ -820,12 +820,12 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
         ? ["drape depth and pallu fall clearly visible", "silhouette is not compressed", "model clearly rotated 35-45 degrees off Pose 1 angle"]
         : isShortTop
           ? ["sleeve shape, armhole, shoulder seam, and waist/hip hem clearly visible", "silhouette is not compressed", "framed knees-up so top construction fills the frame"]
-          : [
+        : [
             "front and side construction and any side slit remain readable",
-            "silhouette is not compressed",
-            angledBottomRule,
-            "bottom wear remains unchanged and visible",
-          ],
+          "silhouette is not compressed",
+          angledBottomRule,
+          "bottom wear remains unchanged and visible",
+        ],
       consistencyNotes: "Use Pose 1 only as the model and shoot anchor; preserve the original product references as garment truth",
       description: isSaree
         ? "A three-quarter angled view from a subtly shifted camera perspective revealing drape depth, pleat stack, and pallu fall."
@@ -894,12 +894,12 @@ export function getPoseSlots(input: string | PoseSlotContext): readonly StudioPo
             "no prop or limb hides neckline, sleeves, yoke, or garment construction",
             "no handheld objects or style-reference clothing copied",
           ]
-          : [
-            "product remains the visual subject",
-            "no prop or limb hides key construction",
-            "creative movement does not alter bottom wear cut, leg volume, fit, or silhouette",
-            "if seated on a bench or architectural step, both trouser legs and footwear remain visible, unbunched, and fully displayed",
-          ],
+        : [
+          "product remains the visual subject",
+          "no prop or limb hides key construction",
+          "creative movement does not alter bottom wear cut, leg volume, fit, or silhouette",
+          "if seated on a bench or architectural step, both trouser legs and footwear remain visible, unbunched, and fully displayed",
+        ],
       consistencyNotes: "Borrow only art direction, backdrop, and subtle jewellery taste from style references; garment, footwear, model identity, and studio light continuity remain locked",
       description: useCloserPose4
         ? "A closer, distinct editorial pose (knees-up or waist-up three-quarter angle) clearly diverging in camera proximity and body language from Pose 1, unless product notes demand sitting."
@@ -1458,7 +1458,7 @@ export function sareeAnalysisIssues(session: unknown): string[] {
   if (
     poses.length !== REQUIRED_POSE_IDS.length ||
     poses.map((pose) => String(objectValue(pose).id)).join(",") !==
-    REQUIRED_POSE_IDS.join(",")
+      REQUIRED_POSE_IDS.join(",")
   ) {
     issues.push("the ordered six-pose plan is incomplete");
   }
@@ -1474,7 +1474,7 @@ export function sareeAnalysisIssues(session: unknown): string[] {
       Boolean(
         String(
           reference.storagePath ?? reference.storage_path ??
-          reference.downloadUrl ?? reference.download_url ?? "",
+            reference.downloadUrl ?? reference.download_url ?? "",
         ).trim(),
       );
   });
@@ -1528,18 +1528,18 @@ export function normalizeAnalysis(
   const model = objectValue(raw.modelIdentity ?? raw.model_identity);
   const rawPoseValue = raw.posePlan ?? raw.pose_plan;
   const rawPoses = Array.isArray(rawPoseValue) ? (rawPoseValue as unknown[]) : [];
-
+  
   const sareeTruthRaw = objectValue(
     raw.sareeTruth ??
-    raw.saree_truth ??
-    product.sareeTruth ??
-    product.saree_truth,
+      raw.saree_truth ??
+      product.sareeTruth ??
+      product.saree_truth,
   );
   const sareeDrapePlanRaw = objectValue(
     raw.sareeDrapePlan ??
-    raw.saree_drape_plan ??
-    product.sareeDrapePlan ??
-    product.saree_drape_plan,
+      raw.saree_drape_plan ??
+      product.sareeDrapePlan ??
+      product.saree_drape_plan,
   );
   const sareeTruth = normalizeSareeTruth(sareeTruthRaw);
   const sareeDrapePlan = normalizeSareeDrapePlan(sareeDrapePlanRaw);

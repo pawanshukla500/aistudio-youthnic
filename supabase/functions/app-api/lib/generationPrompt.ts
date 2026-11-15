@@ -642,12 +642,12 @@ function bottomWearSection(args: {
   return `LOCKED BOTTOM WEAR ARCHITECTURE, SILHOUETTE & PRINT - HIGHEST FIDELITY:
 Bottom wear specification: ${boundedText(cleanedDetails, 1_200)}
 ${args.hasBottomReference && bottomImageTag
-      ? `- DEDICATED BOTTOM WEAR AUTHORITY (${bottomImageTag}): ${bottomImageTag} (labeled BOTTOM WEAR / FARSHI) is the pixel-level authority for bottom-wear cut, volume, hem, fabric color, and print. Copy ${bottomImageTag} literally onto the lower body in this frame.
+  ? `- DEDICATED BOTTOM WEAR AUTHORITY (${bottomImageTag}): ${bottomImageTag} (labeled BOTTOM WEAR / FARSHI) is the pixel-level authority for bottom-wear cut, volume, hem, fabric color, and print. Copy ${bottomImageTag} literally onto the lower body in this frame.
 - ZERO BLEED FROM UPPER GARMENT: Strictly DO NOT copy the upper kurta's fabric, embroidery, butti, or print${fabricImageTag ? ` (from ${fabricImageTag})` : ""} onto the bottom wear.
 - ZERO BLEED FROM STYLE REFERENCE: Strictly DO NOT copy or borrow the trousers, pants, or outfit from ${styleImageTag || "the STYLE REFERENCE"} image. The bottom wear must match ${bottomImageTag} 100%.`
-      : args.hasBottomReference
-        ? "- A dedicated BOTTOM WEAR / FARSHI image is in the reference manifest. That image is the pixel-level authority for bottom-wear cut, volume, hem, fabric color, and print. Copy it literally onto the worn trousers/skirt."
-        : "- Read bottom-wear cut, volume, hem, fabric color, and print from FRONT, BACK, MANNEQUIN, and ADDITIONAL product images where the trousers/skirt are visible. Do not invent a simpler palazzo or a solid/plain bottom."}
+  : args.hasBottomReference
+    ? "- A dedicated BOTTOM WEAR / FARSHI image is in the reference manifest. That image is the pixel-level authority for bottom-wear cut, volume, hem, fabric color, and print. Copy it literally onto the worn trousers/skirt."
+    : "- Read bottom-wear cut, volume, hem, fabric color, and print from FRONT, BACK, MANNEQUIN, and ADDITIONAL product images where the trousers/skirt are visible. Do not invent a simpler palazzo or a solid/plain bottom."}
 - MANDATORY SILHOUETTE PRESERVATION: render the EXACT bottom wear cut, silhouette, leg volume, leg structure, pleat/gather architecture, and hem construction described above and shown in the product references, in EVERY pose.
 - ABSOLUTE PROHIBITION ON SILHOUETTE SUBSTITUTION:
 ${guard}
@@ -683,8 +683,8 @@ function showcasePlanHardRule(args: {
   if (args.closeupHeroDetail) {
     lines.push(
       `- SHOWCASE FRAME MUST NOT REPEAT THE CLOSE-UP: Pose 5 already sells "${args.closeupHeroDetail}" in a tight crop. This frame must add coverage that pose does not give${args.widenedFromCloseup
-        ? " - so shoot the named feature at a wider distance here, showing how it sits on the worn garment rather than re-cropping the same detail."
-        : "."
+          ? " - so shoot the named feature at a wider distance here, showing how it sits on the worn garment rather than re-cropping the same detail."
+          : "."
       }`,
     );
   }
@@ -1086,7 +1086,7 @@ export function composeGenerationPrompt(args: {
     ? []
     : sanitizeDetailPlacementMap(product.detailPlacementMap, evidence).map((entry) => boundedText(entry, 420));
   const absent = isTrueBack ? [] : boundedStrings(product.absenceConstraints, 16, 420);
-
+  
   const isSaree = product?.garmentFamily === "saree";
   if (isSaree && (!product.sareeTruth || typeof product.sareeTruth !== "object" || !product.sareeDrapePlan || typeof product.sareeDrapePlan !== "object")) {
     throw new Error("Stored saree analysis is incomplete or outdated. Reanalyse the product references before generation.");
@@ -1147,12 +1147,12 @@ export function composeGenerationPrompt(args: {
   // photos stay out so their construction cannot leak onto the rear.
   const promptReferences = isTrueBack
     ? args.references.filter((ref) =>
-      isDirectBackProductRole(ref.role) ||
-      ref.role === "bottom" ||
-      ref.role === "model_identity" ||
-      ref.role === "style_reference" ||
-      ref.role === "approved_pose"
-    )
+        isDirectBackProductRole(ref.role) ||
+        ref.role === "bottom" ||
+        ref.role === "model_identity" ||
+        ref.role === "style_reference" ||
+        ref.role === "approved_pose"
+      )
     : args.references;
   if (isTrueBack && !promptReferences.some((ref) => isDirectBackProductRole(ref.role))) {
     throw new Error("The true back pose requires the current uploaded back product reference. Reanalyse or replace the back image before generation.");
@@ -1264,11 +1264,11 @@ export function composeGenerationPrompt(args: {
               : (args.pose.poseNumber === 5 || args.pose.id === "closeup")
                 ? "playful"
                 : detectPoseCategory([
-                  args.pose.id,
-                  poseDescription,
-                  posePrompt,
-                  catalogPoseText(args.pose.bodyPosition, plantedStance, isSittingDemanded),
-                ].join(" "));
+                    args.pose.id,
+                    poseDescription,
+                    posePrompt,
+                    catalogPoseText(args.pose.bodyPosition, plantedStance, isSittingDemanded),
+                  ].join(" "));
   const categoryRules = poseCategoryRules(poseCategory, { croppedAboveAnkles: isPose4CroppedAboveAnkles });
   // Compaction keeps the first 1,400 characters of this block. The current
   // frame and the seated rules have to lead, or a long six-pose summary
@@ -1382,8 +1382,8 @@ SAREE DRAPE PLAN:
 ${sareeDrapePlanJson}`) : ""}
 User notes: ${isTrueBack ? "Non-authoritative for rear construction. The direct uploaded back product image remains the sole product source." : boundedText(args.productDetails, 1_200)}
 Reference authority: ${isTrueBack
-      ? `The one direct uploaded BACK / SAREE REAR-BACK DRAPE image in the manifest is the sole visual product authority for the upper garment back.${bottomWear.includesBottomWear ? " Bottom wear preserves its authentic cut, volume, pleats, hem, and print DNA from the bottom wear references and recorded bottom-wear specifications." : ""} Do not derive upper-garment rear construction from a front, pallu, body detail, border, blouse, mannequin, model, style, or generated image.`
-      : `original product images always outrank generated anchors and style references. FRONT controls front construction and, when bottoms are visible, bottom-wear cut and print; BACK solely controls rear construction including rear bottom-wear; FABRIC/PATTERN resolves UPPER-garment material, embroidery and small construction only unless that image itself shows the trousers/skirt; BOTTOM WEAR / FARSHI (if supplied) is the pixel-level authority for bottom-wear cut, volume, hem, color and print; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion, drape and bottom volume, while a FLAT-LAY resolves outline, construction, panel layout and length only, since flat cloth shows no worn drape. ADDITIONAL supports product truth including bottoms; STYLE controls art direction, photoshoot backdrop, room architecture, flooring, and lighting only - STYLE REFERENCE is the SOLE AUTHORITY for the photoshoot environment, never product identity. Product reference backgrounds must be 100% discarded.${isSaree ? " For sarees, FULL SAREE FRONT and REAR/BACK DRAPE control their complete worn regions; SAREE BODY/WEAVE controls body colour, weave and motif geometry; FULLY SPREAD PALLU alone controls the pallu boundary and artwork; BORDER/TASSELS controls edge geometry and tassel construction; BLOUSE FRONT/BACK controls only the matching blouse region. Never classify or treat the pallu spread as generic body fabric." : ""}`}
+    ? `The one direct uploaded BACK / SAREE REAR-BACK DRAPE image in the manifest is the sole visual product authority for the upper garment back.${bottomWear.includesBottomWear ? " Bottom wear preserves its authentic cut, volume, pleats, hem, and print DNA from the bottom wear references and recorded bottom-wear specifications." : ""} Do not derive upper-garment rear construction from a front, pallu, body detail, border, blouse, mannequin, model, style, or generated image.`
+    : `original product images always outrank generated anchors and style references. FRONT controls front construction and, when bottoms are visible, bottom-wear cut and print; BACK solely controls rear construction including rear bottom-wear; FABRIC/PATTERN resolves UPPER-garment material, embroidery and small construction only unless that image itself shows the trousers/skirt; BOTTOM WEAR / FARSHI (if supplied) is the pixel-level authority for bottom-wear cut, volume, hem, color and print; a MANNEQUIN/DRESS-FORM shot resolves worn shape, fit, proportion, drape and bottom volume, while a FLAT-LAY resolves outline, construction, panel layout and length only, since flat cloth shows no worn drape. ADDITIONAL supports product truth including bottoms; STYLE controls art direction, photoshoot backdrop, room architecture, flooring, and lighting only - STYLE REFERENCE is the SOLE AUTHORITY for the photoshoot environment, never product identity. Product reference backgrounds must be 100% discarded.${isSaree ? " For sarees, FULL SAREE FRONT and REAR/BACK DRAPE control their complete worn regions; SAREE BODY/WEAVE controls body colour, weave and motif geometry; FULLY SPREAD PALLU alone controls the pallu boundary and artwork; BORDER/TASSELS controls edge geometry and tassel construction; BLOUSE FRONT/BACK controls only the matching blouse region. Never classify or treat the pallu spread as generic body fabric." : ""}`}
 - Product references may be flat-lay, folded, pinned or shot on a mannequin or dress form. Rebuild the garment as it falls on a live human body, and never render a mannequin, dress form, hanger, clip, pin, prop stand, or the flat background surface in the output.
 ${isSaree ? (isTrueBack
     ? "- SAREE REAR RULE: read the visible pallu fall, border, tassels, weave and blouse-back only from the direct rear image. When the direct rear reference is an unadorned mannequin wrap showing no ornate blouse back, render a clean, modest, undecorated plain solid tonal blouse back matching Pose 1 (no bare strapless chest/back, no invented dori/keyhole/cutout/embroidery). Never mirror or extend a front-only design into the back."
@@ -1422,26 +1422,26 @@ Embroidery geometry: ${embroideryGeometryJson}
 - If a region is not clearly resolved in any reference, render it plainly in the garment's base fabric, colour and texture only. Never copy a neighbouring panel's motif arrangement into it, never mirror or continue decoration across it, and never invent decoration to fill it - unresolved means undecorated, not "probably like the panel next to it".`)}
 
 ${bottomWearSection({
-        bottomWear,
-        isSaree: isSareeShoot,
-        hasBottomReference,
-        skuName: String(args.skuName || ""),
-        productDetails: String(args.productDetails || ""),
-        promptReferences,
-        isTrueBack,
-      })}
+  bottomWear,
+  isSaree: isSareeShoot,
+  hasBottomReference,
+  skuName: String(args.skuName || ""),
+  productDetails: String(args.productDetails || ""),
+  promptReferences,
+  isTrueBack,
+})}
 
 LOCKED ART DIRECTION & SET CONTINUITY - MUST NOT CHANGE BETWEEN POSES:
 - ABSOLUTE PROHIBITION ON PRODUCT PRE-SHOOT BACKGROUNDS: Never reproduce the background, wall, arches, urns, pots, plants, steps, or environment visible behind the garment in the product reference photos (front, back, bottom, mannequin). The photoshoot set must come exclusively from the STYLE REFERENCE (or Pose 1 anchor / studio specification).
 - BACKDROP AND SET CONTINUITY ACROSS ALL POSES: The exact same photoshoot set (wall color, wall finish, floor, and lighting) must remain identical across every pose in this set without drift or forgetting context.
 ${lockedDetailsDirective()}
 ${hasApprovedAnchor
-      ? `- SET & BACKDROP HARD LOCK TO APPROVED POSE 1:
+  ? `- SET & BACKDROP HARD LOCK TO APPROVED POSE 1:
   * Rebuild the EXACT SAME physical room and backdrop set from Pose 1: identical wall color, wall plaster/paint finish, texture, architectural elements, floor surface, and carpet/rug.
   * ZERO NEW PROPS: Do NOT add urns, brass urlis, flower petals, steps, pedestals, or vases absent from that room. Objects in the hands are not the set.
   * LIGHTING & SHADOW CONTINUITY: Keep the exact same light direction, shadow density, and warm/cool color temperature established in Pose 1.
   * The camera and model remain in the exact same photoshoot location - only the pose and framing change.`
-      : "- Maintain a single, consistent studio set, wall finish, flooring, and lighting setup across all poses."}
+  : "- Maintain a single, consistent studio set, wall finish, flooring, and lighting setup across all poses."}
 - SET ONLY: the direction below is backdrop, light, and camera. It does not set the pose, the garment, or handheld props.
 ${creativeJson}
 - Build the set described above, and where a STYLE REFERENCE or APPROVED POSE 1 image is supplied, rebuild only the room those images show: the same wall colour and finish, floor or ground surface, furniture in the room, light direction and quality, and colour grade. Do not substitute a different backdrop.
@@ -1458,11 +1458,11 @@ ${themeInterpretation ? `- Theme being served: ${boundedText(themeInterpretation
 - JEWELLERY & ORNAMENT LOCK: Wear exactly the jewellery and ornaments in this plan. If the plan copied style-reference ornaments, keep those pieces identical. Do not invent competing necklaces, maang tikkas, extra bangles, or hair jewellery. Product-included jewellery from the product references outranks style-reference jewellery when both exist, and nothing in this plan may hide neckline or embroidery.
 - This is styling only. It never becomes part of the garment, never hides or replaces a garment detail, bottom wear or footwear shown in the product references, and never contradicts the placement or absence locks above.
 ${directedCreative.suggestedAccessories ? `- Legacy stylist note (subordinate to the plan above): ${boundedText(withoutHeldObjectClauses(String(directedCreative.suggestedAccessories), [args.skuName, args.productDetails].filter(Boolean).join(" ")), 420)}` : ""}`
-      : `STYLING ADDITION (optional, locked once chosen):
+  : `STYLING ADDITION (optional, locked once chosen):
 ${directedCreative.suggestedAccessories ? `The stylist has proposed adding: ${boundedText(withoutHeldObjectClauses(String(directedCreative.suggestedAccessories), [args.skuName, args.productDetails].filter(Boolean).join(" ")), 420)}. Style the model with exactly this addition, identical across every pose. It is a styling choice only - it must never hide, replace, or contradict the garment, bottom wear, or footwear shown in the product references.` : "No additional styling accessory is needed for this product - use only what the product references show."}
 - JEWELLERY & ORNAMENT LOCK: ${hasStyleReference
-        ? "If the STYLE REFERENCE image in this manifest shows jewellery or ornaments that complement this product and the product itself does not already include competing pieces, keep those exact style-reference pieces identical across the set. Never invent a second jewellery story."
-        : "No STYLE REFERENCE image is in this manifest. Use only jewellery/ornaments that ship with the product or were named in the approved styling plan. Do not invent jewellery from a missing style reference."}`}
+    ? "If the STYLE REFERENCE image in this manifest shows jewellery or ornaments that complement this product and the product itself does not already include competing pieces, keep those exact style-reference pieces identical across the set. Never invent a second jewellery story."
+    : "No STYLE REFERENCE image is in this manifest. Use only jewellery/ornaments that ship with the product or were named in the approved styling plan. Do not invent jewellery from a missing style reference."}`}
 ${dupattaLock}
 ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
 ${allowedDelta.map((value) => `- ${value}`).join("\n")}
@@ -1479,15 +1479,15 @@ Consistency notes: ${poseConsistency}
 GARMENT POSE GRAMMAR (${garmentPoseFamilyHeading(poseFamily)}) - body language and framing only; it never changes the garment's design, print, colour, fit or construction:
 ${garmentPoseDirection(poseFamily, { croppedAboveAnkles: isPose4CroppedAboveAnkles })}
 ${isShowcase
-      ? (showcaseShot
-        ? showcasePlanHardRule({
-          plan: showcaseShot.plan,
-          shotType: showcaseShot.shotType,
-          widenedFromCloseup: showcaseShot.widenedFromCloseup,
-          closeupHeroDetail: recordedCloseupHeroDetail,
-        })
-        : showcaseHardRule(showcaseIntent, poseFamily))
-      : ""}
+    ? (showcaseShot
+      ? showcasePlanHardRule({
+        plan: showcaseShot.plan,
+        shotType: showcaseShot.shotType,
+        widenedFromCloseup: showcaseShot.widenedFromCloseup,
+        closeupHeroDetail: recordedCloseupHeroDetail,
+      })
+      : showcaseHardRule(showcaseIntent, poseFamily))
+    : ""}
 ${isPose4 && hasStyleReference ? `
 DO NOT COPY THE STYLE POSE (POSE 4):
 - A person sitting in the STYLE REFERENCE does not make this frame seated. Also never copy a foreground pillar-leaning posture or handheld props from the STYLE REFERENCE.
