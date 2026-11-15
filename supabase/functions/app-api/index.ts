@@ -27,7 +27,7 @@ import {
   type StudioPose,
   type StylingPlanProfile,
 } from "./profiles.ts";
-import { appendRejectedAttemptHistory, buildPoseQaPrompt, canSalvageExhaustedPoseQa, parseQaResponse, qaStorageDisposition, unavailableQaResult } from "./qa.ts";
+import { appendRejectedAttemptHistory, buildPoseQaPrompt, parseQaResponse, qaStorageDisposition, unavailableQaResult } from "./qa.ts";
 import { assertGenerationPromptWithinLimit, composeGenerationPrompt } from "./lib/generationPrompt.ts";
 import {
   AI_MODEL_REGISTRY,
@@ -94,6 +94,8 @@ import {
   canUsePoseOneAnchor,
   canonicalReferences,
   collapseDuplicateUploads,
+  hasCollapsedModelIdentity,
+  hasExplicitModelIdentity,
   isDirectBackProductRole,
   isSareeReferenceSet,
   missingRequiredReferenceLabels,
@@ -151,7 +153,7 @@ const DEFAULT_IMAGE_QUALITY = "medium";
 // regenerations, so it must not drop earlier ones after a single epoch's worth;
 // the bound only keeps the row finite.
 const REJECTED_ATTEMPT_HISTORY_LIMIT = 100;
-const QA_VERSION = "saree-qa-v16-crop-footwear-back-hair";
+const QA_VERSION = "saree-qa-v14-listing-grade";
 const WORKER_LEASE_MS = 4 * 60_000;
 const WORKER_LEASE_HEARTBEAT_MS = 60_000;
 const PREFLIGHT_FAILED_RETRY_MS = 6 * 60 * 60_000;
@@ -253,7 +255,7 @@ async function fetchAssetBlobWithRetry(url: string, label: string): Promise<Blob
       const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
       if (response.ok) return await response.blob();
       const status = response.status;
-      await response.body?.cancel().catch(() => {});
+      await response.body?.cancel().catch(() => { });
       lastError = new Error(`${label} failed (${status}).`);
       const retryable = [408, 429, 500, 502, 503, 504].includes(status);
       if (!retryable) break;
@@ -1191,14 +1193,14 @@ function requiredAvailabilityRoles(references: ReferenceInput[], garmentFamily =
   const requiresSareeEvidence = garmentFamily.trim().toLowerCase() === "saree" || isSareeReferenceSet(references);
   return requiresSareeEvidence
     ? new Set([
-        "saree_front_drape",
-        "front",
-        "saree_back_drape",
-        "back",
-        "saree_pallu_spread",
-        "saree_body_detail",
-        "fabric_pattern",
-      ])
+      "saree_front_drape",
+      "front",
+      "saree_back_drape",
+      "back",
+      "saree_pallu_spread",
+      "saree_body_detail",
+      "fabric_pattern",
+    ])
     : new Set(["front", "back"]);
 }
 
@@ -1506,13 +1508,13 @@ async function openAiCompatibleVisionJson(
       response_format: { type: "json_object" },
       ...(provider === "openai"
         ? {
-            max_completion_tokens: 16384,
-            ...(route.thinkingLevel !== "none" ? { reasoning_effort: openaiReasoningEffort(route.thinkingLevel) } : {}),
-          }
+          max_completion_tokens: 16384,
+          ...(route.thinkingLevel !== "none" ? { reasoning_effort: openaiReasoningEffort(route.thinkingLevel) } : {}),
+        }
         : {
-            max_tokens: 16384,
-            reasoning_effort: route.thinkingLevel === "none" ? "minimal" : route.thinkingLevel,
-          }),
+          max_tokens: 16384,
+          reasoning_effort: route.thinkingLevel === "none" ? "minimal" : route.thinkingLevel,
+        }),
     }),
   });
   const data = await response.json().catch(() => ({})) as JsonRecord;
@@ -1810,8 +1812,8 @@ async function visionJson(
       ...(policy.fallbacks && policy.fallbacks.length > 0
         ? policy.fallbacks
         : policy.fallback
-        ? [policy.fallback]
-        : []),
+          ? [policy.fallback]
+          : []),
     ];
   // Every configured route is attempted in order. A route whose API key is
   // missing fails at once with a message naming the secret, and the chain moves
@@ -1946,25 +1948,32 @@ async function analyze(request: Request, args: JsonRecord) {
     const { data: cached, error: cachedError } = await service.from("analysis_cache").select("payload").eq("org_key", orgId).eq("cache_kind", "studio_product_analysis").eq("cache_key", cacheKey).gt("expires_at", new Date().toISOString()).maybeSingle();
     if (cachedError) throw new Error(cachedError.message);
     if (cached?.payload) {
-      normalized = normalizeAnalysis(cached.payload as JsonRecord, String(args.category || "ethnic/fusion"));
+      normalized = normalizeAnalysis(cached.payload as JsonRecord, String(args.category || "ethnic/fusion"), {
+        modelDirection: String(args.modelDirection || ""),
+      });
       cacheHit = true;
     }
   }
   const started = Date.now();
   const analysisRunIds: string[] = [];
   if (!normalized) {
+    const rawHasModelReference = hasExplicitModelIdentity(references);
+    const useStyleAsModelFace = hasCollapsedModelIdentity(references);
     const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, String(args.category || ""));
     const manifest: Array<{ number: number; role: string }> = [];
     const parts: JsonRecord[] = [];
     loaded.forEach((reference, index) => {
-      manifest.push({ number: index + 1, role: roleLabel(reference.role) });
-      parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` });
+      const label = roleLabel(reference.role, { useStyleAsModelFace });
+      manifest.push({ number: index + 1, role: label });
+      parts.push({ text: `IMAGE ${index + 1}: ${label}` });
       parts.push({ inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
     });
     parts.push({ text: buildCombinedAnalysisPrompt({
       skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
       category: String(args.category || "ethnic/fusion"), modelDirection: String(args.modelDirection || ""),
       sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences, fashionKnowledge, analysisLearning, showcaseFeedback,
+      hasModelReference: rawHasModelReference,
+      useStyleAsModelFace,
     }) });
 
     let result: VisionResult;
@@ -2010,7 +2019,9 @@ async function analyze(request: Request, args: JsonRecord) {
       }
       throw error;
     }
-    normalized = normalizeAnalysis(result.json, String(args.category || "ethnic/fusion"));
+    normalized = normalizeAnalysis(result.json, String(args.category || "ethnic/fusion"), {
+      modelDirection: String(args.modelDirection || ""),
+    });
     await service.from("analysis_cache").upsert({
       organization_id: orgId, org_key: orgId, cache_kind: "studio_product_analysis", cache_key: cacheKey,
       sku_name: String(args.skuName || ""), product_category: String(args.category || ""), payload: normalized,
@@ -2265,19 +2276,24 @@ function generationFailureCode(error: unknown, message: string) {
 async function validatePose(args: {
   generated: { base64: string; mimeType: string }; references: LoadedReference[];
   approved: LoadedReference[]; session: JsonRecord; pose: StudioPose & { poseNumber: number }; organizationId: string;
-  aspectRatio?: string;
 }) {
   const garmentFamily = String((args.session.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
   const qaRefs = await withInlineBase64(
     selectReferences(args.references, args.approved, args.pose.id, garmentFamily, MAX_REFERENCES, args.pose.primaryReference),
   );
+  const sessionReferences = Array.isArray(args.session.references)
+    ? (args.session.references as ReferenceInput[])
+    : [];
+  const qaHasModelReference = qaRefs.some((reference) => reference.role === "model_identity");
+  const useStyleAsModelFace = !qaHasModelReference &&
+    qaRefs.some((reference) => reference.role === "style_reference") &&
+    (hasCollapsedModelIdentity(sessionReferences) || hasCollapsedModelIdentity(args.references));
   const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
   const prompt = buildPoseQaPrompt({
     poseNumber: args.pose.poseNumber, poseType: args.pose.id, poseTitle: args.pose.title, poseDirection: args.pose,
     productIdentity: args.session.productIdentity, creativeDirection: args.session.creativeDirection,
     modelIdentity: args.session.modelIdentity, garmentFamily,
     bottomWearMode: args.session.bottomWearMode,
-    aspectRatio: args.aspectRatio,
     consistencyRules: [
       ...((args.session.consistencyRules as string[]) || CONSISTENCY_RULES),
       ...(styling
@@ -2285,8 +2301,9 @@ async function validatePose(args: {
         : []),
     ],
     hasApprovedAnchor: args.approved.length > 0,
-    hasModelReference: qaRefs.some((reference) => reference.role === "model_identity"),
-    referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`),
+    hasModelReference: qaHasModelReference,
+    useStyleAsModelFace,
+    referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role, { useStyleAsModelFace })}`),
   });
   const baseParts: JsonRecord[] = [
     { text: prompt },
@@ -2294,7 +2311,7 @@ async function validatePose(args: {
     { inlineData: { mimeType: args.generated.mimeType, data: args.generated.base64 } },
   ];
   qaRefs.forEach((reference) => {
-    baseParts.push({ text: roleLabel(reference.role) });
+    baseParts.push({ text: roleLabel(reference.role, { useStyleAsModelFace }) });
     baseParts.push({ inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
   });
 
@@ -3099,35 +3116,43 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     }
   }
 
+  const rawHasModelReference = hasExplicitModelIdentity(references);
+  const useStyleAsModelFace = hasCollapsedModelIdentity(references);
   const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, String(inputs.category || ""));
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
   loaded.forEach((reference, index) => {
-    manifest.push({ number: index + 1, role: roleLabel(reference.role) });
-    parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
+    const label = roleLabel(reference.role, { useStyleAsModelFace });
+    manifest.push({ number: index + 1, role: label });
+    parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
   });
 
-  parts.push({ text: buildCombinedAnalysisPrompt({
-    skuName: String(variant?.sku_name), productDetails: String(variant?.product_description || ""), category,
-    modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
-    housePreferences: await stylingPreferenceBrief(orgId, category),
-    fashionKnowledge: await fashionKnowledgeBrief(
-      orgId,
-      category,
-      "",
-      explicitBottomCutHint(
-        settings.bottomWear ?? settings.bottomWearMode,
-        variant?.product_description,
-        variant?.sku_name,
+  parts.push({
+    text: buildCombinedAnalysisPrompt({
+      skuName: String(variant?.sku_name), productDetails: String(variant?.product_description || ""), category,
+      modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
+      housePreferences: await stylingPreferenceBrief(orgId, category),
+      fashionKnowledge: await fashionKnowledgeBrief(
+        orgId,
+        category,
+        "",
+        explicitBottomCutHint(
+          settings.bottomWear ?? settings.bottomWearMode,
+          variant?.product_description,
+          variant?.sku_name,
+        ),
       ),
     ),
     analysisLearning: await analysisLearningBrief(orgId, category),
     showcaseFeedback: await showcaseFeedbackBrief(orgId, category),
+    hasModelReference: rawHasModelReference,
+    useStyleAsModelFace,
   }) });
 
   const result = await visionJson(policy, parts);
   const normalized = normalizeAnalysis(result.json, category, {
     bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+    modelDirection: String(settings.modelDirection || ""),
   });
 
   // Store baseAnalysis into catalog_memory
@@ -3146,7 +3171,7 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
   } catch (err) {
     console.error("Could not save baseAnalysis in catalog memory:", errorMessage(err));
   }
-  
+
   return { analysisResult: normalized, usage: result.raw.usageMetadata || result.raw.usage, policy: visionPolicySnapshot(policy, result.attempts), isColorwayDelta: false };
 }
 async function handleProductTruthNode(node: JsonRecord, sessionId: string) {
@@ -3155,9 +3180,9 @@ async function handleProductTruthNode(node: JsonRecord, sessionId: string) {
   const sourceId = edges?.[0]?.source_node_id;
   const { data: sourceNode, error: sourceNodeError } = await service.from("generation_flow_nodes").select("outputs").eq("id", sourceId).maybeSingle();
   if (sourceNodeError) throw new Error(sourceNodeError.message);
-  
+
   const analysisResult = (sourceNode?.outputs as JsonRecord)?.analysisResult as ReturnType<typeof normalizeAnalysis>;
-  
+
   // Update session with product truth
   const { data: session, error: sessionError } = await service.from("catalog_sessions").select("session_data").eq("session_id", sessionId).single();
   if (sessionError) throw new Error(sessionError.message);
@@ -3172,7 +3197,7 @@ async function handleMemoryAndPlanningNode(node: JsonRecord, sessionId: string) 
   const inputs = node.inputs as JsonRecord;
   const batchId = String(inputs.batchId);
   const variantId = String(inputs.variantId);
-  
+
   // Find original analysis
   const { data: analysisNodes, error: analysisNodesError } = await service.from("generation_flow_nodes").select("outputs").eq("session_id", sessionId).eq("node_type", "ai_visual_analysis");
   if (analysisNodesError) console.error(analysisNodesError.message);
@@ -3181,11 +3206,11 @@ async function handleMemoryAndPlanningNode(node: JsonRecord, sessionId: string) 
   const { data: proposalBatch, error: proposalBatchError } = await service.from("planning_batches").select("catalog_memory, status, queue_status").eq("id", batchId).maybeSingle();
   if (proposalBatchError) throw new Error(proposalBatchError.message);
   let normalized = analysisResult;
-  
+
   if (!((proposalBatch?.catalog_memory || {}) as JsonRecord).stylingPlan) {
     const { count: generatedAlready } = await service.from("planning_requests")
       .select("id", { count: "exact", head: true }).eq("batch_id", batchId).eq("generation_status", "completed");
-    
+
     await proposeCatalogStylingPlan(batchId, { catalog_memory: proposalBatch?.catalog_memory || {} } as JsonRecord, normalized.stylingPlan, variantId, normalized.posePlan);
     if (!generatedAlready) {
       await service.rpc("save_catalog_styling_plan", { p_batch_id: batchId, p_plan: normalized.stylingPlan, p_approve: false, p_member_id: null });
@@ -3197,7 +3222,7 @@ async function handleMemoryAndPlanningNode(node: JsonRecord, sessionId: string) 
   const { data: freshBatch, error: freshBatchError } = await service.from("planning_batches").select("catalog_memory").eq("id", batchId).maybeSingle();
   if (freshBatchError) throw new Error(freshBatchError.message);
   const freshMemory = { catalog_memory: freshBatch?.catalog_memory || {} } as JsonRecord;
-  
+
   if (stylingPlanApproval(freshMemory).blocked) {
     await service.from("planning_batches").update({
       schedule_status: "awaiting_styling_approval", queue_status: "idle",
@@ -3228,13 +3253,13 @@ async function handleMemoryAndPlanningNode(node: JsonRecord, sessionId: string) 
 
   return { stylingPlan: normalized.stylingPlan, posePlan: normalized.posePlan };
 }
-async function handlePoseReferenceNode(node: JsonRecord, sessionId: string) { 
+async function handlePoseReferenceNode(node: JsonRecord, sessionId: string) {
   const inputs = node.inputs as JsonRecord;
-  return { poseIndex: inputs.poseIndex, referencesLoaded: true }; 
+  return { poseIndex: inputs.poseIndex, referencesLoaded: true };
 }
-async function handlePromptCompilationNode(node: JsonRecord, sessionId: string) { 
+async function handlePromptCompilationNode(node: JsonRecord, sessionId: string) {
   const inputs = node.inputs as JsonRecord;
-  return { compiledPrompt: `Generate pose ${inputs.poseIndex} using the styled memory.` }; 
+  return { compiledPrompt: `Generate pose ${inputs.poseIndex} using the styled memory.` };
 }
 async function handleGptImage2Node(_node: JsonRecord, _sessionId: string): Promise<never> {
   throw new Error("This legacy node-graph session cannot emit a verified catalog asset. Restart the SKU from Catalog Production.");
@@ -3242,7 +3267,7 @@ async function handleGptImage2Node(_node: JsonRecord, _sessionId: string): Promi
 async function handleGeminiQaNode(_node: JsonRecord, _sessionId: string): Promise<never> {
   throw new Error("This legacy node-graph session cannot emit a verified QA result. Restart the SKU from Catalog Production.");
 }
-async function handleFinalImageNode(node: JsonRecord, sessionId: string) { 
+async function handleFinalImageNode(node: JsonRecord, sessionId: string) {
   const inputs = node.inputs as JsonRecord;
   // Find output URL from GPT node
   const { data: edges, error: edgesError } = await service.from("generation_flow_edges").select("source_node_id").eq("target_node_id", node.id);
@@ -3256,11 +3281,11 @@ async function handleFinalImageNode(node: JsonRecord, sessionId: string) {
       }).eq("session_id", sessionId).eq("pose_index", inputs.poseIndex);
     }
   }
-  return { finalized: true }; 
+  return { finalized: true };
 }
-async function handleLearningNode(node: JsonRecord, sessionId: string) { 
+async function handleLearningNode(node: JsonRecord, sessionId: string) {
   const inputs = node.inputs as JsonRecord;
-  
+
   // Update planning request to completed to finish the generation lifecycle
   const { data: session, error: sessionError } = await service.from("catalog_sessions").select("planning_request_id").eq("session_id", sessionId).single();
   if (sessionError) throw new Error(sessionError.message);
@@ -3269,7 +3294,7 @@ async function handleLearningNode(node: JsonRecord, sessionId: string) {
     if (planningRequestError) throw new Error(planningRequestError.message);
     const completedAt = new Date().toISOString();
     const completionUpdates = await Promise.all([
-      service.from("planning_requests").update({ 
+      service.from("planning_requests").update({
         status: "completed",
         generation_status: "completed",
         completion_status: "completed",
@@ -3292,7 +3317,7 @@ async function handleLearningNode(node: JsonRecord, sessionId: string) {
     if (planningRequest?.batch_id) scheduleBackground(kickCatalogProcessor(String(planningRequest.batch_id)));
   }
 
-  return { learned: true, catalogUpdated: true }; 
+  return { learned: true, catalogUpdated: true };
 }
 
 async function processNode(request: Request, args: JsonRecord) {
@@ -3304,12 +3329,12 @@ async function processNode(request: Request, args: JsonRecord) {
   if (allNodesError) console.error(allNodesError.message);
   const { data: allEdges, error: allEdgesError } = await service.from("generation_flow_edges").select("*").eq("session_id", sessionId);
   if (allEdgesError) console.error(allEdgesError.message);
-  
+
   if (!allNodes || !allNodes.length) return { processed: false, reason: "no_nodes" };
-  
+
   const completedNodeIds = new Set(allNodes.filter((n) => n.status === "completed").map((n) => n.id));
   const runningNodeIds = new Set(allNodes.filter((n) => n.status === "running").map((n) => n.id));
-  
+
   const runnableNodes = allNodes.filter((node) => {
     if (node.status !== "pending") return false;
     const incomingEdges = allEdges?.filter((e) => e.target_node_id === node.id) || [];
@@ -3349,10 +3374,10 @@ async function processNode(request: Request, args: JsonRecord) {
     else if (claimed.node_type === "learning") result = await handleLearningNode(claimed, sessionId);
     else throw new Error(`Unknown node type: ${claimed.node_type}`);
 
-    await service.from("generation_flow_nodes").update({ 
-      status: "completed", 
+    await service.from("generation_flow_nodes").update({
+      status: "completed",
       outputs: { ...claimed.outputs, ...result },
-      completed_at: new Date().toISOString() 
+      completed_at: new Date().toISOString()
     }).eq("id", claimed.id);
 
     scheduleBackground(kickNodeOrchestrator(sessionId));
@@ -3360,9 +3385,9 @@ async function processNode(request: Request, args: JsonRecord) {
   } catch (err) {
     const failureMessage = errorMessage(err);
     await service.from("generation_flow_nodes").update({
-      status: "failed", 
+      status: "failed",
       error_message: failureMessage,
-      completed_at: new Date().toISOString() 
+      completed_at: new Date().toISOString()
     }).eq("id", claimed.id);
     if ((err as any)?.code !== "styling_approval_pause") {
       const failedAt = new Date().toISOString();
@@ -3572,12 +3597,19 @@ async function compilePosePrompt(
     ? `${learningSelection.guidance.slice(0, 430)}\n${outcomeSelection.guidance.slice(0, 430)}`
     : [learningSelection.guidance, outcomeSelection.guidance].filter(Boolean).join("\n");
 
+  const sessionRefs = Array.isArray(sessionData.references)
+    ? (sessionData.references as ReferenceInput[])
+    : [];
+  const useStyleReferenceAsModelIdentity =
+    !selected.some((reference) => reference.role === "model_identity") &&
+    hasCollapsedModelIdentity(sessionRefs);
+
   const prompt = composeGenerationPrompt({
     skuName: String((job.job_data as JsonRecord)?.skuName || job.sku_name || "Untitled product"),
     productDetails: String((job.job_data as JsonRecord)?.productDetails || ""), pose: poseData, session: sessionData,
     references: selected, correction: promptCorrection(), learnings: combinedLearnings, fashionKnowledge,
     bottomWearMode: sessionData.bottomWearMode ?? (job.job_data as JsonRecord | undefined)?.bottomWearMode,
-    aspectRatio: String(job.aspect_ratio || "3:4"),
+    useStyleReferenceAsModelIdentity,
     generationMemory: formatGenerationMemoryBrief({
       references: selected,
       memory: sessionGenerationMemory(sessionData, {
@@ -3759,7 +3791,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     if (poseQaEnabled) {
       try {
         qaStarted = Date.now();
-        qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData, organizationId: String(job.org_id), aspectRatio: String(job.aspect_ratio || "3:4") });
+        qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData, organizationId: String(job.org_id) });
         qaLatencyMs = Date.now() - qaStarted;
       } catch (error) {
         qaUnavailable = errorMessage(error);
@@ -3813,58 +3845,27 @@ async function processWorker(request: Request, args: JsonRecord) {
       total_tokens: generated.usage.totalTokens, usage_payload: { openai: generated.usage.raw },
       cost_usd: attemptCost, cost_source: generated.usage.providerReported ? "provider_reported_tokens_openai_public_rates" : "provider_not_reported",
     });
-    
+
     if (!qaUnavailable && poseQaEnabled) {
-       const qaUsage = (qa.usageMetadata || {}) as any;
-       const policy = (qa as any).policy as VisionPolicy | undefined;
-         const calculated = await pricedVisionUsage({ usageMetadata: qaUsage }, policy?.provider || "openai", policy?.model || "gpt-5.6-luna");
-       qaAttemptCost = calculated.costUsd;
-       await recordAiRun({
-         organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
-         job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: policy?.model || "gpt-5.6-luna", provider: policy?.provider || "openai",
-         generation_id: pose.generation_id, generation_epoch: generationEpoch, attempt_number: attempt,
-         purpose: policy?.purpose || "qa", thinking_level: policy?.thinkingLevel || "high",
-         input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt, policy: policy ? visionPolicySnapshot(policy, (qa as any).visionAttempts || []) : null },
-         output_json: { qa, qaVersion: QA_VERSION }, status: qa.outcome, latency_ms: qaLatencyMs,
-         provider_request_id: "",
-         input_tokens: calculated.inTok, input_text_tokens: calculated.inTok,
-         input_image_tokens: 0, output_tokens: calculated.outTok,
-         total_tokens: calculated.totalTok, thoughts_token_count: calculated.thoughtsTok,
-         cached_content_token_count: calculated.cachedTok,
-         usage_payload: { providerQa: qaUsage, attempts: (qa as any).visionAttempts || [] },
-         cost_usd: calculated.costUsd, cost_source: calculated.costSource,
-       });
-    }
-    let salvagedAfterMaxAttempts = false;
-    if (!qa.pass && attempt >= MAX_GENERATION_ATTEMPTS) {
-      const salvageProductRecord = (sessionData.productIdentity && typeof sessionData.productIdentity === "object"
-        ? sessionData.productIdentity as JsonRecord
-        : {});
-      const salvageGarmentFamily = String(salvageProductRecord.garmentFamily || "");
-      const salvageHasBottomWear = resolveBottomWearPresentation({
-        mode: sessionData.bottomWearMode ?? (job.job_data as JsonRecord | undefined)?.bottomWearMode,
-        productIdentity: sessionData.productIdentity,
-        skuName: String(salvageProductRecord.skuName ?? salvageProductRecord.sku_name ?? job.sku_name ?? ""),
-        productDetails: String(salvageProductRecord.productDetails ?? salvageProductRecord.product_details ?? (job.job_data as JsonRecord | undefined)?.productDetails ?? ""),
-        hasBottomReference: loadedReferences.some((entry) => entry.role === "bottom"),
-      }).includesBottomWear;
-      if (canSalvageExhaustedPoseQa(qa, {
-        garmentFamily: salvageGarmentFamily,
-        poseType: poseData.id,
-        hasBottomWear: salvageHasBottomWear,
-        creativeDirection: sessionData.creativeDirection,
-        poseDirection: poseData,
-      })) {
-        salvagedAfterMaxAttempts = true;
-        qa = {
-          ...qa,
-          pass: true,
-          automaticallyVerified: false,
-          outcome: "requires_human_review",
-          reviewRecommended: true,
-          reason: `Salvaged on attempt ${attempt}/${MAX_GENERATION_ATTEMPTS} for human review (${qa.productFidelity}% fidelity; zero anatomical or core garment defects): ${qa.reason}`,
-        };
-      }
+      const qaUsage = (qa.usageMetadata || {}) as any;
+      const policy = (qa as any).policy as VisionPolicy | undefined;
+      const calculated = await pricedVisionUsage({ usageMetadata: qaUsage }, policy?.provider || "openai", policy?.model || "gpt-5.6-luna");
+      qaAttemptCost = calculated.costUsd;
+      await recordAiRun({
+        organization_id: job.org_id, planning_request_id: job.planning_request_id, batch_id: job.batch_id || null,
+        job_id: job.job_id, session_id: job.session_id, pose_index: pose.pose_index, run_kind: "quality_assurance", model: policy?.model || "gpt-5.6-luna", provider: policy?.provider || "openai",
+        generation_id: pose.generation_id, generation_epoch: generationEpoch, attempt_number: attempt,
+        purpose: policy?.purpose || "qa", thinking_level: policy?.thinkingLevel || "high",
+        input_fingerprint: smallHash(prompt), input_summary: { pose: pose.pose_index, attempt, policy: policy ? visionPolicySnapshot(policy, (qa as any).visionAttempts || []) : null },
+        output_json: { qa, qaVersion: QA_VERSION }, status: qa.outcome, latency_ms: qaLatencyMs,
+        provider_request_id: "",
+        input_tokens: calculated.inTok, input_text_tokens: calculated.inTok,
+        input_image_tokens: 0, output_tokens: calculated.outTok,
+        total_tokens: calculated.totalTok, thoughts_token_count: calculated.thoughtsTok,
+        cached_content_token_count: calculated.cachedTok,
+        usage_payload: { providerQa: qaUsage, attempts: (qa as any).visionAttempts || [] },
+        cost_usd: calculated.costUsd, cost_source: calculated.costSource,
+      });
     }
     if (!qa.pass) {
       const defect = [
@@ -3907,7 +3908,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     await Promise.all([
       service.from("session_generations").update({
         status: "completed", output_url: stored.downloadUrl, storage_path: stored.storagePath, storage_backend: stored.storageBackend,
-        qa_status: qaStatus, qa_payload: { ...qa, qaUnavailable, qaVersion: QA_VERSION, qaEnabled: poseQaEnabled, ...(salvagedAfterMaxAttempts ? { salvagedAfterMaxAttempts: true } : {}) },
+        qa_status: qaStatus, qa_payload: { ...qa, qaUnavailable, qaVersion: QA_VERSION, qaEnabled: poseQaEnabled },
         error: qaUnavailable ? `Delivered without automatic consistency QA: ${qaUnavailable}`.slice(0, 1000) : "", updated_at: completedAt,
         // A review decision belongs to the image it was made on. The earlier
         // version keeps its archive row; this new image has not been reviewed.
@@ -3931,7 +3932,6 @@ async function processWorker(request: Request, args: JsonRecord) {
         sku_matched: true, asset_role: "generated", storage_backend: stored.storageBackend,
         metadata: {
           poseIndex: pose.pose_index, poseType: pose.pose_type, qa, qaStatus, qaVersion: QA_VERSION, qaEnabled: poseQaEnabled,
-          ...(salvagedAfterMaxAttempts ? { salvagedAfterMaxAttempts: true } : {}),
           model: imageGenerationRoute.model, provider: imageGenerationRoute.provider, quality: job.quality,
           providerRequestId: generated.requestId, usage: generated.usage.raw, actualCostUsd: attemptCost,
           generationId: pose.generation_id, generationEpoch, attempt, timing: versionTiming,
@@ -3948,7 +3948,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         score: qa.score, passed: !qaUnavailable && poseQaEnabled && qa.automaticallyVerified,
         issues: qaUnavailable ? ["qa_unavailable"] : !poseQaEnabled ? ["qa_disabled"] : qa.failed,
         notes: qa.reason, qa_version: QA_VERSION, outcome: qaStatus,
-        generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt, metadata: { qa, qaUnavailable, ...(salvagedAfterMaxAttempts ? { salvagedAfterMaxAttempts: true } : {}) },
+        generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt, metadata: { qa, qaUnavailable },
       }),
     ]);
     const { data: allPoses, error: allPosesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
@@ -4040,12 +4040,12 @@ async function cloneJob(request: Request, args: JsonRecord) {
   const jobId = String(args.jobId || "");
   const { data: sourceJob, error: jobError } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
   if (jobError || !sourceJob) throw new Error("Source job not found or access denied.");
-  
+
   const { data: sourceSession, error: sessionError } = await service.from("catalog_sessions").select("*").eq("session_id", sourceJob.session_id).single();
   if (sessionError || !sourceSession) throw new Error("Source session not found.");
-  
+
   const newSessionId = `session_${crypto.randomUUID()}`;
-  
+
   const { data: planningRequest, error: planningError } = await service.from("planning_requests").insert({
     organization_id: workspace.organization.id,
     created_by_member_id: workspace.member.id,
@@ -4059,9 +4059,9 @@ async function cloneJob(request: Request, args: JsonRecord) {
     completion_status: "pending",
     validation_status: "ready"
   }).select("id").single();
-  
+
   if (planningError || !planningRequest) throw new Error("Could not create planning request for cloned session.");
-  
+
   const newSessionData = {
     ...(sourceSession.session_data as JsonRecord),
     skuId: planningRequest.id,
@@ -4069,7 +4069,7 @@ async function cloneJob(request: Request, args: JsonRecord) {
     approvedAssets: [],
     generationMemory: resetGenerationMemoryForClone((sourceSession.session_data as JsonRecord)?.generationMemory),
   };
-  
+
   const { error: newSessionError } = await service.from("catalog_sessions").insert({
     session_id: newSessionId,
     job_id: "",
@@ -4083,7 +4083,7 @@ async function cloneJob(request: Request, args: JsonRecord) {
     session_data: newSessionData
   });
   if (newSessionError) throw new Error("Could not create cloned session.");
-  
+
   return { sessionId: newSessionId };
 }
 
@@ -4092,7 +4092,7 @@ async function approvePose(request: Request, args: JsonRecord) {
   const generationId = String(args.generationId || "");
   const status = String(args.status || "approved");
   const notes = String(args.notes || "");
-  
+
   if (!["approved", "rejected", "pending"].includes(status)) {
     throw new Error("Invalid approval status");
   }
@@ -4189,14 +4189,14 @@ async function batchUpload(request: Request, args: JsonRecord) {
       try {
         const sku = String(row.sku || "");
         if (!sku) throw new Error("Missing SKU");
-        
+
         const { error } = await service.from("planning_requests").insert({
           organization_id: workspace.organization.id,
           created_by_member_id: workspace.member.id,
           sku_name: sku,
           category: "ethnic/fusion",
           status: "ready",
-          request_code: `BATCH-${crypto.randomUUID().slice(0,8).toUpperCase()}`,
+          request_code: `BATCH-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
         });
         if (error) throw error;
         completed++;
@@ -4205,7 +4205,7 @@ async function batchUpload(request: Request, args: JsonRecord) {
         console.error(`Row failed:`, err);
       }
     }
-    
+
     await service.from("batch_upload_jobs").update({
       completed_rows: completed,
       failed_rows: failed,
@@ -4222,7 +4222,7 @@ async function exportZip(request: Request, args: JsonRecord) {
   const jobId = String(args.jobId || "");
   const { data: job, error: jobError } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
   if (jobError || !job) throw new Error("Job not found.");
-  
+
   const { data: poses, error: posesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).eq("status", "completed");
   if (posesError || !poses || poses.length === 0) throw new Error("No completed poses found for this job.");
 
@@ -4412,7 +4412,7 @@ async function rerunPoseQa(request: Request, args: JsonRecord) {
   const reviewedAt = new Date().toISOString();
   let qa: Awaited<ReturnType<typeof validatePose>>;
   try {
-    qa = await validatePose({ generated, references, approved: [], session: sessionData, pose: poseData, organizationId: workspace.organization.id, aspectRatio: String(job.aspect_ratio || "3:4") });
+    qa = await validatePose({ generated, references, approved: [], session: sessionData, pose: poseData, organizationId: workspace.organization.id });
   } catch (error) {
     const message = errorMessage(error);
     const unavailable = unavailableQaResult(`Automatic consistency QA could not run: ${message}`);
@@ -4699,7 +4699,7 @@ async function downloadCatalogProductionAssets(request: Request, args: JsonRecor
 async function adminGenerationFlowList(request: Request) {
   const { workspace } = await workspaceFor(request);
   if (!workspace.isAdmin && !workspace.permissions.includes("admin.settings")) throw new Error("You do not have access to the admin console.");
-  
+
   const { data: jobs, error } = await service.from("generation_jobs")
     .select("job_id, session_id, sku_name, status, model, provider, actual_cost_usd, started_at, batch_id, current_pose")
     .eq("org_id", workspace.organization.id)
@@ -4713,7 +4713,7 @@ async function adminGenerationFlowList(request: Request) {
     .order("created_at", { ascending: false })
     .limit(50);
   if (sessionError) throw new Error(sessionError.message);
-  
+
   // Combine both V1 jobs and V2 sessions. Map V2 sessions to look like jobs for the UI list.
   const mappedSessions = (sessions || []).map((s: any) => {
     const data = s.session_data || {};
@@ -4739,7 +4739,7 @@ async function adminGenerationFlowList(request: Request) {
 
 async function historyGenerationFlowGet(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request);
-  
+
   const jobId = String(args.jobId || "");
   if (!jobId) throw new Error("jobId is required.");
 
@@ -4752,11 +4752,11 @@ async function historyGenerationFlowGet(request: Request, args: JsonRecord) {
       service.from("generation_flow_nodes").select("*").eq("session_id", jobId).order("created_at"),
       service.from("generation_flow_edges").select("*").eq("session_id", jobId)
     ]);
-    
+
     if (session.error) throw new Error("Session not found.");
     if (nodes.error) throw new Error(nodes.error.message);
     if (edges.error) throw new Error(edges.error.message);
-    
+
     return {
       is_v2: true,
       session: session.data,
@@ -4767,7 +4767,7 @@ async function historyGenerationFlowGet(request: Request, args: JsonRecord) {
 
   const { data: job, error: jobError } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
   if (jobError || !job) throw new Error("Job not found.");
-  
+
   if (!workspace.isAdmin && !workspace.permissions.includes("admin.settings") && job.user_id !== workspace.user.firebaseUid) {
     throw new Error("You do not have permission to view diagnostics for this job.");
   }
@@ -4798,7 +4798,7 @@ async function historyGenerationFlowGet(request: Request, args: JsonRecord) {
 async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request);
   if (!workspace.isAdmin && !workspace.permissions.includes("admin.settings")) throw new Error("You do not have access to the admin console.");
-  
+
   const jobId = String(args.jobId || "");
   if (!jobId) throw new Error("jobId is required.");
 
@@ -4808,11 +4808,11 @@ async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
       service.from("generation_flow_nodes").select("*").eq("session_id", jobId).order("created_at"),
       service.from("generation_flow_edges").select("*").eq("session_id", jobId)
     ]);
-    
+
     if (session.error) throw new Error("Session not found.");
     if (nodes.error) throw new Error(nodes.error.message);
     if (edges.error) throw new Error(edges.error.message);
-    
+
     return {
       is_v2: true,
       session: session.data,
@@ -5198,7 +5198,7 @@ async function createUserOperation(request: Request, args: JsonRecord) {
       action: "admin.user.created", resource_type: "organization_member", resource_id: member.id,
       metadata: { firebaseUid: firebaseUser.localId, roleIds, roleNames: roles.map((role) => role.name) },
     });
-    
+
     let welcomeEmailSent = false;
     try {
       const loginUrl = Deno.env.get("FRONTEND_URL") || "https://aistudio.youthnic.shop";
@@ -5713,24 +5713,24 @@ async function deleteCatalogOperation(request: Request, args: JsonRecord) {
   const batchId = String(args.catalogId || "");
   // Ensure the batch belongs to this workspace before deleting
   const batch = await catalogBatch(workspace, batchId);
-  
+
   if (String(batch.queue_status) === "running") throw new Error("A catalog that is currently scheduling cannot be deleted. Wait for it to finish or stall.");
-  
+
   // Check for active generation jobs that might be currently running in workers
   const { data: activeJobs, error: activeJobsError } = await service.from("generation_jobs").select("id").eq("batch_id", batchId).in("status", ["queued", "processing"]).limit(1);
   if (activeJobsError) console.error(activeJobsError.message);
   if (activeJobs && activeJobs.length > 0) {
     throw new Error("This catalog currently has active generation jobs. Please cancel them in the History tab before deleting.");
   }
-  
+
   // Delete all associated generation jobs to prevent orphaned job history
   const { error: jobsError } = await service.from("generation_jobs").delete().eq("batch_id", batchId);
   if (jobsError) console.error("Could not delete associated jobs: " + jobsError.message);
-  
+
   // Delete all colorway requests
   const { error: requestsError } = await service.from("planning_requests").delete().eq("batch_id", batchId);
   if (requestsError) console.error("Could not delete associated requests: " + requestsError.message);
-  
+
   const { error } = await service.from("planning_batches").delete().eq("id", batchId);
   if (error) throw new Error("Could not delete catalog: " + error.message);
   return { success: true };
@@ -5740,7 +5740,7 @@ async function stopCatalogGenerationOperation(request: Request, args: JsonRecord
   const { workspace } = await workspaceFor(request, "planning.manage");
   const batchId = String(args.catalogId || "");
   await catalogBatch(workspace, batchId);
-  
+
   const b = await service.from("planning_batches").update({ queue_status: "idle", updated_at: new Date().toISOString() }).eq("id", batchId);
   if (b.error) throw new Error(b.error.message);
 
@@ -5749,7 +5749,7 @@ async function stopCatalogGenerationOperation(request: Request, args: JsonRecord
 
   const r = await service.from("planning_requests").update({ generation_status: "failed", error_message: "Force stopped from Planning tab.", updated_at: new Date().toISOString() }).eq("batch_id", batchId).in("generation_status", ["pending", "processing"]);
   if (r.error) throw new Error(r.error.message);
-  
+
   return { success: true };
 }
 
@@ -5825,35 +5825,35 @@ async function analyzeCatalogVariant(
         // describe a garment this SKU is not. Fall through to the full analysis.
         console.log(`Colorway shortcut declined for ${String(variant.sku_name || "variant")}: ${delta.differences.join("; ") || "structure match not confirmed"}`);
       } else {
-      const merged = mergeVariantColorways(baseAnalysis, result.json, String(variant.sku_name || ""));
-      const normalized = applyCatalogMemory(batch, merged);
+        const merged = mergeVariantColorways(baseAnalysis, result.json, String(variant.sku_name || ""));
+        const normalized = applyCatalogMemory(batch, merged);
 
-      // Record colorway learning in catalog_memory asynchronously
-      try {
-        if (batch.id) {
-          const colorways = { ...((memory.colorways || {}) as JsonRecord) };
-          colorways[String(variant.id)] = {
-            sku: variant.sku_name,
-            mainColor: merged.productIdentity.mainColor,
-            secondaryColors: merged.productIdentity.secondaryColors,
-            analyzedAt: new Date().toISOString(),
-          };
-          await service.rpc("merge_catalog_memory", {
-            p_batch_id: String(batch.id),
-            p_patch: { colorways },
-          });
+        // Record colorway learning in catalog_memory asynchronously
+        try {
+          if (batch.id) {
+            const colorways = { ...((memory.colorways || {}) as JsonRecord) };
+            colorways[String(variant.id)] = {
+              sku: variant.sku_name,
+              mainColor: merged.productIdentity.mainColor,
+              secondaryColors: merged.productIdentity.secondaryColors,
+              analyzedAt: new Date().toISOString(),
+            };
+            await service.rpc("merge_catalog_memory", {
+              p_batch_id: String(batch.id),
+              p_patch: { colorways },
+            });
+          }
+        } catch (err) {
+          console.error("Could not record colorway in catalog memory:", errorMessage(err));
         }
-      } catch (err) {
-        console.error("Could not record colorway in catalog memory:", errorMessage(err));
-      }
 
-      return {
-        normalized,
-        policy: result.policy,
-        attempts: result.attempts,
-        usage: result.raw.usageMetadata || result.raw.usage,
-        isColorwayDelta: true,
-      };
+        return {
+          normalized,
+          policy: result.policy,
+          attempts: result.attempts,
+          usage: result.raw.usageMetadata || result.raw.usage,
+          isColorwayDelta: true,
+        };
       }
     }
   }
@@ -5900,17 +5900,21 @@ async function analyzeCatalogVariant(
     if (!cachedError && cached?.payload) {
       normalized = normalizeAnalysis(cached.payload as JsonRecord, category, {
         bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+        modelDirection: String(settings.modelDirection || ""),
       });
     }
   }
 
   if (!normalized) {
+    const rawHasModelReference = hasExplicitModelIdentity(references);
+    const useStyleAsModelFace = hasCollapsedModelIdentity(references);
     const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, category);
     const manifest: Array<{ number: number; role: string }> = [];
     const parts: JsonRecord[] = [];
     loaded.forEach((reference, index) => {
-      manifest.push({ number: index + 1, role: roleLabel(reference.role) });
-      parts.push({ text: `IMAGE ${index + 1}: ${roleLabel(reference.role)}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
+      const label = roleLabel(reference.role, { useStyleAsModelFace });
+      manifest.push({ number: index + 1, role: label });
+      parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
     });
     parts.push({ text: buildCombinedAnalysisPrompt({
       skuName: String(variant.sku_name), productDetails: String(variant.product_description || ""), category,
@@ -5919,10 +5923,13 @@ async function analyzeCatalogVariant(
       fashionKnowledge,
       analysisLearning,
       showcaseFeedback,
+      hasModelReference: rawHasModelReference,
+      useStyleAsModelFace,
     }) });
     const result = await visionJson(policy, parts, { onAttempt });
     normalized = normalizeAnalysis(result.json, category, {
       bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+      modelDirection: String(settings.modelDirection || ""),
     });
     usedPolicy = result.policy;
     attempts = result.attempts;
@@ -6677,7 +6684,7 @@ async function generateCatalogFlowGraph(batch: JsonRecord, variant: JsonRecord, 
 
   const settings = (batch.generation_settings || {}) as JsonRecord;
   const posePlan = Array.isArray(settings.posePlan) && settings.posePlan.length > 0
-    ? settings.posePlan 
+    ? settings.posePlan
     : REQUIRED_POSE_IDS.map((id, i) => ({ title: `Pose ${i + 1}`, id, prompt: `Generate pose ${i + 1}` }));
 
   const poseRows = posePlan.map((pose: any, index: number) => ({
@@ -8849,7 +8856,7 @@ async function warmFastApiProductDna(input: {
         }),
       },
     });
-    await response.body?.cancel().catch(() => {});
+    await response.body?.cancel().catch(() => { });
   } catch (err) {
     console.warn("Best-effort FastAPI Product DNA warm skipped:", errorMessage(err));
   }

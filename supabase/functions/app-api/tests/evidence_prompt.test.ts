@@ -10,7 +10,13 @@ import {
   compactFullPromptSafely,
   composeGenerationPrompt,
 } from "../lib/generationPrompt.ts";
-import { isAboveAnkleCropFraming, isTightCropFraming, normalizeAnalysis } from "../lib/profiles.ts";
+import {
+  buildCombinedAnalysisPrompt,
+  isAboveAnkleCropFraming,
+  isTightCropFraming,
+  normalizeAnalysis,
+  sanitizeHeldObjectText,
+} from "../lib/profiles.ts";
 import { buildGenerationMemory, formatGenerationMemoryBrief } from "../lib/generationMemory.ts";
 
 Deno.test("Garment Truth Contract: Legacy placement and absence locks are preserved when garmentEvidence is populated", () => {
@@ -1177,7 +1183,8 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   assertStringIncludes(pose2Prompt, "REFERENCE IMAGE SCOPE & PRODUCT INTEGRITY:");
   assertStringIncludes(pose2Prompt, "the STYLE REFERENCE is the only source for the photoshoot backdrop, wall, floor, lighting, and camera mood on all six poses");
   assertStringIncludes(pose2Prompt, "SET ONLY: the direction below is backdrop, light, and camera. It does not set the pose, the garment, or handheld props.");
-  assertStringIncludes(pose2Prompt, "the STYLE REFERENCE face, hair, skin tone, and body proportions are the model identity for all six poses");
+  assertStringIncludes(pose2Prompt, "Cast an original photorealistic adult model matching Model Identity below in Pose 1");
+  assertStringIncludes(pose2Prompt, "Discard the STYLE REFERENCE person's face, clothing, pose, pillar-leaning posture, and handheld props.");
   assertStringIncludes(pose2Prompt, "The product must NOT be redesigned, altered, recolored, or restyled based on what the reference image shows");
   assertStringIncludes(pose2Prompt, "If this written profile disagrees with the product photos on motif, neckline, sleeves, or hem, the photos win.");
 
@@ -1443,6 +1450,7 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
       },
     },
     references: [{ role: "front" }, { role: "style_reference" }],
+    useStyleReferenceAsModelIdentity: true,
   });
   assertEquals(creativeLeak.includes("sparkler"), false);
   assertEquals(creativeLeak.includes("Mid-stride walk"), false);
@@ -2157,4 +2165,97 @@ Deno.test("Cropped Pose 4 omits grounded-feet and footwear requirements from gar
   });
   assertStringIncludes(westernFullPrompt, "footwear all stay in frame");
   assertEquals(westernCroppedPrompt.includes("footwear all stay in frame"), false);
+});
+
+Deno.test("omitted Face Lock quarantines style-ref face/props, duplicate upload unlocks style face, and fashion terms survive sanitization", () => {
+  const styleOnlyPrompt = composeGenerationPrompt({
+    skuName: "SKY-SAREE-01",
+    productDetails: "Bottle green saree paired with padded cups blouse piece",
+    pose: {
+      id: "full_front",
+      title: "Hero Front",
+      poseNumber: 1,
+      description: "Open floor stance holding iced-coffee cup and tote bag",
+      cameraAngle: "eye level",
+      framing: "3:4 head-to-toe",
+      bodyPosition: "Centered in open floor",
+      handPlacement: "Holding coffee cup and leather tote bag",
+      expression: "calm confident poise",
+      highlightedDetails: ["pallu border"],
+      productVisibilityRules: ["full drape visible"],
+      primaryReference: "front",
+      purpose: "Hero frame",
+      consistencyNotes: "Lock identity",
+      prompt: "Natural standing stance leaning behind pillar holding takeaway coffee.",
+      enabled: true,
+    } as never,
+    session: {
+      category: "saree",
+      productIdentity: { garmentFamily: "saree_ethnic", mainColor: "sky blue" },
+      creativeDirection: {
+        propUsage: "Courtyard arches, no props — never copy coffee cup or tote bag",
+        suggestedAccessories: "Minimal pearl studs and leather tote bag",
+      },
+      modelIdentity: { ethnicity: "South Asian", ageRange: "24-28" },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+    useStyleReferenceAsModelIdentity: false,
+  });
+  assertStringIncludes(styleOnlyPrompt, "completely discarding the person's face, pose, and props in the STYLE REFERENCE");
+  assertStringIncludes(styleOnlyPrompt, "NEVER render a bare/strapless mannequin upper-torso look");
+  assertStringIncludes(styleOnlyPrompt, "hands poking impossibly through mid-garment/pallu/dupatta slits");
+  assertStringIncludes(styleOnlyPrompt, "Bottle green saree paired with padded cups blouse piece");
+  assertEquals(/iced-coffee cup|takeaway coffee|leather tote bag/i.test(styleOnlyPrompt), false);
+
+  const duplicateUploadPrompt = composeGenerationPrompt({
+    skuName: "SKY-SAREE-01",
+    productDetails: "Sky blue saree",
+    pose: {
+      id: "full_front",
+      title: "Hero Front",
+      poseNumber: 1,
+      description: "Natural open floor front stance",
+      cameraAngle: "eye level",
+      framing: "3:4 head-to-toe",
+      bodyPosition: "Open floor",
+      handPlacement: "Natural relaxed arms",
+      expression: "calm poise",
+      highlightedDetails: ["pallu"],
+      productVisibilityRules: ["drape visible"],
+      primaryReference: "front",
+      purpose: "Hero",
+      consistencyNotes: "Lock face",
+      prompt: "Full front shot.",
+      enabled: true,
+    } as never,
+    session: {
+      category: "saree",
+      productIdentity: { garmentFamily: "saree_ethnic" },
+    },
+    references: [{ role: "front" }, { role: "style_reference" }],
+    useStyleReferenceAsModelIdentity: true,
+  });
+  assertStringIncludes(duplicateUploadPrompt, "attached the same image as MODEL FACE REFERENCE and STYLE REFERENCE");
+
+  // Fashion domain terms must never be mangled while handheld street props are scrubbed
+  assertEquals(
+    sanitizeHeldObjectText("Bottle green silk with padded cups and mirror border", "room only", "Bottle green silk"),
+    "Bottle green silk with padded cups and mirror border",
+  );
+  assertEquals(
+    sanitizeHeldObjectText("Model holding iced-coffee cup and leather tote bag", "no objects held in hand"),
+    "no objects held in hand",
+  );
+
+  const analysisPrompt = buildCombinedAnalysisPrompt({
+    skuName: "SKY-SAREE-01",
+    productDetails: "Bottle green saree",
+    category: "saree",
+    modelDirection: "Young South Asian woman",
+    sceneDirection: "Auto",
+    referenceManifest: [{ number: 1, role: "FRONT PRODUCT" }, { number: 2, role: "STYLE REFERENCE" }],
+    hasModelReference: false,
+    useStyleAsModelFace: false,
+  });
+  assertStringIncludes(analysisPrompt, "discard that person's face, hair, pillar-leaning stance, and objects in their hands (coffee cup, tote bag, handbag, sunglasses)");
 });

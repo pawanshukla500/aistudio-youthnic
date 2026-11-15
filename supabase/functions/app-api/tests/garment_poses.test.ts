@@ -3,6 +3,7 @@ import {
   classifyBottomCut,
   detectGarmentPoseFamily,
   effectiveBottomCutClass,
+  garmentPoseDirection,
   hasBottomWearInAnalysis,
   normalizeBottomWearMode,
   reconcileFarshiVisibilityRules,
@@ -622,4 +623,23 @@ Deno.test("positiveBottomWearPortion keeps later positive clauses when an earlie
     }),
     "palazzo",
   );
+});
+
+Deno.test("category lineup frames short_kurti_top closer, enforces natural exterior hand paths, and shields blouseless sarees from bare chest/back", () => {
+  const shortSlots = getPoseSlots({
+    productIdentity: { garmentFamily: "kurta_or_kurti_set", length: "cropped", bottomWearDetails: "none - standalone garment" },
+    category: "top",
+  });
+  assertStringIncludes(shortSlots[1].framing.toLowerCase(), "knees-up");
+  assertStringIncludes(shortSlots[3].framing.toLowerCase(), "waist-up to mid-thigh");
+
+  const sareeGrammar = garmentPoseDirection("saree_ethnic");
+  assertStringIncludes(sareeGrammar, "open floor zone");
+  assertStringIncludes(sareeGrammar, "plain undecorated modest basic short- or elbow-sleeve blouse");
+  assertStringIncludes(sareeGrammar, "phantom slit");
+  assertStringIncludes(sareeGrammar, "forearm clawing");
+
+  const topGrammar = garmentPoseDirection("short_kurti_top");
+  assertStringIncludes(topGrammar, "continuous visible forearm/wrist");
+  assertStringIncludes(topGrammar, "splayed stiff plastic fingers");
 });

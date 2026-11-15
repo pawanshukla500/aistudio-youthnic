@@ -407,3 +407,41 @@ def test_farshi_taper_rule_isolated_from_non_farshi_and_top_only():
         model="muse-spark-1.2-contributor",
     )
     assert unknown_dna.bottom_wear.cut_class == "unknown"
+
+
+def test_pose_planning_top_only_and_open_floor_human_realism():
+    planner = CreativePosePlanningAgent()
+    top_poses = planner.process(
+        {
+            "product_dna": {
+                "sku_id": "TOP-201",
+                "sku_name": "Olive Pleated Crop Top",
+                "main_color": "olive",
+                "fabric_type": "cotton poplin",
+                "garment_family": "western_top",
+                "bottom_wear": {"has_bottom_wear": False, "cut_class": "none"},
+            }
+        }
+    )["pose_plans"]
+    assert len(top_poses) == 6
+    assert "knees-up" in top_poses[1]["framing"].lower()
+    assert "butti work" not in top_poses[4]["prompt"].lower()
+    assert "kurta" not in top_poses[4]["prompt"].lower()
+    assert "neckline construction" in top_poses[4]["prompt"].lower()
+    assert "open unobstructed studio space" in top_poses[0]["prompt"].lower()
+    assert "forearm clawing" in top_poses[1]["hand_placement"].lower()
+
+    saree_poses = planner.process(
+        {
+            "product_dna": {
+                "sku_id": "SAREE-201",
+                "sku_name": "Sky Floral Organza Saree",
+                "main_color": "sky blue",
+                "fabric_type": "organza",
+                "garment_family": "saree",
+            }
+        }
+    )["pose_plans"]
+    assert "not wedged behind a foreground pillar" in saree_poses[0]["prompt"].lower()
+    assert "plain undecorated solid matching" in saree_poses[0]["prompt"].lower()
+    assert "zero phantom slits" in saree_poses[0]["hand_placement"].lower()
