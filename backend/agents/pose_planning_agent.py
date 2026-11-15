@@ -7,6 +7,10 @@ from models.generation import PoseDefinition, PoseType
 
 logger = logging.getLogger(__name__)
 
+# Bump whenever planner prompt templates change so cached scene locks and
+# compiled prompts automatically refresh across pods without waiting for TTL.
+PLANNER_REVISION = "v2026-11-15-human-lineup"
+
 
 class CreativePosePlanningAgent:
     """Plans the required 6-pose catalog photoshoot maintaining product fidelity,
@@ -31,6 +35,7 @@ class CreativePosePlanningAgent:
                     "dna": dna,
                     "source_fingerprint": state.get("source_fingerprint", ""),
                     "extra": state.get("extra_instructions", ""),
+                    "planner_revision": PLANNER_REVISION,
                 },
                 sort_keys=True,
                 default=str,

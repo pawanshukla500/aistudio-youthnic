@@ -1963,7 +1963,11 @@ async function analyze(request: Request, args: JsonRecord) {
     const manifest: Array<{ number: number; role: string }> = [];
     const parts: JsonRecord[] = [];
     loaded.forEach((reference, index) => {
-      const label = roleLabel(reference.role, { useStyleAsModelFace });
+      const label = roleLabel(reference.role, {
+        useStyleAsModelFace,
+        hasModelReference: rawHasModelReference,
+        hasApprovedAnchor: false,
+      });
       manifest.push({ number: index + 1, role: label });
       parts.push({ text: `IMAGE ${index + 1}: ${label}` });
       parts.push({ inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
@@ -2305,7 +2309,7 @@ async function validatePose(args: {
     hasApprovedAnchor: args.approved.length > 0,
     hasModelReference: qaHasModelReference,
     useStyleAsModelFace,
-    referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role, { useStyleAsModelFace })}`),
+    referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role, { useStyleAsModelFace, hasModelReference: qaHasModelReference, hasApprovedAnchor: args.approved.length > 0 })}`),
   });
   const baseParts: JsonRecord[] = [
     { text: prompt },
@@ -2313,7 +2317,7 @@ async function validatePose(args: {
     { inlineData: { mimeType: args.generated.mimeType, data: args.generated.base64 } },
   ];
   qaRefs.forEach((reference) => {
-    baseParts.push({ text: roleLabel(reference.role, { useStyleAsModelFace }) });
+    baseParts.push({ text: roleLabel(reference.role, { useStyleAsModelFace, hasModelReference: qaHasModelReference, hasApprovedAnchor: args.approved.length > 0 }) });
     baseParts.push({ inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
   });
 
@@ -3124,7 +3128,11 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
   loaded.forEach((reference, index) => {
-    const label = roleLabel(reference.role, { useStyleAsModelFace });
+    const label = roleLabel(reference.role, {
+      useStyleAsModelFace,
+      hasModelReference: rawHasModelReference,
+      hasApprovedAnchor: false,
+    });
     manifest.push({ number: index + 1, role: label });
     parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
   });
@@ -5945,7 +5953,11 @@ async function analyzeCatalogVariant(
     const manifest: Array<{ number: number; role: string }> = [];
     const parts: JsonRecord[] = [];
     loaded.forEach((reference, index) => {
-      const label = roleLabel(reference.role, { useStyleAsModelFace });
+      const label = roleLabel(reference.role, {
+        useStyleAsModelFace,
+        hasModelReference: rawHasModelReference,
+        hasApprovedAnchor: false,
+      });
       manifest.push({ number: index + 1, role: label });
       parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
     });

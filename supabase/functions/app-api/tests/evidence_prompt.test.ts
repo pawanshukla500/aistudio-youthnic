@@ -2259,3 +2259,50 @@ Deno.test("omitted Face Lock quarantines style-ref face/props, duplicate upload 
   });
   assertStringIncludes(analysisPrompt, "discard that person's face, hair, pillar-leaning stance, and objects in their hands (coffee cup, tote bag, handbag, sunglasses)");
 });
+
+
+Deno.test("sanitizeIdentityText preserves worn eyewear in face identity while stripping held eyewear and non-eyewear props", () => {
+  const prompt = composeGenerationPrompt({
+    skuName: "SKY-SAREE-EYE-01",
+    productDetails: "Sky blue saree",
+    pose: {
+      id: "full_front",
+      title: "Hero Front",
+      poseNumber: 1,
+      description: "Natural open floor front stance.",
+      cameraAngle: "eye level",
+      framing: "3:4 head-to-toe",
+      bodyPosition: "Centered in open floor",
+      handPlacement: "Hands relaxed at sides",
+      expression: "Calm poise",
+      highlightedDetails: ["pallu border"],
+      productVisibilityRules: ["full drape visible"],
+      primaryReference: "front",
+      purpose: "Hero frame",
+      consistencyNotes: "Lock identity",
+      prompt: "Natural standing stance.",
+      enabled: true,
+    } as never,
+    session: {
+      category: "saree",
+      productIdentity: { garmentFamily: "saree_ethnic", mainColor: "sky blue" },
+      modelIdentity: {
+        face: "Side braid and sunglasses.",
+        faceRealism: "Holding sunglasses. Clear natural skin texture.",
+        handNotes: "Resting near sunglasses and leather tote.",
+      },
+    },
+    references: [
+      { role: "front" },
+      { role: "model_identity" },
+      { role: "style_reference" },
+    ],
+    useStyleReferenceAsModelIdentity: false,
+  });
+  assertStringIncludes(prompt, "Side braid and sunglasses.");
+  assertStringIncludes(prompt, "Clear natural skin texture.");
+  assertEquals(/holding sunglasses/i.test(prompt), false);
+  assertEquals(prompt.includes("Resting near sunglasses"), false);
+  assertEquals(/leather tote/i.test(prompt), false);
+  assertEquals(prompt.includes("casting one fresh"), false);
+});

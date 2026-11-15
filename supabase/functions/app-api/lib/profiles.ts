@@ -1502,7 +1502,10 @@ export function assertSareeGenerationReady(session: unknown) {
   }
 }
 
-export const FORBIDDEN_HELD_OBJECT_PATTERN = /\b(?:iced[-\s]?coffee|coffee|latte|matcha|boba|espresso|drinks?|beverages?|drinking\s+glass(?:es)?|tea[-\s]?(?:cup|mug|glass)s?|(?:coffee|tea|paper|plastic|takeaway|iced)[-\s]?cups?|mugs?|(?:water|plastic|drink|beverage|glass)[-\s]?bottles?(?!\s*green)|drinking\s+straws?|plastic\s+straws?|sipper\s+straws?|totes?|tote[-\s]?handles?|handbags?|shoulder[-\s]?bags?|sling[-\s]?bags?|backpacks?|wallets?|smartphones?|cell\s+phones?|phones?|sparklers?|fireworks?|handheld\s+props?|handheld\s+objects?|bags?|purses?|clutch(?:es)?|flowers?|bouquets?|diya[s]?|candles?|umbrellas?)\b/i;
+const FORBIDDEN_HELD_OBJECT_CORE = String.raw`iced[-\s]?coffee|coffee|latte|matcha|boba|espresso|drinks?|beverages?|drinking\s+glass(?:es)?|tea[-\s]?(?:cup|mug|glass)s?|(?:coffee|tea|paper|plastic|takeaway|iced)[-\s]?cups?|mugs?|(?:water|plastic|drink|beverage|glass)[-\s]?bottles?(?!\s*green)|drinking\s+straws?|plastic\s+straws?|sipper\s+straws?|totes?|tote[-\s]?handles?|handbags?|shoulder[-\s]?bags?|sling[-\s]?bags?|backpacks?|wallets?|smartphones?|cell\s+phones?|phones?|sparklers?|fireworks?|handheld\s+props?|handheld\s+objects?|bags?|purses?|clutch(?:es)?|flowers?|bouquets?|diya[s]?|candles?|umbrellas?`;
+
+export const FORBIDDEN_NON_EYEWEAR_HELD_OBJECT_PATTERN = new RegExp(`\\b(?:${FORBIDDEN_HELD_OBJECT_CORE})\\b`, "i");
+export const FORBIDDEN_HELD_OBJECT_PATTERN = new RegExp(`\\b(?:${FORBIDDEN_HELD_OBJECT_CORE}|sunglass(?:es)?|eyewear|shades)\\b`, "i");
 
 export function sanitizeHeldObjectText(value: unknown, replacement: string, allowNotes = ""): string {
   const raw = String(value ?? "");

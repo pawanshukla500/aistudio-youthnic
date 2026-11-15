@@ -445,3 +445,45 @@ def test_pose_planning_top_only_and_open_floor_human_realism():
     assert "not wedged behind a foreground pillar" in saree_poses[0]["prompt"].lower()
     assert "plain undecorated solid matching" in saree_poses[0]["prompt"].lower()
     assert "zero phantom slits" in saree_poses[0]["hand_placement"].lower()
+
+
+def test_pose_planning_dna_sig_invalidates_stale_planner_cache(monkeypatch):
+    from agents import pose_planning_agent as ppa
+
+    written: list[tuple[str, str, int, str, str]] = []
+    compiled_cache: dict[tuple[str, str, int, str], str] = {
+        (VALID_ORG_UUID, "SAREE-CACHE-01", num, "legacy-no-rev"): "STALE_PROMPT"
+        for num in range(1, 7)
+    }
+
+    def fake_set_prompt(org, sku, num, sig, prompt):
+        compiled_cache[(org, sku, num, sig)] = prompt
+        written.append((org, sku, num, sig, prompt))
+
+    monkeypatch.setattr(ppa.cache_manager, "get_scene_lock", lambda org, sku: {"dna_sig": "legacy-no-rev", "description": "STALE_SCENE"})
+    monkeypatch.setattr(ppa.cache_manager, "set_scene_lock", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ppa.cache_manager, "get_compiled_prompt", lambda org, sku, num, sig: compiled_cache.get((org, sku, num, sig)))
+    monkeypatch.setattr(ppa.cache_manager, "set_compiled_prompt", fake_set_prompt)
+
+    planner = CreativePosePlanningAgent()
+    payload = {
+        "organization_id": VALID_ORG_UUID,
+        "sku_id": "SAREE-CACHE-01",
+        "product_dna": {"sku_id": "SAREE-CACHE-01", "sku_name": "Saree", "garment_family": "saree"},
+    }
+    first = planner.process(payload)
+    assert "STALE_SCENE" not in first["scene_lock"]["description"]
+    assert all(pose["prompt"] != "STALE_PROMPT" for pose in first["pose_plans"])
+    assert len(written) == 6
+    sig_v1 = written[0][3]
+
+    # Same revision hits the newly populated cache instead of recomputing.
+    written.clear()
+    planner.process(payload)
+    assert len(written) == 0
+
+    # Bumping PLANNER_REVISION rotates dna_sig and invalidates cached prompts.
+    monkeypatch.setattr(ppa, "PLANNER_REVISION", "v-next-test-bump")
+    planner.process(payload)
+    assert len(written) == 6
+    assert written[0][3] != sig_v1

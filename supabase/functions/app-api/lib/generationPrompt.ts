@@ -2,6 +2,7 @@ import {
   CLOSEUP_PRODUCT_DETAIL,
   CONSISTENCY_RULES,
   FORBIDDEN_HELD_OBJECT_PATTERN,
+  FORBIDDEN_NON_EYEWEAR_HELD_OBJECT_PATTERN,
   effectiveShowcaseIntent,
   isAboveAnkleCropFraming,
   isSeatedEditorialPoseDemanded,
@@ -940,24 +941,43 @@ function poseListItem(value: unknown, sitting: boolean): string {
 }
 
 const IDENTITY_FACE_PATTERN = /\b(?:eyes?|sunglass(?:es)?|shades|cover(?:ed|ing)?|braid|jaw|nose|lips?|hair|skin|face)\b/i;
+const HELD_EYEWEAR_PATTERN = /\b(?:(?:holds?|holding|carries|carrying|gripping|clutching)\s+(?:a\s+|her\s+|his\s+|their\s+|the\s+|pair\s+of\s+)?(?:sunglass(?:es)?|eyewear|shades)|(?:sunglass(?:es)?|eyewear|shades)\s+(?:in\s+(?:her\s+|his\s+|their\s+|one\s+)?hands?|held))\b/i;
 
-function withoutCopiedPoseInIdentity(value: string, sitting: boolean): string {
+function globalRegex(pattern: RegExp): RegExp {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  return new RegExp(pattern.source, flags);
+}
+
+function withoutCopiedPoseInIdentity(
+  value: string,
+  sitting: boolean,
+  preserveFacialEyewear = false,
+): string {
   const dropSitting = !sitting;
+  const heldPattern = preserveFacialEyewear
+    ? FORBIDDEN_NON_EYEWEAR_HELD_OBJECT_PATTERN
+    : HELD_OBJECT_PATTERN;
   const poseLike = (part: string) => UNPLANTED_POSE_PATTERN.test(part)
-    || HELD_OBJECT_PATTERN.test(part)
+    || new RegExp(heldPattern.source, heldPattern.flags.replace(/g/g, "")).test(part)
+    || (preserveFacialEyewear && HELD_EYEWEAR_PATTERN.test(part))
     || (dropSitting && COPIED_SITTING_PATTERN.test(part));
   if (!poseLike(value)) return value;
   const kept = value.split(/(?<=[.!;])\s+/).map((part) => {
     const clause = part.trim();
     if (!clause || !poseLike(clause)) return clause;
     if (!IDENTITY_FACE_PATTERN.test(clause)) return "";
-    const text = (dropSitting ? clause.replace(COPIED_SITTING_PATTERN, "") : clause)
-      .replace(UNPLANTED_POSE_PATTERN, "")
-      .replace(HELD_OBJECT_PATTERN, "")
+    let text = (dropSitting ? clause.replace(globalRegex(COPIED_SITTING_PATTERN), "") : clause)
+      .replace(globalRegex(UNPLANTED_POSE_PATTERN), "")
+      .replace(globalRegex(heldPattern), "");
+    if (preserveFacialEyewear) {
+      text = text.replace(globalRegex(HELD_EYEWEAR_PATTERN), "");
+    }
+    text = text
       .replace(/\s{2,}/g, " ")
       .replace(/\s+([,.;])/g, "$1")
+      .replace(/^[,.;\s]+/, "")
       .trim();
-    return text;
+    return /[a-z0-9]/i.test(text) ? text : "";
   }).filter(Boolean);
   return kept.join(" ").trim() || "Eyes stay as the identity photo shows them, including a cover.";
 }
@@ -965,8 +985,9 @@ function withoutCopiedPoseInIdentity(value: string, sitting: boolean): string {
 function sanitizeIdentityText(model: JsonRecord, sitting: boolean): JsonRecord {
   const output: JsonRecord = {};
   for (const [key, value] of Object.entries(model)) {
+    const preserveFacialEyewear = key === "face" || key === "faceRealism";
     output[key] = typeof value === "string"
-      ? withoutCopiedPoseInIdentity(withoutInventedCatchlights(value), sitting)
+      ? withoutCopiedPoseInIdentity(withoutInventedCatchlights(value), sitting, preserveFacialEyewear)
       : value;
   }
   return output;
@@ -1161,7 +1182,7 @@ export function composeGenerationPrompt(args: {
   const hasModelReference = promptReferences.some((reference) => reference.role === "model_identity");
   const hasStyleReference = promptReferences.some((reference) => reference.role === "style_reference");
   const useStyleModelIdentity = !hasModelReference && hasStyleReference && Boolean(args.useStyleReferenceAsModelIdentity);
-  const manifest = promptReferences.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role, { useStyleAsModelFace: useStyleModelIdentity })}`).join("\n");
+  const manifest = promptReferences.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role, { useStyleAsModelFace: useStyleModelIdentity, hasModelReference, hasApprovedAnchor })}`).join("\n");
   const bottomRefIndex = promptReferences.findIndex((ref) => ref.role === "bottom");
   const bottomImageTag = bottomRefIndex >= 0 ? `IMAGE ${bottomRefIndex + 1}` : null;
   const isCloseup = args.pose.id === "closeup";

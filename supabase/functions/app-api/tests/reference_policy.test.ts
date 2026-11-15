@@ -405,3 +405,23 @@ Deno.test("model identity helpers distinguish empty Face Lock from collapsed dup
   assertEquals(hasExplicitModelIdentity(distinctUploads), true);
   assertEquals(hasCollapsedModelIdentity(distinctUploads), false);
 });
+
+
+Deno.test("roleLabel appends fresh-cast cue on style_reference only when no face identity or approved anchor exists", () => {
+  assertStringIncludes(
+    roleLabel("style_reference", { hasModelReference: false, hasApprovedAnchor: false }),
+    "casting one fresh photorealistic adult model in Pose 1 locked across all six poses",
+  );
+  assertEquals(
+    roleLabel("style_reference", { hasModelReference: true }).includes("casting one fresh"),
+    false,
+  );
+  assertEquals(
+    roleLabel("style_reference", { hasModelReference: false, hasApprovedAnchor: true }).includes("casting one fresh"),
+    false,
+  );
+  assertEquals(
+    roleLabel("style_reference", { useStyleAsModelFace: true }).includes("casting one fresh"),
+    false,
+  );
+});
