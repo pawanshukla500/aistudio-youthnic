@@ -636,6 +636,8 @@ export async function runVisionProviderChain<T>(args: {
   onAttempt?: (attempt: VisionHopAttempt) => Promise<void> | void;
   /** Override for tests; see `VISION_TELEMETRY_WAIT_MS`. */
   telemetryWaitMs?: number;
+  /** Aborts remaining fallback hops immediately when the caller disconnects. */
+  signal?: AbortSignal;
 }): Promise<{ value: T; route: NormalizedAiModelRoute; attempts: VisionHopAttempt[] }> {
   const now = args.now || Date.now;
   const started = now();
@@ -682,6 +684,10 @@ export async function runVisionProviderChain<T>(args: {
   };
 
   for (let index = 0; index < args.routes.length; index += 1) {
+    if (args.signal?.aborted) {
+      await settleWrites();
+      throw new DOMException("The vision request was aborted.", "AbortError");
+    }
     let route = args.routes[index];
     const timeoutMs = remainingVisionTimeoutMs({
       purpose: args.purpose,
@@ -727,6 +733,10 @@ export async function runVisionProviderChain<T>(args: {
       await settleWrites();
       return { value, route, attempts };
     } catch (error) {
+      if (args.signal?.aborted) {
+        await settleWrites();
+        throw new DOMException("The vision request was aborted.", "AbortError");
+      }
       const failure = args.classify(route, error);
       lastFailure = failure;
       await emit({

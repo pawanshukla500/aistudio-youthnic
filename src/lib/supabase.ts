@@ -25,8 +25,8 @@ if (!supabaseUrl || !supabasePublishableKey) {
  * Every login session expires after 24 hours (SESSION_MAX_AGE_MS).
  */
 const supabaseFunctionsUrl =
-  import.meta.env.VITE_SUPABASE_FUNCTIONS_URL?.trim() ||
-  "https://functions-production-b062.up.railway.app";
+  (import.meta.env.VITE_SUPABASE_FUNCTIONS_URL?.trim() ||
+    "https://functions-production-b062.up.railway.app").replace(/\/+$/, "");
 
 export const supabase = createClient<Database>(supabaseUrl, supabasePublishableKey, {
   accessToken: async () => {

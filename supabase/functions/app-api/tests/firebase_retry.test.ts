@@ -96,6 +96,26 @@ Deno.test("firebaseFetchWithRetry recovers from transient 503, 401, and network 
     assertEquals(missingResponse.status, 404);
     assertEquals(await missingResponse.text(), "missing");
     assertEquals(notFoundCalls, 1);
+
+    let abortedCalls = 0;
+    const abortController = new AbortController();
+    globalThis.fetch = (() => {
+      abortedCalls += 1;
+      abortController.abort();
+      return Promise.reject(new DOMException("Aborted", "AbortError"));
+    }) as typeof fetch;
+
+    await assertRejects(
+      () =>
+        firebaseFetchWithRetry(
+          "https://storage.googleapis.com/aborted",
+          () => ({ method: "GET" }),
+          { maxAttempts: 3, signal: abortController.signal },
+        ),
+      DOMException,
+      "Aborted",
+    );
+    assertEquals(abortedCalls, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }

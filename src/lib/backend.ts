@@ -178,16 +178,23 @@ function messageFromFunctionError(error: unknown) {
 /** Gap before the single retry, long enough for a competing call to finish. */
 const GATEWAY_RETRY_DELAY_MS = 1_500;
 
-async function invokeAppApiOnce<T>(operation: string, args: Record<string, unknown>) {
+async function invokeAppApiRequest<T>(
+  operation: string,
+  args: Record<string, unknown>,
+  options?: { signal?: AbortSignal },
+) {
   const timeoutMs = appApiInvokeTimeoutMs(operation);
   const invokeOptions: {
     body: { operation: string; args: Record<string, unknown> };
     timeout?: number;
     signal?: AbortSignal;
   } = { body: { operation, args } };
-  if (timeoutMs) {
-    invokeOptions.timeout = timeoutMs;
-    invokeOptions.signal = AbortSignal.timeout(timeoutMs);
+  const timeoutSignal = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
+  if (timeoutMs) invokeOptions.timeout = timeoutMs;
+  if (options?.signal && timeoutSignal && typeof AbortSignal.any === "function") {
+    invokeOptions.signal = AbortSignal.any([options.signal, timeoutSignal]);
+  } else if (options?.signal || timeoutSignal) {
+    invokeOptions.signal = options?.signal ?? timeoutSignal;
   }
   const { data, error } = await supabase.functions.invoke("app-api", invokeOptions);
   if (error) {
@@ -219,7 +226,18 @@ async function invokeAppApiOnce<T>(operation: string, args: Record<string, unkno
   return (data?.data ?? data) as T;
 }
 
-export async function invokeAppApi<T = unknown>(operation: string, args: Record<string, unknown> = {}): Promise<T> {
+async function invokeAppApiOnce<T>(operation: string, args: Record<string, unknown>) {
+  return await invokeAppApiRequest<T>(operation, args);
+}
+
+export async function invokeAppApi<T = unknown>(
+  operation: string,
+  args: Record<string, unknown> = {},
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  if (options?.signal) {
+    return await invokeAppApiRequest<T>(operation, args, options);
+  }
   try {
     return await invokeAppApiOnce<T>(operation, args);
   } catch (reason) {
@@ -941,10 +959,14 @@ async function queryBackend(endpoint: BackendEndpoint, args: Record<string, any>
   }
 }
 
-async function mutateBackend(endpoint: BackendEndpoint, args: Record<string, any>) {
+async function mutateBackend(
+  endpoint: BackendEndpoint,
+  args: Record<string, any>,
+  options?: { signal?: AbortSignal },
+) {
   switch (endpoint) {
     case api.analysis.analyzeReferences:
-      return invokeAppApi("studio.analyze", args);
+      return invokeAppApi("studio.analyze", args, options);
     case api.dna.extract:
       return invokeAppApi("dna.extract", args);
     case api.dna.approve:
@@ -1173,8 +1195,8 @@ export function useQuery<T = any>(
 }
 
 export function useMutation<TResult = any, TArgs extends Record<string, any> = Record<string, any>>(endpoint: BackendEndpoint) {
-  return async (args?: TArgs): Promise<TResult> => {
-    const result = await mutateBackend(endpoint, (args || {}) as Record<string, any>);
+  return async (args?: TArgs, options?: { signal?: AbortSignal }): Promise<TResult> => {
+    const result = await mutateBackend(endpoint, (args || {}) as Record<string, any>, options);
     refreshBackend();
     return result as TResult;
   };

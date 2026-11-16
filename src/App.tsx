@@ -53,7 +53,7 @@ function AppRoutes() {
 function StudioAuthBarrier({ user }: { user: unknown }) {
   const location = useLocation();
   if (!user) {
-    const isRoot = location.pathname === "/" || location.pathname === "";
+    const isRoot = location.pathname === "/" || location.pathname === "" || location.pathname === "/login";
     return <Login redirect={isRoot ? undefined : `${location.pathname}${location.search}`} />;
   }
   return <AppRoutes />;

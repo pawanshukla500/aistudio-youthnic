@@ -1,3 +1,10 @@
+import {
+  abortError,
+  combineTimeoutAndSignal,
+  isAbortError,
+  sleepWithSignal,
+} from "./visionConcurrency.ts";
+
 type ServiceAccount = { client_email: string; private_key: string; private_key_id?: string; project_id?: string };
 type CachedToken = { value: string; expiresAt: number; scope: string };
 let cachedToken: CachedToken | null = null;
@@ -7,22 +14,23 @@ const TRANSIENT_FIREBASE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 export async function firebaseFetchWithRetry(
   url: string,
   makeInit: () => Promise<RequestInit> | RequestInit,
-  options: { timeoutMs?: number; maxAttempts?: number; invalidateTokenOn401?: boolean } = {},
+  options: { timeoutMs?: number; maxAttempts?: number; invalidateTokenOn401?: boolean; signal?: AbortSignal } = {},
 ): Promise<Response> {
   const timeoutMs = options.timeoutMs ?? 45_000;
   const maxAttempts = options.maxAttempts ?? 3;
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (options.signal?.aborted) throw abortError("Firebase request aborted.");
     try {
       const requestInit = await makeInit();
       const response = await fetch(url, {
         ...requestInit,
-        signal: requestInit.signal ?? AbortSignal.timeout(timeoutMs),
+        signal: requestInit.signal ?? combineTimeoutAndSignal(timeoutMs, options.signal),
       });
       if (response.status === 401 && options.invalidateTokenOn401 && attempt < maxAttempts) {
         cachedToken = null;
         await response.body?.cancel().catch(() => {});
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        await sleepWithSignal(150, options.signal);
         continue;
       }
       if (TRANSIENT_FIREBASE_STATUSES.has(response.status) && attempt < maxAttempts) {
@@ -31,14 +39,15 @@ export async function firebaseFetchWithRetry(
           ? retryAfter * 1000
           : 250 * 2 ** (attempt - 1);
         await response.body?.cancel().catch(() => {});
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        await sleepWithSignal(delayMs, options.signal);
         continue;
       }
       return response;
     } catch (error) {
+      if (options.signal?.aborted || isAbortError(error)) throw error;
       lastError = error;
       if (attempt < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** (attempt - 1)));
+        await sleepWithSignal(250 * 2 ** (attempt - 1), options.signal);
         continue;
       }
     }
@@ -188,7 +197,10 @@ export async function uploadFirebaseObject(args: { storagePath: string; blob: Bl
   };
 }
 
-export async function downloadFirebaseObject(storagePath: string) {
+export async function downloadFirebaseObject(
+  storagePath: string,
+  options: { signal?: AbortSignal } = {},
+) {
   const bucket = requiredEnv("FIREBASE_STORAGE_BUCKET");
   const response = await firebaseFetchWithRetry(
     `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}?alt=media`,
@@ -196,7 +208,7 @@ export async function downloadFirebaseObject(storagePath: string) {
       const token = await googleAccessToken(["https://www.googleapis.com/auth/cloud-platform"]);
       return { headers: { Authorization: `Bearer ${token}` } };
     },
-    { invalidateTokenOn401: true },
+    { invalidateTokenOn401: true, signal: options.signal },
   );
   if (!response.ok) throw new Error(`Firebase download failed (${response.status}).`);
   return response.blob();

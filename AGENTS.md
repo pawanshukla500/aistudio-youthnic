@@ -33,7 +33,7 @@ When interacting with vision pipelines (`supabase/functions/app-api/` and `backe
 - **Fallback Chain:** Hop 1 is **OpenAI GPT 6.1 Terra (`gpt-6.1-terra:medium`)** for analysis & pose planning fallback, Hop 2 is OpenAI GPT 5.6 Luna (`gpt-5.6-luna:low`), then Gemini Flash (`gemini-3.8-flash`).
 - **Default Image Generation Model:** **`gpt-image-2.6-sunburst`** (3:4, 2K / `1536x2048`, default `medium` quality unless overridden; DB policy `primary_reasoning` must be `'none'`).
 - **Garment Construction Isolation:** Preserve Farshi/Farsi two-leg architecture and 4-inch upper-hem taper strictly on `farshi` SKUs only—never bleed Farshi geometry rules onto non-Farshi bottoms.
-- **Deno Railway Runtime (`Dockerfile.functions`):** Keep `DENO_V8_FLAGS` comma-separated (`"--max-old-space-size=256,--optimize-for-size"`), never space-separated.
+- **Deno Railway Runtime (`Dockerfile.functions`):** Keep `DENO_V8_FLAGS` comma-separated (`"--max-old-space-size=768,--optimize-for-size"`), never space-separated.
 
 ---
 

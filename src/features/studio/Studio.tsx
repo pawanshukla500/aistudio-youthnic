@@ -35,7 +35,7 @@ const basePoses: StudioPose[] = [
 ];
 
 const REQUIRED_POSE_COUNT = 6;
-const AUTO_ANALYZE_DELAY_MS = 900;
+const AUTO_ANALYZE_DELAY_MS = 1500;
 
 const defaultOptions: OutputOptions = {
   // Empty on purpose: the shoot follows the organization's configured route
@@ -134,16 +134,14 @@ function SessionSubmissionRow({ jobId, latest, onRemove }: { jobId: string; late
           <div className="mt-1 flex items-center gap-2.5">
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-container">
               <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  job.status === "failed" ? "bg-danger" : job.status === "completed" ? "bg-emerald-500" : "bg-primary"
-                }`}
+                className={`h-full rounded-full transition-all duration-500 ${job.status === "failed" ? "bg-danger" : job.status === "completed" ? "bg-emerald-500" : "bg-primary"
+                  }`}
                 style={{ width: `${delivery.deliveredPercent}%` }}
               />
             </div>
             <span
-              className={`shrink-0 text-[10px] font-bold ${
-                job.status === "failed" ? "text-danger" : job.status === "completed" ? "text-emerald-700" : "text-secondary"
-              }`}
+              className={`shrink-0 text-[10px] font-bold ${job.status === "failed" ? "text-danger" : job.status === "completed" ? "text-emerald-700" : "text-secondary"
+                }`}
             >
               {submissionStatusLabel(job)} · {delivery.imagesStored}/{delivery.totalPoses}
               {delivery.failedPoses ? ` · ${delivery.failedPoses} failed` : ""}
@@ -252,8 +250,13 @@ export function Studio() {
   const [category, setCategory] = useState("ethnic/fusion");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string; jobId?: Id<"generationJobs"> } | null>(null);
   const analysisRequestRef = useRef(0);
+  const analysisAbortRef = useRef<AbortController | null>(null);
   const uploadPromisesRef = useRef(new Map<string, Promise<StudioReference>>());
   const autoAnalyzeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    analysisAbortRef.current?.abort();
+  }, []);
   const { data: submittedJob, error: submittedJobError } = useQuery(api.jobs.get, submittedJobId ? { jobId: submittedJobId } : "skip");
   const { data: queuePosition, error: _queuePositionError } = useQuery(api.jobs.getQueuePosition, submittedJobId && submittedJob?.status === "queued" ? { jobId: submittedJobId } : "skip");
   const { data: effectiveRouting, error: effectiveRoutingError } = useQuery(api.ai.getEffectiveRouting, organization?._id ? { organizationId: organization._id } : "skip");
@@ -350,8 +353,6 @@ export function Studio() {
         id: reference.id,
         role: reference.role,
       })),
-      skuId: effectiveSkuId,
-      skuName: effectiveSkuName,
       productDetails: productDetails.trim(),
       category,
       modelDirection: options.modelIdentity,
@@ -359,7 +360,7 @@ export function Studio() {
       sceneDirectionNote: sceneDirectionNote.trim(),
       garmentSummaryNote: garmentSummaryNote.trim(),
     }),
-    [allReferences, category, effectiveSkuId, effectiveSkuName, options.backgroundStyle, options.modelIdentity, productDetails, sceneDirectionNote, garmentSummaryNote],
+    [allReferences, category, options.backgroundStyle, options.modelIdentity, productDetails, sceneDirectionNote, garmentSummaryNote],
   );
 
   const latestAnalysisKeyRef = useRef(analysisInputKey);
@@ -372,6 +373,8 @@ export function Studio() {
 
   const markAnalysisStale = () => {
     analysisRequestRef.current += 1;
+    analysisAbortRef.current?.abort();
+    setAnalyzing(false);
     setAnalysisSourceKey(null);
     setDnaState(null);
   };
@@ -514,11 +517,19 @@ export function Studio() {
       if (!automatic) setNotice({ tone: "error", text: isSareeCategory ? "Upload the required full front, rear drape, pallu spread, and body-detail saree references first." : "Upload the required front and back product images first." });
       return;
     }
+    if (autoAnalyzeTimerRef.current) {
+      clearTimeout(autoAnalyzeTimerRef.current);
+      autoAnalyzeTimerRef.current = null;
+    }
     const requestId = ++analysisRequestRef.current;
+    analysisAbortRef.current?.abort();
+    const controller = new AbortController();
+    analysisAbortRef.current = controller;
     setNotice(null);
     setAnalyzing(true);
     try {
       const uploaded = await Promise.all(allReferences.map(uploadReference));
+      if (controller.signal.aborted || analysisRequestRef.current !== requestId) return;
       const uploadedById = new Map(uploaded.map((reference) => [reference.id, reference]));
       setProductReferences((current) => Object.fromEntries(Object.entries(current).map(([role, reference]) => [role, reference ? uploadedById.get(reference.id) || reference : reference])) as Partial<Record<ProductReferenceRole, StudioReference>>);
       setStyleReferences((current) => current.map((reference) => uploadedById.get(reference.id) || reference));
@@ -545,8 +556,8 @@ export function Studio() {
           size: reference.file.size,
         })),
         forceRefresh,
-      }) as StudioAnalysis;
-      if (analysisRequestRef.current !== requestId || latestAnalysisKeyRef.current !== sourceKey) return;
+      }, { signal: controller.signal }) as StudioAnalysis;
+      if (controller.signal.aborted || analysisRequestRef.current !== requestId || latestAnalysisKeyRef.current !== sourceKey) return;
       setAnalysis(result);
       setPoses(result.posePlan);
       const dnaParams = {
@@ -576,11 +587,14 @@ export function Studio() {
         setNotice({ tone: "success", text: "Authoritative product identity, creative direction, and the six-pose shoot plan are ready." });
       }
     } catch (error) {
-      if (analysisRequestRef.current === requestId) {
+      if (!controller.signal.aborted && analysisRequestRef.current === requestId) {
         setAnalysisSourceKey(null);
         setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not analyze the references." });
       }
     } finally {
+      if (analysisAbortRef.current === controller) {
+        analysisAbortRef.current = null;
+      }
       if (analysisRequestRef.current === requestId) setAnalyzing(false);
     }
   };
@@ -706,6 +720,7 @@ export function Studio() {
 
   useEffect(() => {
     analysisRequestRef.current += 1;
+    analysisAbortRef.current?.abort();
     setAnalysisSourceKey((current) => current === analysisInputKey ? current : null);
     if (!requiredReady) {
       setAnalyzing(false);
@@ -716,6 +731,7 @@ export function Studio() {
     }, AUTO_ANALYZE_DELAY_MS);
     return () => {
       if (autoAnalyzeTimerRef.current) clearTimeout(autoAnalyzeTimerRef.current);
+      analysisAbortRef.current?.abort();
     };
   }, [analysisInputKey, requiredReady]);
 
@@ -865,16 +881,14 @@ export function Studio() {
         ].map((s) => (
           <div
             key={s.step}
-            className={`flex items-center gap-3 rounded-2xl border p-3 shadow-xs transition-all ${
-              s.ready
-                ? "border-emerald-600/30 bg-emerald-50/50"
-                : "border-outline-variant/40 bg-white"
-            }`}
+            className={`flex items-center gap-3 rounded-2xl border p-3 shadow-xs transition-all ${s.ready
+              ? "border-emerald-600/30 bg-emerald-50/50"
+              : "border-outline-variant/40 bg-white"
+              }`}
           >
             <div
-              className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl text-xs font-bold ${
-                s.ready ? "bg-emerald-600 text-white" : "bg-surface-container text-secondary"
-              }`}
+              className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl text-xs font-bold ${s.ready ? "bg-emerald-600 text-white" : "bg-surface-container text-secondary"
+                }`}
             >
               {s.ready ? <Check className="h-4 w-4" /> : s.step}
             </div>
@@ -889,11 +903,10 @@ export function Studio() {
       {/* Notice Banner */}
       {notice && (
         <div
-          className={`mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-4 text-xs font-semibold shadow-xs animate-in fade-in ${
-            notice.tone === "success"
-              ? "border-emerald-600/20 bg-emerald-50 text-emerald-900"
-              : "border-danger/20 bg-danger-surface text-danger"
-          }`}
+          className={`mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-4 text-xs font-semibold shadow-xs animate-in fade-in ${notice.tone === "success"
+            ? "border-emerald-600/20 bg-emerald-50 text-emerald-900"
+            : "border-danger/20 bg-danger-surface text-danger"
+            }`}
         >
           <span className="flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 shrink-0" />
