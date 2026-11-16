@@ -1253,6 +1253,35 @@ function releaseLoadedReferences(loaded: LoadedReference[]) {
   loaded.length = 0;
 }
 
+async function loadVisionReferenceParts(
+  references: ReferenceInput[],
+  orgId: string,
+  garmentFamily: string,
+  roleOptions: { useStyleAsModelFace: boolean; hasModelReference: boolean },
+): Promise<{ manifest: Array<{ number: number; role: string }>; parts: JsonRecord[] }> {
+  const loaded = await loadAvailableReferences(
+    collapseDuplicateUploads(references),
+    orgId,
+    garmentFamily,
+    { retainBlob: false },
+  );
+  const manifest: Array<{ number: number; role: string }> = [];
+  const parts: JsonRecord[] = [];
+  try {
+    loaded.forEach((reference, index) => {
+      const label = roleLabel(reference.role, {
+        ...roleOptions,
+        hasApprovedAnchor: false,
+      });
+      manifest.push({ number: index + 1, role: label });
+      parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
+    });
+  } finally {
+    releaseLoadedReferences(loaded);
+  }
+  return { manifest, parts };
+}
+
 /**
  * The references a single pose can actually use. `selectReferences` already caps
  * the manifest at MAX_REFERENCES and a true-back frame legitimately uses three
@@ -2001,25 +2030,12 @@ async function analyze(request: Request, args: JsonRecord) {
       roles: references.map((reference) => reference.role),
     };
     const result = await visionLimiter.run(async () => {
-      const loaded = await loadAvailableReferences(
-        collapseDuplicateUploads(references),
+      const { manifest, parts } = await loadVisionReferenceParts(
+        references,
         orgId,
         String(args.category || ""),
-        { retainBlob: false },
+        { useStyleAsModelFace, hasModelReference: rawHasModelReference },
       );
-      const manifest: Array<{ number: number; role: string }> = [];
-      const parts: JsonRecord[] = [];
-      loaded.forEach((reference, index) => {
-        const label = roleLabel(reference.role, {
-          useStyleAsModelFace,
-          hasModelReference: rawHasModelReference,
-          hasApprovedAnchor: false,
-        });
-        manifest.push({ number: index + 1, role: label });
-        parts.push({ text: `IMAGE ${index + 1}: ${label}` });
-        parts.push({ inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
-      });
-      releaseLoadedReferences(loaded);
       parts.push({ text: buildCombinedAnalysisPrompt({
         skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
         category: String(args.category || "ethnic/fusion"), modelDirection: String(args.modelDirection || ""),
@@ -3189,19 +3205,12 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     showcaseFeedback: await showcaseFeedbackBrief(orgId, category),
   };
   const result = await visionLimiter.run(async () => {
-    const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, String(inputs.category || ""), { retainBlob: false });
-    const manifest: Array<{ number: number; role: string }> = [];
-    const parts: JsonRecord[] = [];
-    loaded.forEach((reference, index) => {
-      const label = roleLabel(reference.role, {
-        useStyleAsModelFace,
-        hasModelReference: rawHasModelReference,
-        hasApprovedAnchor: false,
-      });
-      manifest.push({ number: index + 1, role: label });
-      parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
-    });
-    releaseLoadedReferences(loaded);
+    const { manifest, parts } = await loadVisionReferenceParts(
+      references,
+      orgId,
+      String(inputs.category || ""),
+      { useStyleAsModelFace, hasModelReference: rawHasModelReference },
+    );
     parts.push({ text: buildCombinedAnalysisPrompt({
       skuName: String(variant?.sku_name), productDetails: String(variant?.product_description || ""), category,
       modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
@@ -6007,19 +6016,12 @@ async function analyzeCatalogVariant(
     const rawHasModelReference = hasExplicitModelIdentity(references);
     const useStyleAsModelFace = hasCollapsedModelIdentity(references);
     const result = await visionLimiter.run(async () => {
-      const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, category, { retainBlob: false });
-      const manifest: Array<{ number: number; role: string }> = [];
-      const parts: JsonRecord[] = [];
-      loaded.forEach((reference, index) => {
-        const label = roleLabel(reference.role, {
-          useStyleAsModelFace,
-          hasModelReference: rawHasModelReference,
-          hasApprovedAnchor: false,
-        });
-        manifest.push({ number: index + 1, role: label });
-        parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
-      });
-      releaseLoadedReferences(loaded);
+      const { manifest, parts } = await loadVisionReferenceParts(
+        references,
+        orgId,
+        category,
+        { useStyleAsModelFace, hasModelReference: rawHasModelReference },
+      );
       parts.push({ text: buildCombinedAnalysisPrompt({
         skuName: String(variant.sku_name), productDetails: String(variant.product_description || ""), category,
         modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,

@@ -516,6 +516,10 @@ export function Studio() {
       if (!automatic) setNotice({ tone: "error", text: isSareeCategory ? "Upload the required full front, rear drape, pallu spread, and body-detail saree references first." : "Upload the required front and back product images first." });
       return;
     }
+    if (autoAnalyzeTimerRef.current) {
+      clearTimeout(autoAnalyzeTimerRef.current);
+      autoAnalyzeTimerRef.current = null;
+    }
     const requestId = ++analysisRequestRef.current;
     analysisAbortRef.current?.abort();
     const controller = new AbortController();

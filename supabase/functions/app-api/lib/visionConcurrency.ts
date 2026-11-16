@@ -24,7 +24,12 @@ export function combineTimeoutAndSignal(timeoutMs: number, signal?: AbortSignal)
     return AbortSignal.any([signal, timeoutSignal]);
   }
   const controller = new AbortController();
+  const cleanup = () => {
+    signal.removeEventListener("abort", onSignalAbort);
+    timeoutSignal.removeEventListener("abort", onTimeoutAbort);
+  };
   const forward = (reason: unknown) => {
+    cleanup();
     if (!controller.signal.aborted) controller.abort(reason);
   };
   if (signal.aborted) {
