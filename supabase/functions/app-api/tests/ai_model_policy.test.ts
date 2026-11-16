@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertThrows } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
   allowedModelsForPurpose,
   allowedThinkingLevels,
@@ -1263,3 +1263,39 @@ Deno.test("4-tier shockproof chain (Meta -> Terra -> Luna -> Gemini) preserves r
 });
 
 
+Deno.test("runVisionProviderChain aborts immediately when signal aborts without running fallback hops", async () => {
+  const controller = new AbortController();
+  const invoked: string[] = [];
+  const attempts: string[] = [];
+
+  await assertRejects(
+    () =>
+      runVisionProviderChain({
+        routes: [
+          { provider: "meta", model: "muse-spark-1.3-contributor", thinkingLevel: "medium" },
+          { provider: "openai", model: "gpt-6.1-terra", thinkingLevel: "medium" },
+        ],
+        purpose: "product_truth",
+        gatewayBudgetMs: 235_000,
+        signal: controller.signal,
+        onAttempt: (attempt) => {
+          attempts.push(`${attempt.provider}:${attempt.outcome}`);
+        },
+        invoke: (route) => {
+          invoked.push(route.model);
+          controller.abort();
+          return Promise.reject(new DOMException("Aborted by client", "AbortError"));
+        },
+        classify: (route, error) =>
+          classifyVisionProviderFailure(route.provider, {
+            name: (error as { name?: string }).name,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      }),
+    DOMException,
+    "aborted",
+  );
+
+  assertEquals(invoked, ["muse-spark-1.3-contributor"]);
+  assertEquals(attempts, []);
+});

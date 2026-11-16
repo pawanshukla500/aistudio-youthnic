@@ -88,6 +88,12 @@ import {
 import { firebaseCatalogPath, supabaseCatalogPath } from "./lib/catalogStoragePaths.ts";
 import { isCompleteCatalogHandoffPackage } from "./lib/catalogHandoffPackage.ts";
 import {
+  abortError,
+  combineTimeoutAndSignal,
+  createConcurrencyLimiter,
+  isAbortError,
+} from "./lib/visionConcurrency.ts";
+import {
   MAX_IMAGE_REFERENCES,
   colorwayCheckReferences,
   PRODUCT_REFERENCE_ROLES,
@@ -145,6 +151,7 @@ const PUBLISHABLE_KEY = Deno.env.get("SB_PUBLISHABLE_KEY")?.trim() || Deno.env.g
 const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/app-api`;
 const OPENAI_MODEL = DEFAULT_IMAGE_GENERATION_ROUTE.model;
 const MAX_REFERENCES = MAX_IMAGE_REFERENCES;
+const visionLimiter = createConcurrencyLimiter(4);
 const MAX_GENERATION_ATTEMPTS = 3;
 // GPT Image quality when a request, catalog or legacy job names none. Medium
 // keeps output tokens (and cost) well below high; Studio can still pick high.
@@ -1149,7 +1156,7 @@ async function geminiGroundedJson(prompt: string) {
 async function loadReference(
   reference: ReferenceInput,
   orgId: string,
-  options: { encodeBase64?: boolean } = {},
+  options: { encodeBase64?: boolean; retainBlob?: boolean } = {},
 ): Promise<LoadedReference> {
   let blob: Blob | null = null;
   assertCatalogReferenceOwnership(orgId, reference);
@@ -1163,7 +1170,10 @@ async function loadReference(
   }
   if (!blob) throw new Error(`Could not load ${reference.filename} from catalog asset storage.`);
   const mimeType = reference.mimeType || blob.type || "image/jpeg";
-  return { ...reference, mimeType, blob, base64: options.encodeBase64 === false ? "" : await blobToBase64(blob) };
+  const base64 = options.encodeBase64 === false ? "" : await blobToBase64(blob);
+  const retainedBlob = options.encodeBase64 !== false && options.retainBlob === false ? new Blob([]) : blob;
+  blob = null;
+  return { ...reference, mimeType, blob: retainedBlob, base64 };
 }
 
 /** Fill in the inline base64 a vision call needs, for references loaded without it. */
@@ -1208,7 +1218,7 @@ async function loadAvailableReferences(
   references: ReferenceInput[],
   orgId: string,
   garmentFamily = "",
-  options: { encodeBase64?: boolean } = {},
+  options: { encodeBase64?: boolean; retainBlob?: boolean } = {},
 ): Promise<LoadedReference[]> {
   const requiredRoles = requiredAvailabilityRoles(references, garmentFamily);
   // Every reference is an independent storage read plus an optional base64
@@ -1234,6 +1244,13 @@ async function loadAvailableReferences(
   });
   assertRequiredProductReferences(loaded, garmentFamily);
   return loaded;
+}
+
+function releaseLoadedReferences(loaded: LoadedReference[]) {
+  for (const reference of loaded) {
+    reference.base64 = "";
+  }
+  loaded.length = 0;
 }
 
 /**
@@ -1340,11 +1357,12 @@ async function geminiJson(
   policy: GeminiPolicy,
   parts: JsonRecord[],
   timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<{ raw: JsonRecord; text: string; json: JsonRecord; policy: GeminiPolicy }> {
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(policy.model)}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": requiredEnv("GEMINI_API_KEY") },
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: combineTimeoutAndSignal(timeoutMs, signal),
     body: JSON.stringify({
       contents: [{ role: "user", parts }],
       generationConfig: {
@@ -1456,12 +1474,13 @@ async function openAiResponsesVisionJson(
   route: NormalizedAiModelRoute,
   parts: JsonRecord[],
   timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+  signal?: AbortSignal,
 ) {
   assertVisionProviderConfigured(route);
   const effort = openaiReasoningEffort(route.thinkingLevel);
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: combineTimeoutAndSignal(timeoutMs, signal),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${requiredEnv("OPENAI_API_KEY")}`,
@@ -1492,12 +1511,13 @@ async function openAiCompatibleVisionJson(
   parts: JsonRecord[],
   provider: "openai" | "meta",
   timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+  signal?: AbortSignal,
 ) {
   assertVisionProviderConfigured(route);
   const endpoint = provider === "openai" ? "https://api.openai.com/v1/chat/completions" : "https://api.meta.ai/v1/chat/completions";
   const response = await fetch(endpoint, {
     method: "POST",
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: combineTimeoutAndSignal(timeoutMs, signal),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${requiredEnv(providerSecretName(provider))}`,
@@ -1542,15 +1562,17 @@ async function openAiVisionJson(
   route: NormalizedAiModelRoute,
   parts: JsonRecord[],
   timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+  signal?: AbortSignal,
 ) {
   const startedAt = Date.now();
   const [first] = visionProtocolOrder("openai", visionPartsHaveImages(parts));
   const primaryBudget = dualProtocolPrimaryTimeoutMs(timeoutMs);
   try {
     return first === "responses"
-      ? await openAiResponsesVisionJson(route, parts, primaryBudget)
-      : await openAiCompatibleVisionJson(route, parts, "openai", primaryBudget);
+      ? await openAiResponsesVisionJson(route, parts, primaryBudget, signal)
+      : await openAiCompatibleVisionJson(route, parts, "openai", primaryBudget, signal);
   } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw error;
     const classified = asVisionProviderError(error, route);
     if (classified.failure.code === "provider_authentication_failed") {
       throw classified;
@@ -1561,8 +1583,8 @@ async function openAiVisionJson(
     }
     try {
       return first === "responses"
-        ? await openAiCompatibleVisionJson(route, parts, "openai", remainingMs)
-        : await openAiResponsesVisionJson(route, parts, remainingMs);
+        ? await openAiCompatibleVisionJson(route, parts, "openai", remainingMs, signal)
+        : await openAiResponsesVisionJson(route, parts, remainingMs, signal);
     } catch (alternateError) {
       // A 404 / 400 from the first protocol means this model only serves the
       // other one. Report the protocol that actually accepted the model.
@@ -1585,6 +1607,7 @@ async function metaResponsesVisionJson(
   route: NormalizedAiModelRoute,
   parts: JsonRecord[],
   timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+  signal?: AbortSignal,
 ) {
   assertVisionProviderConfigured(route);
   const effort = route.thinkingLevel === "none" ? "minimal" : route.thinkingLevel;
@@ -1598,6 +1621,7 @@ async function metaResponsesVisionJson(
 
   for (const modelCandidate of modelCandidates) {
     for (let transientAttempt = 0; transientAttempt < 2; transientAttempt += 1) {
+      if (signal?.aborted) throw abortError();
       const elapsed = Date.now() - startedAt;
       const remainingMs = timeoutMs - elapsed;
       if (remainingMs < 2_000) {
@@ -1607,7 +1631,7 @@ async function metaResponsesVisionJson(
       try {
         response = await fetch("https://api.meta.ai/v1/responses", {
           method: "POST",
-          signal: AbortSignal.timeout(remainingMs),
+          signal: combineTimeoutAndSignal(remainingMs, signal),
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${requiredEnv("META_MODEL_API_KEY")}`,
@@ -1620,6 +1644,7 @@ async function metaResponsesVisionJson(
           }),
         });
       } catch (fetchErr) {
+        if (signal?.aborted || isAbortError(fetchErr)) throw fetchErr;
         lastError = fetchErr;
         const postElapsed = Date.now() - startedAt;
         const postRemainingMs = timeoutMs - postElapsed;
@@ -1691,6 +1716,7 @@ async function metaVisionJson(
   route: NormalizedAiModelRoute,
   parts: JsonRecord[],
   timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+  signal?: AbortSignal,
 ) {
   // Responses API (https://api.meta.ai/v1/responses) is the multimodal endpoint.
   // It gets the whole hop. Chat Completions runs only when Responses returns an
@@ -1698,8 +1724,9 @@ async function metaVisionJson(
   const startedAt = Date.now();
   const responsesBudgetMs = dualProtocolPrimaryTimeoutMs(timeoutMs);
   try {
-    return await metaResponsesVisionJson(route, parts, responsesBudgetMs);
+    return await metaResponsesVisionJson(route, parts, responsesBudgetMs, signal);
   } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw error;
     const classified = asVisionProviderError(error, route);
     if (classified.failure.code === "provider_authentication_failed" || visionPartsHaveImages(parts)) {
       throw classified;
@@ -1710,7 +1737,7 @@ async function metaVisionJson(
       throw classified;
     }
     try {
-      return await openAiCompatibleVisionJson(route, parts, "meta", remainingMs);
+      return await openAiCompatibleVisionJson(route, parts, "meta", remainingMs, signal);
     } catch (chatError) {
       const chatClassified = asVisionProviderError(chatError, route);
       throw chatClassified.failure.status === 404 ? classified : chatClassified;
@@ -1722,11 +1749,12 @@ async function qwenVisionJson(
   route: NormalizedAiModelRoute,
   parts: JsonRecord[],
   timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+  signal?: AbortSignal,
 ) {
   assertVisionProviderConfigured(route);
   const response = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
     method: "POST",
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: combineTimeoutAndSignal(timeoutMs, signal),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${requiredEnv("QWEN_API_KEY")}`,
@@ -1759,6 +1787,7 @@ async function invokeVisionRoute(
   route: NormalizedAiModelRoute,
   parts: JsonRecord[],
   timeoutMs = policy.purpose === "product_truth" ? PRODUCT_TRUTH_TIMEOUT_MS : VISION_PROVIDER_TIMEOUT_MS,
+  signal?: AbortSignal,
 ) {
   const effectiveRoute = policy.purpose === "product_truth"
     ? clampProductTruthHopThinking(route, timeoutMs)
@@ -1769,15 +1798,16 @@ async function invokeVisionRoute(
       purpose: policy.purpose,
       model: effectiveRoute.model,
       thinkingLevel: effectiveRoute.thinkingLevel as "medium" | "high" | "low",
-    }, parts, timeoutMs);
+    }, parts, timeoutMs, signal);
     return { raw: gemini.raw, text: gemini.text, json: gemini.json };
   }
   if (effectiveRoute.provider === "openai") {
-    return openAiVisionJson(effectiveRoute, parts, timeoutMs);
+    return openAiVisionJson(effectiveRoute, parts, timeoutMs, signal);
   }
   if (effectiveRoute.provider === "meta") {
-    return metaVisionJson(effectiveRoute, parts, timeoutMs);
+    return metaVisionJson(effectiveRoute, parts, timeoutMs, signal);
   }
+  if (signal) return qwenVisionJson(effectiveRoute, parts, timeoutMs, signal);
   return qwenVisionJson(effectiveRoute, parts, timeoutMs);
 }
 
@@ -1799,7 +1829,7 @@ function asVisionProviderError(error: unknown, route: NormalizedAiModelRoute) {
 async function visionJson(
   policy: VisionPolicy,
   parts: JsonRecord[],
-  options?: { onAttempt?: (attempt: VisionHopAttempt) => Promise<void> },
+  options?: { onAttempt?: (attempt: VisionHopAttempt) => Promise<void>; signal?: AbortSignal },
 ): Promise<VisionResult> {
   const requested = policy.purpose === "product_truth"
     ? productTruthRouteChain({
@@ -1824,14 +1854,17 @@ async function visionJson(
       routes: requested,
       purpose: policy.purpose,
       gatewayBudgetMs: visionGatewayBudgetMs(policy.purpose),
+      signal: options?.signal,
       invoke: async (route, timeoutMs) => {
+        if (options?.signal?.aborted) throw abortError();
         // Product truth runs each configured hop once: a same-route retry
         // would spend the configured fallback's share of Studio's 180s wait.
         if (policy.purpose === "product_truth") {
-          return await invokeVisionRoute(policy, route, parts, timeoutMs);
+          return await invokeVisionRoute(policy, route, parts, timeoutMs, options?.signal);
         }
         const hopStarted = Date.now();
         for (let attempt = 1; attempt <= 2; attempt += 1) {
+          if (options?.signal?.aborted) throw abortError();
           const remainingMs = Math.max(0, timeoutMs - (Date.now() - hopStarted));
           if (remainingMs < VISION_HOP_MIN_MS) {
             throw Object.assign(new Error("The selected vision provider timed out."), {
@@ -1839,8 +1872,9 @@ async function visionJson(
             });
           }
           try {
-            return await invokeVisionRoute(policy, route, parts, remainingMs);
+            return await invokeVisionRoute(policy, route, parts, remainingMs, options?.signal);
           } catch (error) {
+            if (options?.signal?.aborted || isAbortError(error)) throw error;
             const providerError = asVisionProviderError(error, route);
             if (
               route.provider !== "meta" &&
@@ -1877,6 +1911,9 @@ async function visionJson(
       attempts,
     };
   } catch (error) {
+    if (options?.signal?.aborted || isAbortError(error)) {
+      throw error;
+    }
     const chainError = error && typeof error === "object"
       ? error as {
         failure?: VisionProviderFailure;
@@ -1959,70 +1996,82 @@ async function analyze(request: Request, args: JsonRecord) {
   if (!normalized) {
     const rawHasModelReference = hasExplicitModelIdentity(references);
     const useStyleAsModelFace = hasCollapsedModelIdentity(references);
-    const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, String(args.category || ""));
-    const manifest: Array<{ number: number; role: string }> = [];
-    const parts: JsonRecord[] = [];
-    loaded.forEach((reference, index) => {
-      const label = roleLabel(reference.role, {
-        useStyleAsModelFace,
-        hasModelReference: rawHasModelReference,
-        hasApprovedAnchor: false,
-      });
-      manifest.push({ number: index + 1, role: label });
-      parts.push({ text: `IMAGE ${index + 1}: ${label}` });
-      parts.push({ inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
-    });
-    parts.push({ text: buildCombinedAnalysisPrompt({
-      skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
-      category: String(args.category || "ethnic/fusion"), modelDirection: String(args.modelDirection || ""),
-      sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences, fashionKnowledge, analysisLearning, showcaseFeedback,
-      hasModelReference: rawHasModelReference,
-      useStyleAsModelFace,
-    }) });
-
-    let result: VisionResult;
     const analysisInputSummary = {
       referenceCount: references.length,
       roles: references.map((reference) => reference.role),
     };
-    const persistFailedHop = async (attempt: VisionAttempt) => {
-      if (attempt.outcome !== "failed") return;
-      const hopIds = await recordVisionHopRuns({
-        organizationId: orgId,
-        runKind: "product_reference_analysis",
-        purpose: policy.purpose,
-        fingerprint,
-        inputSummary: analysisInputSummary,
-        policy,
-        attempts: [attempt],
-      });
-      analysisRunIds.push(...hopIds);
-    };
-    try {
-      result = await visionJson(policy, parts, { onAttempt: persistFailedHop });
-    } catch (error) {
-      const attempts = error instanceof VisionProviderError ? error.attempts : [];
-      if (!attempts.length) {
-        const failure = visionFailureRecord(error, policy);
-        await recordAiRun({
-          organization_id: orgId,
-          job_id: "",
-          run_kind: "product_reference_analysis",
-          purpose: policy.purpose,
-          input_fingerprint: fingerprint,
-          input_summary: {
-            ...analysisInputSummary,
-            policy: visionPolicySnapshot(policy, []),
-          },
-          status: "failed",
-          latency_ms: Date.now() - started,
-          cost_usd: 0,
-          cost_source: "provider_cost_not_available",
-          ...failure,
+    const result = await visionLimiter.run(async () => {
+      const loaded = await loadAvailableReferences(
+        collapseDuplicateUploads(references),
+        orgId,
+        String(args.category || ""),
+        { retainBlob: false },
+      );
+      const manifest: Array<{ number: number; role: string }> = [];
+      const parts: JsonRecord[] = [];
+      loaded.forEach((reference, index) => {
+        const label = roleLabel(reference.role, {
+          useStyleAsModelFace,
+          hasModelReference: rawHasModelReference,
+          hasApprovedAnchor: false,
         });
+        manifest.push({ number: index + 1, role: label });
+        parts.push({ text: `IMAGE ${index + 1}: ${label}` });
+        parts.push({ inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
+      });
+      releaseLoadedReferences(loaded);
+      parts.push({ text: buildCombinedAnalysisPrompt({
+        skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
+        category: String(args.category || "ethnic/fusion"), modelDirection: String(args.modelDirection || ""),
+        sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences, fashionKnowledge, analysisLearning, showcaseFeedback,
+        hasModelReference: rawHasModelReference,
+        useStyleAsModelFace,
+      }) });
+
+      const persistFailedHop = async (attempt: VisionAttempt) => {
+        if (attempt.outcome !== "failed" || request.signal.aborted) return;
+        const hopIds = await recordVisionHopRuns({
+          organizationId: orgId,
+          runKind: "product_reference_analysis",
+          purpose: policy.purpose,
+          fingerprint,
+          inputSummary: analysisInputSummary,
+          policy,
+          attempts: [attempt],
+        });
+        analysisRunIds.push(...hopIds);
+      };
+      try {
+        return await visionJson(policy, parts, { onAttempt: persistFailedHop, signal: request.signal });
+      } catch (error) {
+        if (request.signal.aborted || isAbortError(error)) {
+          throw error;
+        }
+        const attempts = error instanceof VisionProviderError ? error.attempts : [];
+        if (!attempts.length) {
+          const failure = visionFailureRecord(error, policy);
+          await recordAiRun({
+            organization_id: orgId,
+            job_id: "",
+            run_kind: "product_reference_analysis",
+            purpose: policy.purpose,
+            input_fingerprint: fingerprint,
+            input_summary: {
+              ...analysisInputSummary,
+              policy: visionPolicySnapshot(policy, []),
+            },
+            status: "failed",
+            latency_ms: Date.now() - started,
+            cost_usd: 0,
+            cost_source: "provider_cost_not_available",
+            ...failure,
+          });
+        }
+        throw error;
+      } finally {
+        parts.length = 0;
       }
-      throw error;
-    }
+    }, request.signal);
     normalized = normalizeAnalysis(result.json, String(args.category || "ethnic/fusion"), {
       modelDirection: String(args.modelDirection || ""),
     });
@@ -3124,22 +3173,7 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
 
   const rawHasModelReference = hasExplicitModelIdentity(references);
   const useStyleAsModelFace = hasCollapsedModelIdentity(references);
-  const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, String(inputs.category || ""));
-  const manifest: Array<{ number: number; role: string }> = [];
-  const parts: JsonRecord[] = [];
-  loaded.forEach((reference, index) => {
-    const label = roleLabel(reference.role, {
-      useStyleAsModelFace,
-      hasModelReference: rawHasModelReference,
-      hasApprovedAnchor: false,
-    });
-    manifest.push({ number: index + 1, role: label });
-    parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
-  });
-
-  parts.push({ text: buildCombinedAnalysisPrompt({
-    skuName: String(variant?.sku_name), productDetails: String(variant?.product_description || ""), category,
-    modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
+  const promptStatic = {
     housePreferences: await stylingPreferenceBrief(orgId, category),
     fashionKnowledge: await fashionKnowledgeBrief(
       orgId,
@@ -3153,11 +3187,34 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
     ),
     analysisLearning: await analysisLearningBrief(orgId, category),
     showcaseFeedback: await showcaseFeedbackBrief(orgId, category),
-    hasModelReference: rawHasModelReference,
-    useStyleAsModelFace,
-  }) });
-
-  const result = await visionJson(policy, parts);
+  };
+  const result = await visionLimiter.run(async () => {
+    const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, String(inputs.category || ""), { retainBlob: false });
+    const manifest: Array<{ number: number; role: string }> = [];
+    const parts: JsonRecord[] = [];
+    loaded.forEach((reference, index) => {
+      const label = roleLabel(reference.role, {
+        useStyleAsModelFace,
+        hasModelReference: rawHasModelReference,
+        hasApprovedAnchor: false,
+      });
+      manifest.push({ number: index + 1, role: label });
+      parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
+    });
+    releaseLoadedReferences(loaded);
+    parts.push({ text: buildCombinedAnalysisPrompt({
+      skuName: String(variant?.sku_name), productDetails: String(variant?.product_description || ""), category,
+      modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
+      ...promptStatic,
+      hasModelReference: rawHasModelReference,
+      useStyleAsModelFace,
+    }) });
+    try {
+      return await visionJson(policy, parts);
+    } finally {
+      parts.length = 0;
+    }
+  });
   const normalized = normalizeAnalysis(result.json, category, {
     bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
     modelDirection: String(settings.modelDirection || ""),
@@ -5949,29 +6006,36 @@ async function analyzeCatalogVariant(
   if (!normalized) {
     const rawHasModelReference = hasExplicitModelIdentity(references);
     const useStyleAsModelFace = hasCollapsedModelIdentity(references);
-    const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, category);
-    const manifest: Array<{ number: number; role: string }> = [];
-    const parts: JsonRecord[] = [];
-    loaded.forEach((reference, index) => {
-      const label = roleLabel(reference.role, {
-        useStyleAsModelFace,
-        hasModelReference: rawHasModelReference,
-        hasApprovedAnchor: false,
+    const result = await visionLimiter.run(async () => {
+      const loaded = await loadAvailableReferences(collapseDuplicateUploads(references), orgId, category, { retainBlob: false });
+      const manifest: Array<{ number: number; role: string }> = [];
+      const parts: JsonRecord[] = [];
+      loaded.forEach((reference, index) => {
+        const label = roleLabel(reference.role, {
+          useStyleAsModelFace,
+          hasModelReference: rawHasModelReference,
+          hasApprovedAnchor: false,
+        });
+        manifest.push({ number: index + 1, role: label });
+        parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
       });
-      manifest.push({ number: index + 1, role: label });
-      parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
+      releaseLoadedReferences(loaded);
+      parts.push({ text: buildCombinedAnalysisPrompt({
+        skuName: String(variant.sku_name), productDetails: String(variant.product_description || ""), category,
+        modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
+        housePreferences,
+        fashionKnowledge,
+        analysisLearning,
+        showcaseFeedback,
+        hasModelReference: rawHasModelReference,
+        useStyleAsModelFace,
+      }) });
+      try {
+        return await visionJson(policy, parts, { onAttempt });
+      } finally {
+        parts.length = 0;
+      }
     });
-    parts.push({ text: buildCombinedAnalysisPrompt({
-      skuName: String(variant.sku_name), productDetails: String(variant.product_description || ""), category,
-      modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
-      housePreferences,
-      fashionKnowledge,
-      analysisLearning,
-      showcaseFeedback,
-      hasModelReference: rawHasModelReference,
-      useStyleAsModelFace,
-    }) });
-    const result = await visionJson(policy, parts, { onAttempt });
     normalized = normalizeAnalysis(result.json, category, {
       bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
       modelDirection: String(settings.modelDirection || ""),
