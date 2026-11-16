@@ -4,6 +4,7 @@ import {
   combineTimeoutAndSignal,
   createConcurrencyLimiter,
   isAbortError,
+  sleepWithSignal,
 } from "../lib/visionConcurrency.ts";
 
 Deno.test("concurrency limiter caps parallel vision tasks and releases queued waiters FIFO", async () => {
@@ -63,4 +64,12 @@ Deno.test("combineTimeoutAndSignal propagates external abort and identifies Abor
   assertEquals(combined.aborted, true);
   assertEquals(isAbortError(abortError()), true);
   assertEquals(isAbortError(new Error("other")), false);
+});
+
+Deno.test("sleepWithSignal resolves normally and cancels immediately on signal abort", async () => {
+  await sleepWithSignal(5);
+  const controller = new AbortController();
+  const wait = sleepWithSignal(5_000, controller.signal);
+  controller.abort();
+  await assertRejects(() => wait, DOMException, "aborted");
 });

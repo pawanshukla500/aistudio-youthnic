@@ -374,6 +374,7 @@ export function Studio() {
   const markAnalysisStale = () => {
     analysisRequestRef.current += 1;
     analysisAbortRef.current?.abort();
+    setAnalyzing(false);
     setAnalysisSourceKey(null);
     setDnaState(null);
   };

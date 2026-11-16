@@ -92,6 +92,7 @@ import {
   combineTimeoutAndSignal,
   createConcurrencyLimiter,
   isAbortError,
+  sleepWithSignal,
 } from "./lib/visionConcurrency.ts";
 import {
   MAX_IMAGE_REFERENCES,
@@ -221,33 +222,43 @@ async function uploadCatalogObject(args: { orgId: string; storagePath: string; b
   }
 }
 
-async function downloadCatalogObject(orgId: string, storagePath: string, storageBackend: unknown, fallbackUrl = "") {
+async function downloadCatalogObject(
+  orgId: string,
+  storagePath: string,
+  storageBackend: unknown,
+  fallbackUrl = "",
+  signal?: AbortSignal,
+) {
+  if (signal?.aborted) throw abortError("Asset download aborted.");
   const backend = String(storageBackend || "firebase") as CatalogStorageBackend;
   if (backend === "supabase") {
     const tenantPath = supabaseCatalogPath(orgId, storagePath);
     const { data, error } = await service.storage.from(CATALOG_ASSET_BUCKET).download(tenantPath);
+    if (signal?.aborted) throw abortError("Asset download aborted.");
     if (error || !data) throw new Error(`Supabase Storage download failed: ${error?.message || "object unavailable"}`);
     return data;
   }
   if (/^https:\/\//i.test(storagePath)) {
-    return await fetchAssetBlobWithRetry(storagePath, "Asset download");
+    return await fetchAssetBlobWithRetry(storagePath, "Asset download", signal);
   }
   if (/^http:\/\//i.test(storagePath)) throw new Error("Catalog asset URLs must use HTTPS.");
   if (backend === "external") {
     if (!fallbackUrl) throw new Error("External asset URL is unavailable.");
-    return await fetchAssetBlobWithRetry(fallbackUrl, "External asset download");
+    return await fetchAssetBlobWithRetry(fallbackUrl, "External asset download", signal);
   }
   if (!storagePath && fallbackUrl && /^https:\/\//i.test(fallbackUrl)) {
-    return await fetchAssetBlobWithRetry(fallbackUrl, "Fallback asset download");
+    return await fetchAssetBlobWithRetry(fallbackUrl, "Fallback asset download", signal);
   }
   try {
     assertCatalogReferenceOwnership(orgId, { role: "stored_asset", storagePath, storageBackend: "firebase", hash: "", filename: "stored-asset", mimeType: "", size: 0 });
-    return await downloadFirebaseObject(storagePath);
+    return await downloadFirebaseObject(storagePath, { signal });
   } catch (firebaseError) {
+    if (signal?.aborted || isAbortError(firebaseError)) throw firebaseError;
     if (fallbackUrl && /^https:\/\//i.test(fallbackUrl)) {
       try {
-        return await fetchAssetBlobWithRetry(fallbackUrl, "Fallback asset download");
-      } catch {
+        return await fetchAssetBlobWithRetry(fallbackUrl, "Fallback asset download", signal);
+      } catch (fallbackError) {
+        if (signal?.aborted || isAbortError(fallbackError)) throw fallbackError;
         // Surface the primary Firebase storage error when the fallback URL also fails.
       }
     }
@@ -255,11 +266,12 @@ async function downloadCatalogObject(orgId: string, storagePath: string, storage
   }
 }
 
-async function fetchAssetBlobWithRetry(url: string, label: string): Promise<Blob> {
+async function fetchAssetBlobWithRetry(url: string, label: string, signal?: AbortSignal): Promise<Blob> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
+    if (signal?.aborted) throw abortError(`${label} aborted.`);
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      const response = await fetch(url, { signal: combineTimeoutAndSignal(30_000, signal) });
       if (response.ok) return await response.blob();
       const status = response.status;
       await response.body?.cancel().catch(() => {});
@@ -267,10 +279,11 @@ async function fetchAssetBlobWithRetry(url: string, label: string): Promise<Blob
       const retryable = [408, 429, 500, 502, 503, 504].includes(status);
       if (!retryable) break;
     } catch (error) {
+      if (signal?.aborted || isAbortError(error)) throw error;
       lastError = error;
     }
     if (attempt < 3) {
-      await sleep(300 * 2 ** (attempt - 1));
+      await sleepWithSignal(300 * 2 ** (attempt - 1), signal);
     }
   }
   throw lastError instanceof Error ? lastError : new Error(`${label} failed.`);
@@ -1156,19 +1169,23 @@ async function geminiGroundedJson(prompt: string) {
 async function loadReference(
   reference: ReferenceInput,
   orgId: string,
-  options: { encodeBase64?: boolean; retainBlob?: boolean } = {},
+  options: { encodeBase64?: boolean; retainBlob?: boolean; signal?: AbortSignal } = {},
 ): Promise<LoadedReference> {
+  if (options.signal?.aborted) throw abortError(`Loading reference ${reference.filename} aborted.`);
   let blob: Blob | null = null;
   assertCatalogReferenceOwnership(orgId, reference);
-  if (reference.storagePath) blob = await downloadCatalogObject(orgId, reference.storagePath, reference.storageBackend, reference.downloadUrl);
+  if (reference.storagePath) blob = await downloadCatalogObject(orgId, reference.storagePath, reference.storageBackend, reference.downloadUrl, options.signal);
+  if (options.signal?.aborted) throw abortError(`Loading reference ${reference.filename} aborted.`);
   if (!blob && reference.downloadUrl) {
     try {
-      blob = await fetchAssetBlobWithRetry(reference.downloadUrl, `Reference ${reference.filename}`);
-    } catch {
+      blob = await fetchAssetBlobWithRetry(reference.downloadUrl, `Reference ${reference.filename}`, options.signal);
+    } catch (error) {
+      if (options.signal?.aborted || isAbortError(error)) throw error;
       blob = null;
     }
   }
   if (!blob) throw new Error(`Could not load ${reference.filename} from catalog asset storage.`);
+  if (options.signal?.aborted) throw abortError(`Loading reference ${reference.filename} aborted.`);
   const mimeType = reference.mimeType || blob.type || "image/jpeg";
   const base64 = options.encodeBase64 === false ? "" : await blobToBase64(blob);
   const retainedBlob = options.encodeBase64 !== false && options.retainBlob === false ? new Blob([]) : blob;
@@ -1218,14 +1235,19 @@ async function loadAvailableReferences(
   references: ReferenceInput[],
   orgId: string,
   garmentFamily = "",
-  options: { encodeBase64?: boolean; retainBlob?: boolean } = {},
+  options: { encodeBase64?: boolean; retainBlob?: boolean; signal?: AbortSignal } = {},
 ): Promise<LoadedReference[]> {
+  if (options.signal?.aborted) throw abortError("Reference loading aborted.");
   const requiredRoles = requiredAvailabilityRoles(references, garmentFamily);
   // Every reference is an independent storage read plus an optional base64
   // encode. Loading them one at a time made a pose wait for the sum of all
   // downloads; the provider call that follows is the only part that must be
   // serial.
   const settled = await Promise.allSettled(references.map((reference) => loadReference(reference, orgId, options)));
+  const abortedResult = settled.find((result) => result.status === "rejected" && (options.signal?.aborted || isAbortError(result.reason)));
+  if (abortedResult && abortedResult.status === "rejected") {
+    throw isAbortError(abortedResult.reason) ? abortedResult.reason : abortError("Reference loading aborted.");
+  }
   const loaded: LoadedReference[] = [];
   settled.forEach((result, index) => {
     const reference = references[index];
@@ -1258,21 +1280,19 @@ async function loadVisionReferenceParts(
   orgId: string,
   garmentFamily: string,
   roleOptions: { useStyleAsModelFace: boolean; hasModelReference: boolean },
+  options: { signal?: AbortSignal } = {},
 ): Promise<{ manifest: Array<{ number: number; role: string }>; parts: JsonRecord[] }> {
   const loaded = await loadAvailableReferences(
     collapseDuplicateUploads(references),
     orgId,
     garmentFamily,
-    { retainBlob: false },
+    { retainBlob: false, signal: options.signal },
   );
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
   try {
     loaded.forEach((reference, index) => {
-      const label = roleLabel(reference.role, {
-        ...roleOptions,
-        hasApprovedAnchor: false,
-      });
+      const label = roleLabel(reference.role, { ...roleOptions, hasApprovedAnchor: false });
       manifest.push({ number: index + 1, role: label });
       parts.push({ text: `IMAGE ${index + 1}: ${label}` }, { inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
     });
@@ -2035,6 +2055,7 @@ async function analyze(request: Request, args: JsonRecord) {
         orgId,
         String(args.category || ""),
         { useStyleAsModelFace, hasModelReference: rawHasModelReference },
+        { signal: request.signal },
       );
       parts.push({ text: buildCombinedAnalysisPrompt({
         skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
@@ -3151,7 +3172,7 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
 
   // Token optimization: If base product analysis already exists for the batch, extract colorway only
   if (baseAnalysis && baseAnalysis.productIdentity?.garmentFamily) {
-    const loadedRefs = await loadAvailableReferences(collapseDuplicateUploads(colorwayCheckReferences(references)), orgId, category);
+    const loadedRefs = await loadAvailableReferences(collapseDuplicateUploads(colorwayCheckReferences(references)), orgId, category, { retainBlob: false });
     if (loadedRefs.length > 0) {
       const manifest = loadedRefs.map((reference, index) => ({ number: index + 1, role: roleLabel(reference.role) }));
       const parts: JsonRecord[] = [
@@ -3169,7 +3190,14 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
           }),
         },
       ];
-      const result = await visionJson(policy, parts);
+      releaseLoadedReferences(loadedRefs);
+      let result: VisionResult;
+      try {
+        result = await visionLimiter.run(() => visionJson(policy, parts));
+      } finally {
+        releaseLoadedReferences(loadedRefs);
+        parts.length = 0;
+      }
       // Only repaint the collection's garment truth when this SKU really is that
       // garment in another colour. Anything else falls through to the full
       // analysis below, which reads the variant's own references properly.
@@ -5907,7 +5935,7 @@ async function analyzeCatalogVariant(
   // do not waste tokens re-analyzing the identical cut, silhouette, structure, and pose plan.
   // Instead, run a lightweight colorway analysis and merge into the base garment!
   if (baseAnalysis && baseAnalysis.productIdentity?.garmentFamily) {
-    const loadedRefs = await loadAvailableReferences(collapseDuplicateUploads(colorwayCheckReferences(references)), String(batch.organization_id), category);
+    const loadedRefs = await loadAvailableReferences(collapseDuplicateUploads(colorwayCheckReferences(references)), String(batch.organization_id), category, { retainBlob: false });
     if (loadedRefs.length > 0) {
       const manifest = loadedRefs.map((reference, index) => ({ number: index + 1, role: roleLabel(reference.role) }));
       const parts: JsonRecord[] = [
@@ -5925,7 +5953,14 @@ async function analyzeCatalogVariant(
           }),
         },
       ];
-      const result = await visionJson(policy, parts, { onAttempt });
+      releaseLoadedReferences(loadedRefs);
+      let result: VisionResult;
+      try {
+        result = await visionLimiter.run(() => visionJson(policy, parts, { onAttempt }));
+      } finally {
+        releaseLoadedReferences(loadedRefs);
+        parts.length = 0;
+      }
       const delta = colorwayDeltaIsSafe(result.json);
       if (!delta.safe) {
         // The variant is not just a recolour, so the collection's truth would

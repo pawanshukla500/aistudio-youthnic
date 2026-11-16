@@ -17,6 +17,31 @@ export function isAbortError(error: unknown): boolean {
   );
 }
 
+export function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  if (signal.aborted) {
+    return Promise.reject(abortError("Request aborted while waiting."));
+  }
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(abortError("Request aborted while waiting."));
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export function combineTimeoutAndSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   if (!signal) return timeoutSignal;
