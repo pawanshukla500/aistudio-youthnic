@@ -412,7 +412,6 @@ def _meta_vision_json(
                         "input": [{"role": "user", "content": content_items}],
                         "reasoning": {"effort": attempt_effort},
                         "max_output_tokens": 16384,
-                        **({"stream": True} if images else {}),
                     }
                     resp, data = _invoke_meta_response(client, body, deadline)
                 if resp.status_code >= 400:

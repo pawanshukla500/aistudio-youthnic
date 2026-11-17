@@ -1692,9 +1692,6 @@ async function metaResponsesVisionJson(
             input,
             reasoning: { effort },
             max_output_tokens: 16384,
-            // Image analysis at medium reasoning outlives Meta's non-streaming
-            // gateway limit. Streaming keeps the call open until the JSON lands.
-            ...(visionPartsHaveImages(parts) ? { stream: true } : {}),
           }),
         });
       } catch (fetchErr) {
