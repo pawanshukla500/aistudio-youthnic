@@ -171,8 +171,11 @@ class ValkeyCacheManager:
         with self._lock:
             self._pending_deletes.difference_update(deletes)
             for key, payload in writes:
-                if self._pending_writes.get(key) == payload:
-                    self._pending_writes.pop(key, None)
+                # A delete or newer write that arrived during the Redis round
+                # trip is newer than this snapshot, so leave it queued.
+                if self._pending_writes.get(key) != payload:
+                    continue
+                self._pending_writes.pop(key, None)
                 self._pending_deletes.discard(key)
 
     def _safe_get(self, key: str) -> Optional[str]:

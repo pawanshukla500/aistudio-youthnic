@@ -9074,8 +9074,9 @@ async function dnaExtractOperation(request: Request, args: JsonRecord) {
     baseUrl: fastApiBaseUrl(),
     path: "/api/v1/dna/extract",
     timeoutMs: 130_000,
-    maxRetries: 1,
-    retryOnTimeout: true,
+    // One POST only. A timeout retry would start a second vision call while
+    // the first is still writing an immutable DNA version.
+    maxRetries: 0,
     init: {
       method: "POST",
       headers: fastApiHeaders(true),
