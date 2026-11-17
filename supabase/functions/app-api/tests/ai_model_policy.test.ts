@@ -56,6 +56,10 @@ Deno.test("Meta response stream keeps the product-truth JSON", () => {
   assertThrows(() => parseMetaResponseSse(
     `data: ${JSON.stringify({ type: "response.failed", response: { error: { message: "model overloaded" } } })}`,
   ), Error, "model overloaded");
+  assertThrows(() => parseMetaResponseSse([
+    `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "{\"ok\":true}" })}`,
+    `data: ${JSON.stringify({ type: "error", error: { code: "server_error", message: "stream failed" } })}`,
+  ].join("\n")), Error, "server_error: stream failed");
 });
 
 Deno.test("vision registry keeps image generation on approved OpenAI image models", () => {

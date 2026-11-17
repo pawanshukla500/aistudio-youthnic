@@ -60,10 +60,15 @@ def parse_meta_response_sse(raw: str) -> Dict[str, Any]:
         elif event_type in {"response.completed", "response.incomplete"}:
             response = event.get("response")
             completed = response if isinstance(response, dict) else event
-        elif event_type == "response.failed":
+        elif event_type in {"response.failed", "error"}:
             response = event.get("response") if isinstance(event.get("response"), dict) else {}
             error = response.get("error") if isinstance(response.get("error"), dict) else event.get("error")
-            failed_message = str((error or {}).get("message") or "Meta response failed.")
+            error = error if isinstance(error, dict) else {}
+            code = str(error.get("code") or event.get("code") or "")
+            message = str(error.get("message") or event.get("message") or "Meta response failed.")
+            failed_message = f"{code}: {message}" if code else message
+            assembled = ""
+            completed = None
     if failed_message:
         raise RuntimeError(failed_message)
     if completed is not None:
@@ -80,6 +85,46 @@ def _meta_response_payload(resp: Any) -> Dict[str, Any]:
     if isinstance(raw, str) and raw.lstrip().startswith("data:"):
         return parse_meta_response_sse(raw)
     return _safe_resp_json(resp)
+
+
+class _BufferedMetaResponse:
+    def __init__(self, status_code: int, raw: bytes):
+        self.status_code = status_code
+        self.content = raw
+        self.text = raw.decode("utf-8", "replace")
+
+    def json(self) -> Dict[str, Any]:
+        if not self.content:
+            return {}
+        parsed = json.loads(self.text)
+        return parsed if isinstance(parsed, dict) else {}
+
+
+def _invoke_meta_response(client: Any, body: Dict[str, Any], deadline: Optional[float]) -> tuple:
+    """POST a Meta response. Image calls stream so a long reasoning run stays open.
+
+    The read timeout is the time left until `deadline`, so a silent reasoning
+    pass can still finish. Each chunk is checked against that deadline; a read
+    already in flight can run only until the timeout that was set for it.
+    """
+    headers = {
+        "Authorization": f"Bearer {(settings.META_MODEL_API_KEY or '').strip()}",
+        "Content-Type": "application/json",
+    }
+    url = "https://api.meta.ai/v1/responses"
+    if body.get("stream") and callable(getattr(client, "stream", None)):
+        with client.stream("POST", url, headers=headers, json=body) as resp:
+            chunks: List[bytes] = []
+            for chunk in resp.iter_bytes():
+                if deadline is not None and time.monotonic() > deadline:
+                    resp.close()
+                    raise TimeoutError("Meta vision deadline exhausted while reading the stream")
+                if chunk:
+                    chunks.append(chunk)
+            buffered = _BufferedMetaResponse(resp.status_code, b"".join(chunks))
+            return buffered, _meta_response_payload(buffered)
+    resp = client.post(url, headers=headers, json=body)
+    return resp, _meta_response_payload(resp)
 
 
 def _resolve_safe_public_ip(raw_url: str) -> Optional[str]:
@@ -359,22 +404,17 @@ def _meta_vision_json(
             per_call_timeout = int(max(5, min(float(timeout_s), remaining)))
             attempt_effort = "low" if (effort in ("medium", "high") and remaining < 60.0) else effort
             try:
-                with httpx.Client(timeout=per_call_timeout) as client:
-                    resp = client.post(
-                        "https://api.meta.ai/v1/responses",
-                        headers={
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "model": model_name,
-                            "input": [{"role": "user", "content": content_items}],
-                            "reasoning": {"effort": attempt_effort},
-                            "max_output_tokens": 16384,
-                            **({"stream": True} if images else {}),
-                        },
-                    )
-                data = _meta_response_payload(resp)
+                read_budget = max(5.0, (deadline - time.monotonic()) if deadline is not None else float(per_call_timeout))
+                client_timeout = httpx.Timeout(read_budget, connect=10.0, write=30.0, pool=10.0) if images else per_call_timeout
+                with httpx.Client(timeout=client_timeout) as client:
+                    body = {
+                        "model": model_name,
+                        "input": [{"role": "user", "content": content_items}],
+                        "reasoning": {"effort": attempt_effort},
+                        "max_output_tokens": 16384,
+                        **({"stream": True} if images else {}),
+                    }
+                    resp, data = _invoke_meta_response(client, body, deadline)
                 if resp.status_code >= 400:
                     msg = str((data.get("error") or {}).get("message") or data.get("message") or f"Meta HTTP {resp.status_code}")
                     last_err = RuntimeError(msg)
@@ -619,8 +659,11 @@ def invoke_vision_json(
 
     is_analysis = purpose in ("product_truth", "pose_planning")
     configured_budget = float(max(12, settings.VISION_TIMEOUT_SECONDS))
+    # DNA and pose planning pass their own budget, up to the Studio wait.
+    # Other callers keep the configured window (default 80s, inside 90s).
+    caller_ceiling = 240.0 if is_analysis else configured_budget
     total_budget = (
-        max(12.0, min(configured_budget, float(timeout_budget_s)))
+        max(12.0, min(caller_ceiling, float(timeout_budget_s)))
         if timeout_budget_s is not None
         else configured_budget
     )
@@ -629,8 +672,17 @@ def invoke_vision_json(
 
     if has_meta:
         remaining = deadline - time.monotonic()
+        later_provider = has_openai or has_gemini
+        # Same reserve the OpenAI hops already use, so a Meta timeout still
+        # leaves a fallback a real window. Meta alone keeps the whole budget.
+        reserve = (
+            35.0 if remaining >= 95.0
+            else 18.0 if remaining >= 78.0
+            else max(12.0, min(20.0, remaining * 0.35))
+        )
+        usable = remaining - reserve if later_provider and remaining > reserve + 8.0 else remaining
         meta_cap = 240 if is_analysis else 25
-        meta_timeout = int(max(12, min(meta_cap, remaining)))
+        meta_timeout = int(max(12, min(meta_cap, usable)))
         meta_deadline = min(deadline, time.monotonic() + float(meta_timeout))
         meta_effort = "low" if (is_analysis and meta_timeout < 60) else ("medium" if is_analysis else "low")
         try:

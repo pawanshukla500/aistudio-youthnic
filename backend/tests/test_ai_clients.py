@@ -18,6 +18,111 @@ def test_parse_meta_response_sse_keeps_product_truth_json():
     assert payload["output_text"] == '{"ok":true}'
     assert payload["usage"]["output_tokens"] == 4
 
+    import pytest
+    with pytest.raises(RuntimeError, match="server_error: stream failed"):
+        parse_meta_response_sse("\n".join([
+            "data: " + json.dumps({"type": "response.output_text.delta", "delta": '{"ok":true}'}),
+            "data: " + json.dumps({"type": "error", "error": {"code": "server_error", "message": "stream failed"}}),
+        ]))
+
+
+def test_analysis_budget_reaches_muse_past_the_default_window(monkeypatch):
+    from services import ai_clients
+
+    monkeypatch.setattr(settings, "META_MODEL_API_KEY", "meta_test_key")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(settings, "VISION_TIMEOUT_SECONDS", 80)
+    seen = {}
+
+    class FakeResp:
+        status_code = 200
+        content = b'{"output_text": "{\\"ok\\": true}"}'
+        text = '{"output_text": "{\\"ok\\": true}"}'
+
+        def json(self):
+            return {"output_text": '{"ok": true}'}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            seen["timeout"] = kwargs.get("timeout", args[0] if args else None)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            seen["timeout_s_body"] = json["reasoning"]["effort"]
+            return FakeResp()
+
+    monkeypatch.setattr(ai_clients.httpx, "Client", FakeClient)
+    monkeypatch.setattr(ai_clients.cache_manager, "record_provider_result", lambda *a, **k: None)
+    result = ai_clients.invoke_vision_json(
+        "prompt",
+        [{"role": "front", "mime_type": "image/jpeg", "base64": "YQ=="}],
+        purpose="product_truth",
+        timeout_budget_s=240,
+    )
+    assert result is not None
+    assert result["provider"] == "meta"
+    # OpenAI is configured, so Muse keeps the established 35s fallback reserve.
+    timeout = seen["timeout"]
+    read_s = getattr(timeout, "read", timeout)
+    assert float(read_s) > 180
+
+
+def test_meta_image_stream_stops_when_the_deadline_passes(monkeypatch):
+    import pytest
+    from services import ai_clients
+
+    monkeypatch.setattr(settings, "META_MODEL_API_KEY", "meta_test_key")
+    monkeypatch.setattr(ai_clients.cache_manager, "record_provider_result", lambda *a, **k: None)
+    clock = {"now": 0.0}
+    monkeypatch.setattr(ai_clients.time, "monotonic", lambda: clock["now"])
+
+    class StreamBody:
+        status_code = 200
+        closed = False
+
+        def iter_bytes(self):
+            clock["now"] = 50.0
+            yield b'data: {"type":"response.output_text.delta","delta":"{"}'
+
+        def close(self):
+            self.closed = True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def stream(self, method, url, headers=None, json=None):
+            assert json["stream"] is True
+            return StreamBody()
+
+    monkeypatch.setattr(ai_clients.httpx, "Client", FakeClient)
+    with pytest.raises(RuntimeError, match="deadline exhausted"):
+        ai_clients._meta_vision_json(
+            "prompt",
+            [{"role": "front", "mime_type": "image/jpeg", "base64": "YQ=="}],
+            timeout_s=30,
+            effort="low",
+            deadline=10.0,
+        )
+
 
 def test_meta_muse_spark_sibling_retry_uses_canonical_input(monkeypatch):
     monkeypatch.setattr(settings, "META_MODEL_API_KEY", "meta_test_key")

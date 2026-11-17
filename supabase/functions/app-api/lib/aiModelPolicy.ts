@@ -1312,10 +1312,14 @@ export function parseMetaResponseSse(raw: string): Record<string, unknown> {
         ? response as Record<string, unknown>
         : event;
     }
-    if (type === "response.failed") {
+    if (type === "response.failed" || type === "error") {
       const response = event.response as Record<string, unknown> | undefined;
       const error = (response?.error || event.error) as Record<string, unknown> | undefined;
-      failedMessage = String(error?.message || "Meta response failed.");
+      const code = String(error?.code || event.code || "");
+      const message = String(error?.message || event.message || "Meta response failed.");
+      failedMessage = code ? `${code}: ${message}` : message;
+      assembled = "";
+      completed = null;
     }
   }
   if (failedMessage) throw new Error(failedMessage);
