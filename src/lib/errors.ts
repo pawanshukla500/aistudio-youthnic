@@ -79,6 +79,9 @@ export function functionInvokeErrorMessage(args: {
   const haystack = `${args.fallbackMessage} ${text} ${args.bodyError || ""}`.toLowerCase();
 
   if (isGatewayCutFailure(args)) {
+    if (args.operation === "dna.extract") {
+      return "Product DNA extraction may still finish and save a version after this timeout. Refresh the product before extracting again.";
+    }
     if (ANALYZE_OPERATIONS.has(args.operation)) return ANALYZE_GATEWAY_CUT_MESSAGE;
     // A read that runs one query has no images to shrink and no model settings
     // to speed up, so the generic advice below would be unactionable.

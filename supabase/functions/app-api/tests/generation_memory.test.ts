@@ -55,8 +55,16 @@ Deno.test("generation memory labels product vs style and keeps approved outputs 
   assertStringIncludes(brief, "Previous approved output");
   assertStringIncludes(brief, "Match that same face, hair, skin, set, and lighting.");
   assertStringIncludes(brief, "Do not copy its pose, the objects in the hands, or the garment.");
-  assertStringIncludes(brief, "Model identity lock: model_identity");
+  assertStringIncludes(brief, "Model identity lock: the approved Pose 1 face already photographed in this shoot.");
+  assertEquals(brief.includes("Model identity lock: model_identity"), false);
   assertEquals(brief.includes("Face lock: the style reference"), false);
+  const samePhoto = formatGenerationMemoryBrief({
+    references: [{ role: "front" }, { role: "style_reference" }],
+    memory,
+    useStyleReferenceAsModelIdentity: true,
+  });
+  assertStringIncludes(samePhoto, "the same photo is the model and the style reference");
+  assertEquals(samePhoto.includes("outranks the style-reference person"), false);
   assertEquals(brief.includes("Use it for identity"), false);
   assertStringIncludes(brief, "Do not copy the product-photo courtyard.");
   assertEquals(brief.includes("gold yoke embroidery"), true);

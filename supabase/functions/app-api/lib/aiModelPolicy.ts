@@ -682,7 +682,14 @@ export async function runVisionProviderChain<T>(args: {
     ]);
     if (timer !== undefined) clearTimeout(timer);
   };
-  const settleWrites = () => Promise.all(writes);
+  const settleWrites = async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.all(writes),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, telemetryWaitMs); }),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+  };
 
   const chainError = (failure: VisionProviderFailure | null, route: NormalizedAiModelRoute) => {
     const message = visionChainFailureMessage(attempts, args.routes.length);

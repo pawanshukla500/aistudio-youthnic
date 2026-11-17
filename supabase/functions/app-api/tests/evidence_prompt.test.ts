@@ -190,7 +190,7 @@ Deno.test("a true-back prompt uses only the direct rear image and never leaks a 
   assertStringIncludes(prompt, "furniture in the room");
   assertStringIncludes(prompt, "glances back over her shoulder");
   assertStringIncludes(prompt, "Copy the room, not its pose or objects in the hands.");
-  assertStringIncludes(prompt, "APPROVED POSE 1 is the room only");
+  assertStringIncludes(prompt, "APPROVED POSE 1 is the room and the identity anchor");
 });
 
 Deno.test("a saree prompt drops style-photo region evidence even when analysis was not normalized", () => {

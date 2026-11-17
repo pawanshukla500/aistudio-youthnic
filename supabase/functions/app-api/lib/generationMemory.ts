@@ -330,6 +330,7 @@ export function resetGenerationMemoryForClone(value: unknown): GenerationMemory 
 export function formatGenerationMemoryBrief(args: {
   references?: Array<{ role?: string }>;
   memory?: unknown;
+  useStyleReferenceAsModelIdentity?: boolean;
 }): string {
   const memory = normalizeGenerationMemory(args.memory);
   const live = Array.isArray(args.references) ? args.references : [];
@@ -340,9 +341,14 @@ export function formatGenerationMemoryBrief(args: {
   const lines: string[] = [];
   lines.push(`Product images (SKU/garment truth only): ${product.join(", ") || memory.productRoles.join(", ") || "none labeled in this request"}.`);
   lines.push(`Style reference (photoshoot set, backdrop, lighting, jewellery taste only): ${style.join(", ") || (memory.styleRoles.length ? `${memory.styleRoles.join(", ")} uploaded for this session` : "none")}.`);
-  const sessionModel = model.length ? model : memory.modelRoles;
-  if (sessionModel.length) {
-    lines.push(`Model identity lock: ${sessionModel.join(", ")}. This face stays identical in every frame and outranks the style-reference person.`);
+  // Only name a face the request actually attaches. Remembered model roles
+  // without that image would outrank the style face the prompt is using.
+  if (model.length) {
+    lines.push(`Model identity lock: ${model.join(", ")}. This face stays identical in every frame and outranks the style-reference person.`);
+  } else if (args.useStyleReferenceAsModelIdentity) {
+    lines.push("Face lock: the style reference, because the same photo is the model and the style reference. Discard its clothing. This face stays identical in every frame.");
+  } else if (approved.length) {
+    lines.push("Model identity lock: the approved Pose 1 face already photographed in this shoot. This face stays identical in every frame and outranks the style-reference person.");
   } else if (style.length || memory.styleRoles.length) {
     lines.push("Face lock: the style reference, because no separate model photo is attached. Discard its clothing.");
   }

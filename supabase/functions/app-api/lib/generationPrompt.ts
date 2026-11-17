@@ -1209,7 +1209,7 @@ export function composeGenerationPrompt(args: {
   const faceQualityInstruction = faceRequired
     ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, eyes kept as the identity photo shows them, including a cover that hides them, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
     : isTrueBack
-      ? `The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face MUST match ${hasModelReference ? "the MODEL FACE REFERENCE" : useStyleModelIdentity ? "the STYLE REFERENCE face identity (duplicated upload)" : "APPROVED POSE 1 (never copy the STYLE REFERENCE person's face)"}. APPROVED POSE 1 is the room only: do not copy its pose or objects in the hands. Never substitute a different person or face.`
+      ? `The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face MUST match ${hasModelReference ? "the MODEL FACE REFERENCE" : useStyleModelIdentity ? "the STYLE REFERENCE face identity (duplicated upload)" : "APPROVED POSE 1 (never copy the STYLE REFERENCE person's face)"}. APPROVED POSE 1 is the room and the identity anchor: do not copy its pose or objects in the hands. Never substitute a different person or face.`
       : "This frame is a PRODUCT-DETAIL close-up. Do not force a full beauty-face crop. If any portion of the face appears it MUST match the identity lock - same jawline, eyes, skin texture with visible pores, and makeup. Prefer filling the frame with the named product selling detail; omit or crop the face when a full face would make that detail too small to read.";
   const plantedStance = plantedPoseReplacement(args.pose, isSittingDemanded, isPose4CroppedAboveAnkles);
   const cleanPoseText = (rawValue: unknown) => {
@@ -1356,7 +1356,7 @@ ${manifest}
 ${generationMemory ? `
 GENERATION MEMORY (DO NOT FORGET):
 ${generationMemory}
-- Product images remain garment/SKU truth. Style reference remains set/backdrop authority. Approved Pose 1 is set continuity only, never a different face or a different garment.
+- Product images remain garment/SKU truth. Style reference remains set/backdrop authority. Approved Pose 1 keeps the same face, hair, skin, and set. Do not copy its pose, garment, or objects in the hands.
 ` : ""}
 
 EDIT GOAL:
