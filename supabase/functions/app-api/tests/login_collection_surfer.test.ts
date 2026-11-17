@@ -1,4 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
+import { functionsInvokeBase } from "../../../../src/lib/functionsUrl.ts";
 import {
   SESSION_MAX_AGE_MS,
   extractFirebaseAuthTimeSeconds,
@@ -25,6 +26,14 @@ const supabaseClientSource = Deno.readTextFileSync(
 const appApiIndexSource = Deno.readTextFileSync(
   new URL("../index.ts", import.meta.url),
 ).replace(/\r\n/g, "\n");
+
+Deno.test("functions invoke base stays a single slash before app-api", () => {
+  const base = functionsInvokeBase("https://functions-production-b062.up.railway.app/");
+  assertEquals(base, "https://functions-production-b062.up.railway.app");
+  assertEquals(`${base}/app-api`, "https://functions-production-b062.up.railway.app/app-api");
+  assertEquals(supabaseClientSource.includes("new URL(supabaseFunctionsUrl)"), false);
+  assertEquals(supabaseClientSource.includes("href: supabaseFunctionsUrl"), true);
+});
 
 Deno.test("Option 2 Login integrates CollectionSurfer in Light Atelier Mode with default Magnetic + Glide and no badge/runway-switcher clutter", () => {
   assertEquals(loginSource.includes("<CollectionSurfer"), true);
