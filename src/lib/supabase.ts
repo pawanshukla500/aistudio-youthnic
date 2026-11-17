@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { signOut as firebaseSignOut } from "firebase/auth";
 import type { Database } from "../database.types";
 import { firebaseAuth } from "./firebase";
+import { functionsInvokeBase } from "./functionsUrl";
 import {
   clearStoredSessionLoginAtMs,
   extractFirebaseAuthTimeSeconds,
@@ -24,9 +25,10 @@ if (!supabaseUrl || !supabasePublishableKey) {
  * with PostgreSQL RLS; no second browser auth session is created.
  * Every login session expires after 24 hours (SESSION_MAX_AGE_MS).
  */
-const supabaseFunctionsUrl =
-  (import.meta.env.VITE_SUPABASE_FUNCTIONS_URL?.trim() ||
-    "https://functions-production-b062.up.railway.app").replace(/\/+$/, "");
+const supabaseFunctionsUrl = functionsInvokeBase(
+  import.meta.env.VITE_SUPABASE_FUNCTIONS_URL?.trim() ||
+    "https://functions-production-b062.up.railway.app",
+);
 
 export const supabase = createClient<Database>(supabaseUrl, supabasePublishableKey, {
   accessToken: async () => {
@@ -57,9 +59,7 @@ export const supabase = createClient<Database>(supabaseUrl, supabasePublishableK
 });
 
 if (supabaseFunctionsUrl) {
-  try {
-    (supabase as unknown as { functionsUrl: URL }).functionsUrl = new URL(supabaseFunctionsUrl);
-  } catch {
-    // Keep standard gateway URL if parsing fails
-  }
+  (supabase as unknown as { functionsUrl: { href: string } }).functionsUrl = {
+    href: supabaseFunctionsUrl,
+  };
 }
