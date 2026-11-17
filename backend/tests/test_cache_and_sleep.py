@@ -110,6 +110,30 @@ def test_database_pool_uses_zero_min_size_and_no_keepalives(monkeypatch):
     database.close_pool()
 
 
+def test_offline_dna_write_is_flushed_instead_of_deleted(monkeypatch):
+    import cache
+
+    fake_valkey = FakeValkey()
+    monkeypatch.setattr(cache, "get_valkey", lambda: fake_valkey)
+    manager = cache.cache_manager
+    monkeypatch.setattr(manager, "_custom_r", fake_valkey)
+    monkeypatch.setattr(manager, "_offline_until", time.time() + 60)
+    manager._pending_deletes.clear()
+    manager._pending_writes.clear()
+    manager._local_fallback.clear()
+
+    manager.set_hot_dna("org_offline", "sku_face", {"source_fingerprint": "fp-1", "main_color": "ivory"})
+    assert fake_valkey.store == {}
+    assert any(key.startswith("cache:dna:v2:org_offline:sku_face") for key in manager._pending_writes)
+
+    monkeypatch.setattr(manager, "_offline_until", 0.0)
+    restored = manager.get_hot_dna("org_offline", "sku_face")
+    assert restored["main_color"] == "ivory"
+    assert restored["source_fingerprint"] == "fp-1"
+    assert fake_valkey.store["cache:dna:v2:org_offline:sku_face"]
+    assert "cache:dna:v2:org_offline:sku_face" not in manager._pending_deletes
+
+
 def test_memory_rules_cache_and_invalidation(monkeypatch):
     import cache
 

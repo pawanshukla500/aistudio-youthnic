@@ -23,6 +23,7 @@ import {
   VISION_GATEWAY_RESERVE_MS,
   VISION_REQUEST_OVERHEAD_MS,
   productTruthGatewayBudgetMs,
+  productTruthRemainingBudgetMs,
   geminiThinkingConfig,
   normalizeAiModelRoute,
   preferFastProductTruthThinking,
@@ -574,6 +575,9 @@ Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
   assertEquals(productTruthGatewayBudgetMs(245_000), reserved);
   assertEquals(productTruthGatewayBudgetMs(), reserved);
   assert(productTruthGatewayBudgetMs() < STUDIO_INVOKE_BUDGET_MS);
+  assertEquals(productTruthRemainingBudgetMs(0), reserved);
+  assertEquals(productTruthRemainingBudgetMs(20_000), reserved - 20_000);
+  assertEquals(productTruthRemainingBudgetMs(reserved + 5_000), 0);
 
   // The end-to-end invariant, and the reason the two reserves are not one:
   // a lone hop plus the work inside the chain plus the work outside it has to

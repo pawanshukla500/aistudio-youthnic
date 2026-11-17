@@ -53,8 +53,10 @@ Deno.test("generation memory labels product vs style and keeps approved outputs 
   assertStringIncludes(brief, "Style reference");
   assertStringIncludes(brief, "style_reference");
   assertStringIncludes(brief, "Previous approved output");
-  assertStringIncludes(brief, "Use it for set continuity only, never as the face, the pose, the objects in the hands, or the garment.");
-  assertStringIncludes(brief, "Face lock: the style reference, because no separate model photo is attached.");
+  assertStringIncludes(brief, "Match that same face, hair, skin, set, and lighting.");
+  assertStringIncludes(brief, "Do not copy its pose, the objects in the hands, or the garment.");
+  assertStringIncludes(brief, "Model identity lock: model_identity");
+  assertEquals(brief.includes("Face lock: the style reference"), false);
   assertEquals(brief.includes("Use it for identity"), false);
   assertStringIncludes(brief, "Do not copy the product-photo courtyard.");
   assertEquals(brief.includes("gold yoke embroidery"), true);

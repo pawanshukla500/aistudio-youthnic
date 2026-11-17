@@ -93,6 +93,7 @@ class ValkeyCacheManager:
         self._offline_until = 0.0
         self._local_fallback: Dict[str, Tuple[str, Optional[float]]] = {}
         self._pending_deletes: Set[str] = set()
+        self._pending_writes: Dict[str, Tuple[str, Optional[int]]] = {}
         self._memory_versions: Dict[str, int] = {}
 
     @property
@@ -144,22 +145,47 @@ class ValkeyCacheManager:
         with self._lock:
             self._local_fallback.clear()
 
+    def _remember_write(self, key: str, value: str, ex: Optional[int]) -> None:
+        """Queue a Valkey write that happened while the cache was unreachable."""
+        with self._lock:
+            self._local_set(key, value, ex=ex)
+            self._pending_writes[key] = (value, ex)
+            self._pending_deletes.discard(key)
+
     def _reconcile_pending(self):
-        """Flush offline cache invalidations to Redis before trusting Redis reads again."""
+        """Flush offline writes and invalidations before trusting Redis again.
+
+        A write during a Valkey sleep must be replayed. Treating it as a delete
+        dropped Product DNA, scene locks, and pose prompts on the next read.
+        """
         with self._lock:
-            if not self._pending_deletes:
+            if not self._pending_deletes and not self._pending_writes:
                 return
-            keys = list(self._pending_deletes)
-        self.r.delete(*keys)
+            writes = list(self._pending_writes.items())
+            write_keys = {key for key, _ in writes}
+            deletes = [key for key in self._pending_deletes if key not in write_keys]
+        if deletes:
+            self.r.delete(*deletes)
+        for key, (value, ex) in writes:
+            self.r.set(key, value, ex=ex)
         with self._lock:
-            self._pending_deletes.difference_update(keys)
+            self._pending_deletes.difference_update(deletes)
+            for key, payload in writes:
+                if self._pending_writes.get(key) == payload:
+                    self._pending_writes.pop(key, None)
+                self._pending_deletes.discard(key)
 
     def _safe_get(self, key: str) -> Optional[str]:
         if self._is_offline():
             return self._local_get(key)
         try:
             self._reconcile_pending()
-            return self.r.get(key)
+            value = self.r.get(key)
+            if value is None:
+                local = self._local_get(key)
+                if local is not None:
+                    return local
+            return value
         except Exception as e:
             self._mark_offline(e)
             return self._local_get(key)
@@ -169,9 +195,8 @@ class ValkeyCacheManager:
             with self._lock:
                 if nx:
                     return False
-                self._local_set(key, value, ex=ex)
-                self._pending_deletes.add(key)
-                return True
+            self._remember_write(key, value, ex)
+            return True
         try:
             self._reconcile_pending()
             acquired = bool(self.r.set(key, value, ex=ex, nx=nx))
@@ -179,20 +204,22 @@ class ValkeyCacheManager:
                 with self._lock:
                     self._local_set(key, value, ex=ex)
                     self._pending_deletes.discard(key)
+                    if self._pending_writes.get(key) == (value, ex):
+                        self._pending_writes.pop(key, None)
             return acquired
         except Exception as e:
             self._mark_offline(e)
             with self._lock:
                 if nx:
                     return False
-                self._local_set(key, value, ex=ex)
-                self._pending_deletes.add(key)
-                return True
+            self._remember_write(key, value, ex)
+            return True
 
     def _safe_delete(self, *keys: str, defer_invalidation: bool = True):
         with self._lock:
             for k in keys:
                 self._local_fallback.pop(k, None)
+                self._pending_writes.pop(k, None)
             if not keys:
                 return
             if self._is_offline():

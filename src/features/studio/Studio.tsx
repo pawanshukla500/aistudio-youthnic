@@ -217,6 +217,7 @@ export function Studio() {
     skuName: string;
     category: string;
     sourceKey: string;
+    modelIdentity: string;
     references: Array<{
       role: ReferenceRole;
       downloadUrl?: string;
@@ -565,6 +566,7 @@ export function Studio() {
         skuName: effectiveSkuName,
         category,
         sourceKey,
+        modelIdentity: options.modelIdentity,
         references: uploaded.map((reference) => ({
           role: reference.role,
           downloadUrl: reference.downloadUrl,
@@ -636,6 +638,7 @@ export function Studio() {
         sku_id: params.skuId,
         sku_name: params.skuName,
         category: params.category,
+        model_identity: params.modelIdentity,
         references: params.references,
         force_refresh: forceRefresh,
       })) as ProductDnaExtractResult;

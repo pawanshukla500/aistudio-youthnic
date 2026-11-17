@@ -442,6 +442,8 @@ def test_pose_planning_top_only_and_open_floor_human_realism():
             }
         }
     )["pose_plans"]
+    assert "model identity lock for every frame" in saree_poses[0]["prompt"].lower()
+    assert "model identity lock for every frame" in saree_poses[5]["prompt"].lower()
     assert "not wedged behind a foreground pillar" in saree_poses[0]["prompt"].lower()
     assert "plain undecorated solid matching" in saree_poses[0]["prompt"].lower()
     assert "zero phantom slits" in saree_poses[0]["hand_placement"].lower()
