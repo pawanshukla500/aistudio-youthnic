@@ -5,6 +5,20 @@ from services.ai_clients import invoke_vision_json, generate_catalog_image, norm
 from config import settings
 
 
+def test_parse_meta_response_sse_keeps_product_truth_json():
+    import json
+    from services.ai_clients import parse_meta_response_sse
+
+    payload = parse_meta_response_sse("\n".join([
+        "data: " + json.dumps({"type": "response.output_text.delta", "delta": '{"ok":'}),
+        "data: " + json.dumps({"type": "response.output_text.delta", "delta": "true}"}),
+        "data: " + json.dumps({"type": "response.completed", "response": {"id": "resp_1", "usage": {"output_tokens": 4}}}),
+        "data: [DONE]",
+    ]))
+    assert payload["output_text"] == '{"ok":true}'
+    assert payload["usage"]["output_tokens"] == 4
+
+
 def test_meta_muse_spark_sibling_retry_uses_canonical_input(monkeypatch):
     monkeypatch.setattr(settings, "META_MODEL_API_KEY", "meta_test_key")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "")

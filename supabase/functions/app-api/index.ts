@@ -58,6 +58,7 @@ import {
   visionHopTimeoutError,
   geminiThinkingConfig,
   preferFastProductTruthThinking,
+  parseMetaResponseSse,
   productTruthRouteChain,
   providerSecretName,
   resolveStoredImageGenerationRoute,
@@ -1691,6 +1692,9 @@ async function metaResponsesVisionJson(
             input,
             reasoning: { effort },
             max_output_tokens: 16384,
+            // Image analysis at medium reasoning outlives Meta's non-streaming
+            // gateway limit. Streaming keeps the call open until the JSON lands.
+            ...(visionPartsHaveImages(parts) ? { stream: true } : {}),
           }),
         });
       } catch (fetchErr) {
@@ -1717,7 +1721,15 @@ async function metaResponsesVisionJson(
 
       const rawBodyText = await response.text().catch(() => "");
       let data: JsonRecord = {};
-      if (rawBodyText) {
+      if (rawBodyText.trimStart().startsWith("data:")) {
+        try {
+          data = parseMetaResponseSse(rawBodyText) as JsonRecord;
+        } catch (parseError) {
+          throw visionProviderError({ ...route, model: modelCandidate }, {
+            message: errorMessage(parseError),
+          });
+        }
+      } else if (rawBodyText) {
         try {
           data = JSON.parse(rawBodyText) as JsonRecord;
         } catch {
@@ -9048,8 +9060,8 @@ async function dnaExtractOperation(request: Request, args: JsonRecord) {
     };
   });
   const dnaStarted = Date.now();
-  // Studio waits 240s. Wake plus extraction must finish inside that wait.
-  const DNA_GATEWAY_BUDGET_MS = 220_000;
+  // Studio waits 360s for this follow-up. Wake plus extraction stay inside that wait.
+  const DNA_GATEWAY_BUDGET_MS = 320_000;
   const payload: JsonRecord = {
     sku_id: String(args.sku_id || args.skuId || ""),
     sku_name: String(args.sku_name || args.skuName || args.sku_id || args.skuId || "Garment"),
@@ -9077,7 +9089,7 @@ async function dnaExtractOperation(request: Request, args: JsonRecord) {
   } catch (error) {
     console.warn("FastAPI wake before DNA extract failed:", errorMessage(error));
   }
-  const postTimeoutMs = Math.max(8_000, Math.min(110_000, DNA_GATEWAY_BUDGET_MS - (Date.now() - dnaStarted) - 5_000));
+  const postTimeoutMs = Math.max(8_000, Math.min(260_000, DNA_GATEWAY_BUDGET_MS - (Date.now() - dnaStarted) - 5_000));
   payload.timeout_seconds = Math.max(8, Math.floor((postTimeoutMs - 8_000) / 1000));
   let response: Response;
   try {

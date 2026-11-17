@@ -36,6 +36,52 @@ def _safe_resp_json(resp: httpx.Response) -> Dict[str, Any]:
         return {}
 
 
+def parse_meta_response_sse(raw: str) -> Dict[str, Any]:
+    """Join a streamed Meta Responses body into the completed response object."""
+    assembled = ""
+    completed: Optional[Dict[str, Any]] = None
+    failed_message = ""
+    for line in raw.splitlines():
+        trimmed = line.strip()
+        if not trimmed.startswith("data:"):
+            continue
+        data = trimmed[5:].strip()
+        if not data or data == "[DONE]":
+            continue
+        try:
+            event = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("type") or "")
+        if event_type == "response.output_text.delta":
+            assembled += str(event.get("delta") or "")
+        elif event_type in {"response.completed", "response.incomplete"}:
+            response = event.get("response")
+            completed = response if isinstance(response, dict) else event
+        elif event_type == "response.failed":
+            response = event.get("response") if isinstance(event.get("response"), dict) else {}
+            error = response.get("error") if isinstance(response.get("error"), dict) else event.get("error")
+            failed_message = str((error or {}).get("message") or "Meta response failed.")
+    if failed_message:
+        raise RuntimeError(failed_message)
+    if completed is not None:
+        if assembled and not str(completed.get("output_text") or "").strip():
+            completed["output_text"] = assembled
+        return completed
+    if assembled.strip():
+        return {"output_text": assembled}
+    raise RuntimeError("Meta stream ended without a response.")
+
+
+def _meta_response_payload(resp: Any) -> Dict[str, Any]:
+    raw = getattr(resp, "text", "") or ""
+    if isinstance(raw, str) and raw.lstrip().startswith("data:"):
+        return parse_meta_response_sse(raw)
+    return _safe_resp_json(resp)
+
+
 def _resolve_safe_public_ip(raw_url: str) -> Optional[str]:
     try:
         parsed = urlparse(raw_url)
@@ -325,9 +371,10 @@ def _meta_vision_json(
                             "input": [{"role": "user", "content": content_items}],
                             "reasoning": {"effort": attempt_effort},
                             "max_output_tokens": 16384,
+                            **({"stream": True} if images else {}),
                         },
                     )
-                data = _safe_resp_json(resp)
+                data = _meta_response_payload(resp)
                 if resp.status_code >= 400:
                     msg = str((data.get("error") or {}).get("message") or data.get("message") or f"Meta HTTP {resp.status_code}")
                     last_err = RuntimeError(msg)
@@ -582,7 +629,7 @@ def invoke_vision_json(
 
     if has_meta:
         remaining = deadline - time.monotonic()
-        meta_cap = 115 if is_analysis else 25
+        meta_cap = 240 if is_analysis else 25
         meta_timeout = int(max(12, min(meta_cap, remaining)))
         meta_deadline = min(deadline, time.monotonic() + float(meta_timeout))
         meta_effort = "low" if (is_analysis and meta_timeout < 60) else ("medium" if is_analysis else "low")

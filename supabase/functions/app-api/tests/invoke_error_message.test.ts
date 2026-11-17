@@ -9,9 +9,9 @@ import {
 } from "../../../../src/lib/errors.ts";
 
 Deno.test("Studio analyze client timeout is at least 240s", () => {
-  assertEquals(STUDIO_ANALYZE_TIMEOUT_MS, 240_000);
-  assertEquals(appApiInvokeTimeoutMs("studio.analyze"), 240_000);
-  assertEquals(appApiInvokeTimeoutMs("analysis.analyzeReferences"), 240_000);
+  assertEquals(STUDIO_ANALYZE_TIMEOUT_MS, 360_000);
+  assertEquals(appApiInvokeTimeoutMs("studio.analyze"), 360_000);
+  assertEquals(appApiInvokeTimeoutMs("analysis.analyzeReferences"), 360_000);
   assertEquals(appApiInvokeTimeoutMs("studio.queue"), undefined);
 });
 
