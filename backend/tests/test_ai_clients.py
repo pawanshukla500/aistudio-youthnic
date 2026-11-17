@@ -113,13 +113,11 @@ def test_meta_image_stream_stops_when_the_deadline_passes(monkeypatch):
             assert json["stream"] is True
             return StreamBody()
 
-    monkeypatch.setattr(ai_clients.httpx, "Client", FakeClient)
-    with pytest.raises(RuntimeError, match="deadline exhausted"):
-        ai_clients._meta_vision_json(
-            "prompt",
-            [{"role": "front", "mime_type": "image/jpeg", "base64": "YQ=="}],
-            timeout_s=30,
-            effort="low",
+    client = FakeClient()
+    with pytest.raises(TimeoutError, match="deadline exhausted"):
+        ai_clients._invoke_meta_response(
+            client,
+            {"model": "muse-spark-1.3-contributor", "stream": True, "input": []},
             deadline=10.0,
         )
 
