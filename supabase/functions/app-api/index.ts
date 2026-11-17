@@ -51,6 +51,7 @@ import {
   VISION_HOP_MIN_MS,
   VISION_PROVIDER_TIMEOUT_MS,
   productTruthGatewayBudgetMs,
+  productTruthRemainingBudgetMs,
   dualProtocolPrimaryTimeoutMs,
   visionProtocolOrder,
   clampProductTruthHopThinking,
@@ -1878,7 +1879,7 @@ function asVisionProviderError(error: unknown, route: NormalizedAiModelRoute) {
 async function visionJson(
   policy: VisionPolicy,
   parts: JsonRecord[],
-  options?: { onAttempt?: (attempt: VisionHopAttempt) => Promise<void>; signal?: AbortSignal },
+  options?: { onAttempt?: (attempt: VisionHopAttempt) => Promise<void>; signal?: AbortSignal; gatewayBudgetMs?: number },
 ): Promise<VisionResult> {
   const requested = policy.purpose === "product_truth"
     ? productTruthRouteChain({
@@ -1899,10 +1900,15 @@ async function visionJson(
   // on; it is not dropped silently, so an administrator can see why a
   // configured fallback never answered.
   try {
+    const configuredBudget = visionGatewayBudgetMs(policy.purpose);
+    const requestedBudget = options?.gatewayBudgetMs;
+    const gatewayBudgetMs = Number.isFinite(requestedBudget)
+      ? Math.max(0, Math.min(configuredBudget, Math.round(requestedBudget as number)))
+      : configuredBudget;
     const chained = await runVisionProviderChain({
       routes: requested,
       purpose: policy.purpose,
-      gatewayBudgetMs: visionGatewayBudgetMs(policy.purpose),
+      gatewayBudgetMs,
       signal: options?.signal,
       invoke: async (route, timeoutMs) => {
         if (options?.signal?.aborted) throw abortError();
@@ -2003,6 +2009,7 @@ function explicitBottomCutHint(bottomWearValue: unknown, productDetails: unknown
 }
 
 async function analyze(request: Request, args: JsonRecord) {
+  const requestStarted = Date.now();
   const { workspace } = await workspaceFor(request, "studio.generate");
   const references = canonicalReferences((Array.isArray(args.references) ? args.references : []) as ReferenceInput[]);
   const orgId = workspace.organization.id;
@@ -2079,7 +2086,14 @@ async function analyze(request: Request, args: JsonRecord) {
         analysisRunIds.push(...hopIds);
       };
       try {
-        return await visionJson(policy, parts, { onAttempt: persistFailedHop, signal: request.signal });
+        return await visionJson(policy, parts, {
+          onAttempt: persistFailedHop,
+          signal: request.signal,
+          gatewayBudgetMs: productTruthRemainingBudgetMs(
+            Date.now() - requestStarted,
+            Number(Deno.env.get("VISION_GATEWAY_BUDGET_MS") || ""),
+          ),
+        });
       } catch (error) {
         if (request.signal.aborted || isAbortError(error)) {
           throw error;
@@ -3715,6 +3729,7 @@ async function compilePosePrompt(
     useStyleReferenceAsModelIdentity,
     generationMemory: formatGenerationMemoryBrief({
       references: selected,
+      useStyleReferenceAsModelIdentity,
       memory: sessionGenerationMemory(sessionData, {
         references: selected,
         referenceFingerprint: String(session.reference_hash || ""),
@@ -9009,7 +9024,12 @@ async function warmFastApiProductDna(input: {
 }
 
 async function dnaExtractOperation(request: Request, args: JsonRecord) {
-  const { workspace } = await workspaceFor(request, "planning.manage");
+  const { workspace } = await workspaceFor(request);
+  // Creative-team members keep studio.generate and lost planning.manage.
+  // Studio still has to extract Product DNA for those operators.
+  if (!hasAnyPermission(workspace, ["studio.generate", "planning.analyze", "planning.manage"])) {
+    throw new Error("Permission required: studio.generate");
+  }
   const canApprove = workspace.isAdmin || workspace.permissions.includes("planning.approve");
   const rawReferences = Array.isArray(args.references) ? args.references : [];
   const references = rawReferences.map((item) => {
@@ -9027,6 +9047,9 @@ async function dnaExtractOperation(request: Request, args: JsonRecord) {
       notes: typeof ref.notes === "string" ? ref.notes : undefined,
     };
   });
+  const dnaStarted = Date.now();
+  // Studio waits 240s. Wake plus extraction must finish inside that wait.
+  const DNA_GATEWAY_BUDGET_MS = 220_000;
   const payload: JsonRecord = {
     sku_id: String(args.sku_id || args.skuId || ""),
     sku_name: String(args.sku_name || args.skuName || args.sku_id || args.skuId || "Garment"),
@@ -9034,21 +9057,50 @@ async function dnaExtractOperation(request: Request, args: JsonRecord) {
     references,
     force_refresh: Boolean(args.force_refresh),
     auto_approve: Boolean(args.auto_approve && canApprove),
-    timeout_seconds: 75,
   };
   if (typeof args.category === "string" && args.category.trim()) payload.category = args.category.trim();
   if (typeof args.garment_family === "string" && args.garment_family.trim()) payload.garment_family = args.garment_family.trim();
   if (typeof args.main_color === "string" && args.main_color.trim()) payload.main_color = args.main_color.trim();
+  const modelIdentity = String(args.model_identity || args.modelIdentity || "").trim();
+  if (modelIdentity) payload.model_identity = modelIdentity;
 
-  const response = await fetchFastApiWithRetry({
-    baseUrl: fastApiBaseUrl(),
-    path: "/api/v1/dna/extract",
-    init: {
-      method: "POST",
-      headers: fastApiHeaders(true),
-      body: JSON.stringify(payload),
-    },
-  });
+  const healthBudgetMs = Math.min(15_000, Math.max(1_000, DNA_GATEWAY_BUDGET_MS - (Date.now() - dnaStarted)));
+  try {
+    await fetchFastApiWithRetry({
+      baseUrl: fastApiBaseUrl(),
+      path: "/health",
+      init: { method: "GET" },
+      timeoutMs: healthBudgetMs,
+      maxRetries: 1,
+      retryOnTimeout: true,
+    });
+  } catch (error) {
+    console.warn("FastAPI wake before DNA extract failed:", errorMessage(error));
+  }
+  const postTimeoutMs = Math.max(8_000, Math.min(110_000, DNA_GATEWAY_BUDGET_MS - (Date.now() - dnaStarted) - 5_000));
+  payload.timeout_seconds = Math.max(8, Math.floor((postTimeoutMs - 8_000) / 1000));
+  let response: Response;
+  try {
+    response = await fetchFastApiWithRetry({
+      baseUrl: fastApiBaseUrl(),
+      path: "/api/v1/dna/extract",
+      timeoutMs: postTimeoutMs,
+      // One POST only. A timeout retry would start a second vision call while
+      // the first is still writing an immutable DNA version.
+      maxRetries: 0,
+      init: {
+        method: "POST",
+        headers: fastApiHeaders(true),
+        body: JSON.stringify(payload),
+      },
+    });
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError" || /timed?\s*out/i.test(error.message));
+    if (timedOut && !request.signal.aborted) {
+      throw new Error("Product DNA extraction may still finish and save a version after this timeout. Refresh the product before extracting again.");
+    }
+    throw error;
+  }
   if (!response.ok) {
     const err = await response.text();
     throw new Error(`DNA extraction failed (${response.status}): ${err}`);

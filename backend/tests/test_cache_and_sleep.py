@@ -10,6 +10,7 @@ import pytest
 class FakeValkey:
     def __init__(self):
         self.store = {}
+        self.expirations = {}
         self.hashes = {}
         self.lists = {}
 
@@ -20,7 +21,13 @@ class FakeValkey:
         if nx and key in self.store:
             return False
         self.store[key] = value
+        self.expirations[key] = ex
         return True
+
+    def incrby(self, key, amount):
+        val = int(self.store.get(key) or 0) + int(amount)
+        self.store[key] = str(val)
+        return val
 
     def delete(self, *keys):
         removed = 0
@@ -108,6 +115,150 @@ def test_database_pool_uses_zero_min_size_and_no_keepalives(monkeypatch):
     assert captured["max_idle"] == 60.0
     assert captured["kwargs"]["keepalives"] == 0
     database.close_pool()
+
+
+def test_offline_dna_write_is_flushed_instead_of_deleted(monkeypatch):
+    import cache
+
+    fake_valkey = FakeValkey()
+    monkeypatch.setattr(cache, "get_valkey", lambda: fake_valkey)
+    manager = cache.cache_manager
+    monkeypatch.setattr(manager, "_custom_r", fake_valkey)
+    monkeypatch.setattr(manager, "_offline_until", time.time() + 60)
+    manager._pending_deletes.clear()
+    manager._pending_writes.clear()
+    manager._pending_increments.clear()
+    manager._local_fallback.clear()
+
+    manager.set_hot_dna("org_offline", "sku_face", {"source_fingerprint": "fp-1", "main_color": "ivory"})
+    assert fake_valkey.store == {}
+    assert any(key.startswith("cache:dna:v2:org_offline:sku_face") for key in manager._pending_writes)
+
+    monkeypatch.setattr(manager, "_offline_until", 0.0)
+    restored = manager.get_hot_dna("org_offline", "sku_face")
+    assert restored["main_color"] == "ivory"
+    assert restored["source_fingerprint"] == "fp-1"
+    assert fake_valkey.store["cache:dna:v2:org_offline:sku_face"]
+    assert "cache:dna:v2:org_offline:sku_face" not in manager._pending_deletes
+
+
+def test_expired_offline_write_keeps_remaining_ttl_and_drops_when_due(monkeypatch):
+    import cache
+
+    fake_valkey = FakeValkey()
+    monkeypatch.setattr(cache, "get_valkey", lambda: fake_valkey)
+    manager = cache.cache_manager
+    monkeypatch.setattr(manager, "_custom_r", fake_valkey)
+    monkeypatch.setattr(manager, "_offline_until", time.time() + 60)
+    manager._pending_deletes.clear()
+    manager._pending_writes.clear()
+    manager._pending_increments.clear()
+    manager._local_fallback.clear()
+
+    manager.set_compiled_prompt("org_ttl", "sku_ttl", 1, "sig", "keep-me", ttl=100)
+    key = "cache:prompt:org_ttl:sku_ttl:1:sig"
+    value, _expires_at = manager._pending_writes[key]
+    manager._pending_writes[key] = (value, time.time() + 40)
+    monkeypatch.setattr(manager, "_offline_until", 0.0)
+    assert manager.get_compiled_prompt("org_ttl", "sku_ttl", 1, "sig") == "keep-me"
+    assert 1 <= fake_valkey.expirations[key] <= 40
+
+    monkeypatch.setattr(manager, "_offline_until", time.time() + 60)
+    manager.set_compiled_prompt("org_ttl", "sku_ttl", 2, "sig", "drop-me", ttl=10)
+    expired_key = "cache:prompt:org_ttl:sku_ttl:2:sig"
+    expired_value, _expired_at = manager._pending_writes[expired_key]
+    manager._pending_writes[expired_key] = (expired_value, time.time() - 5)
+    monkeypatch.setattr(manager, "_offline_until", 0.0)
+    assert manager.get_compiled_prompt("org_ttl", "sku_ttl", 2, "sig") is None
+    assert expired_key not in fake_valkey.store
+
+
+def test_offline_memory_version_increments_instead_of_rewinding(monkeypatch):
+    import cache
+
+    fake_valkey = FakeValkey()
+    fake_valkey.store["memory:ver:org_ver"] = "5"
+    monkeypatch.setattr(cache, "get_valkey", lambda: fake_valkey)
+    manager = cache.cache_manager
+    monkeypatch.setattr(manager, "_custom_r", fake_valkey)
+    monkeypatch.setattr(manager, "_offline_until", time.time() + 60)
+    manager._pending_deletes.clear()
+    manager._pending_writes.clear()
+    manager._pending_increments.clear()
+    manager._memory_versions.clear()
+    manager._local_fallback.clear()
+
+    manager.invalidate_memory_rules("org_ver")
+    assert fake_valkey.store["memory:ver:org_ver"] == "5"
+    monkeypatch.setattr(manager, "_offline_until", 0.0)
+    assert manager.get_memory_rules("org_ver", "missing") is None
+    assert fake_valkey.store["memory:ver:org_ver"] == "6"
+
+
+def test_redis_miss_does_not_revive_local_dna(monkeypatch):
+    import cache
+
+    fake_valkey = FakeValkey()
+    monkeypatch.setattr(cache, "get_valkey", lambda: fake_valkey)
+    manager = cache.cache_manager
+    monkeypatch.setattr(manager, "_custom_r", fake_valkey)
+    monkeypatch.setattr(manager, "_offline_until", 0.0)
+    manager._pending_deletes.clear()
+    manager._pending_writes.clear()
+    manager._pending_increments.clear()
+    manager._local_fallback.clear()
+
+    manager.set_hot_dna("org_miss", "sku_miss", {"main_color": "ivory"})
+    del fake_valkey.store["cache:dna:v2:org_miss:sku_miss"]
+    assert manager.get_hot_dna("org_miss", "sku_miss") is None
+
+
+def test_sku_invalidation_drops_queued_prompt(monkeypatch):
+    import cache
+
+    fake_valkey = FakeValkey()
+    monkeypatch.setattr(cache, "get_valkey", lambda: fake_valkey)
+    manager = cache.cache_manager
+    monkeypatch.setattr(manager, "_custom_r", fake_valkey)
+    monkeypatch.setattr(manager, "_offline_until", time.time() + 60)
+    manager._pending_deletes.clear()
+    manager._pending_writes.clear()
+    manager._pending_increments.clear()
+    manager._local_fallback.clear()
+
+    manager.set_compiled_prompt("org_drop", "sku_drop", 3, "sig", "queued-prompt")
+    manager.invalidate_sku_cache("org_drop", "sku_drop")
+    monkeypatch.setattr(manager, "_offline_until", 0.0)
+    assert manager.get_compiled_prompt("org_drop", "sku_drop", 3, "sig") is None
+    assert "cache:prompt:org_drop:sku_drop:3:sig" not in fake_valkey.store
+
+
+def test_invalidation_during_replay_is_not_restored(monkeypatch):
+    import cache
+
+    manager = cache.cache_manager
+
+    class InvalidateOnSet(FakeValkey):
+        def set(self, key, value, ex=None, nx=False):
+            stored = super().set(key, value, ex=ex, nx=nx)
+            if key.startswith("cache:dna:"):
+                manager._pending_writes.pop(key, None)
+                manager._pending_deletes.add(key)
+            return stored
+
+    fake_valkey = InvalidateOnSet()
+    monkeypatch.setattr(cache, "get_valkey", lambda: fake_valkey)
+    monkeypatch.setattr(manager, "_custom_r", fake_valkey)
+    monkeypatch.setattr(manager, "_offline_until", time.time() + 60)
+    manager._pending_deletes.clear()
+    manager._pending_writes.clear()
+    manager._pending_increments.clear()
+    manager._local_fallback.clear()
+
+    manager.set_hot_dna("org_race", "sku_race", {"main_color": "ivory"})
+    monkeypatch.setattr(manager, "_offline_until", 0.0)
+    assert manager.get_hot_dna("org_race", "sku_race") is None
+    assert "cache:dna:v2:org_race:sku_race" not in fake_valkey.store
 
 
 def test_memory_rules_cache_and_invalidation(monkeypatch):

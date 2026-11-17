@@ -93,6 +93,9 @@ class ValkeyCacheManager:
         self._offline_until = 0.0
         self._local_fallback: Dict[str, Tuple[str, Optional[float]]] = {}
         self._pending_deletes: Set[str] = set()
+        # value, absolute expiry (time.time()) or None when the write has no TTL
+        self._pending_writes: Dict[str, Tuple[str, Optional[float]]] = {}
+        self._pending_increments: Dict[str, int] = {}
         self._memory_versions: Dict[str, int] = {}
 
     @property
@@ -144,21 +147,93 @@ class ValkeyCacheManager:
         with self._lock:
             self._local_fallback.clear()
 
+    def _remember_write(self, key: str, value: str, ex: Optional[int]) -> None:
+        """Queue a Valkey write that happened while the cache was unreachable."""
+        with self._lock:
+            self._local_set(key, value, ex=ex)
+            expires_at = None if ex is None else time.time() + max(0, ex)
+            self._pending_writes[key] = (value, expires_at)
+            self._pending_deletes.discard(key)
+            self._pending_increments.pop(key, None)
+
+    def _queue_version_bump(self, ver_key: str, local_version: int) -> None:
+        """Advance a shared counter on reconnect instead of SETting a local number."""
+        with self._lock:
+            self._pending_increments[ver_key] = self._pending_increments.get(ver_key, 0) + 1
+            self._pending_writes.pop(ver_key, None)
+            self._local_set(ver_key, str(local_version), ex=604800)
+
     def _reconcile_pending(self):
-        """Flush offline cache invalidations to Redis before trusting Redis reads again."""
+        """Flush offline writes and invalidations before trusting Redis again.
+
+        A write during a Valkey sleep must be replayed. Treating it as a delete
+        dropped Product DNA, scene locks, and pose prompts on the next read.
+        Replay keeps the remaining TTL, and a version counter is incremented
+        rather than replaced with this process's local number.
+        """
         with self._lock:
-            if not self._pending_deletes:
+            now = time.time()
+            for key, (_value, expires_at) in list(self._pending_writes.items()):
+                if expires_at is not None and expires_at <= now:
+                    self._pending_writes.pop(key, None)
+                    self._local_fallback.pop(key, None)
+            for key in list(self._pending_writes):
+                if key.startswith("memory:ver:"):
+                    self._pending_increments[key] = self._pending_increments.get(key, 0) + 1
+                    self._pending_writes.pop(key, None)
+            if not self._pending_deletes and not self._pending_writes and not self._pending_increments:
                 return
-            keys = list(self._pending_deletes)
-        self.r.delete(*keys)
+            writes = []
+            for key, (value, expires_at) in self._pending_writes.items():
+                remaining = None if expires_at is None else max(1, int(expires_at - now))
+                writes.append((key, value, expires_at, remaining))
+            write_keys = {key for key, _value, _expires_at, _remaining in writes}
+            deletes = [key for key in self._pending_deletes if key not in write_keys]
+            increments = list(self._pending_increments.items())
+        if deletes:
+            self.r.delete(*deletes)
+        applied = []
+        for key, value, expires_at, remaining in writes:
+            self.r.set(key, value, ex=remaining)
+            applied.append((key, value, expires_at))
+        for key, amount in increments:
+            if hasattr(self.r, "incrby"):
+                self.r.incrby(key, int(amount))
+            else:
+                for _ in range(int(amount)):
+                    self.r.incr(key)
+            self.r.expire(key, 604800)
+        corrective: list[str] = []
         with self._lock:
-            self._pending_deletes.difference_update(keys)
+            self._pending_deletes.difference_update(deletes)
+            for key, value, expires_at in applied:
+                if key in self._pending_deletes:
+                    corrective.append(key)
+                    self._pending_writes.pop(key, None)
+                    continue
+                if self._pending_writes.get(key) != (value, expires_at):
+                    continue
+                self._pending_writes.pop(key, None)
+            for key, amount in increments:
+                current = self._pending_increments.get(key, 0)
+                if current == amount:
+                    self._pending_increments.pop(key, None)
+                elif current > amount:
+                    self._pending_increments[key] = current - amount
+        if corrective:
+            self.r.delete(*corrective)
+            with self._lock:
+                for key in corrective:
+                    if key not in self._pending_writes:
+                        self._pending_deletes.discard(key)
 
     def _safe_get(self, key: str) -> Optional[str]:
         if self._is_offline():
             return self._local_get(key)
         try:
             self._reconcile_pending()
+            # A successful Redis miss is authoritative. Another process may have
+            # deleted the shared key; this process's local copy must not revive it.
             return self.r.get(key)
         except Exception as e:
             self._mark_offline(e)
@@ -169,9 +244,8 @@ class ValkeyCacheManager:
             with self._lock:
                 if nx:
                     return False
-                self._local_set(key, value, ex=ex)
-                self._pending_deletes.add(key)
-                return True
+            self._remember_write(key, value, ex)
+            return True
         try:
             self._reconcile_pending()
             acquired = bool(self.r.set(key, value, ex=ex, nx=nx))
@@ -179,20 +253,23 @@ class ValkeyCacheManager:
                 with self._lock:
                     self._local_set(key, value, ex=ex)
                     self._pending_deletes.discard(key)
+                    pending = self._pending_writes.get(key)
+                    if pending and pending[0] == value:
+                        self._pending_writes.pop(key, None)
             return acquired
         except Exception as e:
             self._mark_offline(e)
             with self._lock:
                 if nx:
                     return False
-                self._local_set(key, value, ex=ex)
-                self._pending_deletes.add(key)
-                return True
+            self._remember_write(key, value, ex)
+            return True
 
     def _safe_delete(self, *keys: str, defer_invalidation: bool = True):
         with self._lock:
             for k in keys:
                 self._local_fallback.pop(k, None)
+                self._pending_writes.pop(k, None)
             if not keys:
                 return
             if self._is_offline():
@@ -349,7 +426,7 @@ class ValkeyCacheManager:
             next_local = self._memory_versions.get(org_ns, 0) + 1
             self._memory_versions[org_ns] = next_local
         if self._is_offline():
-            self._safe_set(ver_key, str(next_local), ex=604800)
+            self._queue_version_bump(ver_key, next_local)
             return
         try:
             self._reconcile_pending()
@@ -358,9 +435,10 @@ class ValkeyCacheManager:
             with self._lock:
                 self._memory_versions[org_ns] = new_ver
                 self._local_set(ver_key, str(new_ver), ex=604800)
+                self._pending_writes.pop(ver_key, None)
         except Exception as e:
             self._mark_offline(e)
-            self._local_set(ver_key, str(next_local), ex=604800)
+            self._queue_version_bump(ver_key, next_local)
 
     # 8. Invalidation
     def invalidate_sku_cache(self, org_id: str, sku_id: str):
@@ -368,10 +446,16 @@ class ValkeyCacheManager:
         scene_key = f"cache:scene:{org_id}:{sku_id}"
         prompt_prefix = f"cache:prompt:{org_id}:{sku_id}:"
         with self._lock:
+            queued = [
+                k for k in self._pending_writes
+                if k == dna_key or k == scene_key or k.startswith(prompt_prefix)
+            ]
+            for k in queued:
+                self._pending_writes.pop(k, None)
             for k in list(self._local_fallback.keys()):
                 if k == dna_key or k == scene_key or k.startswith(prompt_prefix):
                     self._local_fallback.pop(k, None)
-        keys_to_delete = [dna_key, scene_key]
+        keys_to_delete = [dna_key, scene_key, *queued]
         if not self._is_offline():
             try:
                 for k in self.r.scan_iter(match=f"{prompt_prefix}*"):

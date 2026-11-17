@@ -47,6 +47,7 @@ def extract_product_dna(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         "main_color": payload.get("main_color", "unknown"),
         "force_refresh": bool(payload.get("force_refresh", False)),
         "auto_approve": bool(payload.get("auto_approve", False)),
+        "model_identity": str(payload.get("model_identity") or "").strip(),
         "vision_timeout_seconds": caller_timeout,
         "poses_to_generate": [1, 2, 3, 4, 5, 6],
         # Reset QA/generation fields so prior checkpoint values on thread_id never bleed into DNA extraction

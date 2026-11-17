@@ -442,6 +442,8 @@ def test_pose_planning_top_only_and_open_floor_human_realism():
             }
         }
     )["pose_plans"]
+    assert "model identity lock for every frame" in saree_poses[0]["prompt"].lower()
+    assert "model identity lock for every frame" in saree_poses[5]["prompt"].lower()
     assert "not wedged behind a foreground pillar" in saree_poses[0]["prompt"].lower()
     assert "plain undecorated solid matching" in saree_poses[0]["prompt"].lower()
     assert "zero phantom slits" in saree_poses[0]["hand_placement"].lower()
@@ -487,3 +489,41 @@ def test_pose_planning_dna_sig_invalidates_stale_planner_cache(monkeypatch):
     planner.process(payload)
     assert len(written) == 6
     assert written[0][3] != sig_v1
+
+
+def test_pose_planning_identity_cache_is_per_face(monkeypatch):
+    from agents import pose_planning_agent as ppa
+
+    written: list[tuple[str, str, int, str, str]] = []
+    compiled_cache: dict[tuple[str, str, int, str], str] = {}
+
+    def fake_set_prompt(org, sku, num, sig, prompt):
+        compiled_cache[(org, sku, num, sig)] = prompt
+        written.append((org, sku, num, sig, prompt))
+
+    monkeypatch.setattr(ppa.cache_manager, "get_scene_lock", lambda org, sku: None)
+    monkeypatch.setattr(ppa.cache_manager, "set_scene_lock", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ppa.cache_manager, "get_compiled_prompt", lambda org, sku, num, sig: compiled_cache.get((org, sku, num, sig)))
+    monkeypatch.setattr(ppa.cache_manager, "set_compiled_prompt", fake_set_prompt)
+
+    planner = CreativePosePlanningAgent()
+    base = {
+        "organization_id": VALID_ORG_UUID,
+        "sku_id": "FACE-LOCK-01",
+        "product_dna": {"sku_id": "FACE-LOCK-01", "sku_name": "Kurta", "garment_family": "kurta_or_kurti_set"},
+    }
+    face_a = planner.process({**base, "model_identity": "Face A with a small mole on the left cheek"})
+    assert face_a["model_lock"]["description"] == "Face A with a small mole on the left cheek"
+    assert all("Face A with a small mole on the left cheek" in pose["prompt"] for pose in face_a["pose_plans"])
+    assert len(written) == 6
+
+    written.clear()
+    again = planner.process({**base, "model_identity": "Face A with a small mole on the left cheek"})
+    assert len(written) == 0
+    assert all("Face A with a small mole on the left cheek" in pose["prompt"] for pose in again["pose_plans"])
+
+    face_b = planner.process({**base, "model_identity": "Face B with a centre parting"})
+    assert face_b["model_lock"]["description"] == "Face B with a centre parting"
+    assert all("Face B with a centre parting" in pose["prompt"] for pose in face_b["pose_plans"])
+    assert all("Face A with a small mole" not in pose["prompt"] for pose in face_b["pose_plans"])
+    assert len(written) == 6

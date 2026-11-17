@@ -445,6 +445,17 @@ export function productTruthGatewayBudgetMs(configured?: number) {
 }
 
 /**
+ * Budget left for the vision chain after auth, cache lookup, and reference
+ * downloads. The gateway budget is a duration measured from the chain start,
+ * so spending it in full after that prep work runs past the Studio client wait
+ * and the browser aborts a finished analysis.
+ */
+export function productTruthRemainingBudgetMs(elapsedBeforeChainMs: number, configured?: number) {
+  const elapsed = Number.isFinite(elapsedBeforeChainMs) ? Math.max(0, Math.round(elapsedBeforeChainMs)) : 0;
+  return Math.max(0, productTruthGatewayBudgetMs(configured) - elapsed);
+}
+
+/**
  * The routes product-truth analysis tries, in order: exactly the primary and
  * the fallback(s) saved in Administration or defaults. No model is inserted ahead
  * of them, substituted for them, or dropped from the chain; duplicate fallbacks run
@@ -671,7 +682,14 @@ export async function runVisionProviderChain<T>(args: {
     ]);
     if (timer !== undefined) clearTimeout(timer);
   };
-  const settleWrites = () => Promise.all(writes);
+  const settleWrites = async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.all(writes),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, telemetryWaitMs); }),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+  };
 
   const chainError = (failure: VisionProviderFailure | null, route: NormalizedAiModelRoute) => {
     const message = visionChainFailureMessage(attempts, args.routes.length);

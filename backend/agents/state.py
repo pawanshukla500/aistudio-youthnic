@@ -16,6 +16,7 @@ class AgentWorkflowState(TypedDict, total=False):
     fabric_type: str
     allow_local_references: bool
     extra_instructions: str
+    model_identity: str
     requested_model: Optional[str]
     quality: str
     pose_qa: bool

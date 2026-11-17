@@ -29,12 +29,14 @@ class CreativePosePlanningAgent:
         bottom_cut = dna.get("bottom_wear", {}).get("cut_class", "straight")
         is_farshi = bottom_cut == "farshi"
 
+        supplied_identity = str(state.get("model_identity") or "").strip()
         dna_sig = hashlib.sha256(
             json.dumps(
                 {
                     "dna": dna,
                     "source_fingerprint": state.get("source_fingerprint", ""),
                     "extra": state.get("extra_instructions", ""),
+                    "model_identity": supplied_identity,
                     "planner_revision": PLANNER_REVISION,
                 },
                 sort_keys=True,
@@ -55,7 +57,7 @@ class CreativePosePlanningAgent:
         )
 
         scene_desc = default_scene_desc
-        model_desc = default_model_desc
+        model_desc = supplied_identity or default_model_desc
         if org_id and sku_id:
             cached_scene = (
                 cache_manager.get_scene_lock(org_id, sku_id)
@@ -75,6 +77,13 @@ class CreativePosePlanningAgent:
                         "dna_sig": dna_sig,
                     },
                 )
+
+        if supplied_identity:
+            model_desc = supplied_identity
+        scene_desc = (
+            f"{scene_desc} Model identity lock for every frame: {model_desc} "
+            "Keep this exact face, hair, skin tone, and body proportions identical across all six poses."
+        )
 
         if is_saree:
             saree_arch = dna.get("saree_details", {}) or {}
