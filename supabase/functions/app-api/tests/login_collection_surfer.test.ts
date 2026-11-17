@@ -31,6 +31,8 @@ Deno.test("functions invoke base stays a single slash before app-api", () => {
   const base = functionsInvokeBase("https://functions-production-b062.up.railway.app/");
   assertEquals(base, "https://functions-production-b062.up.railway.app");
   assertEquals(`${base}/app-api`, "https://functions-production-b062.up.railway.app/app-api");
+  assertEquals(functionsInvokeBase("/functions/v1"), null);
+  assertEquals(functionsInvokeBase("not a url"), null);
   assertEquals(supabaseClientSource.includes("new URL(supabaseFunctionsUrl)"), false);
   assertEquals(supabaseClientSource.includes("href: supabaseFunctionsUrl"), true);
 });
