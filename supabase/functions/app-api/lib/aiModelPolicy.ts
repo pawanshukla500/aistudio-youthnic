@@ -306,10 +306,11 @@ export const OPENAI_TERRA_VISION_ROUTE = {
  * Studio Analyze calls the self-hosted `app-api` Deno Edge Gateway on Railway
  * (bypassing hosted Supabase Envoy's 150s gateway limit). Without an explicit
  * client timeout the browser/SDK aborts around 55–60s, so the Studio client
- * waits `STUDIO_ANALYZE_TIMEOUT_MS` (240s) and the product-truth chain is
- * budgeted inside that wait.
+ * waits `STUDIO_ANALYZE_TIMEOUT_MS` (360s) and the product-truth chain is
+ * budgeted inside that wait. A product-photo Muse call at medium reasoning
+ * was still working when a 240s wait aborted it at about 169s.
  */
-export const STUDIO_ANALYZE_TIMEOUT_MS = 240_000;
+export const STUDIO_ANALYZE_TIMEOUT_MS = 360_000;
 export const STUDIO_INVOKE_BUDGET_MS = STUDIO_ANALYZE_TIMEOUT_MS;
 export const PRODUCT_TRUTH_TIMEOUT_MS = 40_000;
 /**
@@ -319,7 +320,7 @@ export const PRODUCT_TRUTH_TIMEOUT_MS = 40_000;
  */
 export const PRODUCT_TRUTH_FALLBACK_RESERVE_MS = 60_000;
 export const VISION_PROVIDER_TIMEOUT_MS = 50_000;
-export const VISION_GATEWAY_BUDGET_MS = 240_000;
+export const VISION_GATEWAY_BUDGET_MS = 360_000;
 /** Held back inside the chain: parsing a hop's reply and recording the attempt. */
 export const VISION_GATEWAY_RESERVE_MS = 5_000;
 /**
@@ -426,7 +427,7 @@ export function clampProductTruthHopThinking(
 
 /**
  * Cap product-truth at the Studio client wait even when
- * `VISION_GATEWAY_BUDGET_MS` is 240s. Returning after the client has
+ * `VISION_GATEWAY_BUDGET_MS` is 360s. Returning after the client has
  * disconnected still drops hop 2.
  *
  * The cap holds back `VISION_REQUEST_OVERHEAD_MS` rather than spending the whole
@@ -1278,4 +1279,54 @@ export function shouldRetrySameVisionRoute(
   if (!failure?.retryable) return false;
   return failure.code !== "provider_timeout" &&
     failure.code !== "provider_incomplete_response";
+}
+
+/**
+ * Assemble a Meta Responses API server-sent stream.
+ *
+ * Product-photo analysis at medium reasoning runs longer than Meta's
+ * non-streaming gateway limit. `stream: true` keeps that call alive; the
+ * visible answer is the concatenated output-text deltas, with the completed
+ * response object kept so usage can still be priced.
+ */
+export function parseMetaResponseSse(raw: string): Record<string, unknown> {
+  let assembled = "";
+  let completed: Record<string, unknown> | null = null;
+  let failedMessage = "";
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) continue;
+    const data = trimmed.slice(5).trim();
+    if (!data || data === "[DONE]") continue;
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(data) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const type = String(event.type || "");
+    if (type === "response.output_text.delta") assembled += String(event.delta || "");
+    if (type === "response.completed" || type === "response.incomplete") {
+      const response = event.response;
+      completed = response && typeof response === "object" && !Array.isArray(response)
+        ? response as Record<string, unknown>
+        : event;
+    }
+    if (type === "response.failed" || type === "error") {
+      const response = event.response as Record<string, unknown> | undefined;
+      const error = (response?.error || event.error) as Record<string, unknown> | undefined;
+      const code = String(error?.code || event.code || "");
+      const message = String(error?.message || event.message || "Meta response failed.");
+      failedMessage = code ? `${code}: ${message}` : message;
+      assembled = "";
+      completed = null;
+    }
+  }
+  if (failedMessage) throw new Error(failedMessage);
+  if (completed) {
+    if (assembled && !String(completed.output_text || "").trim()) completed.output_text = assembled;
+    return completed;
+  }
+  if (assembled.trim()) return { output_text: assembled };
+  throw new Error("Meta stream ended without a response.");
 }

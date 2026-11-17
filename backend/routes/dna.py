@@ -1,7 +1,6 @@
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Query, Body, Depends
 from auth import verify_internal_secret
-from config import settings
 from models.dna_v2 import ProductDNAV2
 from database import get_latest_dna_version, list_dna_versions, approve_dna_version
 from graph import get_compiled_graph
@@ -31,7 +30,7 @@ def extract_product_dna(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     caller_timeout: Optional[float] = None
     if raw_timeout is not None:
         try:
-            caller_timeout = max(12.0, min(float(settings.VISION_TIMEOUT_SECONDS), float(raw_timeout)))
+            caller_timeout = max(12.0, min(240.0, float(raw_timeout)))
         except (TypeError, ValueError):
             caller_timeout = None
 

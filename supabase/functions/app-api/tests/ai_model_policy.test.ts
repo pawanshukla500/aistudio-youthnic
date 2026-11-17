@@ -35,6 +35,7 @@ import {
   shouldRetrySameVisionRoute,
   validateAiModelRoute,
   visionAttemptTelemetryRows,
+  parseMetaResponseSse,
   visionChainFailureMessage,
   visionRouteLabel,
 } from "../lib/aiModelPolicy.ts";
@@ -42,6 +43,24 @@ import {
 // The organization's saved Administration policy for product truth.
 const ADMIN_TERRA = { provider: "openai", model: "gpt-5.6-terra", thinkingLevel: "high" } as const;
 const ADMIN_MUSE_CONTRIBUTOR = { provider: "meta", model: "muse-spark-1.3-contributor", thinkingLevel: "high" } as const;
+
+Deno.test("Meta response stream keeps the product-truth JSON", () => {
+  const payload = parseMetaResponseSse([
+    `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "{\"ok\":" })}`,
+    `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "true}" })}`,
+    `data: ${JSON.stringify({ type: "response.completed", response: { id: "resp_1", usage: { output_tokens: 4 } } })}`,
+    "data: [DONE]",
+  ].join("\n"));
+  assertEquals(payload.output_text, "{\"ok\":true}");
+  assertEquals((payload.usage as { output_tokens: number }).output_tokens, 4);
+  assertThrows(() => parseMetaResponseSse(
+    `data: ${JSON.stringify({ type: "response.failed", response: { error: { message: "model overloaded" } } })}`,
+  ), Error, "model overloaded");
+  assertThrows(() => parseMetaResponseSse([
+    `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "{\"ok\":true}" })}`,
+    `data: ${JSON.stringify({ type: "error", error: { code: "server_error", message: "stream failed" } })}`,
+  ].join("\n")), Error, "server_error: stream failed");
+});
 
 Deno.test("vision registry keeps image generation on approved OpenAI image models", () => {
   assertEquals(DEFAULT_IMAGE_GENERATION_ROUTE, {
@@ -528,7 +547,7 @@ Deno.test("product-truth analyze preserves high thinking for Meta Muse Spark, GP
   );
   assertEquals(PRODUCT_TRUTH_TIMEOUT_MS, 40_000);
   assertEquals(PRODUCT_TRUTH_FALLBACK_RESERVE_MS, 60_000);
-  assertEquals(STUDIO_INVOKE_BUDGET_MS, 240_000);
+  assertEquals(STUDIO_INVOKE_BUDGET_MS, 360_000);
 });
 
 Deno.test("product truth runs exactly the Administration primary, then its fallback", () => {
@@ -572,7 +591,7 @@ Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
   // browser aborted: the chain's clock starts after auth, the workspace RPC and
   // reference loading, so none of that is covered by the per-hop reserve.
   const reserved = STUDIO_INVOKE_BUDGET_MS - VISION_REQUEST_OVERHEAD_MS;
-  assertEquals(productTruthGatewayBudgetMs(245_000), reserved);
+  assertEquals(productTruthGatewayBudgetMs(400_000), reserved);
   assertEquals(productTruthGatewayBudgetMs(), reserved);
   assert(productTruthGatewayBudgetMs() < STUDIO_INVOKE_BUDGET_MS);
   assertEquals(productTruthRemainingBudgetMs(0), reserved);

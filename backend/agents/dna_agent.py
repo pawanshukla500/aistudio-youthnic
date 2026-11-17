@@ -482,7 +482,7 @@ class ProductDNAAgent:
         caller_started_at = time.monotonic()
         raw_caller_budget = state.get("vision_timeout_seconds")
         total_budget = (
-            max(12.0, min(float(settings.VISION_TIMEOUT_SECONDS), float(raw_caller_budget)))
+            max(12.0, min(240.0, float(raw_caller_budget)))
             if raw_caller_budget is not None
             else float(settings.VISION_TIMEOUT_SECONDS)
         )
