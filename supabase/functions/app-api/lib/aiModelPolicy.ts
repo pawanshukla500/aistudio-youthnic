@@ -767,6 +767,7 @@ export async function runVisionProviderChain<T>(args: {
       }
       const failure = args.classify(route, error);
       lastFailure = failure;
+      const hopLatency = now() - hopStarted;
       await emit({
         provider: route.provider as AiProvider,
         model: route.model,
@@ -774,12 +775,12 @@ export async function runVisionProviderChain<T>(args: {
         outcome: "failed",
         failureCode: failure.code,
         failureMessage: failure.message,
-        latencyMs: now() - hopStarted,
+        latencyMs: hopLatency,
         attemptNumber: index + 1,
       });
       const remaining = args.routes.length - index - 1;
       const usedTheWindow = args.purpose === "product_truth" &&
-        now() - hopStarted >= PRODUCT_TRUTH_FAST_FAILURE_MS;
+        hopLatency >= PRODUCT_TRUTH_FAST_FAILURE_MS;
       if (usedTheWindow || !shouldContinueVisionFallback(failure, remaining)) {
         await settleWrites();
         throw chainError(failure, route);

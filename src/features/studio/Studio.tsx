@@ -569,6 +569,7 @@ export function Studio() {
         })),
         forceRefresh,
       };
+      const startedKey = latestAnalysisKeyRef.current;
       const result = await analyzeReferences(analysisArgs, { signal: controller.signal }) as StudioAnalysis;
       if (!acceptAnalysis(result)) return;
       const dnaParams = {
@@ -595,7 +596,7 @@ export function Studio() {
       } else {
         lastDnaParamsRef.current = dnaParams;
         void runDnaExtraction(dnaParams, requestId, forceRefresh);
-        setAnalysisSourceKey(latestAnalysisKeyRef.current);
+        setAnalysisSourceKey(startedKey);
         setNotice({ tone: "success", text: "Authoritative product identity, creative direction, and the six-pose shoot plan are ready." });
       }
     } catch (error) {
@@ -788,6 +789,22 @@ export function Studio() {
       analysisAbortRef.current?.abort();
     };
   }, [analysisPhotoKey, requiredReady]);
+
+  useEffect(() => {
+    if (!requiredReady || analyzing || !analysis || !analysisSourceKey) return;
+    if (analysisSourceKey === analysisInputKey) return;
+    let sourcePhotos = "";
+    try {
+      sourcePhotos = JSON.stringify(JSON.parse(analysisSourceKey).references ?? null);
+    } catch {
+      return;
+    }
+    if (sourcePhotos !== analysisPhotoKey) return;
+    const timer = setTimeout(() => {
+      void runAnalysisRef.current(latestAnalysisKeyRef.current, true);
+    }, AUTO_ANALYZE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [analysis, analysisInputKey, analysisPhotoKey, analysisSourceKey, analyzing, requiredReady]);
 
   const handleGenerate = async () => {
     setNotice(null);

@@ -91,6 +91,7 @@ Deno.test("only side-effect-free reads may be repeated after a gateway cut", () 
 
 Deno.test("a gateway cut is told apart from the operation failing", () => {
   assertEquals(isGatewayCutFailure({ status: 504 }), true);
+  assertEquals(isGatewayCutFailure({ status: 499 }), true);
   assertEquals(isGatewayCutFailure({ bodyText: "504 Gateway Timeout" }), true);
   assertEquals(
     isGatewayCutFailure({ fallbackMessage: "Failed to send a request to the Edge Function" }),
