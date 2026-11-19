@@ -1355,10 +1355,20 @@ export async function getCatalogWorkflowDetail(
     const generationData = asRecord(currentPose?.generation_data);
     const referenceManifests = Array.isArray(generationData.referenceManifests) ? generationData.referenceManifests : [];
     const latestReferenceManifest = referenceManifests.at(-1) || null;
+    // During a queued or failed re-generation the newest manifest belongs to
+    // the new attempt while versions[0] is still the retained prior image, so
+    // attribute the manifest recorded for that version's own epoch.
+    const versionEpoch = Number(asRecord(versions[0]?.prompt_metadata)?.sourceGenerationEpoch ?? -1);
+    const versionManifest = referenceManifests.find((manifest) => Number(asRecord(manifest)?.generationEpoch ?? -2) === versionEpoch) || null;
+    const poseBusy = ["queued", "processing", "cancelling"].includes(String(currentPose?.status || ""));
     return {
       poseIndex,
       title: text(versions[0]?.title || currentPose?.title || `Pose ${poseIndex}`),
-      current: versions[0] ? { ...versions[0], reference_manifest: latestReferenceManifest } : (currentPose ? {
+      current: versions[0] ? {
+        ...versions[0],
+        prompt: text(versions[0].prompt) || (poseBusy ? "" : text(currentPose?.full_prompt)),
+        reference_manifest: versionManifest || latestReferenceManifest,
+      } : (currentPose ? {
         generation_id: currentPose.generation_id,
         pose_index: currentPose.pose_index,
         version_number: Number(currentPose.generation_epoch || 1),

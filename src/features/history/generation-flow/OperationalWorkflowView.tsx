@@ -23,14 +23,13 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
-  Sparkles,
   UserRound,
   X,
-  XCircle,
   Zap,
 } from "lucide-react";
 import { saveAs } from "file-saver";
 import { invokeAppApi } from "../../../lib/backend";
+import { CatalogPoseFlow, type FlowPose, type FlowReference } from "./CatalogPoseFlow";
 
 type Member = { id: string; display_name?: string; email?: string } | null;
 type WorkflowStage = {
@@ -129,6 +128,14 @@ function words(value: unknown) {
   return String(value || "").replaceAll("_", " ");
 }
 
+function poseStatus(asset: { generation_status?: string; approval_status?: string } | null | undefined, imageUrl: string) {
+  const generation = String(asset?.generation_status || "");
+  const approval = String(asset?.approval_status || "");
+  if (generation && generation !== "completed") return words(generation);
+  if (imageUrl && (!approval || approval === "pending")) return "Generated · review pending";
+  return words(approval || generation || "Not started");
+}
+
 function memberName(member: Member | undefined) {
   return member?.display_name || member?.email || "Unassigned";
 }
@@ -145,6 +152,12 @@ function duration(seconds?: number | null) {
   const minutes = Math.floor((seconds % 3600) / 60);
   const remaining = seconds % 60;
   return [hours ? `${hours}h` : "", minutes ? `${minutes}m` : "", !hours ? `${remaining}s` : ""].filter(Boolean).join(" ");
+}
+
+function stageTone(stage: WorkflowStage) {
+  if (stage.status === "current") return "border-primary/40 bg-white text-on-surface shadow-primary/10";
+  if (stage.status === "completed") return "border-emerald-200 bg-emerald-50/70 text-emerald-900 shadow-emerald-50";
+  return "border-outline-variant/35 bg-white/60 text-secondary shadow-transparent";
 }
 
 function elapsedSeconds(start: unknown, end: unknown) {
@@ -173,24 +186,75 @@ function base64Blob(base64: string, mimeType: string) {
   return new Blob([bytes], { type: mimeType || "image/png" });
 }
 
-function stageTone(stage: WorkflowStage) {
-  if (stage.status === "current") {
-    return stage.code === "blocked_failed" || stage.code === "regeneration_required"
-      ? "border-red-300 bg-red-50 text-red-800 shadow-red-100"
-      : "border-primary/40 bg-white text-on-surface shadow-primary/10";
+function posesForBoard(data: { references?: Array<Record<string, unknown>>; poses: PoseGroup[]; planningRequest?: Record<string, unknown> | null }) {
+  const request = data.planningRequest || {};
+  const rows = (data.references || []).filter((reference) => reference.image_url);
+  const currentIds = new Set(rows.filter((reference) => reference.is_current_product_reference).map((reference) => String(reference.id)));
+  const visible = currentIds.size
+    ? rows.filter((reference) => currentIds.has(String(reference.id)) || String(reference.asset_role || reference.role || "").toLowerCase().includes("style"))
+    : rows;
+  const references: FlowReference[] = visible.flatMap((reference) => {
+    const imageUrl = String(reference.image_url || "");
+    if (!imageUrl) return [];
+    const role = String(reference.asset_role || reference.role || "reference");
+    if (["generated", "output", "result"].includes(role.toLowerCase())) return [];
+    const storedName = String(reference.storage_path || reference.filename || "").split("/").pop() || "";
+    return [{
+      id: String(reference.id || role),
+      role,
+      label: words(role),
+      imageUrl,
+      fileName: storedName,
+      roomOnly: role.toLowerCase().includes("style"),
+    }];
+  });
+  for (const [role, url] of [["front", request.front_image_url], ["back", request.back_image_url]] as const) {
+    const imageUrl = String(url || "");
+    if (!imageUrl || references.some((reference) => reference.role.toLowerCase() === role)) continue;
+    references.unshift({ id: role, role, label: words(role), imageUrl, roomOnly: false });
   }
-  if (stage.status === "completed") return "border-emerald-200 bg-emerald-50/70 text-emerald-900 shadow-emerald-50";
-  return "border-outline-variant/35 bg-white/60 text-secondary shadow-transparent";
+  const plan = Array.isArray(request.pose_plan) ? request.pose_plan as Array<Record<string, unknown>> : [];
+  const planFor = (poseIndex: number) => plan[poseIndex - 1] || plan.find((item) => Number(item.id) === poseIndex) || null;
+  const source: PoseGroup[] = data.poses.length ? data.poses : plan.map((item, index) => ({
+    poseIndex: index + 1,
+    title: String(item.title || `Pose ${index + 1}`),
+    current: null,
+    versions: [],
+    reviews: [],
+  }));
+  const poses: FlowPose[] = source.map((pose) => {
+    const asset = pose.current;
+    const planned = planFor(pose.poseIndex);
+    const manifest = asset?.reference_manifest?.references || [];
+    const savedPrompt = String(asset?.prompt || planned?.prompt || planned?.description || "").trim();
+    const versions = pose.versions || [];
+    return {
+      poseIndex: pose.poseIndex,
+      title: pose.title || String(planned?.title || `Pose ${pose.poseIndex}`),
+      prompt: savedPrompt,
+      imageUrl: String(asset?.preview_url || asset?.original_url || asset?.final_asset_url || ""),
+      referenceRoles: manifest.map((reference) => String(reference.role || "")),
+      sent: manifest.map((reference) => ({
+        role: String(reference.role || ""),
+        fileName: String(reference.filename || ""),
+      })),
+      model: String(asset?.model || ""),
+      status: poseStatus(asset, String(asset?.preview_url || asset?.original_url || asset?.final_asset_url || "")),
+      error: String(asset?.error || (String(asset?.generation_status || "") === "failed" ? "This pose failed. Re-generate to try again." : "")),
+      versionCount: versions.length || (asset ? 1 : 0),
+      versions: versions.slice(0, 4).map((version) => ({
+        version: Number(version.version_number || 1),
+        at: String(version.generated_at || ""),
+        status: String(version.approval_status || version.generation_status || ""),
+        imageUrl: String(version.preview_url || version.original_url || version.final_asset_url || ""),
+      })),
+      canRegenerate: Boolean(asset?.generation_id),
+    };
+  });
+  return { references, poses };
 }
 
-function dependencyTone(status: string) {
-  if (status === "complete") return "bg-emerald-50 text-emerald-700 ring-emerald-200";
-  if (status === "failed" || status === "missing") return "bg-red-50 text-red-700 ring-red-200";
-  if (status === "in_progress" || status === "ready") return "bg-blue-50 text-blue-700 ring-blue-200";
-  return "bg-amber-50 text-amber-700 ring-amber-200";
-}
-
-export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: WorkflowData; onRefresh: () => Promise<void>; onBack?: () => void }) {
+export function OperationalWorkflowView({ data, onRefresh, onBack, boardOnly = false }: { data: WorkflowData; onRefresh: () => Promise<void>; onBack?: () => void; boardOnly?: boolean }) {
   const navigate = useNavigate();
   const [panel, setPanel] = useState<(typeof panels)[number]["id"]>("flow");
   const [busy, setBusy] = useState("");
@@ -228,7 +292,11 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
   const totalPoses = data.progress.totalPoseCount || data.poses.length;
   const packageIsDelivered = Boolean(item.listing_sent_at || ["sent_to_listing_team", "listing_in_progress", "listed"].includes(item.workflow_stage));
   const workflowElapsedSeconds = elapsedSeconds(workflowStartedAt, workflowFinishedAt || clock);
-  const generationElapsedSeconds = elapsedSeconds(item.generation_started_at, item.generation_completed_at || clock);
+  const stageGroups = useMemo(() => {
+    const groups = new Map<string, WorkflowStage[]>();
+    for (const stage of data.stages) groups.set(stage.groupKey, [...(groups.get(stage.groupKey) || []), stage]);
+    return [...groups.entries()];
+  }, [data.stages]);
 
   useEffect(() => {
     if (workflowFinishedAt) return;
@@ -236,11 +304,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
     return () => window.clearInterval(timer);
   }, [workflowFinishedAt]);
 
-  const stageGroups = useMemo(() => {
-    const groups = new Map<string, WorkflowStage[]>();
-    for (const stage of data.stages) groups.set(stage.groupKey, [...(groups.get(stage.groupKey) || []), stage]);
-    return [...groups.entries()];
-  }, [data.stages]);
+  const poseFlow = posesForBoard(data);
 
   useEffect(() => {
     if (editingBrief) return;
@@ -288,10 +352,10 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
     if (type === "complete_listing") return run("listing-done", () => invokeAppApi("catalogProduction.markListingDone", { workItemId: item.id }), "Marketplace listing marked complete.");
   };
 
-  const regeneratePose = (pose: PoseGroup) => {
+  const regeneratePose = (pose: PoseGroup, note = "") => {
     const poseId = pose.current?.generation_id || pose.current?.generationId;
     if (!poseId) return setNotice({ tone: "error", text: "This pose has no generation record to retry." });
-    setActionNotes(pose.current?.reviewer_comments || "");
+    setActionNotes(note.trim().slice(0, 1000));
     setPendingAction({ type: "regenerate_pose", pose });
   };
 
@@ -417,8 +481,8 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
   };
 
   return (
-    <div className="min-h-full overflow-hidden rounded-[28px] border border-outline-variant/35 bg-[#f7f7fc] shadow-[0_24px_80px_rgba(29,34,61,0.08)]">
-      <header className="relative overflow-hidden bg-[#182033] px-5 py-5 text-white sm:px-7 lg:px-8">
+    <div className={boardOnly ? "h-full" : "min-h-full overflow-hidden rounded-[28px] border border-outline-variant/35 bg-[#f7f7fc] shadow-[0_24px_80px_rgba(29,34,61,0.08)]"}>
+      {!boardOnly && <header className="relative overflow-hidden bg-[#182033] px-5 py-5 text-white sm:px-7 lg:px-8">
         <div className="pointer-events-none absolute -right-24 -top-28 h-80 w-80 rounded-full bg-primary/35 blur-3xl" />
         <div className="pointer-events-none absolute bottom-0 left-1/3 h-28 w-72 rounded-full bg-teal-400/10 blur-3xl" />
         <div className="relative">
@@ -450,64 +514,69 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
             {panels.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setPanel(id)} className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition ${panel === id ? "bg-white text-[#182033] shadow" : "text-white/65 hover:bg-white/10 hover:text-white"}`}><Icon className="h-3.5 w-3.5" />{label}</button>)}
           </nav>
         </div>
-      </header>
+      </header>}
 
       {notice && <div className={`mx-4 mt-4 flex items-start gap-2 rounded-xl border px-4 py-3 text-sm sm:mx-6 ${notice.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>{notice.tone === "success" ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span className="flex-1">{notice.text}</span><button onClick={() => setNotice(null)} aria-label="Dismiss"><X className="h-4 w-4" /></button></div>}
 
-      {panel === "flow" && (
-        <main className="space-y-6 p-4 sm:p-6 lg:p-8">
-          <section>
-            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">Operational workflow</p><h2 className="mt-1 font-manrope text-xl font-bold tracking-tight text-on-surface">Every stage, owner, dependency and next action</h2></div><p className="text-xs text-secondary">Updated from database activity records</p></div>
-            <div className="space-y-5">
-              {stageGroups.map(([group, stages]) => (
-                <div key={group} className="grid gap-3 lg:grid-cols-[110px_minmax(0,1fr)]">
-                  <div className="pt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-secondary">{words(group)}</div>
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    {stages.map((stage) => {
-                      const stageDuration = stage.status === "current"
-                        ? Number(stage.completedDurationSeconds || 0) + elapsedSeconds(stage.currentStartedAt || stage.startedAt, clock)
-                        : stage.durationSeconds;
-                      return (
-                      <article key={stage.code} className={`relative min-h-36 rounded-2xl border p-4 shadow-lg transition ${stageTone(stage)}`}>
-                        {stage.status === "current" && <span className="absolute right-4 top-4 h-2.5 w-2.5 animate-pulse rounded-full bg-primary ring-4 ring-primary/10" />}
-                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-black/5">{stage.status === "completed" ? <Check className="h-4 w-4 text-emerald-600" /> : stage.status === "current" ? <Zap className="h-4 w-4 text-primary" /> : <Circle className="h-4 w-4 text-outline" />}</div>
-                        <p className="mt-3 text-sm font-bold">{stage.title}</p>
-                        <p className="mt-1 line-clamp-2 text-[11px] leading-4 opacity-70">{stage.description}</p>
-                        <div className="mt-3 flex items-end justify-between gap-2 text-[10px] font-semibold opacity-65"><span>{stage.status === "current" ? `Started ${dateTime(stage.currentStartedAt || stage.startedAt)}` : stage.status === "completed" ? stage.completedAt ? `Completed ${dateTime(stage.completedAt)}` : "Completed · time not recorded" : "Waiting"}{Number(stage.visitCount || 0) > 1 ? ` · ${stage.visitCount} visits` : ""}</span><span className="shrink-0">{duration(stageDuration)}</span></div>
-                      </article>
-                      );
-                    })}
+      {(boardOnly || panel === "flow") && (
+        <main className={boardOnly ? "h-full" : "space-y-4 p-4 sm:p-6"}>
+          {item.blocked_reason && <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{item.blocked_reason}</p>}
+          {String(data.generationJob?.error_message || "").trim() && <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{String(data.generationJob?.error_message || "").trim()}</p>}
+          {!boardOnly && (
+            <section className="space-y-4 rounded-2xl border border-outline-variant/35 bg-white p-4 shadow-sm">
+              <div className="grid gap-2 rounded-xl border border-outline-variant/25 bg-surface-container/20 p-3 text-[11px] text-secondary sm:grid-cols-2">
+                <p><span className="font-bold text-on-surface">Workflow started:</span> {dateTime(workflowStartedAt)}</p>
+                <p><span className="font-bold text-on-surface">Workflow completed:</span> {workflowFinishedAt ? dateTime(workflowFinishedAt) : "In progress"}</p>
+                <p><span className="font-bold text-on-surface">Generation started:</span> {dateTime(item.generation_started_at)}</p>
+                <p><span className="font-bold text-on-surface">Generation completed:</span> {item.generation_completed_at ? dateTime(item.generation_completed_at) : item.generation_started_at ? "In progress" : "Not started"}</p>
+                <p className="sm:col-span-2"><span className="font-bold text-on-surface">Elapsed:</span> {duration(workflowElapsedSeconds)}</p>
+              </div>
+              <div className="space-y-3">
+                {stageGroups.map(([group, stages]) => (
+                  <div key={group} className="grid gap-3 lg:grid-cols-[110px_minmax(0,1fr)]">
+                    <div className="pt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-secondary">{words(group)}</div>
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      {stages.map((stage) => {
+                        const stageDuration = stage.status === "current"
+                          ? Number(stage.completedDurationSeconds || 0) + elapsedSeconds(stage.currentStartedAt || stage.startedAt, clock)
+                          : stage.durationSeconds;
+                        return (
+                          <article key={stage.code} className={`relative min-h-36 rounded-2xl border p-4 shadow-lg transition ${stageTone(stage)}`}>
+                            {stage.status === "current" && <span className="absolute right-4 top-4 h-2.5 w-2.5 animate-pulse rounded-full bg-primary ring-4 ring-primary/10" />}
+                            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-black/5">{stage.status === "completed" ? <Check className="h-4 w-4 text-emerald-600" /> : stage.status === "current" ? <Zap className="h-4 w-4 text-primary" /> : <Circle className="h-4 w-4 text-outline" />}</div>
+                            <p className="mt-3 text-sm font-bold">{stage.title}</p>
+                            <p className="mt-1 line-clamp-2 text-[11px] leading-4 opacity-70">{stage.description}</p>
+                            <div className="mt-3 flex items-end justify-between gap-2 text-[10px] font-semibold opacity-65"><span>{stage.status === "current" ? `Started ${dateTime(stage.currentStartedAt || stage.startedAt)}` : stage.status === "completed" ? stage.completedAt ? `Completed ${dateTime(stage.completedAt)}` : "Completed · time not recorded" : "Waiting"}{Number(stage.visitCount || 0) > 1 ? ` · ${stage.visitCount} visits` : ""}</span><span className="shrink-0">{duration(stageDuration)}</span></div>
+                          </article>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,.7fr)]">
-            <div className="rounded-2xl border border-outline-variant/35 bg-white p-5 shadow-sm">
-              <div className="flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">Live processing</p><h3 className="mt-1 text-base font-bold text-on-surface">Current execution state</h3></div><Sparkles className="h-5 w-5 text-primary" /></div>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {[
-                  ["Current step", data.progress.currentStep || item.next_action || "Waiting", Zap],
-                  ["Pose progress", `${data.progress.completedPoseCount}/${data.progress.totalPoseCount}`, ImageIcon],
-                  ["Generation owner", memberName(item.generation_assigned_member), UserRound],
-                  ["Listing owner", memberName(item.listing_assigned_member), PackageCheck],
-                  ["Generation time", item.generation_started_at ? duration(generationElapsedSeconds) : "Not started", Clock3],
-                  ["Workflow total", workflowStartedAt ? duration(workflowElapsedSeconds) : "Not started", CalendarClock],
-                ].map(([label, value, Icon]) => <div key={String(label)} className="rounded-xl bg-surface-container/55 p-3"><Icon className="h-4 w-4 text-primary" /><p className="mt-3 text-[10px] font-bold uppercase tracking-wide text-secondary">{String(label)}</p><p className="mt-1 truncate text-sm font-bold text-on-surface">{String(value)}</p></div>)}
+                ))}
               </div>
-              <div className="mt-3 grid gap-2 rounded-xl border border-outline-variant/25 bg-surface-container/20 p-3 text-[11px] text-secondary sm:grid-cols-2"><p><span className="font-bold text-on-surface">Workflow started:</span> {dateTime(workflowStartedAt)}</p><p><span className="font-bold text-on-surface">Workflow completed:</span> {workflowFinishedAt ? dateTime(workflowFinishedAt) : "In progress"}</p><p><span className="font-bold text-on-surface">Generation started:</span> {dateTime(item.generation_started_at)}</p><p><span className="font-bold text-on-surface">Generation completed:</span> {item.generation_completed_at ? dateTime(item.generation_completed_at) : item.generation_started_at ? "In progress" : "Not started"}</p></div>
-              {item.blocked_reason && <div className="mt-4 flex gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-red-800"><XCircle className="mt-0.5 h-5 w-5 shrink-0" /><div><p className="text-sm font-bold">Workflow blocked</p><p className="mt-1 text-xs leading-5">{item.blocked_reason}</p></div></div>}
-              <div className="mt-5 flex flex-wrap gap-2">
-                {data.actions.map((action) => <button key={action.type} disabled={!action.enabled || Boolean(busy)} onClick={() => void runWorkflowAction(action.type)} className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 ${action.type === "reject" || action.type === "retry_generation" ? "border border-red-200 bg-red-50 text-red-700 hover:bg-red-100" : "bg-primary text-white hover:bg-primary/90"}`}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : action.type.includes("retry") || action.type === "reject" ? <RotateCcw className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}{action.label}</button>)}
-                {!data.actions.length && <span className="text-xs text-secondary">No action is required at this stage.</span>}
-              </div>
-            </div>
-            <aside className="rounded-2xl border border-outline-variant/35 bg-white p-5 shadow-sm">
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">Dependencies</p>
-              <div className="mt-3 space-y-2.5">{data.dependencies.map((dependency) => <div key={dependency.key} className="flex items-center gap-3 rounded-xl border border-outline-variant/25 p-3"><span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ring-1 ${dependencyTone(dependency.status)}`}>{dependency.status === "complete" ? <Check className="h-4 w-4" /> : dependency.status === "failed" || dependency.status === "missing" ? <X className="h-4 w-4" /> : <Clock3 className="h-4 w-4" />}</span><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-on-surface">{dependency.label}</p><p className="mt-0.5 text-[10px] capitalize text-secondary">{dependency.detail || words(dependency.status)}</p></div></div>)}</div>
-            </aside>
-          </section>
+            </section>
+          )}
+          <CatalogPoseFlow
+            className={boardOnly ? "h-[calc(100vh-8rem)] min-h-[560px]" : undefined}
+            references={poseFlow.references}
+            poses={poseFlow.poses.map((pose) => ({
+              ...pose,
+              model: pose.model || String(data.generationJob?.model || ""),
+              settings: [data.generationJob?.aspect_ratio, data.generationJob?.image_size, data.generationJob?.quality].filter(Boolean).join(" · "),
+              canRegenerate: Boolean(pose.canRegenerate && data.permissions.canRegenerate && data.item.qc_status !== "passed" && !packageIsDelivered && !["queued", "processing", "cancelling"].includes(String(data.generationJob?.status || ""))),
+            }))}
+            storageKey={String(data.item.id || "")}
+            onBack={boardOnly ? () => (onBack ? onBack() : navigate("/history")) : undefined}
+            onDownload={(poseIndex) => {
+              const pose = data.poses.find((item) => item.poseIndex === poseIndex);
+              if (pose) void downloadPose(pose);
+            }}
+            onRegenerate={(poseIndex, note) => {
+              const pose = data.poses.find((item) => item.poseIndex === poseIndex);
+              if (pose) regeneratePose(pose, note);
+            }}
+            busyPose={busy.startsWith("download:") ? Number(busy.slice("download:".length)) : undefined}
+          />
         </main>
       )}
 
@@ -594,7 +663,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack }: { data: Wor
                 <div><p className={`text-[10px] font-bold uppercase tracking-[0.18em] ${actionDialogCopy.danger ? "text-red-600" : "text-primary"}`}>{actionDialogCopy.eyebrow}</p><h2 id="catalog-action-title" className="mt-2 font-manrope text-xl font-bold tracking-tight text-on-surface">{actionDialogCopy.title}</h2><p className="mt-2 text-sm leading-6 text-secondary">{actionDialogCopy.description}</p></div>
                 <button type="button" disabled={Boolean(busy)} onClick={() => setPendingAction(null)} aria-label="Close action" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-surface-container text-secondary transition hover:text-on-surface disabled:opacity-40"><X className="h-4 w-4" /></button>
               </div>
-              {actionDialogCopy.notes && <label className="mt-5 block text-xs font-bold text-secondary">{actionDialogCopy.notes}<textarea autoFocus rows={4} maxLength={4000} value={actionNotes} onChange={(event) => setActionNotes(event.target.value)} placeholder={actionDialogCopy.required ? "Be specific so the next attempt is actionable…" : "Add context for the audit trail…"} className="mt-2 w-full resize-y rounded-2xl border border-outline-variant bg-surface-container/20 px-4 py-3 text-sm font-normal leading-6 text-on-surface outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10" />{actionDialogCopy.required && <span className="mt-1.5 block text-[10px] font-normal text-secondary">Required · {actionNotes.trim().length}/4,000 characters</span>}</label>}
+              {actionDialogCopy.notes && <label className="mt-5 block text-xs font-bold text-secondary">{actionDialogCopy.notes}<textarea autoFocus rows={4} maxLength={pendingAction?.type === "regenerate_pose" ? 1000 : 4000} value={actionNotes} onChange={(event) => setActionNotes(event.target.value)} placeholder={actionDialogCopy.required ? "Be specific so the next attempt is actionable…" : "Add context for the audit trail…"} className="mt-2 w-full resize-y rounded-2xl border border-outline-variant bg-surface-container/20 px-4 py-3 text-sm font-normal leading-6 text-on-surface outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10" />{actionDialogCopy.required && <span className="mt-1.5 block text-[10px] font-normal text-secondary">Required · {actionNotes.trim().length}/{pendingAction?.type === "regenerate_pose" ? "1,000" : "4,000"} characters</span>}</label>}
               <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <button type="button" disabled={Boolean(busy)} onClick={() => setPendingAction(null)} className="rounded-xl border border-outline-variant px-4 py-2.5 text-sm font-bold text-secondary transition hover:bg-surface-container disabled:opacity-40">Cancel</button>
                 <button type="button" disabled={Boolean(busy) || (actionDialogCopy.required && !actionNotes.trim())} onClick={() => void submitPendingAction()} className={`inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white shadow-lg transition disabled:cursor-not-allowed disabled:opacity-40 ${actionDialogCopy.danger ? "bg-red-600 shadow-red-200 hover:bg-red-700" : "bg-primary shadow-primary/20 hover:bg-primary/90"}`}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : actionDialogCopy.danger ? <RotateCcw className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}{actionDialogCopy.confirm}</button>

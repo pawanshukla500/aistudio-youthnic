@@ -1,18 +1,16 @@
 import { useState, useEffect } from 'react';
 import { invokeAppApi } from '../../../lib/backend';
 import { GenerationFlowList } from './GenerationFlowList';
-import { GenerationFlowCanvas } from './GenerationFlowCanvas';
-import { FlowNodeDetailDrawer } from './FlowNodeDetailDrawer';
-// Removed GenerationTraceViewModel
 import { parseTrace } from './graph/buildGenerationGraph';
 import { ArrowLeft } from 'lucide-react';
+import { CatalogPoseFlow } from './CatalogPoseFlow';
+import { boardFromGenerationData } from './boardFromGenerationData';
 
 export function GenerationFlow() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [isLoadingJobs, setIsLoadingJobs] = useState(true);
   const [selectedGraphData, setSelectedGraphData] = useState<any | null>(null);
   const [isLoadingTrace, setIsLoadingTrace] = useState(false);
-  const [selectedNode, setSelectedNode] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -32,7 +30,6 @@ export function GenerationFlow() {
   const handleSelectJob = async (jobId: string) => {
     setIsLoadingTrace(true);
     setError(null);
-    setSelectedNode(null);
     try {
       const data = await invokeAppApi<any>('admin.generationFlow.get', { jobId });
       if (data) {
@@ -75,18 +72,16 @@ export function GenerationFlow() {
       
     const summaryModel = selectedGraphData.is_v2 ? 'V2 Node Graph' : selectedGraphData.trace?.summary?.model;
     const summaryCost = selectedGraphData.is_v2 ? 0 : (selectedGraphData.trace?.summary?.actual_cost_usd || 0);
+    const board = boardFromGenerationData(selectedGraphData);
 
     return (
-      <div className="h-full flex flex-col relative overflow-hidden bg-surface-container-lowest">
-        <div className="flex-none p-4 border-b border-outline-variant/30 flex justify-between items-center bg-white z-10">
+      <div className="h-full flex flex-col relative overflow-hidden bg-[#f5f6f8]">
+        <div className="flex-none p-4 border-b border-[#e6e8ee] flex justify-between items-center bg-white z-10">
           <div>
             <div className="flex items-center gap-4">
-              <button 
-                onClick={() => {
-                  setSelectedGraphData(null);
-                  setSelectedNode(null);
-                }} 
-                className="p-2 hover:bg-surface-container-low rounded-full transition-colors"
+              <button
+                onClick={() => setSelectedGraphData(null)}
+                className="p-2 hover:bg-[#f5f6f8] rounded-full transition-colors"
               >
                 <ArrowLeft className="w-5 h-5 text-on-surface" />
               </button>
@@ -103,20 +98,9 @@ export function GenerationFlow() {
             </div>
           </div>
         </div>
-        
-        <div className="flex-1 relative">
-          <GenerationFlowCanvas 
-            data={selectedGraphData} 
-            onNodeSelect={(node) => setSelectedNode(node)} 
-          />
+        <div className="min-h-0 flex-1 p-3">
+          <CatalogPoseFlow references={board.references} poses={board.poses} storageKey={`admin-flow-${summaryJobId}`} />
         </div>
-
-        {selectedNode && (
-          <FlowNodeDetailDrawer 
-            node={selectedNode} 
-            onClose={() => setSelectedNode(null)} 
-          />
-        )}
       </div>
     );
   }
