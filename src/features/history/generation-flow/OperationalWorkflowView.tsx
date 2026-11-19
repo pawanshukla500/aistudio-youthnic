@@ -563,7 +563,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack, boardOnly = f
               ...pose,
               model: pose.model || String(data.generationJob?.model || ""),
               settings: [data.generationJob?.aspect_ratio, data.generationJob?.image_size, data.generationJob?.quality].filter(Boolean).join(" · "),
-              canRegenerate: Boolean(pose.canRegenerate && data.permissions.canRegenerate && data.item.qc_status !== "passed" && !packageIsDelivered),
+              canRegenerate: Boolean(pose.canRegenerate && data.permissions.canRegenerate && data.item.qc_status !== "passed" && !packageIsDelivered && !["queued", "processing", "cancelling"].includes(String(data.generationJob?.status || ""))),
             }))}
             storageKey={String(data.item.id || "")}
             onBack={boardOnly ? () => (onBack ? onBack() : navigate("/history")) : undefined}

@@ -80,6 +80,12 @@ test("a prompt card keeps the pose line and leaves the long lock text closed", (
   assert.equal(promptExcerpt("Only a short brief.", 2), "Only a short brief.");
 });
 
+test("numbered sibling files do not cross-match", () => {
+  assert.equal(namesMatch("1.jpg", "1.jpg"), true);
+  assert.equal(namesMatch("1.jpg", "11.jpg"), false);
+  assert.equal(namesMatch("detail-1.jpg", "detail-11.jpg"), false);
+});
+
 test("stored file names still match the upload name", () => {
   assert.equal(namesMatch("a65ad731-988e-4912-a41d-5ab1992cb36f-BT217-Nandlal-Navy-5-.jpg", "BT217-Nandlal-Navy (5).jpg"), true);
 });

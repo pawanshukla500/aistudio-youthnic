@@ -39,7 +39,11 @@ export function namesMatch(left: string, right: string) {
   const a = left.toLowerCase().replace(/[^a-z0-9]+/g, "");
   const b = right.toLowerCase().replace(/[^a-z0-9]+/g, "");
   if (!a || !b) return false;
-  return a.endsWith(b) || b.endsWith(a);
+  if (a.length === b.length) return a === b;
+  // A pure suffix can collide on numbered files (1.jpg vs 11.jpg), so the
+  // character before the shorter name must not be a digit.
+  const [short, long] = a.length < b.length ? [a, b] : [b, a];
+  return long.endsWith(short) && !/[0-9]/.test(long[long.length - short.length - 1]);
 }
 
 function poseIsBack(title: string, poseIndex: number) {

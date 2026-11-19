@@ -340,7 +340,7 @@ function ShotNode({ id, data, selected }: NodeProps<Node<ShotData>>) {
           {data.error && <p className="text-[10px] text-red-700">{data.error}</p>}
           <div className="flex flex-wrap gap-1">
             <button type="button" disabled={!data.imageUrl} onClick={() => data.imageUrl && actions.onCopy(data.imageUrl)} className="rounded-md border border-[#e6e8ee] px-2 py-1 text-[10px] font-semibold text-[#1f2430] disabled:opacity-40">Copy link</button>
-            <button type="button" disabled={!actions.onDownload || actions.busyPose === data.poseIndex} onClick={() => data.poseIndex && actions.onDownload?.(data.poseIndex)} className="rounded-md border border-[#e6e8ee] px-2 py-1 text-[10px] font-semibold text-[#1f2430] disabled:opacity-40">{actions.busyPose === data.poseIndex ? "Downloading" : "Download"}</button>
+            <button type="button" disabled={!actions.onDownload || actions.busyPose !== undefined} onClick={() => data.poseIndex && actions.onDownload?.(data.poseIndex)} className="rounded-md border border-[#e6e8ee] px-2 py-1 text-[10px] font-semibold text-[#1f2430] disabled:opacity-40">{actions.busyPose === data.poseIndex ? "Downloading" : "Download"}</button>
             <button type="button" title={data.canRegenerate ? "Queue a new version of this pose only" : "Re-generation is closed for this shoot"} disabled={!data.canRegenerate || !actions.onRegenerate || !note.trim()} onClick={() => data.poseIndex && actions.onRegenerate?.(data.poseIndex, note.trim())} className="rounded-md bg-[#182033] px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-40">Re-generate</button>
           </div>
         </div>

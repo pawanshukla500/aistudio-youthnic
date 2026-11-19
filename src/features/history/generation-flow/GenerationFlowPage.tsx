@@ -169,7 +169,7 @@ export function GenerationFlowPage() {
         </div>
       </div>
       <div className="min-h-0 flex-1 p-3">
-        <CatalogPoseFlow references={board.references} poses={board.poses} />
+        <CatalogPoseFlow references={board.references} poses={board.poses} storageKey={`flow-${jobId}`} />
       </div>
     </div>
   );
