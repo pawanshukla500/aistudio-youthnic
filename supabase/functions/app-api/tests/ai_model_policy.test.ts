@@ -607,7 +607,16 @@ Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
     remainingRouteCount: 2,
     elapsedMs: 0,
     gatewayBudgetMs: afterSlowPrep,
+    prepElapsedMs: 140_000,
   }), afterSlowPrep - VISION_GATEWAY_RESERVE_MS);
+  // A configured cap with no prep delay is not a late start. The primary
+  // still holds one fallback window.
+  assertEquals(remainingVisionTimeoutMs({
+    purpose: "product_truth",
+    remainingRouteCount: 2,
+    elapsedMs: 0,
+    gatewayBudgetMs: 175_000,
+  }), 175_000 - VISION_GATEWAY_RESERVE_MS - PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
 
   // The end-to-end invariant, and the reason the two reserves are not one:
   // a lone hop plus the work inside the chain plus the work outside it has to

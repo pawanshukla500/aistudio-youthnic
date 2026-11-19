@@ -1897,7 +1897,7 @@ function asVisionProviderError(error: unknown, route: NormalizedAiModelRoute) {
 async function visionJson(
   policy: VisionPolicy,
   parts: JsonRecord[],
-  options?: { onAttempt?: (attempt: VisionHopAttempt) => Promise<void>; signal?: AbortSignal; gatewayBudgetMs?: number },
+  options?: { onAttempt?: (attempt: VisionHopAttempt) => Promise<void>; signal?: AbortSignal; gatewayBudgetMs?: number; prepElapsedMs?: number },
 ): Promise<VisionResult> {
   const requested = policy.purpose === "product_truth"
     ? productTruthRouteChain({
@@ -1927,6 +1927,7 @@ async function visionJson(
       routes: requested,
       purpose: policy.purpose,
       gatewayBudgetMs,
+      prepElapsedMs: options?.prepElapsedMs,
       signal: options?.signal,
       invoke: async (route, timeoutMs) => {
         if (options?.signal?.aborted) throw abortError();
@@ -2133,6 +2134,7 @@ async function analyze(request: Request, args: JsonRecord) {
           onAttempt: persistFailedHop,
           signal: request.signal,
           gatewayBudgetMs,
+          prepElapsedMs: prepMs,
         });
       } catch (error) {
         if (request.signal.aborted || isAbortError(error)) {

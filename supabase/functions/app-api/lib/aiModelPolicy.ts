@@ -528,6 +528,8 @@ export function remainingVisionTimeoutMs(args: {
   elapsedMs: number;
   gatewayBudgetMs: number;
   preferredTimeoutMs?: number;
+  /** Time spent before this chain started (auth, briefs, photo download). */
+  prepElapsedMs?: number;
 }): number {
   const remainingWall = Math.max(
     0,
@@ -541,11 +543,13 @@ export function remainingVisionTimeoutMs(args: {
   // Muse, Luna and Terra each hit their deadline.
   if (args.purpose === "product_truth") {
     if (args.remainingRouteCount <= 1) return remainingWall;
-    // A full Studio budget still holds one fallback window. The exception is
-    // the first hop of a chain that already started late: prep ate the 300s
-    // proxy, so the budget handed in is only the leftover. Holding 60s back
-    // then aborts Muse, and the client is gone before a later model answers.
+    // A full Studio budget still holds one fallback window, including when
+    // Administration configured a shorter cap. The exception is the first hop
+    // after prep already consumed a minute of the 300s proxy: the budget
+    // handed in is only the leftover, and holding 60s back aborts Muse before
+    // a later model can answer.
     if (
+      (args.prepElapsedMs ?? 0) >= 60_000 &&
       args.elapsedMs < 5_000 &&
       args.gatewayBudgetMs >= 120_000 &&
       args.gatewayBudgetMs <= ANALYZE_PROXY_BUDGET_MS &&
@@ -657,6 +661,8 @@ export async function runVisionProviderChain<T>(args: {
   routes: NormalizedAiModelRoute[];
   purpose: string;
   gatewayBudgetMs: number;
+  /** Time already spent before the chain, so a late start can keep its leftover. */
+  prepElapsedMs?: number;
   invoke: (route: NormalizedAiModelRoute, timeoutMs: number) => Promise<T>;
   classify: (route: NormalizedAiModelRoute, error: unknown) => VisionProviderFailure;
   now?: () => number;
@@ -733,6 +739,7 @@ export async function runVisionProviderChain<T>(args: {
       remainingRouteCount: args.routes.length - index,
       elapsedMs: now() - started,
       gatewayBudgetMs: args.gatewayBudgetMs,
+      prepElapsedMs: args.prepElapsedMs,
     });
     if (args.purpose === "product_truth") {
       route = clampProductTruthHopThinking(route, timeoutMs);
