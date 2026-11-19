@@ -230,6 +230,7 @@ async function downloadCatalogObject(
   storageBackend: unknown,
   fallbackUrl = "",
   signal?: AbortSignal,
+  limits: { timeoutMs?: number; maxAttempts?: number } = {},
 ) {
   if (signal?.aborted) throw abortError("Asset download aborted.");
   const backend = String(storageBackend || "firebase") as CatalogStorageBackend;
@@ -241,24 +242,24 @@ async function downloadCatalogObject(
     return data;
   }
   if (/^https:\/\//i.test(storagePath)) {
-    return await fetchAssetBlobWithRetry(storagePath, "Asset download", signal);
+    return await fetchAssetBlobWithRetry(storagePath, "Asset download", signal, limits);
   }
   if (/^http:\/\//i.test(storagePath)) throw new Error("Catalog asset URLs must use HTTPS.");
   if (backend === "external") {
     if (!fallbackUrl) throw new Error("External asset URL is unavailable.");
-    return await fetchAssetBlobWithRetry(fallbackUrl, "External asset download", signal);
+    return await fetchAssetBlobWithRetry(fallbackUrl, "External asset download", signal, limits);
   }
   if (!storagePath && fallbackUrl && /^https:\/\//i.test(fallbackUrl)) {
-    return await fetchAssetBlobWithRetry(fallbackUrl, "Fallback asset download", signal);
+    return await fetchAssetBlobWithRetry(fallbackUrl, "Fallback asset download", signal, limits);
   }
   try {
     assertCatalogReferenceOwnership(orgId, { role: "stored_asset", storagePath, storageBackend: "firebase", hash: "", filename: "stored-asset", mimeType: "", size: 0 });
-    return await downloadFirebaseObject(storagePath, { signal });
+    return await downloadFirebaseObject(storagePath, { signal, ...limits });
   } catch (firebaseError) {
     if (signal?.aborted || isAbortError(firebaseError)) throw firebaseError;
     if (fallbackUrl && /^https:\/\//i.test(fallbackUrl)) {
       try {
-        return await fetchAssetBlobWithRetry(fallbackUrl, "Fallback asset download", signal);
+        return await fetchAssetBlobWithRetry(fallbackUrl, "Fallback asset download", signal, limits);
       } catch (fallbackError) {
         if (signal?.aborted || isAbortError(fallbackError)) throw fallbackError;
         // Surface the primary Firebase storage error when the fallback URL also fails.
@@ -268,12 +269,19 @@ async function downloadCatalogObject(
   }
 }
 
-async function fetchAssetBlobWithRetry(url: string, label: string, signal?: AbortSignal): Promise<Blob> {
+async function fetchAssetBlobWithRetry(
+  url: string,
+  label: string,
+  signal?: AbortSignal,
+  limits: { timeoutMs?: number; maxAttempts?: number } = {},
+): Promise<Blob> {
+  const timeoutMs = limits.timeoutMs ?? 30_000;
+  const maxAttempts = limits.maxAttempts ?? 3;
   let lastError: unknown;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     if (signal?.aborted) throw abortError(`${label} aborted.`);
     try {
-      const response = await fetch(url, { signal: combineTimeoutAndSignal(30_000, signal) });
+      const response = await fetch(url, { signal: combineTimeoutAndSignal(timeoutMs, signal) });
       if (response.ok) return await response.blob();
       const status = response.status;
       await response.body?.cancel().catch(() => {});
@@ -284,7 +292,7 @@ async function fetchAssetBlobWithRetry(url: string, label: string, signal?: Abor
       if (signal?.aborted || isAbortError(error)) throw error;
       lastError = error;
     }
-    if (attempt < 3) {
+    if (attempt < maxAttempts) {
       await sleepWithSignal(300 * 2 ** (attempt - 1), signal);
     }
   }
@@ -1171,16 +1179,17 @@ async function geminiGroundedJson(prompt: string) {
 async function loadReference(
   reference: ReferenceInput,
   orgId: string,
-  options: { encodeBase64?: boolean; retainBlob?: boolean; signal?: AbortSignal } = {},
+  options: { encodeBase64?: boolean; retainBlob?: boolean; signal?: AbortSignal; timeoutMs?: number; maxAttempts?: number } = {},
 ): Promise<LoadedReference> {
   if (options.signal?.aborted) throw abortError(`Loading reference ${reference.filename} aborted.`);
+  const limits = { timeoutMs: options.timeoutMs, maxAttempts: options.maxAttempts };
   let blob: Blob | null = null;
   assertCatalogReferenceOwnership(orgId, reference);
-  if (reference.storagePath) blob = await downloadCatalogObject(orgId, reference.storagePath, reference.storageBackend, reference.downloadUrl, options.signal);
+  if (reference.storagePath) blob = await downloadCatalogObject(orgId, reference.storagePath, reference.storageBackend, reference.downloadUrl, options.signal, limits);
   if (options.signal?.aborted) throw abortError(`Loading reference ${reference.filename} aborted.`);
   if (!blob && reference.downloadUrl) {
     try {
-      blob = await fetchAssetBlobWithRetry(reference.downloadUrl, `Reference ${reference.filename}`, options.signal);
+      blob = await fetchAssetBlobWithRetry(reference.downloadUrl, `Reference ${reference.filename}`, options.signal, limits);
     } catch (error) {
       if (options.signal?.aborted || isAbortError(error)) throw error;
       blob = null;
@@ -1237,7 +1246,7 @@ async function loadAvailableReferences(
   references: ReferenceInput[],
   orgId: string,
   garmentFamily = "",
-  options: { encodeBase64?: boolean; retainBlob?: boolean; signal?: AbortSignal } = {},
+  options: { encodeBase64?: boolean; retainBlob?: boolean; signal?: AbortSignal; timeoutMs?: number; maxAttempts?: number } = {},
 ): Promise<LoadedReference[]> {
   if (options.signal?.aborted) throw abortError("Reference loading aborted.");
   const requiredRoles = requiredAvailabilityRoles(references, garmentFamily);
@@ -1282,13 +1291,13 @@ async function loadVisionReferenceParts(
   orgId: string,
   garmentFamily: string,
   roleOptions: { useStyleAsModelFace: boolean; hasModelReference: boolean },
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; timeoutMs?: number; maxAttempts?: number } = {},
 ): Promise<{ manifest: Array<{ number: number; role: string }>; parts: JsonRecord[] }> {
   const loaded = await loadAvailableReferences(
     collapseDuplicateUploads(references),
     orgId,
     garmentFamily,
-    { retainBlob: false, signal: options.signal },
+    { retainBlob: false, signal: options.signal, timeoutMs: options.timeoutMs, maxAttempts: options.maxAttempts },
   );
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
@@ -2017,6 +2026,21 @@ function explicitBottomCutHint(bottomWearValue: unknown, productDetails: unknown
   return detected !== "other" && detected !== "none" ? detected : "";
 }
 
+const ANALYSIS_REFERENCE_DOWNLOAD_MS = 20_000;
+const ANALYSIS_REFERENCE_DOWNLOAD_ATTEMPTS = 2;
+const ANALYSIS_PREP_QUERY_MS = 8_000;
+
+function withDeadline<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  const settled = work.catch(() => fallback);
+  return Promise.race([settled, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 async function analyze(request: Request, args: JsonRecord) {
   const requestStarted = Date.now();
   const { workspace } = await workspaceFor(request, "studio.generate");
@@ -2033,10 +2057,10 @@ async function analyze(request: Request, args: JsonRecord) {
   // decision, which would change the fingerprint and reject its own session.
   const explicitCutHint = explicitBottomCutHint(args.bottomWear, args.productDetails, args.skuName);
   const [housePreferences, fashionKnowledge, analysisLearning, showcaseFeedback, policy] = await Promise.all([
-    stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion")),
-    fashionKnowledgeBrief(orgId, String(args.category || ""), "", explicitCutHint),
-    analysisLearningBrief(orgId, String(args.category || "ethnic/fusion")),
-    showcaseFeedbackBrief(orgId, String(args.category || "ethnic/fusion")),
+    withDeadline(stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion")), ANALYSIS_PREP_QUERY_MS, ""),
+    withDeadline(fashionKnowledgeBrief(orgId, String(args.category || ""), "", explicitCutHint), ANALYSIS_PREP_QUERY_MS, ""),
+    withDeadline(analysisLearningBrief(orgId, String(args.category || "ethnic/fusion")), ANALYSIS_PREP_QUERY_MS, ""),
+    withDeadline(showcaseFeedbackBrief(orgId, String(args.category || "ethnic/fusion")), ANALYSIS_PREP_QUERY_MS, ""),
     resolveVisionPolicy(orgId, { purpose: "product_truth", garmentFamily: String(args.category || "") }),
   ]);
   let usedPolicy = policy;
@@ -2071,7 +2095,11 @@ async function analyze(request: Request, args: JsonRecord) {
         orgId,
         String(args.category || ""),
         { useStyleAsModelFace, hasModelReference: rawHasModelReference },
-        { signal: request.signal },
+        {
+          signal: request.signal,
+          timeoutMs: ANALYSIS_REFERENCE_DOWNLOAD_MS,
+          maxAttempts: ANALYSIS_REFERENCE_DOWNLOAD_ATTEMPTS,
+        },
       );
       parts.push({ text: buildCombinedAnalysisPrompt({
         skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
@@ -2095,13 +2123,16 @@ async function analyze(request: Request, args: JsonRecord) {
         analysisRunIds.push(...hopIds);
       };
       try {
+        const prepMs = Date.now() - requestStarted;
+        const gatewayBudgetMs = productTruthRemainingBudgetMs(
+          prepMs,
+          Number(Deno.env.get("VISION_GATEWAY_BUDGET_MS") || ""),
+        );
+        console.info(`[studio.analyze] prepMs=${prepMs} visionBudgetMs=${gatewayBudgetMs}`);
         return await visionJson(policy, parts, {
           onAttempt: persistFailedHop,
           signal: request.signal,
-          gatewayBudgetMs: productTruthRemainingBudgetMs(
-            Date.now() - requestStarted,
-            Number(Deno.env.get("VISION_GATEWAY_BUDGET_MS") || ""),
-          ),
+          gatewayBudgetMs,
         });
       } catch (error) {
         if (request.signal.aborted || isAbortError(error)) {

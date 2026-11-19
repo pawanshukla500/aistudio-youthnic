@@ -332,6 +332,14 @@ export const VISION_GATEWAY_RESERVE_MS = 5_000;
  * so the gateway budget gives them their own allowance.
  */
 export const VISION_REQUEST_OVERHEAD_MS = 5_000;
+/**
+ * Railway's public proxy closes `POST /app-api` at 300s (observed as HTTP 499).
+ * The Studio client waits longer than that, so a chain that is still running at
+ * 300s is shown as "Analysis was interrupted" even when the function later
+ * finishes. The vision budget is measured from the request start and must end
+ * before this deadline.
+ */
+export const ANALYZE_PROXY_BUDGET_MS = 280_000;
 export const PRODUCT_TRUTH_MIN_SLICE_MS = 10_000;
 export const VISION_HOP_MIN_MS = 8_000;
 /**
@@ -453,7 +461,9 @@ export function productTruthGatewayBudgetMs(configured?: number) {
  */
 export function productTruthRemainingBudgetMs(elapsedBeforeChainMs: number, configured?: number) {
   const elapsed = Number.isFinite(elapsedBeforeChainMs) ? Math.max(0, Math.round(elapsedBeforeChainMs)) : 0;
-  return Math.max(0, productTruthGatewayBudgetMs(configured) - elapsed);
+  const fromGateway = Math.max(0, productTruthGatewayBudgetMs(configured) - elapsed);
+  const beforeProxy = Math.max(0, ANALYZE_PROXY_BUDGET_MS - elapsed);
+  return Math.min(fromGateway, beforeProxy);
 }
 
 /**
@@ -531,6 +541,16 @@ export function remainingVisionTimeoutMs(args: {
   // Muse, Luna and Terra each hit their deadline.
   if (args.purpose === "product_truth") {
     if (args.remainingRouteCount <= 1) return remainingWall;
+    // A full Studio budget still holds one fallback window. The exception is
+    // the first hop of a chain that already started late: prep ate the 300s
+    // proxy, so the budget handed in is only the leftover. Holding 60s back
+    // then aborts Muse, and the client is gone before a later model answers.
+    if (
+      args.elapsedMs < 5_000 &&
+      args.gatewayBudgetMs >= 120_000 &&
+      args.gatewayBudgetMs <= ANALYZE_PROXY_BUDGET_MS &&
+      remainingWall < 200_000
+    ) return remainingWall;
     // When multiple fallbacks remain inside a tight reserve window after an
     // earlier hop timed out, share the remaining budget rather than collapsing
     // the intermediate fallback down to 10s.

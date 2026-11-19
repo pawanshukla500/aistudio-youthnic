@@ -17,6 +17,7 @@ import {
   CHEAP_OPENAI_VISION_ROUTE,
   LUNA_HIGH_THINKING_VISION_ROUTE,
   OPENAI_TERRA_VISION_ROUTE,
+  ANALYZE_PROXY_BUDGET_MS,
   PRODUCT_TRUTH_FALLBACK_RESERVE_MS,
   PRODUCT_TRUTH_TIMEOUT_MS,
   STUDIO_INVOKE_BUDGET_MS,
@@ -594,9 +595,19 @@ Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
   assertEquals(productTruthGatewayBudgetMs(400_000), reserved);
   assertEquals(productTruthGatewayBudgetMs(), reserved);
   assert(productTruthGatewayBudgetMs() < STUDIO_INVOKE_BUDGET_MS);
-  assertEquals(productTruthRemainingBudgetMs(0), reserved);
-  assertEquals(productTruthRemainingBudgetMs(20_000), reserved - 20_000);
+  assertEquals(productTruthRemainingBudgetMs(0), ANALYZE_PROXY_BUDGET_MS);
+  assertEquals(productTruthRemainingBudgetMs(20_000), ANALYZE_PROXY_BUDGET_MS - 20_000);
   assertEquals(productTruthRemainingBudgetMs(reserved + 5_000), 0);
+  // After a long photo download, the chain only gets what is left before the
+  // 300s proxy, and that leftover goes to Muse instead of a fallback window.
+  const afterSlowPrep = productTruthRemainingBudgetMs(140_000);
+  assertEquals(afterSlowPrep, ANALYZE_PROXY_BUDGET_MS - 140_000);
+  assertEquals(remainingVisionTimeoutMs({
+    purpose: "product_truth",
+    remainingRouteCount: 2,
+    elapsedMs: 0,
+    gatewayBudgetMs: afterSlowPrep,
+  }), afterSlowPrep - VISION_GATEWAY_RESERVE_MS);
 
   // The end-to-end invariant, and the reason the two reserves are not one:
   // a lone hop plus the work inside the chain plus the work outside it has to
