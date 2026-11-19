@@ -93,7 +93,10 @@ function pemToBytes(pem: string) {
   return Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
 }
 
-export async function googleAccessToken(scopes: string[]) {
+export async function googleAccessToken(
+  scopes: string[],
+  options: { timeoutMs?: number; maxAttempts?: number } = {},
+) {
   const scope = [...new Set(scopes)].sort().join(" ");
   if (cachedToken && cachedToken.scope === scope && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.value;
   const account = serviceAccount();
@@ -116,6 +119,10 @@ export async function googleAccessToken(scopes: string[]) {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }),
     }),
+    {
+      ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.maxAttempts ? { maxAttempts: options.maxAttempts } : {}),
+    },
   );
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !(data as { access_token?: string }).access_token) throw new Error((data as { error_description?: string }).error_description || `Google authorization failed (${response.status}).`);
@@ -199,16 +206,24 @@ export async function uploadFirebaseObject(args: { storagePath: string; blob: Bl
 
 export async function downloadFirebaseObject(
   storagePath: string,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; timeoutMs?: number; maxAttempts?: number } = {},
 ) {
   const bucket = requiredEnv("FIREBASE_STORAGE_BUCKET");
   const response = await firebaseFetchWithRetry(
     `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}?alt=media`,
     async () => {
-      const token = await googleAccessToken(["https://www.googleapis.com/auth/cloud-platform"]);
+      const token = await googleAccessToken(
+        ["https://www.googleapis.com/auth/cloud-platform"],
+        options.timeoutMs ? { timeoutMs: options.timeoutMs, maxAttempts: 1 } : {},
+      );
       return { headers: { Authorization: `Bearer ${token}` } };
     },
-    { invalidateTokenOn401: true, signal: options.signal },
+    {
+      invalidateTokenOn401: true,
+      signal: options.signal,
+      ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.maxAttempts ? { maxAttempts: options.maxAttempts } : {}),
+    },
   );
   if (!response.ok) throw new Error(`Firebase download failed (${response.status}).`);
   return response.blob();

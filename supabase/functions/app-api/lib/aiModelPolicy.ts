@@ -332,6 +332,14 @@ export const VISION_GATEWAY_RESERVE_MS = 5_000;
  * so the gateway budget gives them their own allowance.
  */
 export const VISION_REQUEST_OVERHEAD_MS = 5_000;
+/**
+ * Railway's public proxy closes `POST /app-api` at 300s (observed as HTTP 499).
+ * The Studio client waits longer than that, so a chain that is still running at
+ * 300s is shown as "Analysis was interrupted" even when the function later
+ * finishes. The vision budget is measured from the request start and must end
+ * before this deadline.
+ */
+export const ANALYZE_PROXY_BUDGET_MS = 280_000;
 export const PRODUCT_TRUTH_MIN_SLICE_MS = 10_000;
 export const VISION_HOP_MIN_MS = 8_000;
 /**
@@ -453,7 +461,9 @@ export function productTruthGatewayBudgetMs(configured?: number) {
  */
 export function productTruthRemainingBudgetMs(elapsedBeforeChainMs: number, configured?: number) {
   const elapsed = Number.isFinite(elapsedBeforeChainMs) ? Math.max(0, Math.round(elapsedBeforeChainMs)) : 0;
-  return Math.max(0, productTruthGatewayBudgetMs(configured) - elapsed);
+  const fromGateway = Math.max(0, productTruthGatewayBudgetMs(configured) - elapsed);
+  const beforeProxy = Math.max(0, ANALYZE_PROXY_BUDGET_MS - elapsed);
+  return Math.min(fromGateway, beforeProxy);
 }
 
 /**
@@ -518,6 +528,8 @@ export function remainingVisionTimeoutMs(args: {
   elapsedMs: number;
   gatewayBudgetMs: number;
   preferredTimeoutMs?: number;
+  /** Time spent before this chain started (auth, briefs, photo download). */
+  prepElapsedMs?: number;
 }): number {
   const remainingWall = Math.max(
     0,
@@ -531,6 +543,18 @@ export function remainingVisionTimeoutMs(args: {
   // Muse, Luna and Terra each hit their deadline.
   if (args.purpose === "product_truth") {
     if (args.remainingRouteCount <= 1) return remainingWall;
+    // A full Studio budget still holds one fallback window, including when
+    // Administration configured a shorter cap. The exception is the first hop
+    // after prep already consumed a minute of the 300s proxy: the budget
+    // handed in is only the leftover, and holding 60s back aborts Muse before
+    // a later model can answer.
+    if (
+      (args.prepElapsedMs ?? 0) >= 60_000 &&
+      args.elapsedMs < 5_000 &&
+      args.gatewayBudgetMs >= 120_000 &&
+      args.gatewayBudgetMs <= ANALYZE_PROXY_BUDGET_MS &&
+      remainingWall < 200_000
+    ) return remainingWall;
     // When multiple fallbacks remain inside a tight reserve window after an
     // earlier hop timed out, share the remaining budget rather than collapsing
     // the intermediate fallback down to 10s.
@@ -637,6 +661,8 @@ export async function runVisionProviderChain<T>(args: {
   routes: NormalizedAiModelRoute[];
   purpose: string;
   gatewayBudgetMs: number;
+  /** Time already spent before the chain, so a late start can keep its leftover. */
+  prepElapsedMs?: number;
   invoke: (route: NormalizedAiModelRoute, timeoutMs: number) => Promise<T>;
   classify: (route: NormalizedAiModelRoute, error: unknown) => VisionProviderFailure;
   now?: () => number;
@@ -713,6 +739,7 @@ export async function runVisionProviderChain<T>(args: {
       remainingRouteCount: args.routes.length - index,
       elapsedMs: now() - started,
       gatewayBudgetMs: args.gatewayBudgetMs,
+      prepElapsedMs: args.prepElapsedMs,
     });
     if (args.purpose === "product_truth") {
       route = clampProductTruthHopThinking(route, timeoutMs);
