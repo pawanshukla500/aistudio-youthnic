@@ -491,11 +491,6 @@ export function CatalogPoseFlow({
       <div className={`flex flex-col overflow-hidden rounded-2xl border border-[#e6e8ee] bg-[#f5f6f8] ${className || "h-[calc(100vh-280px)] min-h-[560px]"}`}>
         <div className="flex items-center gap-2 px-3 py-2.5">
           {onBack && <button type="button" onClick={onBack} className="rounded-full border border-[#e6e8ee] bg-white px-3 py-1.5 text-sm shadow-sm">Back</button>}
-          <div className="rounded-full border border-[#e6e8ee] bg-white px-3 py-1.5 text-sm shadow-sm">Product</div>
-          <div className="rounded-full border border-[#e6e8ee] bg-white px-3 py-1.5 text-sm shadow-sm">Face</div>
-          <div className="rounded-full border border-[#e6e8ee] bg-white px-3 py-1.5 text-sm shadow-sm">Reference</div>
-          <div className="rounded-full border border-[#e6e8ee] bg-white px-3 py-1.5 text-sm shadow-sm">Prompt</div>
-          <div className="rounded-full border border-[#e6e8ee] bg-white px-3 py-1.5 text-sm shadow-sm">Generated pose</div>
           <button type="button" onClick={fit} className="ml-auto rounded-full border border-[#e6e8ee] bg-white px-3 py-1.5 text-sm shadow-sm">Fit</button>
           <div className="rounded-full border border-[#e6e8ee] bg-white px-3 py-1.5 text-sm tabular-nums shadow-sm">{zoom}%</div>
         </div>
