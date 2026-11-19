@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
@@ -8,6 +8,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  Circle,
   Clock3,
   Download,
   ExternalLink,
@@ -153,6 +154,12 @@ function duration(seconds?: number | null) {
   return [hours ? `${hours}h` : "", minutes ? `${minutes}m` : "", !hours ? `${remaining}s` : ""].filter(Boolean).join(" ");
 }
 
+function stageTone(stage: WorkflowStage) {
+  if (stage.status === "current") return "border-primary/40 bg-white text-on-surface shadow-primary/10";
+  if (stage.status === "completed") return "border-emerald-200 bg-emerald-50/70 text-emerald-900 shadow-emerald-50";
+  return "border-outline-variant/35 bg-white/60 text-secondary shadow-transparent";
+}
+
 function elapsedSeconds(start: unknown, end: unknown) {
   const startMs = typeof start === "number" ? start : Date.parse(String(start || ""));
   const endMs = typeof end === "number" ? end : Date.parse(String(end || ""));
@@ -282,6 +289,11 @@ export function OperationalWorkflowView({ data, onRefresh, onBack, boardOnly = f
   const totalPoses = data.progress.totalPoseCount || data.poses.length;
   const packageIsDelivered = Boolean(item.listing_sent_at || ["sent_to_listing_team", "listing_in_progress", "listed"].includes(item.workflow_stage));
   const workflowElapsedSeconds = elapsedSeconds(workflowStartedAt, workflowFinishedAt || clock);
+  const stageGroups = useMemo(() => {
+    const groups = new Map<string, WorkflowStage[]>();
+    for (const stage of data.stages) groups.set(stage.groupKey, [...(groups.get(stage.groupKey) || []), stage]);
+    return [...groups.entries()];
+  }, [data.stages]);
 
   useEffect(() => {
     if (workflowFinishedAt) return;
@@ -504,9 +516,43 @@ export function OperationalWorkflowView({ data, onRefresh, onBack, boardOnly = f
       {notice && <div className={`mx-4 mt-4 flex items-start gap-2 rounded-xl border px-4 py-3 text-sm sm:mx-6 ${notice.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>{notice.tone === "success" ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />}<span className="flex-1">{notice.text}</span><button onClick={() => setNotice(null)} aria-label="Dismiss"><X className="h-4 w-4" /></button></div>}
 
       {(boardOnly || panel === "flow") && (
-        <main className={boardOnly ? "h-full" : "p-4 sm:p-6"}>
+        <main className={boardOnly ? "h-full" : "space-y-4 p-4 sm:p-6"}>
           {item.blocked_reason && <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{item.blocked_reason}</p>}
           {String(data.generationJob?.error_message || "").trim() && <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{String(data.generationJob.error_message).trim()}</p>}
+          {!boardOnly && (
+            <section className="space-y-4 rounded-2xl border border-outline-variant/35 bg-white p-4 shadow-sm">
+              <div className="grid gap-2 rounded-xl border border-outline-variant/25 bg-surface-container/20 p-3 text-[11px] text-secondary sm:grid-cols-2">
+                <p><span className="font-bold text-on-surface">Workflow started:</span> {dateTime(workflowStartedAt)}</p>
+                <p><span className="font-bold text-on-surface">Workflow completed:</span> {workflowFinishedAt ? dateTime(workflowFinishedAt) : "In progress"}</p>
+                <p><span className="font-bold text-on-surface">Generation started:</span> {dateTime(item.generation_started_at)}</p>
+                <p><span className="font-bold text-on-surface">Generation completed:</span> {item.generation_completed_at ? dateTime(item.generation_completed_at) : item.generation_started_at ? "In progress" : "Not started"}</p>
+                <p className="sm:col-span-2"><span className="font-bold text-on-surface">Elapsed:</span> {duration(workflowElapsedSeconds)}</p>
+              </div>
+              <div className="space-y-3">
+                {stageGroups.map(([group, stages]) => (
+                  <div key={group} className="grid gap-3 lg:grid-cols-[110px_minmax(0,1fr)]">
+                    <div className="pt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-secondary">{words(group)}</div>
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      {stages.map((stage) => {
+                        const stageDuration = stage.status === "current"
+                          ? Number(stage.completedDurationSeconds || 0) + elapsedSeconds(stage.currentStartedAt || stage.startedAt, clock)
+                          : stage.durationSeconds;
+                        return (
+                          <article key={stage.code} className={`relative min-h-36 rounded-2xl border p-4 shadow-lg transition ${stageTone(stage)}`}>
+                            {stage.status === "current" && <span className="absolute right-4 top-4 h-2.5 w-2.5 animate-pulse rounded-full bg-primary ring-4 ring-primary/10" />}
+                            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-black/5">{stage.status === "completed" ? <Check className="h-4 w-4 text-emerald-600" /> : stage.status === "current" ? <Zap className="h-4 w-4 text-primary" /> : <Circle className="h-4 w-4 text-outline" />}</div>
+                            <p className="mt-3 text-sm font-bold">{stage.title}</p>
+                            <p className="mt-1 line-clamp-2 text-[11px] leading-4 opacity-70">{stage.description}</p>
+                            <div className="mt-3 flex items-end justify-between gap-2 text-[10px] font-semibold opacity-65"><span>{stage.status === "current" ? `Started ${dateTime(stage.currentStartedAt || stage.startedAt)}` : stage.status === "completed" ? stage.completedAt ? `Completed ${dateTime(stage.completedAt)}` : "Completed · time not recorded" : "Waiting"}{Number(stage.visitCount || 0) > 1 ? ` · ${stage.visitCount} visits` : ""}</span><span className="shrink-0">{duration(stageDuration)}</span></div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
           <CatalogPoseFlow
             className={boardOnly ? "h-[calc(100vh-8rem)] min-h-[560px]" : undefined}
             references={poseFlow.references}
