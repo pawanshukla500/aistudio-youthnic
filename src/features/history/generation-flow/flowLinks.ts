@@ -96,10 +96,10 @@ export function neighborIds(activeId: string, edges: Array<{ source: string; tar
 }
 
 /** Which uploaded photos feed one pose. A saved send-list wins. Otherwise every product photo feeds the pose, except a rear frame, which keeps the back and the bottom. Face and room always feed the pose. */
-export function photosForPose(
-  photos: FlowShot[],
+export function photosForPose<T extends FlowShot>(
+  photos: T[],
   pose: { poseIndex: number; title: string; sent?: SentShot[] },
-) {
+): T[] {
   const sent = pose.sent || [];
   return photos.filter((photo) => {
     const lane = referenceLane(photo.role);

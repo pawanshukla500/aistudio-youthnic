@@ -215,16 +215,19 @@ function posesForBoard(data: { references?: Array<Record<string, unknown>>; pose
   }
   const plan = Array.isArray(request.pose_plan) ? request.pose_plan as Array<Record<string, unknown>> : [];
   const planFor = (poseIndex: number) => plan[poseIndex - 1] || plan.find((item) => Number(item.id) === poseIndex) || null;
-  const source = data.poses.length ? data.poses : plan.map((item, index) => ({
+  const source: PoseGroup[] = data.poses.length ? data.poses : plan.map((item, index) => ({
     poseIndex: index + 1,
     title: String(item.title || `Pose ${index + 1}`),
     current: null,
+    versions: [],
+    reviews: [],
   }));
   const poses: FlowPose[] = source.map((pose) => {
     const asset = pose.current;
     const planned = planFor(pose.poseIndex);
     const manifest = asset?.reference_manifest?.references || [];
     const savedPrompt = String(asset?.prompt || planned?.prompt || planned?.description || "").trim();
+    const versions = pose.versions || [];
     return {
       poseIndex: pose.poseIndex,
       title: pose.title || String(planned?.title || `Pose ${pose.poseIndex}`),
@@ -238,8 +241,8 @@ function posesForBoard(data: { references?: Array<Record<string, unknown>>; pose
       model: String(asset?.model || ""),
       status: poseStatus(asset, String(asset?.preview_url || asset?.original_url || asset?.final_asset_url || "")),
       error: String(asset?.error || (String(asset?.generation_status || "") === "failed" ? "This pose failed. Re-generate to try again." : "")),
-      versionCount: pose.versions?.length || (asset ? 1 : 0),
-      versions: (pose.versions || []).slice(0, 4).map((version) => ({
+      versionCount: versions.length || (asset ? 1 : 0),
+      versions: versions.slice(0, 4).map((version) => ({
         version: Number(version.version_number || 1),
         at: String(version.generated_at || ""),
         status: String(version.approval_status || version.generation_status || ""),
@@ -518,7 +521,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack, boardOnly = f
       {(boardOnly || panel === "flow") && (
         <main className={boardOnly ? "h-full" : "space-y-4 p-4 sm:p-6"}>
           {item.blocked_reason && <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{item.blocked_reason}</p>}
-          {String(data.generationJob?.error_message || "").trim() && <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{String(data.generationJob.error_message).trim()}</p>}
+          {String(data.generationJob?.error_message || "").trim() && <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{String(data.generationJob?.error_message || "").trim()}</p>}
           {!boardOnly && (
             <section className="space-y-4 rounded-2xl border border-outline-variant/35 bg-white p-4 shadow-sm">
               <div className="grid gap-2 rounded-xl border border-outline-variant/25 bg-surface-container/20 p-3 text-[11px] text-secondary sm:grid-cols-2">
