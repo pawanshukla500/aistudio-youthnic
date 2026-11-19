@@ -2030,6 +2030,7 @@ function explicitBottomCutHint(bottomWearValue: unknown, productDetails: unknown
 const ANALYSIS_REFERENCE_DOWNLOAD_MS = 20_000;
 const ANALYSIS_REFERENCE_DOWNLOAD_ATTEMPTS = 2;
 const ANALYSIS_PREP_QUERY_MS = 8_000;
+const studioAnalysisFlights = new Map<string, Promise<JsonRecord>>();
 
 function withDeadline<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2068,6 +2069,21 @@ async function analyze(request: Request, args: JsonRecord) {
   const policyFingerprint = visionPolicyFingerprint(policy);
   const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}|${policyFingerprint}`);
   const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${policyFingerprint}:${smallHash(housePreferences)}:${smallHash(fashionKnowledge)}:${smallHash(analysisLearning)}:${smallHash(showcaseFeedback)}`;
+  const flightKey = `${orgId}:${cacheKey}`;
+  const existingFlight = studioAnalysisFlights.get(flightKey);
+  if (existingFlight) return await existingFlight;
+  let resolveFlight!: (value: JsonRecord) => void;
+  let rejectFlight!: (reason: unknown) => void;
+  const flight = new Promise<JsonRecord>((resolve, reject) => {
+    resolveFlight = resolve;
+    rejectFlight = reject;
+  });
+  studioAnalysisFlights.set(flightKey, flight);
+  const finishAnalysis = (payload: JsonRecord) => {
+    resolveFlight(payload);
+    return payload;
+  };
+  try {
   let cacheHit = false;
   let normalized: ReturnType<typeof normalizeAnalysis> | null = null;
   const forceRefresh = args.forceRefresh === true;
@@ -2097,7 +2113,6 @@ async function analyze(request: Request, args: JsonRecord) {
         String(args.category || ""),
         { useStyleAsModelFace, hasModelReference: rawHasModelReference },
         {
-          signal: request.signal,
           timeoutMs: ANALYSIS_REFERENCE_DOWNLOAD_MS,
           maxAttempts: ANALYSIS_REFERENCE_DOWNLOAD_ATTEMPTS,
         },
@@ -2130,9 +2145,10 @@ async function analyze(request: Request, args: JsonRecord) {
           Number(Deno.env.get("VISION_GATEWAY_BUDGET_MS") || ""),
         );
         console.info(`[studio.analyze] prepMs=${prepMs} visionBudgetMs=${gatewayBudgetMs}`);
+        // The client connection is not the deadline. A proxy cut at 300s must
+        // still let Muse finish and save the plan; the retry joins this flight.
         return await visionJson(policy, parts, {
           onAttempt: persistFailedHop,
-          signal: request.signal,
           gatewayBudgetMs,
           prepElapsedMs: prepMs,
         });
@@ -2164,7 +2180,7 @@ async function analyze(request: Request, args: JsonRecord) {
       } finally {
         parts.length = 0;
       }
-    }, request.signal);
+    });
     normalized = normalizeAnalysis(result.json, String(args.category || "ethnic/fusion"), {
       modelDirection: String(args.modelDirection || ""),
     });
@@ -2209,7 +2225,7 @@ async function analyze(request: Request, args: JsonRecord) {
     ? missingRequiredReferenceLabels(references, "saree")
     : [];
   if (missingDetectedSareeEvidence.length) {
-    return {
+    return finishAnalysis({
       sessionId: "",
       referenceIds: [],
       analysisFingerprint: fingerprint,
@@ -2222,7 +2238,7 @@ async function analyze(request: Request, args: JsonRecord) {
       analysisThinking: usedPolicy.thinkingLevel,
       requiresSareeEvidence: true,
       sareeEvidenceIssues: missingDetectedSareeEvidence,
-    };
+    });
   }
 
   const requestCode = `STUDIO-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
@@ -2276,7 +2292,13 @@ async function analyze(request: Request, args: JsonRecord) {
     planningRequestId: planningRequest.id,
     fingerprint,
   });
-  return { sessionId, referenceIds: sessionData.referenceIds, analysisFingerprint: fingerprint, productHash: pHash, referenceHash: rHash, ...normalized, cacheHit, analysisProvider: usedPolicy.provider, analysisModel: usedPolicy.model, analysisThinking: usedPolicy.thinkingLevel };
+  return finishAnalysis({ sessionId, referenceIds: sessionData.referenceIds, analysisFingerprint: fingerprint, productHash: pHash, referenceHash: rHash, ...normalized, cacheHit, analysisProvider: usedPolicy.provider, analysisModel: usedPolicy.model, analysisThinking: usedPolicy.thinkingLevel });
+  } catch (error) {
+    rejectFlight(error);
+    throw error;
+  } finally {
+    if (studioAnalysisFlights.get(flightKey) === flight) studioAnalysisFlights.delete(flightKey);
+  }
 }
 
 function normalizeImageSize(aspectRatio: string, imageSize: string, model: string) {

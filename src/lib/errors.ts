@@ -44,7 +44,9 @@ export function isGatewayCutFailure(args: InvokeFailureShape): boolean {
   const text = String(args.bodyText || "");
   const haystack = `${args.fallbackMessage || ""} ${text} ${args.bodyError || ""}`.toLowerCase();
   return status === 504 ||
+    status === 499 ||
     text.includes("504") ||
+    text.includes("499") ||
     haystack.includes("gateway timeout") ||
     haystack.includes("failed to send a request to the edge function");
 }

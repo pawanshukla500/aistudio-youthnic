@@ -319,6 +319,13 @@ export const PRODUCT_TRUTH_TIMEOUT_MS = 40_000;
  * fallback almost the whole wait; a primary that hangs cannot starve it.
  */
 export const PRODUCT_TRUTH_FALLBACK_RESERVE_MS = 60_000;
+/**
+ * A product-truth hop that fails faster than this still has the proxy window
+ * left, so the next configured model may run. A hop that runs longer has used
+ * the window: Muse (or whichever model was in flight) is not followed by
+ * another model the browser will never see.
+ */
+export const PRODUCT_TRUTH_FAST_FAILURE_MS = 15_000;
 export const VISION_PROVIDER_TIMEOUT_MS = 50_000;
 export const VISION_GATEWAY_BUDGET_MS = 360_000;
 /** Held back inside the chain: parsing a hop's reply and recording the attempt. */
@@ -536,36 +543,11 @@ export function remainingVisionTimeoutMs(args: {
     args.gatewayBudgetMs - args.elapsedMs - VISION_GATEWAY_RESERVE_MS,
   );
   if (remainingWall <= 0) return 0;
-  // Product truth: the last hop gets whatever is left of the Studio wait. An
-  // earlier hop holds back one fallback window, not one window per later hop.
-  // Multiplying by the number of later hops (the auto Terra safety net made
-  // that 90s) cut the primary below the time a product-photo call needs, so
-  // Muse, Luna and Terra each hit their deadline.
-  if (args.purpose === "product_truth") {
-    if (args.remainingRouteCount <= 1) return remainingWall;
-    // A full Studio budget still holds one fallback window, including when
-    // Administration configured a shorter cap. The exception is the first hop
-    // after prep already consumed a minute of the 300s proxy: the budget
-    // handed in is only the leftover, and holding 60s back aborts Muse before
-    // a later model can answer.
-    if (
-      (args.prepElapsedMs ?? 0) >= 60_000 &&
-      args.elapsedMs < 5_000 &&
-      args.gatewayBudgetMs >= 120_000 &&
-      args.gatewayBudgetMs <= ANALYZE_PROXY_BUDGET_MS &&
-      remainingWall < 200_000
-    ) return remainingWall;
-    // When multiple fallbacks remain inside a tight reserve window after an
-    // earlier hop timed out, share the remaining budget rather than collapsing
-    // the intermediate fallback down to 10s.
-    const reserve = remainingWall > PRODUCT_TRUTH_FALLBACK_RESERVE_MS + PRODUCT_TRUTH_MIN_SLICE_MS
-      ? PRODUCT_TRUTH_FALLBACK_RESERVE_MS
-      : Math.max(20_000, Math.min(PRODUCT_TRUTH_FALLBACK_RESERVE_MS, Math.floor(remainingWall * 0.4)));
-    return Math.max(
-      Math.min(PRODUCT_TRUTH_MIN_SLICE_MS, remainingWall),
-      remainingWall - reserve,
-    );
-  }
+  // Product truth gives this hop the whole remaining window. The next model
+  // runs only after a fast failure (missing model, auth, quota), which leaves
+  // that window intact. Holding a fallback reserve back is what aborted Muse
+  // while the photos were still being read.
+  if (args.purpose === "product_truth") return remainingWall;
   const preferred = args.preferredTimeoutMs ?? VISION_PROVIDER_TIMEOUT_MS;
   if (args.remainingRouteCount <= 1) return Math.min(preferred, remainingWall);
   const reservedForLater = PRODUCT_TRUTH_MIN_SLICE_MS *
@@ -785,6 +767,7 @@ export async function runVisionProviderChain<T>(args: {
       }
       const failure = args.classify(route, error);
       lastFailure = failure;
+      const hopLatency = now() - hopStarted;
       await emit({
         provider: route.provider as AiProvider,
         model: route.model,
@@ -792,11 +775,13 @@ export async function runVisionProviderChain<T>(args: {
         outcome: "failed",
         failureCode: failure.code,
         failureMessage: failure.message,
-        latencyMs: now() - hopStarted,
+        latencyMs: hopLatency,
         attemptNumber: index + 1,
       });
       const remaining = args.routes.length - index - 1;
-      if (!shouldContinueVisionFallback(failure, remaining)) {
+      const usedTheWindow = args.purpose === "product_truth" &&
+        hopLatency >= PRODUCT_TRUTH_FAST_FAILURE_MS;
+      if (usedTheWindow || !shouldContinueVisionFallback(failure, remaining)) {
         await settleWrites();
         throw chainError(failure, route);
       }
