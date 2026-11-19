@@ -609,14 +609,14 @@ Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
     gatewayBudgetMs: afterSlowPrep,
     prepElapsedMs: 140_000,
   }), afterSlowPrep - VISION_GATEWAY_RESERVE_MS);
-  // A configured cap with no prep delay is not a late start. The primary
-  // still holds one fallback window.
+  // A configured cap is the whole window for the model that is running.
+  // A fast failure is what starts the fallback, not a slice held back in advance.
   assertEquals(remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 2,
     elapsedMs: 0,
     gatewayBudgetMs: 175_000,
-  }), 175_000 - VISION_GATEWAY_RESERVE_MS - PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
+  }), 175_000 - VISION_GATEWAY_RESERVE_MS);
 
   // The end-to-end invariant, and the reason the two reserves are not one:
   // a lone hop plus the work inside the chain plus the work outside it has to
@@ -641,7 +641,7 @@ Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
     elapsedMs: 0,
     gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
   });
-  assertEquals(primaryFirst, STUDIO_INVOKE_BUDGET_MS - VISION_GATEWAY_RESERVE_MS - PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
+  assertEquals(primaryFirst, STUDIO_INVOKE_BUDGET_MS - VISION_GATEWAY_RESERVE_MS);
 
   const primaryOnly = remainingVisionTimeoutMs({
     purpose: "product_truth",
@@ -651,23 +651,23 @@ Deno.test("product-truth hop budget leaves the client wait a reserve", () => {
   });
   assertEquals(primaryOnly, STUDIO_INVOKE_BUDGET_MS - VISION_GATEWAY_RESERVE_MS);
 
-  // A primary that timed out still leaves the fallback its reserved share...
+  // A primary that used the whole window leaves nothing for another model.
   const fallbackAfterPrimaryTimeout = remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 1,
     elapsedMs: primaryFirst,
     gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
   });
-  assertEquals(fallbackAfterPrimaryTimeout, PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
-  // ...and one that failed fast (a 404, a missing key) hands it nearly everything.
+  assertEquals(fallbackAfterPrimaryTimeout, 0);
+  // A fast failure (a 404, a missing key) hands the next model what is left.
   const fallbackAfterFastFailure = remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 1,
     elapsedMs: 1_000,
     gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
   });
-  assert(fallbackAfterFastFailure > primaryFirst);
-  assert(primaryFirst + fallbackAfterPrimaryTimeout + VISION_GATEWAY_RESERVE_MS <= STUDIO_INVOKE_BUDGET_MS);
+  assertEquals(fallbackAfterFastFailure, STUDIO_INVOKE_BUDGET_MS - 1_000 - VISION_GATEWAY_RESERVE_MS);
+  assert(primaryFirst + VISION_GATEWAY_RESERVE_MS <= STUDIO_INVOKE_BUDGET_MS);
 
   const timeout = classifyVisionProviderFailure("meta", {
     name: "TimeoutError",
@@ -738,11 +738,11 @@ Deno.test("unclassified provider request failure on hop-1 fails over to hop-2 in
   assertEquals(result.value, { ok: true, model: "muse-spark-1.3-contributor" });
 });
 
-Deno.test("80s leftover gateway still runs hop-2 after a full hop-1 timeout", async () => {
+Deno.test("a product-truth hop that uses its window does not start the next model", async () => {
   const routes = productTruthRouteChain(ADMIN_TERRA, ADMIN_MUSE_CONTRIBUTOR);
   let clock = 0;
   const invoked: Array<{ model: string; timeoutMs: number; at: number }> = [];
-  const result = await runVisionProviderChain({
+  await assertRejects(() => runVisionProviderChain({
     routes,
     purpose: "product_truth",
     gatewayBudgetMs: 80_000,
@@ -763,24 +763,18 @@ Deno.test("80s leftover gateway still runs hop-2 after a full hop-1 timeout", as
         name: (error as { name?: string }).name,
         message: error instanceof Error ? error.message : String(error),
       }),
-  });
-  assertEquals(invoked.map((hop) => hop.model), [
-    "gpt-5.6-terra",
-    "muse-spark-1.3-contributor",
-  ]);
-  assert(invoked[1].timeoutMs >= PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
-  assert(invoked[0].timeoutMs + invoked[1].timeoutMs <= 80_000);
-  assertEquals(result.route.model, "muse-spark-1.3-contributor");
+  }));
+  assertEquals(invoked.map((hop) => hop.model), ["gpt-5.6-terra"]);
 });
 
-Deno.test("Muse timeout still invokes hop-2 and logs both hops", async () => {
+Deno.test("Muse using its whole window does not start the fallback", async () => {
   const routes = [
     FAST_PRODUCT_TRUTH_ROUTE,
     CHEAP_OPENAI_VISION_ROUTE,
   ];
   const events: string[] = [];
   let clock = 0;
-  const result = await runVisionProviderChain({
+  await assertRejects(() => runVisionProviderChain({
     routes,
     purpose: "product_truth",
     gatewayBudgetMs: STUDIO_INVOKE_BUDGET_MS,
@@ -788,7 +782,7 @@ Deno.test("Muse timeout still invokes hop-2 and logs both hops", async () => {
     invoke: async (route, timeoutMs) => {
       events.push(`invoke:${route.model}`);
       if (route.model === "muse-spark-1.3") {
-        assert(timeoutMs <= STUDIO_INVOKE_BUDGET_MS - VISION_GATEWAY_RESERVE_MS - PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
+        assertEquals(timeoutMs, STUDIO_INVOKE_BUDGET_MS - VISION_GATEWAY_RESERVE_MS);
         clock += timeoutMs;
         throw Object.assign(new Error("The selected vision provider timed out."), {
           name: "TimeoutError",
@@ -805,23 +799,11 @@ Deno.test("Muse timeout still invokes hop-2 and logs both hops", async () => {
     onAttempt: (attempt) => {
       events.push(`log:${attempt.model}:${attempt.outcome}:${attempt.attemptNumber}`);
     },
-  });
+  }));
   assertEquals(events, [
     "invoke:muse-spark-1.3",
     "log:muse-spark-1.3:failed:1",
-    "invoke:gpt-5.6-luna",
-    "log:gpt-5.6-luna:completed:2",
   ]);
-  assertEquals(result.route.model, "gpt-5.6-luna");
-  assertEquals(
-    visionAttemptTelemetryRows(result.attempts).map((row) =>
-      `${row.model}:${row.status}:${row.attemptNumber}`
-    ),
-    [
-      "muse-spark-1.3:failed:1",
-      "gpt-5.6-luna:completed:2",
-    ],
-  );
 });
 
 Deno.test("hop timeout is enforced when invoke ignores timeoutMs", async () => {
@@ -1075,8 +1057,8 @@ Deno.test("3-tier vision fallback chain formats failure messages and budgets tim
     elapsedMs: 0,
     gatewayBudgetMs: 235_000,
   });
-  // 235,000 - 5,000 reserve - 60,000 fallback window = 170,000ms
-  assertEquals(hop1Timeout, 170_000);
+  // 235,000 - 5,000 reserve. The hop that is running gets the whole window.
+  assertEquals(hop1Timeout, 230_000);
   assertEquals(hop1Timeout, remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 2,
@@ -1084,25 +1066,22 @@ Deno.test("3-tier vision fallback chain formats failure messages and budgets tim
     gatewayBudgetMs: 235_000,
   }));
 
-  // hop 2 leaves 60s reserve for hop 3
   const hop2Timeout = remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 2,
     elapsedMs: 20_000,
     gatewayBudgetMs: 235_000,
   });
-  // 235,000 - 20,000 - 5,000 - 60,000 = 150,000ms
-  assertEquals(hop2Timeout, 150_000);
+  // 235,000 - 20,000 - 5,000 = 210,000ms
+  assertEquals(hop2Timeout, 210_000);
 
-  // Inside a tight 60s leftover window with 2 hops left ([Luna, Gemini]),
-  // share the remaining budget (36s Luna / 24s Gemini) instead of starving hop 2 to 10s.
   const tightHop2Timeout = remainingVisionTimeoutMs({
     purpose: "product_truth",
     remainingRouteCount: 2,
     elapsedMs: 170_000,
     gatewayBudgetMs: 235_000,
   });
-  assertEquals(tightHop2Timeout, 36_000);
+  assertEquals(tightHop2Timeout, 60_000);
 
   // hop 3 gets whatever is left of the wait
   const hop3Timeout = remainingVisionTimeoutMs({
@@ -1214,13 +1193,13 @@ Deno.test("runVisionProviderChain clamps fallback thinking for product truth in 
   const result = await runVisionProviderChain({
     routes: [primaryRoute, fallbackRoute, terraRoute],
     purpose: "product_truth",
-    gatewayBudgetMs: 175_000,
+    gatewayBudgetMs: 50_000,
     now: () => simulatedTime,
     classify: (route, error) => classifyVisionProviderFailure(route.provider as any, { message: String(error) }),
     invoke: async (route, _timeoutMs) => {
       if (route.provider === "meta") {
-        simulatedTime += 80_000;
-        throw new Error("Meta timeout");
+        simulatedTime += 1_000;
+        throw Object.assign(new Error("model not found"), { status: 404 });
       }
       fallbackInvokedThinking = route.thinkingLevel;
       return { ok: true };
@@ -1270,8 +1249,8 @@ Deno.test("4-tier shockproof chain (Meta -> Terra -> Luna -> Gemini) preserves r
         throw Object.assign(new Error("model not found"), { status: 404 });
       }
       if (route.model === "gpt-6.1-terra") {
-        clock += timeoutMs;
-        throw Object.assign(new Error("The signal has been aborted"), { name: "TimeoutError" });
+        clock += 2_000;
+        throw Object.assign(new Error("model not found"), { status: 404 });
       }
       if (route.model === "gpt-5.6-luna") {
         clock += 12_000;
