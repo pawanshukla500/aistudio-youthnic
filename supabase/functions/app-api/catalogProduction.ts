@@ -1358,7 +1358,11 @@ export async function getCatalogWorkflowDetail(
     return {
       poseIndex,
       title: text(versions[0]?.title || currentPose?.title || `Pose ${poseIndex}`),
-      current: versions[0] ? { ...versions[0], reference_manifest: latestReferenceManifest } : (currentPose ? {
+      current: versions[0] ? {
+        ...versions[0],
+        prompt: text(versions[0].prompt) || text(currentPose?.full_prompt),
+        reference_manifest: latestReferenceManifest,
+      } : (currentPose ? {
         generation_id: currentPose.generation_id,
         pose_index: currentPose.pose_index,
         version_number: Number(currentPose.generation_epoch || 1),

@@ -1,12 +1,12 @@
 import { useCallback, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { invokeAppApi } from '../../../lib/backend';
-import { GenerationFlowCanvas } from './GenerationFlowCanvas';
-import { FlowNodeDetailDrawer } from './FlowNodeDetailDrawer';
 import { parseTrace } from './graph/buildGenerationGraph';
 import { ArrowLeft } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { OperationalWorkflowView } from './OperationalWorkflowView';
+import { CatalogPoseFlow } from './CatalogPoseFlow';
+import { boardFromGenerationData } from './boardFromGenerationData';
 
 export function GenerationFlowPage() {
   const { jobId } = useParams<{ jobId: string }>();
@@ -14,7 +14,6 @@ export function GenerationFlowPage() {
   
   const [selectedGraphData, setSelectedGraphData] = useState<any | null>(null);
   const [isLoadingTrace, setIsLoadingTrace] = useState(true);
-  const [selectedNode, setSelectedNode] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const fetchFlow = useCallback(async (silent = false) => {
@@ -129,7 +128,7 @@ export function GenerationFlowPage() {
   }
 
   if (selectedGraphData.is_workflow_v2) {
-    return <OperationalWorkflowView data={selectedGraphData} onRefresh={() => fetchFlow(true)} />;
+    return <OperationalWorkflowView boardOnly data={selectedGraphData} onRefresh={() => fetchFlow(true)} />;
   }
 
   const summarySku = selectedGraphData.is_v2 
@@ -142,15 +141,16 @@ export function GenerationFlowPage() {
     
   const summaryModel = selectedGraphData.is_v2 ? 'V2 Node Graph' : selectedGraphData.trace?.summary?.model;
   const summaryCost = selectedGraphData.is_v2 ? 0 : (selectedGraphData.trace?.summary?.actual_cost_usd || 0);
+  const board = boardFromGenerationData(selectedGraphData);
 
   return (
-    <div className="h-screen w-full flex flex-col relative overflow-hidden bg-surface-container-lowest">
-      <div className="flex-none p-4 border-b border-outline-variant/30 flex justify-between items-center bg-white z-10">
+    <div className="h-screen w-full flex flex-col relative overflow-hidden bg-[#f5f6f8]">
+      <div className="flex-none p-4 border-b border-[#e6e8ee] flex justify-between items-center bg-white z-10">
         <div>
           <div className="flex items-center gap-4">
-            <button 
-              onClick={() => navigate('/history')} 
-              className="p-2 hover:bg-surface-container-low rounded-full transition-colors flex flex-shrink-0"
+            <button
+              onClick={() => navigate('/history')}
+              className="p-2 hover:bg-[#f5f6f8] rounded-full transition-colors flex flex-shrink-0"
               title="Back to History"
             >
               <ArrowLeft className="w-5 h-5 text-on-surface" />
@@ -168,20 +168,9 @@ export function GenerationFlowPage() {
           </div>
         </div>
       </div>
-      
-      <div className="flex-1 relative">
-        <GenerationFlowCanvas 
-          data={selectedGraphData} 
-          onNodeSelect={(node) => setSelectedNode(node)} 
-        />
+      <div className="min-h-0 flex-1 p-3">
+        <CatalogPoseFlow references={board.references} poses={board.poses} />
       </div>
-
-      {selectedNode && (
-        <FlowNodeDetailDrawer 
-          node={selectedNode} 
-          onClose={() => setSelectedNode(null)} 
-        />
-      )}
     </div>
   );
 }

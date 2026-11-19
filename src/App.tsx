@@ -6,6 +6,7 @@ import { Planning } from "./features/planning/Planning";
 import { Events } from "./features/events/Events";
 import { History } from "./features/history/History";
 import { GenerationFlowPage } from "./features/history/generation-flow/GenerationFlowPage";
+import { NodeWorkflowExample } from "./features/history/generation-flow/NodeWorkflowExample";
 import { Admin } from "./features/admin/Admin";
 import { Notifications } from "./features/notifications/Notifications";
 import { Login } from "./features/auth/Login";
@@ -70,6 +71,7 @@ export default function App() {
         {/* Public Documentation Portal - accessible to anyone without login */}
         <Route path="/docs" element={<DocsPortal user={user} />} />
         <Route path="/docs/*" element={<DocsPortal user={user} />} />
+        <Route path="/flow-example" element={<NodeWorkflowExample />} />
 
         {/* AI Studio Routes - strictly protected behind authentication */}
         <Route path="/*" element={<StudioAuthBarrier user={user} />} />
