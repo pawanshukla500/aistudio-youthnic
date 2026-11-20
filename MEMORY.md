@@ -4,6 +4,24 @@ This file is the **Canonical Core Memory** for the Youthnic AI Fashion Studio co
 
 ---
 
+## 0. Mandatory Agent Skills (install if missing, then use)
+
+Before any exploration or code change, every AI agent must use these three skills. If any check fails, stop and run `powershell -File tools/install-agent-skills.ps1`. Do not continue until it exits 0. Install only from the three repositories below.
+
+| Skill | Source | Must exist |
+| --- | --- | --- |
+| Graphify | https://github.com/Graphify-Labs/graphify | `graphify` on PATH, `.cursor/rules/graphify.mdc`, `.agents/skills/graphify/SKILL.md`, `.cursor/skills/graphify/SKILL.md` |
+| Ponytail | https://github.com/dietrichgebert/ponytail | `.cursor/skills/ponytail/SKILL.md`, `.cursor/hooks.json` containing `ponytail-activate.js`, checkout `tools/vendor/ponytail` |
+| Understand-Anything | https://github.com/Egonex-AI/Understand-Anything | `.cursor/skills/understand/SKILL.md`, built plugin `tools/vendor/understand-anything/understand-anything-plugin/packages/core/dist/index.js` |
+
+1. **`/ponytail` at `full`.** Read `.cursor/skills/ponytail/SKILL.md` and follow it on every code change: callers first, smallest complete change, keep validation and error handling, one small test for non-trivial logic, and say what was not checked.
+2. **`/graphify` before broad codebase search.** If `graphify-out/graph.json` is missing, build it with `graphify extract . --code-only` (local AST, no API key). Prefer `graphify query`, `graphify path`, and `graphify explain`. After code edits, run `graphify update .`.
+3. **`/understand` before architecture or cross-file work.** If `.ua/knowledge-graph.json` is missing, follow `.cursor/skills/understand/SKILL.md` and build it. The plugin root is `tools/vendor/understand-anything/understand-anything-plugin`. Use `/understand-explain` for a file or symbol and `/understand-diff` for change impact.
+
+Skill folders under `.cursor/skills` and `.agents/skills` are junctions into `tools/vendor/`, except Graphify, which `graphify install --project` writes as real files. Do not add `.cursor/rules/ponytail.mdc`: that rule disables the Ponytail Cursor hooks.
+
+---
+
 ## 1. Vision Model Routing & Zero-Fallback Architecture
 
 ### 1.1 Model Topology & Hierarchy
@@ -14,13 +32,16 @@ Visual product truth extraction, category learning, and 6-pose scene planning re
 2. **In-Provider Sibling Fallback (Zero-Drop Recovery):**
    - If `muse-spark-1.3-contributor` returns HTTP 404 or model unavailable in a specific region or account tier (or suffers a fast `<10s` transient 429/5xx), the system retries once quickly / **automatically switches** to `muse-spark-1.2-contributor` (and vice-versa) within the same Meta provider execution before declaring a provider failure.
    - This ensures transient model version differences never cause a drop-out to secondary providers.
-3. **Primary Fallback (Hop 1):** **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra:medium`)
-   - First fallback for `product_truth` analysis & pose planning, defaulting to **`medium`** reasoning (`reasoning: { effort: "medium" }` on Responses / `reasoning_effort: "medium"` on Chat Completions; clamped to `low` only when `< 60s` remains in the Edge gateway or FastAPI budget, while still preserving `"high"` if explicitly chosen in Administration when budget allows).
-4. **Safety Net (Hop 2+), by service:**
-   - **Edge Function (`app-api`):** When `product_truth` uses Meta primary + OpenAI GPT 6.1 Terra fallback, **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna:low`) is appended as the fast secondary OpenAI safety net (and default unconfigured fallbacks include **Gemini 3.8 Flash** when `GEMINI_API_KEY` is configured).
-   - **FastAPI (`invoke_vision_json`):** **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna:medium`) -> Legacy **GPT 5.6 Terra** (`gpt-5.6-terra:low`) -> **Google Gemini 3.8 Flash** (`gemini-3.8-flash:low`).
-   - Invoked only when primary and Hop 1 fail.
-5. **Default Image Generation Model:** **`gpt-image-2.6-sunburst`** (`primary_reasoning = 'none'`)
+3. **High-Concurrency Primary Fallback (Hop 1 when `ZAI_API_KEY` is configured):** **Z.ai GLM 5.3 Flash** (`glm-5.3-flash:medium`, sibling `glm-5.3-flashx`)
+   - Native multimodal VLM (320B total / 18B active parameters, 1M context, 128K output) via `https://api.z.ai/api/paas/v4/chat/completions` (and LangChain `ChatOpenAI` in FastAPI) with forced deep thinking (`thinking: { type: "enabled", clear_thinking: false }`, `temperature: 1`, `top_p: 0.95`).
+   - Supports **50 concurrent requests** on `glm-5.3-flash` and **20 concurrent requests** (200 tokens/s) on sibling `glm-5.3-flashx`, automatically failing over between siblings on 404/429/5xx before falling back to OpenAI GPT.
+4. **OpenAI Fallback (Hop 2 / Hop 1 when Z.ai is unconfigured):** **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra:medium`)
+   - OpenAI fallback for `product_truth` analysis & pose planning, defaulting to **`medium`** reasoning (`reasoning: { effort: "medium" }` on Responses / `reasoning_effort: "medium"` on Chat Completions; clamped to `low` only when `< 60s` remains in the Edge gateway or FastAPI budget, while still preserving `"high"` if explicitly chosen in Administration when budget allows).
+5. **Safety Net (Hop 3+), by service:**
+   - **Edge Function (`app-api`):** Chains `Meta Muse Spark -> Z.ai GLM 5.3 Flash (when ZAI_API_KEY is configured) -> OpenAI GPT 6.1 Terra (medium) -> OpenAI GPT 5.6 Luna (low) -> Gemini 3.8 Flash (low)`.
+   - **FastAPI (`invoke_vision_json`):** Chains `Meta Muse Spark -> Z.ai GLM 5.3 Flash (when ZAI_API_KEY is configured) -> OpenAI GPT 6.1 Terra (medium) -> OpenAI GPT 5.6 Luna (medium) -> Legacy GPT 5.6 Terra (low) -> Google Gemini 3.8 Flash (low)`.
+   - Invoked only when earlier hops fail.
+6. **Default Image Generation Model:** **`gpt-image-2.6-sunburst`** (`primary_reasoning = 'none'`)
    - Default flagship model across Studio, Catalog batches, FastAPI LangGraph nodes, and `organization_ai_model_policies` (`image_generation`), producing 3:4 2K (`1536x2048`) images at `medium` default quality (overrideable per shoot; visually verified sharper than `gpt-image-2.5-sunburst`).
 
 ### 1.2 Meta Responses API Protocol Rules
@@ -39,7 +60,11 @@ Visual product truth extraction, category learning, and 6-pose scene planning re
   ```
   *Never* send `[{ type: "message", role: "user", content }]` as primary input. Doing so triggers HTTP 400 Bad Request, causing redundant base64 re-uploads and timeout cascades.
 - **Chat Completions Endpoint Guard:** Meta `/v1/chat/completions` does NOT support multimodal images. When image parts are present, failed Responses API calls must never fall back to Chat Completions, as it corrupts error telemetry with misleading 404s.
-- **Time Budgets:** Full gateway budget is 175s within Studio's 180s client timeout (`STUDIO_ANALYZE_TIMEOUT_MS`). Hop 1 receives up to 125s so Meta has ample time to complete full multimodal analysis without timing out.
+- **Time Budgets & Multi-SKU Per-Minute Throughput (3–6+ SKUs/min):**
+  - Full gateway budget is 280s (`ANALYZE_PROXY_BUDGET_MS`) within Studio's 360s client timeout (`STUDIO_ANALYZE_TIMEOUT_MS`). Multi-hop `product_truth` chains reserve `60s` (`PRODUCT_TRUTH_FALLBACK_RESERVE_MS`) for Hop 2 (`gpt-6.1-terra:medium`), giving Hop 1 up to ~214s while guaranteeing Hop 2 always has a clean window.
+  - Studio eagerly uploads all reference images in the background on selection and automatically starts `studio.analyze` **1 second (`AUTO_ANALYZE_DELAY_MS = 1000`)** after all uploaded images finish (`requiredReady && allReferencesUploaded`). Editing `SKU Code` or `Product Name` never aborts or invalidates analysis, and editing director notes never aborts an in-flight analysis.
+  - `visionLimiter(6)` allows up to 6 concurrent vision analyses. When `>= 2` concurrent requests are already running on `muse-spark-1.3-contributor`, additional concurrent requests balance onto `muse-spark-1.2-contributor`. On HTTP `429` (`TPM` / `RPM` per-minute limits), the rate-limited model enters a 45s cooldown and switches immediately to its sibling or fails over in `0ms` to OpenAI `gpt-6.1-terra:medium`.
+  - When `studio.analyze` completes, it passes `seed_analysis` (`product_identity`, `provider`, `model`) to FastAPI `dna.extract`, persisting immutable Product DNA V2 without re-downloading images or making a duplicate VLM call.
 
 ---
 
@@ -82,14 +107,14 @@ Visual product truth extraction, category learning, and 6-pose scene planning re
 
 ## 3. Agentic Backend, Tooling & Verification Invariants
 
-1. **Mandatory Agent Tooling (`/ponytail` + `/graphify`):**
-   - Every agent editing code in this repo **must** use **`/ponytail`** (`full`) every time (check callers first, smallest complete change, preserve error handling/validation, add targeted tests, disclose unrun checks/risks).
-   - Every agent accessing this repo **must** use **`/graphify`** by default: query `graphify-out/graph.json` / `GRAPH_REPORT.md` first for codebase discovery and update `graphify-out/` incrementally (`/graphify . --update`) after edits.
+1. **Mandatory Agent Skills (`/ponytail` + `/graphify` + `/understand`):** Follow section 0. If the skill files, the `graphify` CLI, or the Understand-Anything core build are missing, run `powershell -File tools/install-agent-skills.ps1` before any other work.
 2. **Pure AI Model Policy:** `supabase/functions/app-api/lib/aiModelPolicy.ts` must remain pure (no database queries, no network fetches, no environment reads). Tenant resolution and database interaction belong in `index.ts`.
 3. **LangGraph + FastAPI + Valkey Microservices (`backend/`):**
    - `FastAPI` runs the LangGraph state graph (`PostgresSaver` checkpoints + Product DNA V2 immutable versions) alongside `celery-worker` and `Valkey` on Railway (`AI Studio App`). Internal Edge-to-FastAPI traffic uses `INTERNAL_API_SECRET` / `CATALOG_WORKER_SECRET` and internal networking (`http://fastapi.railway.internal:8000`) with scale-to-zero idle posture (`sleepApplication: true` in `railway.toml`).
 4. **Automated Test Gate:** All Deno tests (`node $npxCli deno test -A supabase/functions/app-api/tests/`), Python backend tests (`$env:PYTHONPATH="backend"; python -m pytest backend/tests/ -q`), linter (`npm run lint`), and web build (`npm run build`) must pass cleanly before merging into `main`.
-5. **Workflow Vigilance:** Any pull request merged into `main` triggers automated CI/CD deployment pipelines:
+5. **Sentry Error Tracking (`SENTRY_DSN` / `VITE_SENTRY_DSN`):**
+   - Lightweight zero-dependency Sentry Envelope v7 reporters are wired across Frontend (`src/lib/sentry.ts`), Edge Gateway (`supabase/functions/app-api/lib/sentry.ts`), and Python FastAPI (`backend/services/sentry_telemetry.py`), capturing non-aborted API/vision/worker exceptions with structured tags (`operation`, `sku_id`, `ai_provider`, `ai_model`, `gateway_cut`).
+6. **Workflow Vigilance:** Any pull request merged into `main` triggers automated CI/CD deployment pipelines:
    - `Validate application` + `Deploy Supabase database and Edge Function` (`supabase/functions/app-api` + migrations).
    - `Deploy web app to Cloud Run` + Railway auto-deploys (`functions`, `FastAPI`, `celery-worker`).
    Always monitor GitHub Actions & Railway deployments to green/SUCCESS completion.

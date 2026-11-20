@@ -37,8 +37,18 @@ supabase/.temp/
 scratch/
 .scratch_skills/
 
-# IDE Agent configuration
+# IDE Agent configuration (recreated by tools/install-agent-skills.ps1;
+# contains Windows junctions and upstream git clones)
 .agents/
+.cursor/
+
+# Understand-Anything local scratch (.ua/knowledge-graph.json stays tracked)
+.ua/intermediate/
+.ua/tmp/
+.ua/diff-overlay.json
+
+# Upstream skill checkouts (recreated by tools/install-agent-skills.ps1)
+tools/vendor/
 
 # Test artifacts
 mogra_farshi_verified/

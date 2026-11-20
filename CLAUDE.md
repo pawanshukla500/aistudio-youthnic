@@ -11,17 +11,20 @@ Six-pose fashion catalog photoshoots generated from product references.
 
 ## Non-negotiable rules
 
-0. **Follow Core Memory & Mandatory Skills (`/ponytail` + `/graphify`):**
-   - Read [MEMORY.md](MEMORY.md) and [AGENTS.md](AGENTS.md) before making architectural or model changes.
-   - **Always use `/ponytail`** every time you write or edit code: grep callers first, ship the smallest complete diff, preserve validation & error handling, write concise tests, and disclose any skipped checks or risks.
-   - **Use `/graphify` by default** whenever exploring or updating this repo: query `graphify-out/graph.json` first for cross-file discovery, and run `/graphify . --update` after edits.
+0. **Follow Core Memory & Mandatory Skills (`/ponytail` + `/graphify` + `/understand`):**
+   - Read [MEMORY.md](MEMORY.md) section 0 and [AGENTS.md](AGENTS.md) before any exploration or code change.
+   - If Graphify, Ponytail, or Understand-Anything is missing, run `powershell -File tools/install-agent-skills.ps1` and stop until it exits 0.
+   - **Always use `/ponytail` (`full`)** every time you write or edit code: grep callers first, ship the smallest complete diff, preserve validation & error handling, write concise tests, and disclose any skipped checks or risks.
+   - **Use `/graphify` by default** whenever exploring or updating this repo: query `graphify-out/graph.json` first (`graphify query` / `path` / `explain`). If the graph is missing, run `graphify extract . --code-only`. After edits, run `graphify update .`.
+   - **Use `/understand`** before architecture or cross-file work. If `.ua/knowledge-graph.json` is missing, follow `.cursor/skills/understand/SKILL.md`. The plugin root is `tools/vendor/understand-anything/understand-anything-plugin`.
 1. **AI models follow configured policies.** The primary and fallback
    routes saved in Administration → AI models (`organization_ai_model_policies`), or
    defaulted when unconfigured, determine the execution chain. For product truth and pose
-   planning (`product_truth`), the standard chain routes through Meta Muse Spark (`muse-spark-1.2-contributor` / `muse-spark-1.3-contributor` with **`high` thinking**) as primary,
-   OpenAI GPT 6.1 Terra (`gpt-6.1-terra` with **`high` thinking**) as first fallback,
+   planning (`product_truth`), the standard chain routes through Meta Muse Spark (`muse-spark-1.3-contributor` / `muse-spark-1.2-contributor` with **`medium` thinking**) as primary,
+   **Z.ai GLM 5.3 Flash** (`glm-5.3-flash:medium`, sibling `glm-5.3-flashx`, 50x concurrency) as first fallback when `ZAI_API_KEY` is configured,
+   **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra:medium`) next,
    and OpenAI GPT 5.6 Luna (`gpt-5.6-luna`) / Gemini Flash (`gemini-3.8-flash`) as secondary safety nets. Do not add arbitrary unapproved
-   models or bypass the established chain. High reasoning is preserved for Meta Muse Spark, GPT 6.1 Terra, and GPT 5.6 Luna during analysis and pose planning (`clampProductTruthThinking`), only clamping to `low` under emergency tight remaining budgets (`< 60s` in Edge `app-api` or FastAPI `invoke_vision_json`), while legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, `gemini-*`) run at `low` (explicit `none`/`minimal` preserved; Qwen thinking off). Image QA runs at `low`. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
+   models or bypass the established chain. Medium/high reasoning is preserved for Meta Muse Spark, Z.ai GLM 5.3 Flash, GPT 6.1 Terra, and GPT 5.6 Luna during analysis and pose planning (`clampProductTruthThinking`), only clamping to `low` under emergency tight remaining budgets (`< 60s` in Edge `app-api` or FastAPI `invoke_vision_json`), while legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, `gemini-*`) run at `low` (explicit `none`/`minimal` preserved; Qwen thinking off). Image QA runs at `low`. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
 2. **Product references are the truth (PR 131).** Generated images must take clothing EXCLUSIVELY
    from uploaded product references. The outfit/clothing shown in the STYLE REFERENCE image is 100% DISCARDED and QUARANTINED.
    Style reference is strictly the authority for backdrop, room architecture, flooring, and lighting. Copy the room only: do not copy the pose, the outfit, or objects in the hands.
@@ -47,6 +50,7 @@ Six-pose fashion catalog photoshoots generated from product references.
    - Farshi / Farsi construction rules (4-inch upper-hem taper, waist narrowing, 2-leg spread) apply strictly to `farshi`/`farsi` SKUs only and never bleed onto other bottom silhouettes.
 9. **Multimodal provider protocols:**
    - **Meta Muse Spark:** Multimodal vision calls use native Responses API (`https://api.meta.ai/v1/responses`) with canonical `input: [{ role: "user", content }]` schema and in-provider sibling candidate retry (`muse-spark-1.2-contributor` <-> `muse-spark-1.3-contributor`) to guarantee zero-drop reliability. Server secret: `META_MODEL_API_KEY`. Supported reasoning levels: `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` (`muse-spark-1.3` standard only). Never pass `none` (Meta rejects with 400). When image parts are present, Chat Completions is bypassed since it does not support images.
+   - **Z.ai GLM 5.3 Flash:** Native multimodal VLM via Chat Completions (`https://api.z.ai/api/paas/v4/chat/completions`, LangChain `ChatOpenAI(base_url="https://api.z.ai/api/paas/v4/")` in FastAPI) with `response_format: { type: "json_object" }`, forced thinking (`thinking: { type: "enabled" }`), `reasoning_effort` (`"low" | "high" | "max"`), `temperature: 1`, `top_p: 0.95`, and sibling failover (`glm-5.3-flash` 50x concurrency <-> `glm-5.3-flashx` 20x concurrency / 200 tok/s). Server secret: `ZAI_API_KEY`.
    - **OpenAI:** Tries Responses API (`/v1/responses`) first when image parts are present, and Chat Completions first for text-only probes (falling back on 404/400). Server secret: `OPENAI_API_KEY`.
 
 ## Where things live

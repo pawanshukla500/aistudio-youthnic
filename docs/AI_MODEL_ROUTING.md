@@ -5,7 +5,7 @@ Which model does which job, who decides, and what happens when a model fails.
 ## The rule
 
 **The models saved in Administration → AI models are the models that run.** Code never
-inserts another model ahead of them or swaps one saved model for another. When `product_truth` uses Meta primary + OpenAI fallback, `resolveVisionPolicy` appends a secondary OpenAI safety-net (`GPT 5.6 Luna` or `GPT 6.1 Terra`) at the end of the fallback chain for reliability. When there is no saved policy, the defaults below apply.
+inserts another model ahead of them or swaps one saved model for another. When `product_truth` uses Meta primary with fallbacks enabled, `resolveVisionPolicy` wires **Z.ai GLM 5.3 Flash** (`glm-5.3-flash:medium`, when `ZAI_API_KEY` is configured) right after Meta Muse Spark, followed by **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra:medium`), **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna:low`), and **Gemini 3.8 Flash** (`gemini-3.8-flash:low`) when configured. When there is no saved policy, the defaults below apply.
 
 Earlier versions broke this rule in several ways, and none of them may come back:
 
@@ -52,27 +52,23 @@ An invalid request (400, malformed input, safety block) stops the chain, because
 switching models would not fix the product references.
 
 A hop whose API key is not set is **still attempted**. It fails at once with a
-message naming the secret (`META_MODEL_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
+message naming the secret (`META_MODEL_API_KEY`, `ZAI_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
 `QWEN_API_KEY`), so the administrator can see why a configured fallback never answered.
 
 ## Reasoning effort for product analysis
 
-Product analysis is one large multimodal JSON call that must finish inside Studio's 180s wait.
-- **Meta Muse Spark** (`muse-spark-1.3-contributor` / `1.2-contributor` / `1.3` / `1.2`), **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra`), and **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna`) default to **medium** thinking (`clampProductTruthThinking`, ~103s full-prompt extraction) and preserve explicit **high** or **medium** thinking during `product_truth` analysis & pose planning for deep chain-of-thought reasoning across garment construction, Farshi/saree drape taxonomy, styling, and 6-pose choreography.
+Product analysis is one large multimodal JSON call that must finish inside Studio's 360s wait (and Railway's 280s gateway budget).
+- **Meta Muse Spark** (`muse-spark-1.3-contributor` / `1.2-contributor` / `1.3` / `1.2`), **Z.ai GLM 5.3 Flash** (`glm-5.3-flash` / `glm-5.3-flashx`), **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra`), and **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna`) default to **medium** thinking (Meta/Z.ai/Terra) or **low** (Luna) and preserve explicit **high** or **medium** thinking during `product_truth` analysis & pose planning (`clampProductTruthThinking`) for deep chain-of-thought reasoning across garment construction, Farshi/saree drape taxonomy, styling, and 6-pose choreography.
+- **Z.ai GLM 5.3 Flash** uses forced thinking (`thinking: { type: "enabled" }`, `temperature: 1`, `top_p: 0.95`, `response_format: { type: "json_object" }`), mapping internal `low` -> `low`, `medium`/`high` -> `high` ("Enhanced Reasoning"), and `max` -> `max`, with 50 concurrent requests on `glm-5.3-flash` and automatic sibling failover to `glm-5.3-flashx` (20x concurrency, 200 tok/s).
 - Legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, `gemini-*`) run at **low** reasoning (or lowest supported level; explicit `"none"` or `"minimal"` is preserved; Qwen runs with thinking off).
-- When any hop runs under an emergency tight deadline (`timeoutMs < 60s`), thinking is dynamically clamped to **low** (`clampProductTruthHopThinking`) to avoid timeout cascades while still letting Meta/Terra run at `medium` (or `high`) under standard failover budgets.
+- When any hop runs under an emergency tight deadline (`timeoutMs < 60s`), thinking is dynamically clamped to **low** (`clampProductTruthHopThinking`) to avoid timeout cascades while still letting Meta/Z.ai/Terra finish cleanly under standard failover budgets.
 QA keeps its saved reasoning, except that Gemini Flash models run at low.
 
 ## Time budget (product analysis)
 
-- Studio's client waits `STUDIO_ANALYZE_TIMEOUT_MS` (180s). The chain budget is 175s,
-  holding 5s back for work outside the chain (`VISION_REQUEST_OVERHEAD_MS`).
-- While a fallback is still to come, the current hop keeps one
-  `PRODUCT_TRUTH_FALLBACK_RESERVE_MS` (45s) window, plus `VISION_GATEWAY_RESERVE_MS`
-  (5s). That reserve is not multiplied by the number of later hops, so the automatic
-  Terra safety net does not shrink the primary. Hop 1 gets up to 125s. A hanging
-  primary still leaves the next model its 45s window.
-- A primary that fails fast (a 404 or a missing key) hands the next model nearly the whole budget.
+- Studio's client waits `STUDIO_ANALYZE_TIMEOUT_MS` (360s). The gateway budget is `ANALYZE_PROXY_BUDGET_MS` (280s) inside Railway's 300s proxy ceiling, holding 5s back inside the chain (`VISION_GATEWAY_RESERVE_MS`).
+- While a fallback is still to come, the current hop keeps one `PRODUCT_TRUTH_FALLBACK_RESERVE_MS` (60s) window, guaranteeing Meta or Z.ai timeout still leaves OpenAI GPT 6.1 Terra its 60s medium-thinking window.
+- A primary that fails fast (a 404, 429 rate-limit, or missing key) hands the next model nearly the whole budget.
 
 ## Errors people see
 
@@ -116,8 +112,8 @@ OpenAI and Meta Muse Spark vision calls support dual protocols. The first protoc
 
 | Purpose | Primary | Fallback |
 | --- | --- | --- |
-| `product_truth` | Meta `muse-spark-1.3-contributor` (`medium`), or OpenAI `gpt-6.1-terra` (`medium`) when Meta key is not set | Hop 1: OpenAI `gpt-6.1-terra` (`medium`) · Hop 2: OpenAI `gpt-5.6-luna` (`low`) |
-| `qa` | Meta `muse-spark-1.3-contributor` (`low`) or OpenAI `gpt-5.6-luna` | OpenAI `gpt-5.6-luna` / `gpt-6.1-terra` |
+| `product_truth` | Meta `muse-spark-1.3-contributor` (`medium`), Z.ai `glm-5.3-flash` (`medium`) if only `ZAI_API_KEY` is set, or OpenAI `gpt-6.1-terra` (`medium`) | Hop 1: Z.ai `glm-5.3-flash` (`medium`, when `ZAI_API_KEY` set) · Hop 2: OpenAI `gpt-6.1-terra` (`medium`) · Hop 3: OpenAI `gpt-5.6-luna` (`low`) · Hop 4: Gemini `gemini-3.8-flash` (`low`) |
+| `qa` | Meta `muse-spark-1.3-contributor` (`low`) or Z.ai `glm-5.3-flash` (`low`) or OpenAI `gpt-5.6-luna` | Z.ai `glm-5.3-flash` (`low`) / OpenAI `gpt-5.6-luna` / `gpt-6.1-terra` / Gemini `gemini-3.8-flash` |
 | `image_generation` | OpenAI `gpt-image-2.6-sunburst` (`none`) | — |
 
 See [MEMORY.md](../MEMORY.md) and [AGENTS.md](../AGENTS.md) for core architectural memory and PR 131 product truth contracts.

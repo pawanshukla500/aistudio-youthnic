@@ -29,26 +29,32 @@ When interacting with vision pipelines (`supabase/functions/app-api/` and `backe
 - **Primary Route (Analysis & Pose Planning):** Meta Muse Spark (`muse-spark-1.3-contributor:medium` default or `muse-spark-1.2-contributor:medium`; standard `muse-spark-1.3` / `1.2` when needed) is the default primary when `META_MODEL_API_KEY` is present, running with **`medium` thinking** (`reasoning: { effort: "medium" }`).
 - **Payload Schema:** Always send `input: [{ role: "user", content: [...] }]` to `https://api.meta.ai/v1/responses`. Do not send `{ type: "message" }`.
 - **Reasoning Effort:** Meta Muse Spark and OpenAI `gpt-6.1-terra` default `product_truth` analysis & pose planning to **`medium`** thinking (while Edge Hop 2 safety-net runs `gpt-5.6-luna:low` and FastAPI secondary runs `gpt-5.6-luna:medium`; explicit **`high`** or **`medium`** selections are preserved in `clampProductTruthThinking` in `app-api` / `invoke_vision_json` in FastAPI), clamping down to `low` under emergency tight remaining budgets (`< 60s` in Edge or FastAPI). Image QA (`qa`) runs at `low` for speed.
-- **In-Provider Sibling Retry:** If `muse-spark-1.3-contributor` returns 404/not available (or suffers a fast `<10s` transient 429/5xx), transparently retry `muse-spark-1.2-contributor` (and vice-versa) before falling back.
-- **Fallback Chain:** Hop 1 is **OpenAI GPT 6.1 Terra (`gpt-6.1-terra:medium`)** for analysis & pose planning fallback, Hop 2 is OpenAI GPT 5.6 Luna (`gpt-5.6-luna:low`), then Gemini Flash (`gemini-3.8-flash`).
+- **In-Provider Sibling Retry:** If `muse-spark-1.3-contributor` returns 404/not available (or suffers a fast `<10s` transient 429/5xx), transparently retry `muse-spark-1.2-contributor` (and vice-versa) before falling back. Similarly, Z.ai `glm-5.3-flash` (50x concurrency) transparently retries sibling `glm-5.3-flashx` (20x concurrency, 200 tok/s).
+- **Fallback Chain:** Hop 1 (when `ZAI_API_KEY` is configured) is **Z.ai GLM 5.3 Flash (`glm-5.3-flash:medium`)** via `https://api.z.ai/api/paas/v4/chat/completions` with forced thinking (`thinking: { type: "enabled" }`), Hop 2 is **OpenAI GPT 6.1 Terra (`gpt-6.1-terra:medium`)** for analysis & pose planning fallback, Hop 3 is OpenAI GPT 5.6 Luna (`gpt-5.6-luna:low`), then Gemini Flash (`gemini-3.8-flash`).
 - **Default Image Generation Model:** **`gpt-image-2.6-sunburst`** (3:4, 2K / `1536x2048`, default `medium` quality unless overridden; DB policy `primary_reasoning` must be `'none'`).
 - **Garment Construction Isolation:** Preserve Farshi/Farsi two-leg architecture and 4-inch upper-hem taper strictly on `farshi` SKUs only—never bleed Farshi geometry rules onto non-Farshi bottoms.
 - **Deno Railway Runtime (`Dockerfile.functions`):** Keep `DENO_V8_FLAGS` comma-separated (`"--max-old-space-size=768,--optimize-for-size"`), never space-separated.
 
 ---
 
-## 3. Mandatory Core Agent Workflows (`/ponytail` & `/graphify`)
+## 3. Mandatory Core Agent Workflows (`/ponytail`, `/graphify`, `/understand`)
 
-Every AI agent accessing or modifying this repository **MUST** follow these two workflows by default:
+Every AI agent accessing or modifying this repository **MUST** follow `MEMORY.md` section 0 before anything else. If Graphify, Ponytail, or Understand-Anything is not installed in this checkout, run `powershell -File tools/install-agent-skills.ps1` and wait until it exits 0.
 
 1. **`/ponytail` Always-On Code Discipline (Mandatory on Every Code Change):**
+   - Read `.cursor/skills/ponytail/SKILL.md` and apply level `full`.
    - Inspect real callers first (`git grep`) before changing interfaces, signatures, or shared helpers.
    - Deliver the **smallest complete change** that solves the full problem—no speculative abstractions, redundant wrappers, or silent fallbacks.
    - Keep existing validation, tenant isolation, and error handling intact; preserve unrelated comments/docstrings.
    - Leave concise unit tests for non-trivial behavior changes and summarize any skipped checks or residual risks in the final report.
 2. **`/graphify` Default Knowledge Graph Usage:**
-   - Query `graphify-out/graph.json` and `graphify-out/GRAPH_REPORT.md` **first** when navigating architecture or tracing multi-file dependencies across TypeScript, Deno, React, and Python instead of reading entire directories blindly.
-   - Run `/graphify . --update` after completing code or documentation edits so `graphify-out/` stays current for subsequent agents.
+   - Query `graphify-out/graph.json` with `graphify query`, `graphify path`, or `graphify explain` **first** when navigating architecture or tracing multi-file dependencies across TypeScript, Deno, React, and Python.
+   - If `graphify-out/graph.json` is missing, build it with `graphify extract . --code-only`.
+   - Run `graphify update .` after completing code or documentation edits so `graphify-out/` stays current for subsequent agents.
+3. **`/understand` Architecture Graph:**
+   - Before architecture or cross-file work, use `.ua/knowledge-graph.json` when it exists.
+   - If it is missing, follow `.cursor/skills/understand/SKILL.md` and build it. The plugin root is `tools/vendor/understand-anything/understand-anything-plugin`.
+   - Use `/understand-explain` for a file or symbol and `/understand-diff` for the impact of a change.
 
 ---
 
