@@ -137,17 +137,55 @@ class ProductDNAAgent:
 
         emb_text = str(pi.get("embroidery") or "").strip()
         has_emb = bool(emb_text and emb_text.lower() not in {"none", "not visible", "no embroidery", "n/a", "unknown"})
-        saree_truth = pi.get("sareeTruth") if isinstance(pi.get("sareeTruth"), dict) else {}
-        saree_drape = pi.get("sareeDrapePlan") if isinstance(pi.get("sareeDrapePlan"), dict) else {}
+        saree_truth = pi.get("sareeTruth") if isinstance(pi.get("sareeTruth"), dict) else (seed_analysis.get("sareeTruth") if isinstance(seed_analysis.get("sareeTruth"), dict) else {})
+        saree_drape = pi.get("sareeDrapePlan") if isinstance(pi.get("sareeDrapePlan"), dict) else (seed_analysis.get("sareeDrapePlan") if isinstance(seed_analysis.get("sareeDrapePlan"), dict) else {})
         saree_pallu = saree_truth.get("pallu") if isinstance(saree_truth.get("pallu"), dict) else {}
         saree_borders = saree_truth.get("borders") if isinstance(saree_truth.get("borders"), dict) else {}
         saree_body = saree_truth.get("body") if isinstance(saree_truth.get("body"), dict) else {}
         saree_blouse = saree_truth.get("blouse") if isinstance(saree_truth.get("blouse"), dict) else {}
 
         bottom_details = str(pi.get("bottomWearDetails") or "").strip()
+        bottom_lower = bottom_details.lower()
+        absent_bottom = (
+            not bottom_details
+            or bottom_lower in {"none", "no", "not included", "n/a", "na", "absent", "unknown"}
+            or bottom_lower.startswith(("none -", "none,", "no bottom", "standalone"))
+        )
         bottom_cut = str(pi.get("bottomWearCut") or "").strip().lower()
         bottom_included = pi.get("bottomWearIncluded")
-        has_bottom = bool(bottom_included) if bottom_included is not None else bool(bottom_cut and bottom_cut != "none")
+        has_bottom = bool(bottom_included) if bottom_included is not None else (
+            bool(bottom_cut and bottom_cut != "none") or not absent_bottom
+        )
+        if not bottom_cut or bottom_cut == "none":
+            if has_bottom and not absent_bottom:
+                if "farshi" in bottom_lower or "farsi" in bottom_lower:
+                    bottom_cut = "farshi"
+                elif "palazzo" in bottom_lower:
+                    bottom_cut = "palazzo"
+                elif "sharara" in bottom_lower:
+                    bottom_cut = "sharara"
+                elif "gharara" in bottom_lower:
+                    bottom_cut = "gharara"
+                elif "salwar" in bottom_lower or "patiala" in bottom_lower:
+                    bottom_cut = "salwar"
+                elif "dhoti" in bottom_lower:
+                    bottom_cut = "dhoti"
+                elif "churidar" in bottom_lower:
+                    bottom_cut = "churidar"
+                elif "cigarette" in bottom_lower or "straight pant" in bottom_lower or "trouser" in bottom_lower or "pant" in bottom_lower:
+                    bottom_cut = "straight_pant"
+                elif "lehenga" in bottom_lower or "skirt" in bottom_lower:
+                    bottom_cut = "skirt"
+                else:
+                    bottom_cut = "included"
+            else:
+                bottom_cut = "none"
+
+        body_motifs = saree_body.get("motifInventory")
+        body_motif_text = ", ".join(str(m) for m in body_motifs if m) if isinstance(body_motifs, list) else ""
+        blouse_color = str(saree_blouse.get("color") or "").strip()
+        blouse_fabric = str(saree_blouse.get("fabric") or "").strip()
+        blouse_coord = " ".join(p for p in (blouse_color, blouse_fabric) if p).strip() or str(saree_blouse.get("colorAndFabric") or "unknown")
 
         return {
             "garment_family": family or "kurta_or_kurti_set",
@@ -177,19 +215,19 @@ class ProductDNAAgent:
             "bottom_wear": {
                 "has_bottom_wear": has_bottom,
                 "classification": bottom_details or bottom_cut or ("none" if not has_bottom else "unknown"),
-                "cut_class": bottom_cut or ("none" if not has_bottom else "unknown"),
+                "cut_class": bottom_cut if has_bottom else "none",
                 "hem_trim": bottom_details or ("none" if not has_bottom else "unknown"),
             },
             "saree_details": {
-                "drape_style": str(saree_drape.get("drapeFamily") or "nivi"),
-                "pallu_direction": str(saree_drape.get("palluPlacement") or "over_left_shoulder"),
-                "pallu_zari_type": str(saree_pallu.get("zariOrThreadType") or "unknown"),
-                "pallu_artwork_description": str(saree_pallu.get("layoutSummary") or "derived from uploaded pallu reference"),
-                "border_weave_type": str(saree_borders.get("borderTechnique") or saree_borders.get("lowerBorder") or "unknown"),
-                "body_butti_type": str(saree_body.get("motifDescription") or "unknown"),
-                "blouse_fabric_coordination": str(saree_blouse.get("colorAndFabric") or "unknown"),
+                "drape_style": str(saree_drape.get("baseDrapeFamily") or saree_drape.get("drapeFamily") or "nivi"),
+                "pallu_direction": str(saree_drape.get("palluShoulderPlacement") or saree_drape.get("palluFallDirection") or saree_drape.get("palluPlacement") or "over_left_shoulder"),
+                "pallu_zari_type": str(saree_pallu.get("zari") or saree_pallu.get("embroidery") or saree_pallu.get("zariOrThreadType") or "unknown"),
+                "pallu_artwork_description": str(saree_pallu.get("artwork") or saree_pallu.get("layoutSummary") or "derived from uploaded pallu reference"),
+                "border_weave_type": str(saree_borders.get("construction") or saree_borders.get("lowerBorder") or saree_borders.get("upperBorder") or saree_borders.get("borderTechnique") or "unknown"),
+                "body_butti_type": str(saree_body.get("motifPlacement") or saree_body.get("embellishment") or body_motif_text or saree_body.get("motifDescription") or "unknown"),
+                "blouse_fabric_coordination": blouse_coord,
                 "blouse_sleeve_length": str(saree_blouse.get("sleeves") or "unknown"),
-                "blouse_back_neckline": str(saree_blouse.get("backDesign") or "unknown"),
+                "blouse_back_neckline": str(saree_blouse.get("backConstruction") or saree_blouse.get("neckline") or saree_blouse.get("backDesign") or "unknown"),
             },
             "explicit_invariants": [str(inv) for inv in (pi.get("invariantDetails") or [])],
             "prohibited_changes": [str(p) for p in (pi.get("absenceConstraints") or [])],
@@ -539,6 +577,45 @@ class ProductDNAAgent:
                 ):
                     row_sku_id = str(db_dna_row.get("sku_id") or sku_id)
                     row_ver = int(db_dna_row.get("version") or dna_payload.get("version") or 1)
+                    if row_sku_id != sku_id:
+                        cloned_payload = {
+                            **dna_payload,
+                            "organization_id": org_id,
+                            "sku_id": sku_id,
+                            "sku_name": sku_name,
+                            "source_fingerprint": fingerprint,
+                            "approved": bool(auto_approve),
+                            "status": "approved" if auto_approve else "draft",
+                            "approved_by": "auto_workflow" if auto_approve else None,
+                            "approved_at": datetime.now(timezone.utc).isoformat() if auto_approve else None,
+                        }
+                        garment_family = str(cloned_payload.get("garment_family") or state.get("garment_family") or "kurta_or_kurti_set")
+                        cloned_persisted = False
+                        try:
+                            new_ver = save_dna_version(
+                                org_id=org_id,
+                                sku_id=sku_id,
+                                sku_name=sku_name,
+                                dna_payload=cloned_payload,
+                                fingerprint=fingerprint,
+                                garment_family=garment_family,
+                                approved=bool(auto_approve),
+                                approved_by="auto_workflow" if auto_approve else None,
+                            )
+                            cloned_payload["version"] = new_ver
+                            cloned_persisted = True
+                            cache_manager.set_hot_dna(org_id, sku_id, cloned_payload)
+                        except Exception as exc:
+                            logger.error(f"Could not clone matched-fingerprint DNA for SKU {sku_id}: {exc}")
+                            cloned_payload["approved"] = False
+                            cloned_payload["status"] = "draft"
+                            cloned_payload["persisted"] = False
+                        return {
+                            "product_dna": cloned_payload,
+                            "dna_approved": bool(cloned_payload.get("approved", False) and cloned_persisted),
+                            "dna_persisted": cloned_persisted,
+                        }
+
                     synced = self._sync_reuse_approval(
                         org_id, row_sku_id, dna_payload,
                         row_ver,
@@ -550,6 +627,7 @@ class ProductDNAAgent:
                     return {
                         "product_dna": synced,
                         "dna_approved": bool(synced.get("approved", False)),
+                        "dna_persisted": True,
                     }
 
         import time

@@ -184,3 +184,41 @@ Deno.test("when Z.ai GLM 5.3 Flash is configured, product truth prefers Z.ai as 
   assertEquals(coerced.fallbackModel, "glm-5.3-flash");
   assertEquals(coerced.fallbackThinking, "medium");
 });
+
+Deno.test("coerceAdminAiPolicy skips unconfigured OpenAI and picks configured fallback provider", () => {
+  const partialRegistry: AdminAiRegistryEntry[] = [
+    {
+      provider: "meta",
+      configured: true,
+      models: [
+        { id: "muse-spark-1.3-contributor", label: "Contributor 1.3", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "medium", "high"] },
+      ],
+    },
+    {
+      provider: "openai",
+      configured: false,
+      models: [
+        { id: "gpt-6.1-terra", label: "GPT 6.1 Terra", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "medium", "high"] },
+      ],
+    },
+    {
+      provider: "gemini",
+      configured: true,
+      models: [
+        { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "medium", "high"] },
+      ],
+    },
+  ];
+  const coerced = coerceAdminAiPolicy({
+    purpose: "product_truth",
+    primaryProvider: "meta",
+    primaryModel: "muse-spark-1.3-contributor",
+    primaryThinking: "medium",
+    fallbackEnabled: true,
+    fallbackProvider: "meta",
+    fallbackModel: "muse-spark-1.3-contributor",
+    fallbackThinking: "medium",
+  }, partialRegistry);
+  assertEquals(coerced.fallbackProvider, "gemini");
+  assertEquals(coerced.fallbackModel, "gemini-3.8-flash");
+});

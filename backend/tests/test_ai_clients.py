@@ -912,3 +912,112 @@ def test_invoke_vision_json_meta_to_zai_glm_5_3_flash_to_openai_fallback(monkeyp
     assert calls[1] == ("zai", "glm-5.3-flash", "medium")
 
 
+def test_dna_seed_mapping_and_cross_sku_fingerprint_clone(monkeypatch):
+    from agents import dna_agent as dna_mod
+
+    agent = dna_mod.ProductDNAAgent()
+    kurti_raw = agent._raw_from_seed_analysis({
+        "product_identity": {
+            "garmentFamily": "kurta_or_kurti_set",
+            "mainColor": "maroon",
+            "fabric": "mulmul cotton",
+            "bottomWearDetails": "Matching maroon farshi pajama with 6-inch tapered embroidered hem",
+        }
+    })
+    assert kurti_raw is not None
+    assert kurti_raw["bottom_wear"]["has_bottom_wear"] is True
+    assert kurti_raw["bottom_wear"]["cut_class"] == "farshi"
+
+    saree_raw = agent._raw_from_seed_analysis({
+        "product_identity": {
+            "garmentFamily": "saree",
+            "mainColor": "crimson",
+            "fabric": "kanjeevaram silk",
+            "sareeDrapePlan": {
+                "baseDrapeFamily": "bengali_aatpoure",
+                "palluShoulderPlacement": "left_shoulder_back_to_front",
+            },
+            "sareeTruth": {
+                "pallu": {"zari": "gold kadhua zari", "artwork": "temple motif panel"},
+                "borders": {"construction": "korvai temple border"},
+                "body": {"motifPlacement": "spaced gold butti", "motifInventory": ["peacock", "lotus"]},
+                "blouse": {"color": "deep green", "fabric": "raw silk", "sleeves": "elbow", "backConstruction": "boat back with dori"},
+            },
+        }
+    })
+    assert saree_raw is not None
+    assert saree_raw["saree_details"]["drape_style"] == "bengali_aatpoure"
+    assert saree_raw["saree_details"]["pallu_zari_type"] == "gold kadhua zari"
+    assert saree_raw["saree_details"]["blouse_fabric_coordination"] == "deep green raw silk"
+    assert saree_raw["saree_details"]["blouse_back_neckline"] == "boat back with dori"
+
+    saved_calls = []
+    monkeypatch.setattr(dna_mod, "get_latest_dna_version", lambda org_id, sku_id: None)
+    monkeypatch.setattr(
+        dna_mod,
+        "get_dna_version_by_fingerprint",
+        lambda org_id, sku_id, fp: {
+            "sku_id": "OLD-SKU",
+            "sku_name": "Old Garment",
+            "version": 3,
+            "source_fingerprint": fp,
+            "approved": True,
+            "dna_payload": {
+                "organization_id": org_id,
+                "sku_id": "OLD-SKU",
+                "sku_name": "Old Garment",
+                "garment_family": "kurta_or_kurti_set",
+                "main_color": "maroon",
+                "source_fingerprint": fp,
+                "metadata": {"analysis_source": "vlm"},
+            },
+        },
+    )
+
+    def fake_save_dna_version(**kwargs):
+        saved_calls.append(kwargs)
+        return 1
+
+    monkeypatch.setattr(dna_mod, "save_dna_version", fake_save_dna_version)
+    out = agent.process({
+        "organization_id": "org_1",
+        "sku_id": "NEW-SKU",
+        "sku_name": "New Garment",
+        "source_fingerprint": "fp_shared_1",
+        "auto_approve": False,
+        "references": [{"role": "front", "sha256_hash": "h1"}],
+    })
+    assert len(saved_calls) == 1
+    assert saved_calls[0]["sku_id"] == "NEW-SKU"
+    assert saved_calls[0]["sku_name"] == "New Garment"
+    assert out["dna_persisted"] is True
+    assert out["product_dna"]["sku_id"] == "NEW-SKU"
+    assert out["product_dna"]["sku_name"] == "New Garment"
+    assert out["product_dna"]["version"] == 1
+
+
+def test_zai_non_retryable_client_error_skips_flashx(monkeypatch):
+    from services import ai_clients
+
+    monkeypatch.setattr(settings, "ZAI_API_KEY", "zai-test-key")
+    invoked_models = []
+
+    class FakeChat:
+        def __init__(self, model, **kwargs):
+            invoked_models.append(model)
+
+        def invoke(self, msgs):
+            raise RuntimeError("Error code: 401 - invalid api key unauthorized")
+
+    import langchain_openai
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", FakeChat)
+
+    import pytest
+    with pytest.raises(RuntimeError, match="401"):
+        ai_clients._zai_vision_json(
+            "test",
+            [{"role": "front", "mime_type": "image/jpeg", "base64": "YWJj"}],
+        )
+    assert invoked_models == ["glm-5.3-flash"]
+
+

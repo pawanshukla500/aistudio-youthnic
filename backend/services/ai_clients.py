@@ -570,8 +570,13 @@ def _zai_vision_json(
             lower_err = str(exc).lower()
             now_elapsed = time.monotonic() - started_at
             remaining_after = (deadline - time.monotonic()) if deadline is not None else max(0.0, float(timeout_s) - now_elapsed)
+            non_retryable_client_error = (
+                any(code in lower_err for code in (" 400", "http 400", " 401", "http 401", " 403", "http 403"))
+                or any(tok in lower_err for tok in ("bad request", "unauthorized", "authentication", "forbidden", "invalid api key", "invalid_request", "content policy"))
+            )
             can_switch = (
                 remaining_after >= 25.0
+                and not non_retryable_client_error
                 and (
                     "429" in lower_err
                     or "rate limit" in lower_err

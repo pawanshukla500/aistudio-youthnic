@@ -59,4 +59,4 @@ Filename: troubleshooting-analysis-failed-error.webp]
 Contact your workspace administrator or Youthnic technical support if:
 - Analysis fails repeatedly across multiple different high-resolution photos that previously worked.
 - The error message displays `500 INTERNAL_VISION_ROUTER_ERROR` or `UPSTREAM_QUOTA_EXHAUSTED`.
-- Check **Sentry** (`SENTRY_DSN` / `VITE_SENTRY_DSN`) for structured exception envelopes tagged with `operation`, `sku_id`, `ai_provider`, `ai_model`, and `gateway_cut`.
+- Check **Sentry** (`SENTRY_DSN` / `VITE_SENTRY_DSN`) for structured exception envelopes tagged with `operation` (`status`, `gateway_cut`, and `sku_id` when present on gateway requests; `http_path` and `purpose` on FastAPI backend errors).

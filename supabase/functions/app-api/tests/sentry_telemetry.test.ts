@@ -24,6 +24,8 @@ Deno.test("parseSentryDsn parses standard and path-prefixed Sentry DSNs", () => 
   assertEquals(parseSentryDsn(""), null);
   assertEquals(parseSentryDsn("not-a-url"), null);
   assertEquals(parseSentryDsn("https://no-user-host.com/123"), null);
+  assertEquals(parseSentryDsn("https://bad%ZZkey@o450000.ingest.us.sentry.io/450999"), null);
+  assertEquals(parseClientSentryDsn("https://bad%ZZkey@o450000.ingest.us.sentry.io/450999"), null);
 });
 
 Deno.test("buildSentryEnvelope and sendSentryException deliver valid v7 Sentry envelope", async () => {

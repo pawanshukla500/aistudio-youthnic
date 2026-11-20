@@ -9559,11 +9559,13 @@ const appRequestHandler = async (request: Request) => {
   if (request.method === "GET") return new Response("ok", { status: 200, headers: corsHeaders });
   if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
   let operation = "request";
+  let sentrySkuId = "";
   try {
     const body = await request.json().catch(() => ({})) as JsonRecord;
     const rawOperation = String(body.operation || "");
     operation = rawOperation || "request";
     const args = (body.args && typeof body.args === "object" ? body.args : {}) as JsonRecord;
+    sentrySkuId = String(args.skuId || args.sku_id || "").trim();
     const handlers: Record<string, () => Promise<unknown>> = {
       "dna.extract": () => dnaExtractOperation(request, args),
       "dna.get": () => dnaGetOperation(request, args),
@@ -9781,7 +9783,10 @@ const appRequestHandler = async (request: Request) => {
     return json({ data: await handler() });
   } catch (error) {
     console.error("app-api request failed", errorMessage(error));
-    reportSentryException(error, { operation: `app-api.${operation}` });
+    reportSentryException(error, {
+      operation: `app-api.${operation}`,
+      ...(sentrySkuId ? { skuId: sentrySkuId } : {}),
+    });
     return json({ error: errorMessage(error) }, 200);
   }
 };

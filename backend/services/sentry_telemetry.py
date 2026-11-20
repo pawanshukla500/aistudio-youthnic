@@ -1,3 +1,5 @@
+import atexit
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import threading
@@ -12,6 +14,10 @@ import httpx
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+_SENTRY_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sentry-telemetry")
+_SENTRY_INFLIGHT = threading.BoundedSemaphore(32)
+atexit.register(_SENTRY_EXECUTOR.shutdown, wait=False, cancel_futures=True)
 
 
 def parse_sentry_dsn(raw_dsn: Optional[str]) -> Optional[Dict[str, str]]:
@@ -129,6 +135,25 @@ def send_sentry_exception_sync(
         return False
 
 
+def _deliver_sentry_task(
+    exc: Any,
+    level: str,
+    tags: Optional[Dict[str, Any]],
+    extra: Optional[Dict[str, Any]],
+    raw_dsn: Optional[str],
+) -> None:
+    try:
+        send_sentry_exception_sync(
+            exc,
+            level=level,
+            tags=tags,
+            extra=extra,
+            raw_dsn=raw_dsn,
+        )
+    finally:
+        _SENTRY_INFLIGHT.release()
+
+
 def capture_sentry_exception(
     exc: Any,
     *,
@@ -140,15 +165,10 @@ def capture_sentry_exception(
     dsn_val = raw_dsn if raw_dsn is not None else settings.SENTRY_DSN
     if not parse_sentry_dsn(dsn_val):
         return
-    worker = threading.Thread(
-        target=send_sentry_exception_sync,
-        kwargs={
-            "exc": exc,
-            "level": level,
-            "tags": tags,
-            "extra": extra,
-            "raw_dsn": dsn_val,
-        },
-        daemon=True,
-    )
-    worker.start()
+    if not _SENTRY_INFLIGHT.acquire(blocking=False):
+        logger.debug("Sentry telemetry queue full; dropping excess capture")
+        return
+    try:
+        _SENTRY_EXECUTOR.submit(_deliver_sentry_task, exc, level, tags, extra, dsn_val)
+    except Exception:
+        _SENTRY_INFLIGHT.release()

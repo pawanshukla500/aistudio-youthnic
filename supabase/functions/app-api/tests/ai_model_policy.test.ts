@@ -1388,6 +1388,10 @@ Deno.test("Z.ai GLM 5.3 Flash and FlashX are approved for vision analysis/QA and
     parseJsonResponse('<think>analyzing garment pleats and zardozi border</think>\n```json\n{"category":"ethnic/fusion","mainColor":"maroon"}\n```'),
     { category: "ethnic/fusion", mainColor: "maroon" },
   );
+  assertEquals(
+    parseJsonResponse('{"note":"keep <think>literal</think> inside string","mainColor":"maroon"}'),
+    { note: "keep <think>literal</think> inside string", mainColor: "maroon" },
+  );
 
   assertThrows(
     () => assertAllowedAiModelRoute({ provider: "zai", model: "glm-5.3-flash", thinkingLevel: "none" }, "product_truth"),

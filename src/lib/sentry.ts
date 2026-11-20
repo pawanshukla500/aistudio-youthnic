@@ -18,13 +18,14 @@ export function parseClientSentryDsn(rawDsn: string | null | undefined): ParsedC
   const trimmed = String(rawDsn || "").trim();
   if (!trimmed) return null;
   let url: URL;
+  let publicKey = "";
   try {
     url = new URL(trimmed);
+    publicKey = decodeURIComponent(url.username || "").trim();
   } catch {
     return null;
   }
   const protocol = url.protocol === "http:" ? "http" : url.protocol === "https:" ? "https" : null;
-  const publicKey = decodeURIComponent(url.username || "").trim();
   const host = url.host.trim();
   const segments = url.pathname.split("/").map((s) => s.trim()).filter(Boolean);
   const projectId = segments.pop() || "";

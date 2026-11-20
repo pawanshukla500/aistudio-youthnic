@@ -153,7 +153,7 @@ export function coerceAdminAiPolicy(
       fallbackCandidates.some((entry) => entry.provider === next.fallbackProvider)
     ? next.fallbackProvider
     : fallbackCandidates.find((entry) => entry.provider === "zai" && entry.configured)?.provider ||
-      fallbackCandidates.find((entry) => entry.provider === "openai")?.provider ||
+      fallbackCandidates.find((entry) => entry.provider === "openai" && entry.configured)?.provider ||
       fallbackCandidates.find((entry) => entry.configured)?.provider ||
       fallbackCandidates[0]?.provider ||
       "";

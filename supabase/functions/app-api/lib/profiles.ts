@@ -980,16 +980,25 @@ function objectValue(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 }
 
+function stripJsonFences(text: string): string {
+  return text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+}
+
 export function parseJsonResponse(text: string): JsonRecord {
-  const withoutThink = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  const cleaned = withoutThink.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const directCandidate = stripJsonFences(text);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(cleaned);
-  } catch (err) {
-    const objectMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (!objectMatch) throw err;
-    parsed = JSON.parse(objectMatch[0]);
+    parsed = JSON.parse(directCandidate);
+  } catch {
+    const withoutThink = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+    const cleaned = stripJsonFences(withoutThink);
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (err) {
+      const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (!objectMatch) throw err;
+      parsed = JSON.parse(objectMatch[0]);
+    }
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("The AI provider returned an invalid object.");
   return parsed as JsonRecord;

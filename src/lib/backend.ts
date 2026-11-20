@@ -222,8 +222,10 @@ async function invokeAppApiRequest<T>(
     };
     thrown.gatewayCut = isGatewayCutFailure(failure);
     if (!options?.signal?.aborted) {
+      const skuId = String(args.skuId || args.sku_id || "").trim();
       captureClientSentryException(thrown, {
         operation,
+        ...(skuId ? { skuId } : {}),
         tags: { status: status ?? undefined, gateway_cut: thrown.gatewayCut },
       });
     }
@@ -975,7 +977,7 @@ async function mutateBackend(
     case api.analysis.analyzeReferences:
       return invokeAppApi("studio.analyze", args, options);
     case api.dna.extract:
-      return invokeAppApi("dna.extract", args);
+      return invokeAppApi("dna.extract", args, options);
     case api.dna.approve:
       return invokeAppApi("dna.approve", args);
     case api.generation.queueSku:

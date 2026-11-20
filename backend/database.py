@@ -276,6 +276,39 @@ def save_reference_evidence(
             return str(row["id"]) if row else ""
 
 
+def update_reference_evidence_dimensions(
+    org_id: str,
+    evidence_id: str,
+    dimensions: Dict[str, int],
+    mime_type: Optional[str] = None,
+) -> None:
+    if not org_id or not evidence_id or not dimensions:
+        return
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                if mime_type:
+                    cur.execute(
+                        """
+                        UPDATE public.product_reference_evidence
+                        SET dimensions = %s, mime_type = %s
+                        WHERE organization_id = %s AND id = %s
+                        """,
+                        (json.dumps(dimensions), mime_type, org_id, evidence_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE public.product_reference_evidence
+                        SET dimensions = %s
+                        WHERE organization_id = %s AND id = %s
+                        """,
+                        (json.dumps(dimensions), org_id, evidence_id),
+                    )
+    except Exception as exc:
+        logger.debug(f"Reference dimensions update skipped for {evidence_id}: {exc}")
+
+
 def get_references_for_sku(org_id: str, sku_id: str) -> List[Dict[str, Any]]:
     with get_db() as conn:
         with conn.cursor() as cur:

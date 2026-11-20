@@ -42,9 +42,18 @@ if (-not (Get-Command graphify -ErrorAction SilentlyContinue)) {
   if ($LASTEXITCODE -ne 0) { throw 'pip install graphifyy failed' }
 }
 
-graphify install --project --platform cursor
+$PythonScriptDirs = @(python -c "import sysconfig, site, pathlib; dirs = [sysconfig.get_path('scripts'), str(pathlib.Path(site.getuserbase()) / 'Scripts'), str(pathlib.Path(site.getuserbase()) / 'bin')]; print('\n'.join(d for d in dirs if d))")
+foreach ($Dir in $PythonScriptDirs) {
+  if ((Test-Path -LiteralPath $Dir) -and ($env:Path -split ';' -notcontains $Dir)) {
+    $env:Path = "$Dir;$env:Path"
+  }
+}
+$GraphifyCmd = Get-Command graphify -ErrorAction SilentlyContinue
+if (-not $GraphifyCmd) { throw 'graphify CLI not found on PATH after pip install; add Python Scripts directory to PATH.' }
+
+& $GraphifyCmd.Source install --project --platform cursor
 if ($LASTEXITCODE -ne 0) { throw 'graphify cursor install failed' }
-graphify install --project --platform agents
+& $GraphifyCmd.Source install --project --platform agents
 if ($LASTEXITCODE -ne 0) { throw 'graphify agents install failed' }
 
 $Vendor = Join-Path $Root 'tools\vendor'
@@ -74,7 +83,11 @@ Get-ChildItem -LiteralPath (Join-Path $Ua 'understand-anything-plugin\skills') -
   Ensure-Junction (Join-Path $CursorSkills $_.Name) $_.FullName
   Ensure-Junction (Join-Path $AgentSkills $_.Name) $_.FullName
 }
-Ensure-Junction (Join-Path $CursorSkills 'graphify') (Join-Path $AgentSkills 'graphify')
+$CursorGraphify = Join-Path $CursorSkills 'graphify'
+$AgentGraphify = Join-Path $AgentSkills 'graphify'
+if (-not (Test-Path -LiteralPath $CursorGraphify) -and (Test-Path -LiteralPath $AgentGraphify)) {
+  Ensure-Junction $CursorGraphify $AgentGraphify
+}
 
 node (Join-Path $Ponytail 'scripts\cursor-hooks.js') install --project
 if ($LASTEXITCODE -ne 0) { throw 'ponytail cursor hook install failed' }

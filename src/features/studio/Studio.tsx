@@ -331,6 +331,8 @@ export function Studio() {
     : Boolean(productReferences.front && productReferences.back);
   const effectiveSkuId = skuId.trim() || `studio-${(productReferences.saree_front_drape || productReferences.front)?.id.slice(0, 8) || "draft"}`;
   const effectiveSkuName = skuName.trim() || skuId.trim() || "Untitled studio product";
+  const latestSkuRef = useRef({ skuId: effectiveSkuId, skuName: effectiveSkuName });
+  latestSkuRef.current = { skuId: effectiveSkuId, skuName: effectiveSkuName };
 
   const derivedSceneDirection = useMemo(() => analysis ? [
     analysis.creativeDirection.backgroundStyle,
@@ -599,7 +601,7 @@ export function Studio() {
     setNotice(null);
     setAnalyzing(true);
     let analysisArgs: Record<string, unknown> | null = null;
-    const startedKey = latestAnalysisKeyRef.current;
+    const startedKey = sourceKey || latestAnalysisKeyRef.current;
     const acceptAnalysis = (result: StudioAnalysis) => {
       if (controller.signal.aborted || analysisRequestRef.current !== requestId) return false;
       setAnalysis(result);
@@ -639,10 +641,10 @@ export function Studio() {
       const result = await analyzeReferences(analysisArgs, { signal: controller.signal }) as StudioAnalysis;
       if (!acceptAnalysis(result)) return;
       const dnaParams = {
-        skuId: effectiveSkuId,
-        skuName: effectiveSkuName,
+        skuId: latestSkuRef.current.skuId,
+        skuName: latestSkuRef.current.skuName,
         category,
-        sourceKey,
+        sourceKey: startedKey,
         modelIdentity: options.modelIdentity,
         seedAnalysis: {
           product_identity: result.productIdentity,
@@ -689,8 +691,8 @@ export function Studio() {
               ? analysisArgs.references as Array<{ role: ReferenceRole; downloadUrl?: string; storagePath?: string; hash?: string; mimeType?: string }>
               : [];
             const dnaParams = {
-              skuId: effectiveSkuId,
-              skuName: effectiveSkuName,
+              skuId: latestSkuRef.current.skuId,
+              skuName: latestSkuRef.current.skuName,
               category,
               sourceKey: startedKey,
               modelIdentity: options.modelIdentity,
@@ -849,6 +851,7 @@ export function Studio() {
       dnaState.persisted === false ||
       dnaState.productDna?.metadata?.analysis_source === "heuristic_offline" ||
       dnaState.sourceKey !== analysisInputKey ||
+      dnaState.skuId !== effectiveSkuId ||
       analysisIsStale
     ) {
       setNotice({
@@ -872,6 +875,27 @@ export function Studio() {
 
   const runAnalysisRef = useRef(runAnalysis);
   runAnalysisRef.current = runAnalysis;
+  const runDnaExtractionRef = useRef(runDnaExtraction);
+  runDnaExtractionRef.current = runDnaExtraction;
+
+  // Keep Product DNA synced when operator edits optional SKU Code / Product Name after analysis,
+  // without aborting or re-running expensive Vision analysis (FastAPI clones via fingerprint/seed in <100ms).
+  useEffect(() => {
+    if (analyzing || !analysisSourceKey || analysisSourceKey !== analysisInputKey) return;
+    const params = lastDnaParamsRef.current;
+    if (!params || params.sourceKey !== analysisInputKey) return;
+    if (params.skuId === effectiveSkuId && params.skuName === effectiveSkuName) return;
+    const timer = setTimeout(() => {
+      const syncedParams = {
+        ...params,
+        skuId: effectiveSkuId,
+        skuName: effectiveSkuName,
+      };
+      lastDnaParamsRef.current = syncedParams;
+      void runDnaExtractionRef.current(syncedParams, analysisRequestRef.current, false, true);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [analysisInputKey, analysisSourceKey, analyzing, effectiveSkuId, effectiveSkuName]);
 
   useEffect(() => {
     analysisRequestRef.current += 1;
@@ -912,6 +936,16 @@ export function Studio() {
     }
     setGenerating(true);
     try {
+      const activeParams = lastDnaParamsRef.current;
+      if (
+        activeParams &&
+        activeParams.sourceKey === analysisInputKey &&
+        (activeParams.skuId !== effectiveSkuId || (dnaState && dnaState.skuId !== effectiveSkuId))
+      ) {
+        const syncedParams = { ...activeParams, skuId: effectiveSkuId, skuName: effectiveSkuName };
+        lastDnaParamsRef.current = syncedParams;
+        await runDnaExtraction(syncedParams, analysisRequestRef.current, false, true);
+      }
       const result = await queueSku({
         organizationId: organization._id,
         createdBy: user._id,
@@ -1388,7 +1422,7 @@ export function Studio() {
             current={analysisIsCurrent}
             onAnalyze={handleAnalyze}
             onImprovePosePlan={handleImprovePosePlan}
-            dnaCurrent={Boolean(dnaState && dnaState.sourceKey === analysisInputKey)}
+            dnaCurrent={Boolean(dnaState && dnaState.sourceKey === analysisInputKey && dnaState.skuId === effectiveSkuId)}
             dnaState={dnaState}
             onApproveDna={handleApproveDna}
             onRetryDna={handleRetryDnaExtraction}
