@@ -61,6 +61,8 @@ export type TracePose = {
   qa_status: string;
   error?: string;
   storage_path?: string;
+  updated_at?: string | null;
+  completed_at?: string | null;
   full_prompt?: string;
   attempts: TraceAttempt[];
   final_output_url?: string;

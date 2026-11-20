@@ -92,6 +92,8 @@ test("stored file names still match the upload name", () => {
 });
 
 test("boardFromGenerationData preserves downloadUrl references, manifest links, versions, and queued prompts", () => {
+  const freshIso = new Date(Date.now() - 60_000).toISOString();
+  const staleIso = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
   const board = boardFromGenerationData({
     trace: {
       summary: {
@@ -101,6 +103,7 @@ test("boardFromGenerationData preserves downloadUrl references, manifest links, 
         aspect_ratio: "3:4",
         image_size: "2K",
         quality: "medium",
+        completed_at: freshIso,
       },
       session: {
         references: [
@@ -113,10 +116,20 @@ test("boardFromGenerationData preserves downloadUrl references, manifest links, 
       },
       poses: [
         {
+          generation_id: "job_old:pose:1",
+          pose_index: 1,
+          title: "Old Run Pose",
+          status: "completed",
+          updated_at: staleIso,
+          final_output_url: "https://cdn.example.com/old-out.jpg",
+          attempts: [],
+        },
+        {
           generation_id: "job_1:pose:1",
           pose_index: 1,
           title: "Full Front",
           status: "completed",
+          updated_at: freshIso,
           full_prompt: "",
           final_output_url: "https://cdn.example.com/out-1.jpg",
           attempts: [
@@ -130,15 +143,50 @@ test("boardFromGenerationData preserves downloadUrl references, manifest links, 
             ],
           },
         },
+        {
+          generation_id: "job_1:pose:2",
+          pose_index: 2,
+          title: "Failed Pose",
+          status: "failed",
+          updated_at: freshIso,
+          full_prompt: "Pose 2",
+          attempts: [
+            { attempt_index: 1, model: "gpt-image-2.6-sunburst", output_url: "https://cdn.example.com/rej-a.jpg", rejected: true },
+            { attempt_index: 2, model: "gpt-image-2.6-sunburst", output_url: "https://cdn.example.com/rej-b.jpg", rejected: true },
+          ],
+        },
+        {
+          generation_id: "job_1:pose:3",
+          pose_index: 3,
+          title: "Expired Pose",
+          status: "completed",
+          updated_at: staleIso,
+          final_output_url: "https://cdn.example.com/out-3.jpg",
+          attempts: [],
+        },
+        {
+          generation_id: "job_1:pose:4",
+          pose_index: 4,
+          title: "Queued Pose",
+          status: "queued",
+          updated_at: freshIso,
+          attempts: [],
+        },
       ],
     },
   });
   assert.equal(board.references.length, 2);
   assert.equal(board.references[0].imageUrl, "https://cdn.example.com/front.jpg");
   assert.equal(board.references[1].roomOnly, true);
+  assert.equal(board.poses.length, 4);
+  assert.equal(board.poses[0].title, "Full Front");
   assert.equal(board.poses[0].prompt, "Planned full front prompt");
   assert.equal(board.poses[0].canRegenerate, true);
   assert.equal(board.poses[0].versions?.length, 2);
   assert.equal(board.poses[0].sent?.[0].fileName, "front.jpg");
   assert.equal(board.poses[0].settings, "3:4 · 2K · medium");
+  assert.equal(board.poses[1].imageUrl, "https://cdn.example.com/rej-b.jpg");
+  assert.equal(board.poses[1].canRegenerate, true);
+  assert.equal(board.poses[2].canRegenerate, false);
+  assert.equal(board.poses[3].canRegenerate, false);
 });

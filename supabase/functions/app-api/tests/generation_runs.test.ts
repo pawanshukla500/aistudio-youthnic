@@ -175,10 +175,12 @@ Deno.test("a pose set that fails to insert fails the claim", async () => {
   assertEquals(calls, ["insertJob", "insertPoses"]);
 });
 
-Deno.test("boardFromGenerationData keeps Studio downloadUrl references and interactive pose metadata", () => {
+Deno.test("boardFromGenerationData keeps Studio downloadUrl references, job scope, latest rejection, and 24h regenerate rules", () => {
+  const freshIso = new Date(Date.now() - 60_000).toISOString();
+  const expiredIso = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
   const board = boardFromGenerationData({
     trace: {
-      summary: { job_id: "job_s1", status: "completed", model: "gpt-image-2.6-sunburst", aspect_ratio: "3:4", image_size: "2K", quality: "medium" },
+      summary: { job_id: "job_s1", status: "completed", model: "gpt-image-2.6-sunburst", aspect_ratio: "3:4", image_size: "2K", quality: "medium", completed_at: freshIso },
       session: {
         references: [
           { id: "r1", role: "front", downloadUrl: "https://example.com/f.jpg", filename: "f.jpg" },
@@ -187,20 +189,54 @@ Deno.test("boardFromGenerationData keeps Studio downloadUrl references and inter
       },
       poses: [
         {
+          generation_id: "job_prev:pose:1",
+          pose_index: 1,
+          title: "Previous Run",
+          status: "completed",
+          updated_at: expiredIso,
+          final_output_url: "https://example.com/prev.jpg",
+          attempts: [],
+        },
+        {
           generation_id: "job_s1:pose:1",
           pose_index: 1,
           title: "Full Front",
           status: "completed",
+          updated_at: freshIso,
           final_output_url: "https://example.com/out.jpg",
           attempts: [{ attempt_index: 1, model: "gpt-image-2.6-sunburst", output_url: "https://example.com/out.jpg", qa: { outcome: "automatically_verified" } }],
           referenceManifest: { references: [{ role: "front", filename: "f.jpg" }] },
+        },
+        {
+          generation_id: "job_s1:pose:2",
+          pose_index: 2,
+          title: "Failed Pose",
+          status: "failed",
+          updated_at: freshIso,
+          attempts: [
+            { attempt_index: 1, model: "gpt-image-2.6-sunburst", output_url: "https://example.com/rej-old.jpg", rejected: true },
+            { attempt_index: 2, model: "gpt-image-2.6-sunburst", output_url: "https://example.com/rej-new.jpg", rejected: true },
+          ],
+        },
+        {
+          generation_id: "job_s1:pose:3",
+          pose_index: 3,
+          title: "Stale Pose",
+          status: "completed",
+          updated_at: expiredIso,
+          final_output_url: "https://example.com/stale.jpg",
+          attempts: [],
         },
       ],
     },
   });
   assertEquals(board.references.length, 1);
   assertEquals(board.references[0].imageUrl, "https://example.com/f.jpg");
+  assertEquals(board.poses.length, 3);
   assertEquals(board.poses[0].prompt, "Planned pose 1");
   assertEquals(board.poses[0].canRegenerate, true);
   assertEquals(board.poses[0].sent, [{ role: "front", fileName: "f.jpg" }]);
+  assertEquals(board.poses[1].imageUrl, "https://example.com/rej-new.jpg");
+  assertEquals(board.poses[1].canRegenerate, true);
+  assertEquals(board.poses[2].canRegenerate, false);
 });

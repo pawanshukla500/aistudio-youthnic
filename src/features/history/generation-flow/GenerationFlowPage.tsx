@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useRef, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { invokeAppApi } from '../../../lib/backend';
 import { parseTrace } from './graph/buildGenerationGraph';
@@ -17,13 +17,17 @@ export function GenerationFlowPage() {
   const [busyPose, setBusyPose] = useState<number | undefined>(undefined);
   const [actionError, setActionError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const latestFlowReqRef = useRef(0);
+  const poseActionLockRef = useRef(false);
 
   const fetchFlow = useCallback(async (silent = false) => {
     if (!jobId) return;
+    const requestId = ++latestFlowReqRef.current;
     if (!silent) setIsLoadingTrace(true);
     setError(null);
     try {
       const data = await invokeAppApi<any>('history.generationFlow.get', { jobId });
+      if (requestId !== latestFlowReqRef.current) return;
       if (data) {
         if (data.is_workflow_v2 || data.is_v2) {
           setSelectedGraphData(data);
@@ -33,20 +37,22 @@ export function GenerationFlowPage() {
         }
       }
     } catch (err: any) {
+      if (requestId !== latestFlowReqRef.current) return;
       setError(err.message);
     } finally {
-      if (!silent) setIsLoadingTrace(false);
+      if (!silent && requestId === latestFlowReqRef.current) setIsLoadingTrace(false);
     }
   }, [jobId]);
 
   useEffect(() => {
     if (!jobId) return;
     let ignore = false;
+    const requestId = ++latestFlowReqRef.current;
     const load = async () => {
       setError(null);
       try {
         const data = await invokeAppApi<any>('history.generationFlow.get', { jobId });
-        if (!ignore) {
+        if (!ignore && requestId === latestFlowReqRef.current) {
           if (data) {
             if (data.is_workflow_v2 || data.is_v2) {
               setSelectedGraphData(data);
@@ -57,11 +63,11 @@ export function GenerationFlowPage() {
           }
         }
       } catch (err: any) {
-        if (!ignore) {
+        if (!ignore && requestId === latestFlowReqRef.current) {
           setError(err.message);
         }
       } finally {
-        if (!ignore) {
+        if (!ignore && requestId === latestFlowReqRef.current) {
           setIsLoadingTrace(false);
         }
       }
@@ -161,7 +167,8 @@ export function GenerationFlowPage() {
   const handleDownloadPose = async (poseIndex: number) => {
     const pose = tracePoses.find((item) => Number(item.pose_index) === poseIndex);
     const storagePath = String(pose?.storage_path || pose?.final_output_url || "").trim();
-    if (!traceJobId || !storagePath) return;
+    if (!traceJobId || !storagePath || poseActionLockRef.current) return;
+    poseActionLockRef.current = true;
     setBusyPose(poseIndex);
     setActionError(null);
     try {
@@ -188,13 +195,15 @@ export function GenerationFlowPage() {
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Could not download pose image.");
     } finally {
+      poseActionLockRef.current = false;
       setBusyPose(undefined);
     }
   };
 
   const handleRegeneratePose = async (poseIndex: number, note: string) => {
     const pose = tracePoses.find((item) => Number(item.pose_index) === poseIndex);
-    if (!pose?.generation_id || !note.trim()) return;
+    if (!pose?.generation_id || !note.trim() || poseActionLockRef.current) return;
+    poseActionLockRef.current = true;
     setBusyPose(poseIndex);
     setActionError(null);
     try {
@@ -203,6 +212,7 @@ export function GenerationFlowPage() {
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Could not queue pose re-generation.");
     } finally {
+      poseActionLockRef.current = false;
       setBusyPose(undefined);
     }
   };

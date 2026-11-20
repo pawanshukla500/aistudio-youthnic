@@ -1,4 +1,7 @@
+import { scopePoseRowsToJob } from "../../../lib/generationRuns.ts";
 import type { FlowPose, FlowReference } from "./flowLinks.ts";
+
+const REGENERATE_WINDOW_MS = 86_400_000;
 
 type Loose = Record<string, any>;
 
@@ -47,11 +50,21 @@ export function boardFromGenerationData(data: Loose | null | undefined): { refer
     const posePlan: Loose[] = Array.isArray(data.trace.session?.posePlan) ? data.trace.session.posePlan : [];
     const settingsText = [summary.aspect_ratio, summary.image_size, summary.quality].filter(Boolean).join(" · ");
     const jobBusy = ["queued", "processing", "cancelling"].includes(String(summary.status || ""));
-    const poses: FlowPose[] = (data.trace.poses || []).map((pose: Loose) => {
+    const jobId = String(summary.job_id || "");
+    const rawTracePoses: Loose[] = Array.isArray(data.trace.poses) ? data.trace.poses : [];
+    const scopedTracePoses = jobId ? scopePoseRowsToJob(rawTracePoses, jobId) : rawTracePoses;
+    const poses: FlowPose[] = scopedTracePoses.map((pose: Loose) => {
       const manifestRefs: Loose[] = Array.isArray(pose.referenceManifest?.references) ? pose.referenceManifest.references : [];
       const attempts: Loose[] = Array.isArray(pose.attempts) ? pose.attempts : [];
       const planned = posePlan[Number(pose.pose_index || 1) - 1] || posePlan.find((item) => item?.id === pose.pose_type);
-      const imageUrl = String(pose.final_output_url || attempts.find((attempt: Loose) => attempt.output_url)?.output_url || "");
+      const finalOutputUrl = String(pose.final_output_url || pose.output_url || "").trim();
+      const latestAttemptUrl = String([...attempts].reverse().find((attempt: Loose) => attempt.output_url)?.output_url || "");
+      const imageUrl = String(finalOutputUrl || latestAttemptUrl);
+      const poseStatus = String(pose.status || "");
+      const completedStamp = pose.updated_at || pose.completed_at || summary.completed_at;
+      const completedMs = completedStamp ? Date.parse(String(completedStamp)) : NaN;
+      const withinRegenerateWindow = Number.isFinite(completedMs) && Date.now() - completedMs < REGENERATE_WINDOW_MS;
+      const poseEligibleStatus = poseStatus === "failed" || (poseStatus === "completed" && Boolean(finalOutputUrl));
       return {
         poseIndex: Number(pose.pose_index),
         title: String(pose.title || planned?.title || `Pose ${pose.pose_index}`),
@@ -63,7 +76,7 @@ export function boardFromGenerationData(data: Loose | null | undefined): { refer
           ...(reference.filename ? { fileName: String(reference.filename) } : {}),
         })),
         model: String(attempts.at(-1)?.model || summary.model || ""),
-        status: String(pose.status || ""),
+        status: poseStatus,
         error: String(pose.error || ""),
         settings: settingsText,
         versionCount: attempts.length || (imageUrl ? 1 : 0),
@@ -72,7 +85,7 @@ export function boardFromGenerationData(data: Loose | null | undefined): { refer
           status: String(attempt.qa?.outcome || (attempt.rejected ? "rejected_by_qa" : pose.status) || ""),
           imageUrl: String(attempt.output_url || ""),
         })),
-        canRegenerate: Boolean(pose.generation_id && !jobBusy),
+        canRegenerate: Boolean(pose.generation_id && !jobBusy && poseEligibleStatus && withinRegenerateWindow),
       };
     });
     const sessionRows: Loose[] = Array.isArray(data.trace.session?.references) ? data.trace.session.references : [];

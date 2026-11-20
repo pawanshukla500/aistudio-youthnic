@@ -67,6 +67,7 @@ Deno.test("Shockproof resilience contracts: safety fallbacks, retries, and delay
   assertEquals(studioSource.includes("onChange={(event) => updateDirectorNote(setProductDetails, event.target.value)}"), true);
 
   assertEquals(indexSource.includes("async function buildGenerationFlowTrace("), true);
+  assertEquals(indexSource.includes("const scopedPoseRows = scopePoseRowsToJob("), true);
   assertEquals(indexSource.includes("operation: \"generation.pose_failed\""), true);
   assertEquals(indexSource.includes("operation: \"app-api.worker\""), true);
   assertEquals(indexSource.includes("operation: \"app-api.nodeWorker\""), true);
@@ -76,5 +77,11 @@ Deno.test("Shockproof resilience contracts: safety fallbacks, retries, and delay
     new URL("../../../../src/features/history/generation-flow/boardFromGenerationData.ts", import.meta.url),
   ).replace(/\r\n/g, "\n");
   assertEquals(flowBoardSource.includes("entry.downloadUrl ||"), true);
-  assertEquals(flowBoardSource.includes("canRegenerate: Boolean(pose.generation_id && !jobBusy)"), true);
+  assertEquals(flowBoardSource.includes("scopePoseRowsToJob(rawTracePoses, jobId)"), true);
+  assertEquals(flowBoardSource.includes("REGENERATE_WINDOW_MS"), true);
+
+  const poseFlowSource = Deno.readTextFileSync(
+    new URL("../../../../src/features/history/generation-flow/CatalogPoseFlow.tsx", import.meta.url),
+  ).replace(/\r\n/g, "\n");
+  assertEquals(poseFlowSource.includes("|| !note.trim() || actions.busyPose !== undefined"), true);
 });

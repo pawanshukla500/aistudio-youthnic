@@ -5284,7 +5284,8 @@ async function buildGenerationFlowTrace(job: JsonRecord, organizationId: string)
     );
   }
 
-  const signedPoses = await Promise.all(((poses.data || []) as JsonRecord[]).map(async (pose) => {
+  const scopedPoseRows = scopePoseRowsToJob((poses.data || []) as PoseRowLike[], String(job.job_id)) as JsonRecord[];
+  const signedPoses = await Promise.all(scopedPoseRows.map(async (pose) => {
     const outputUrl = pose.storage_path
       ? await signCatalogObject(organizationId, String(pose.storage_path), pose.storage_backend, String(pose.output_url || ""))
       : String(pose.output_url || "");
