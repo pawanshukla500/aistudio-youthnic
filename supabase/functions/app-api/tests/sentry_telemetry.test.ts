@@ -26,6 +26,14 @@ Deno.test("parseSentryDsn parses standard and path-prefixed Sentry DSNs", () => 
   assertEquals(parseSentryDsn("https://no-user-host.com/123"), null);
   assertEquals(parseSentryDsn("https://bad%ZZkey@o450000.ingest.us.sentry.io/450999"), null);
   assertEquals(parseClientSentryDsn("https://bad%ZZkey@o450000.ingest.us.sentry.io/450999"), null);
+
+  const regional = parseSentryDsn("https://9b92644acb54c35fb80b3550405fb19a@o4512423893925888.ingest.de.sentry.io/4512463912566864");
+  assertEquals(regional?.host, "o4512423893925888.ingest.de.sentry.io");
+  assertEquals(regional?.projectId, "4512463912566864");
+  assertEquals(
+    regional?.envelopeUrl,
+    "https://o4512423893925888.ingest.de.sentry.io/api/4512463912566864/envelope/?sentry_key=9b92644acb54c35fb80b3550405fb19a&sentry_version=7",
+  );
 });
 
 Deno.test("buildSentryEnvelope and sendSentryException deliver valid v7 Sentry envelope", async () => {
