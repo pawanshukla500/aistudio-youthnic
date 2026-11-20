@@ -123,6 +123,8 @@ jobs:
           VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
           VITE_FIREBASE_MEASUREMENT_ID: ${{ vars.VITE_FIREBASE_MEASUREMENT_ID }}
           VITE_SUPABASE_FUNCTIONS_URL: ${{ secrets.VITE_SUPABASE_FUNCTIONS_URL }}
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_SENTRY_ENVIRONMENT: production
 
   deploy-supabase:
     name: Deploy Supabase database and Edge Function
@@ -195,6 +197,8 @@ jobs:
             VITE_FIREBASE_APP_ID=${{ vars.VITE_FIREBASE_APP_ID }}
             VITE_FIREBASE_MEASUREMENT_ID=${{ vars.VITE_FIREBASE_MEASUREMENT_ID }}
             VITE_SUPABASE_FUNCTIONS_URL=${{ secrets.VITE_SUPABASE_FUNCTIONS_URL }}
+            VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
+            VITE_SENTRY_ENVIRONMENT=production
 
       - id: deploy
         uses: google-github-actions/deploy-cloudrun@v3

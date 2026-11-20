@@ -8,6 +8,7 @@ from cache import distributed_lock, cache_manager
 from database import get_db, get_latest_dna_version, get_references_for_sku, release_process_memory
 from firebase_service import upload_bytes
 from services.ai_clients import generate_catalog_image, load_reference_image
+from services.sentry_telemetry import capture_sentry_exception
 from agents.pose_planning_agent import CreativePosePlanningAgent
 from agents.qa_agent import ComputerVisionQAAgent
 from agents.correction_agent import CorrectionAgent
@@ -184,6 +185,10 @@ def process_generation_job_task(self, job_id: str, org_id: str, sku_id: str):
 
     except Exception as exc:
         logger.error(f"Error in generation job {job_id}: {exc}")
+        capture_sentry_exception(
+            exc,
+            tags={"celery_task": "process_generation_job", "job_id": job_id, "sku_id": sku_id},
+        )
         if self.request.retries >= self.max_retries:
             try:
                 with get_db() as conn:
@@ -347,6 +352,10 @@ def process_pose_generation_task(self, generation_id: str, job_id: str, pose_ind
 
     except Exception as exc:
         logger.error(f"Error generating pose {pose_index}: {exc}")
+        capture_sentry_exception(
+            exc,
+            tags={"celery_task": "process_pose_generation", "job_id": job_id, "sku_id": sku_id, "pose_index": pose_index},
+        )
         is_terminal = self.request.retries >= self.max_retries
         if image_committed and not pose_qa_enabled:
             pose_status = "completed"
@@ -616,6 +625,10 @@ def evaluate_qa_task(self, generation_id: str, job_id: str, pose_index: int, org
 
     except Exception as exc:
         logger.error(f"Error in QA evaluation for {generation_id}: {exc}")
+        capture_sentry_exception(
+            exc,
+            tags={"celery_task": "evaluate_qa", "job_id": job_id, "sku_id": sku_id, "pose_index": pose_index},
+        )
         is_terminal = self.request.retries >= self.max_retries
         if is_terminal and expected_attempt is not None:
             try:
