@@ -701,4 +701,323 @@ def test_generate_catalog_image_skips_doomed_retry_below_min_budget(monkeypatch)
     assert calls["count"] == 1
 
 
+def test_meta_429_tpm_switches_to_sibling_then_falls_back_to_gpt61_terra(monkeypatch):
+    from services import ai_clients
+
+    monkeypatch.setattr(settings, "META_MODEL_API_KEY", "meta_test_key")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test-key")
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
+
+    meta_models = []
+    openai_calls = []
+
+    class FakeResp:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+            self.content = b"{}"
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            meta_models.append(json["model"])
+            return FakeResp(
+                429,
+                {"error": {"message": "Rate limit reached: tokens per min (TPM) quota exceeded"}},
+            )
+
+    def fake_openai(prompt, images, model="gpt-5.6-luna", reasoning_effort="medium", timeout_s=60):
+        openai_calls.append((model, reasoning_effort))
+        return {
+            "provider": "openai",
+            "model": model,
+            "reasoning": reasoning_effort,
+            "data": {"garment_family": "kurta_or_kurti_set", "main_color": "maroon"},
+        }
+
+    monkeypatch.setattr(ai_clients.httpx, "Client", FakeClient)
+    monkeypatch.setattr(ai_clients, "_langchain_openai_vision_json", fake_openai)
+    monkeypatch.setattr(ai_clients.cache_manager, "record_provider_result", lambda *a, **k: None)
+
+    result = ai_clients.invoke_vision_json(
+        "Extract kurti DNA",
+        [{"role": "front", "mime_type": "image/jpeg", "base64": "YWJj"}],
+        purpose="product_truth",
+        timeout_budget_s=180.0,
+    )
+    assert result is not None
+    # Each Meta model is tried once on 429 (no redundant same-model retry), then GPT-6.1 Terra takes over
+    assert meta_models == ["muse-spark-1.3-contributor", "muse-spark-1.2-contributor"]
+    assert openai_calls == [("gpt-6.1-terra", "medium")]
+    assert result["provider"] == "openai"
+    assert result["model"] == "gpt-6.1-terra"
+
+
+def test_dna_agent_reuses_matching_fingerprint_across_studio_sku_rename(monkeypatch):
+    agent = ProductDNAAgent()
+    monkeypatch.setattr("agents.dna_agent.cache_manager.get_hot_dna", lambda *a, **k: None)
+    monkeypatch.setattr("agents.dna_agent.cache_manager.set_hot_dna", lambda *a, **k: None)
+    monkeypatch.setattr("agents.dna_agent.get_latest_dna_version", lambda org_id, sku_id: None)
+    monkeypatch.setattr(
+        "agents.dna_agent.get_dna_version_by_fingerprint",
+        lambda org_id, sku_id, fp: {
+            "sku_id": "studio-draft123",
+            "version": 1,
+            "approved": False,
+            "source_fingerprint": fp,
+            "dna_payload": {
+                "garment_family": "kurta_or_kurti_set",
+                "main_color": "maroon",
+                "version": 1,
+                "approved": False,
+                "metadata": {"analysis_source": "vlm"},
+            },
+        },
+    )
+
+    def should_not_call_vlm(*args, **kwargs):
+        raise AssertionError("VLM should not be called when fingerprint already exists in Postgres")
+
+    monkeypatch.setattr("agents.dna_agent.invoke_vision_json", should_not_call_vlm)
+
+    out = agent.process({
+        "organization_id": "org_1",
+        "sku_id": "B45-Raha-Maroon",
+        "sku_name": "Raha Maroon Set",
+        "source_fingerprint": "fp_raha_maroon",
+        "references": [],
+    })
+    assert out["product_dna"]["main_color"] == "maroon"
+    assert out["product_dna"]["metadata"]["analysis_source"] == "vlm"
+
+
+def test_dna_agent_uses_seed_analysis_without_second_vlm_call(monkeypatch):
+    agent = ProductDNAAgent()
+    monkeypatch.setattr("agents.dna_agent.cache_manager.get_hot_dna", lambda *a, **k: None)
+    monkeypatch.setattr("agents.dna_agent.cache_manager.set_hot_dna", lambda *a, **k: None)
+    monkeypatch.setattr("agents.dna_agent.get_latest_dna_version", lambda org_id, sku_id: None)
+    monkeypatch.setattr("agents.dna_agent.get_dna_version_by_fingerprint", lambda org_id, sku_id, fp: None)
+    monkeypatch.setattr("agents.dna_agent.save_dna_version", lambda *a, **k: 1)
+
+    def should_not_call_vlm(*args, **kwargs):
+        raise AssertionError("VLM should not be called when seed_analysis from studio.analyze is provided")
+
+    monkeypatch.setattr("agents.dna_agent.invoke_vision_json", should_not_call_vlm)
+
+    out = agent.process({
+        "organization_id": "org_1",
+        "sku_id": "B45-Raha-Maroon",
+        "sku_name": "B45-Raha-Maroon",
+        "source_fingerprint": "fp_seed_1",
+        "seed_analysis": {
+            "provider": "meta",
+            "model": "muse-spark-1.3-contributor",
+            "product_identity": {
+                "garmentFamily": "kurta_or_kurti_set",
+                "category": "ethnic/fusion",
+                "mainColor": "deep maroon",
+                "fabric": "georgette",
+                "embroidery": "silver thread floral border embroidery",
+                "bottomWearIncluded": True,
+                "bottomWearCut": "farshi",
+                "bottomWearDetails": "Farshi salwar with 6-inch joined hem panel",
+                "invariantDetails": ["preserve silver floral hem embroidery"],
+            },
+        },
+        "references": [
+            {"role": "front", "hash": "h1"},
+            {"role": "back", "hash": "h2"},
+            {"role": "bottom", "hash": "h3"},
+        ],
+    })
+    assert out["product_dna"]["main_color"] == "deep maroon"
+    assert out["product_dna"]["bottom_wear"]["cut_class"] == "farshi"
+    assert out["product_dna"]["metadata"]["analysis_source"] == "vlm"
+    assert out["product_dna"]["metadata"]["provider"] == "meta"
+    assert out["product_dna"]["metadata"]["model"] == "muse-spark-1.3-contributor"
+
+
+def test_python_sentry_telemetry_dsn_and_envelope():
+    from services.sentry_telemetry import (
+        build_sentry_envelope,
+        build_sentry_event_payload,
+        parse_sentry_dsn,
+    )
+
+    dsn = "https://pykey123@o450000.ingest.sentry.io/778899"
+    parsed = parse_sentry_dsn(dsn)
+    assert parsed is not None
+    assert parsed["public_key"] == "pykey123"
+    assert parsed["project_id"] == "778899"
+    assert parsed["envelope_url"] == "https://o450000.ingest.sentry.io/api/778899/envelope/?sentry_key=pykey123&sentry_version=7"
+
+    payload = build_sentry_event_payload(
+        RuntimeError("Vision fallback exhausted"),
+        tags={"purpose": "product_truth"},
+        extra={"sku_id": "B45-Raha-Maroon"},
+    )
+    assert payload["tags"]["purpose"] == "product_truth"
+    assert payload["exception"]["values"][0]["value"] == "Vision fallback exhausted"
+    envelope = build_sentry_envelope(parsed, payload)
+    assert len(envelope.strip().split("\n")) == 3
+
+
+def test_invoke_vision_json_meta_to_zai_glm_5_3_flash_to_openai_fallback(monkeypatch):
+    """When Meta Muse Spark fails, invoke_vision_json fails over to Z.ai GLM-5.3-Flash (with FlashX sibling retry) before OpenAI GPT."""
+    monkeypatch.setattr(settings, "META_MODEL_API_KEY", "meta-test-key")
+    monkeypatch.setattr(settings, "ZAI_API_KEY", "zai-test-key")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
+
+    calls = []
+
+    def fake_meta(prompt, images, timeout_s=115, effort="medium", deadline=None):
+        calls.append(("meta", effort))
+        raise RuntimeError("Meta HTTP 429: tokens per min rate limit")
+
+    def fake_zai(prompt, images, model="glm-5.3-flash", reasoning_effort="medium", timeout_s=60, deadline=None):
+        calls.append(("zai", model, reasoning_effort))
+        return {
+            "provider": "zai",
+            "model": model,
+            "reasoning": reasoning_effort,
+            "data": {"garment_family": "kurta_or_kurti_set", "main_color": "maroon"},
+        }
+
+    monkeypatch.setattr("services.ai_clients._meta_vision_json", fake_meta)
+    monkeypatch.setattr("services.ai_clients._zai_vision_json", fake_zai)
+
+    result = invoke_vision_json(
+        "Extract kurti DNA",
+        [{"role": "front", "mime_type": "image/jpeg", "base64": "YWJj"}],
+        purpose="product_truth",
+        timeout_budget_s=180.0,
+    )
+    assert result is not None
+    assert result["provider"] == "zai"
+    assert result["model"] == "glm-5.3-flash"
+    assert result["reasoning"] == "medium"
+    assert calls[0][0] == "meta"
+    assert calls[1] == ("zai", "glm-5.3-flash", "medium")
+
+
+def test_dna_seed_mapping_and_cross_sku_fingerprint_clone(monkeypatch):
+    from agents import dna_agent as dna_mod
+
+    agent = dna_mod.ProductDNAAgent()
+    kurti_raw = agent._raw_from_seed_analysis({
+        "product_identity": {
+            "garmentFamily": "kurta_or_kurti_set",
+            "mainColor": "maroon",
+            "fabric": "mulmul cotton",
+            "bottomWearDetails": "Matching maroon farshi pajama with 6-inch tapered embroidered hem",
+        }
+    })
+    assert kurti_raw is not None
+    assert kurti_raw["bottom_wear"]["has_bottom_wear"] is True
+    assert kurti_raw["bottom_wear"]["cut_class"] == "farshi"
+
+    saree_raw = agent._raw_from_seed_analysis({
+        "product_identity": {
+            "garmentFamily": "saree",
+            "mainColor": "crimson",
+            "fabric": "kanjeevaram silk",
+            "sareeDrapePlan": {
+                "baseDrapeFamily": "bengali_aatpoure",
+                "palluShoulderPlacement": "left_shoulder_back_to_front",
+            },
+            "sareeTruth": {
+                "pallu": {"zari": "gold kadhua zari", "artwork": "temple motif panel"},
+                "borders": {"construction": "korvai temple border"},
+                "body": {"motifPlacement": "spaced gold butti", "motifInventory": ["peacock", "lotus"]},
+                "blouse": {"color": "deep green", "fabric": "raw silk", "sleeves": "elbow", "backConstruction": "boat back with dori"},
+            },
+        }
+    })
+    assert saree_raw is not None
+    assert saree_raw["saree_details"]["drape_style"] == "bengali_aatpoure"
+    assert saree_raw["saree_details"]["pallu_zari_type"] == "gold kadhua zari"
+    assert saree_raw["saree_details"]["blouse_fabric_coordination"] == "deep green raw silk"
+    assert saree_raw["saree_details"]["blouse_back_neckline"] == "boat back with dori"
+
+    saved_calls = []
+    monkeypatch.setattr(dna_mod, "get_latest_dna_version", lambda org_id, sku_id: None)
+    monkeypatch.setattr(
+        dna_mod,
+        "get_dna_version_by_fingerprint",
+        lambda org_id, sku_id, fp: {
+            "sku_id": "OLD-SKU",
+            "sku_name": "Old Garment",
+            "version": 3,
+            "source_fingerprint": fp,
+            "approved": True,
+            "dna_payload": {
+                "organization_id": org_id,
+                "sku_id": "OLD-SKU",
+                "sku_name": "Old Garment",
+                "garment_family": "kurta_or_kurti_set",
+                "main_color": "maroon",
+                "source_fingerprint": fp,
+                "metadata": {"analysis_source": "vlm"},
+            },
+        },
+    )
+
+    def fake_save_dna_version(**kwargs):
+        saved_calls.append(kwargs)
+        return 1
+
+    monkeypatch.setattr(dna_mod, "save_dna_version", fake_save_dna_version)
+    out = agent.process({
+        "organization_id": "org_1",
+        "sku_id": "NEW-SKU",
+        "sku_name": "New Garment",
+        "source_fingerprint": "fp_shared_1",
+        "auto_approve": False,
+        "references": [{"role": "front", "sha256_hash": "h1"}],
+    })
+    assert len(saved_calls) == 1
+    assert saved_calls[0]["sku_id"] == "NEW-SKU"
+    assert saved_calls[0]["sku_name"] == "New Garment"
+    assert out["dna_persisted"] is True
+    assert out["product_dna"]["sku_id"] == "NEW-SKU"
+    assert out["product_dna"]["sku_name"] == "New Garment"
+    assert out["product_dna"]["version"] == 1
+
+
+def test_zai_non_retryable_client_error_skips_flashx(monkeypatch):
+    from services import ai_clients
+
+    monkeypatch.setattr(settings, "ZAI_API_KEY", "zai-test-key")
+    invoked_models = []
+
+    class FakeChat:
+        def __init__(self, model, **kwargs):
+            invoked_models.append(model)
+
+        def invoke(self, msgs):
+            raise RuntimeError("Error code: 401 - invalid api key unauthorized")
+
+    import langchain_openai
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", FakeChat)
+
+    import pytest
+    with pytest.raises(RuntimeError, match="401"):
+        ai_clients._zai_vision_json(
+            "test",
+            [{"role": "front", "mime_type": "image/jpeg", "base64": "YWJj"}],
+        )
+    assert invoked_models == ["glm-5.3-flash"]
+
 

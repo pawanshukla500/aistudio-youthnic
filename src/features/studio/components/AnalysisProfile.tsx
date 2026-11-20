@@ -51,9 +51,11 @@ function analysisRouteLabel(analysis: StudioAnalysis | null) {
     ? "Gemini"
     : analysis.analysisProvider === "openai"
       ? "OpenAI"
-      : analysis.analysisProvider === "meta"
-        ? "Meta Muse Spark"
-        : analysis.analysisProvider;
+      : analysis.analysisProvider === "zai"
+        ? "Z.ai GLM"
+        : analysis.analysisProvider === "meta"
+          ? "Meta Muse Spark"
+          : analysis.analysisProvider;
   const cache = analysis.cacheHit ? " · Cache Hit" : "";
   const thinking = analysis.analysisThinking ? ` · ${analysis.analysisThinking}` : "";
   return `${provider} ${analysis.analysisModel}${thinking}${cache}`;

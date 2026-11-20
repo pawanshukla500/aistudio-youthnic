@@ -26,6 +26,10 @@ VITE_CDN_BASE_URL="https://cdn.youthnic.com"
 
 # Environment Identifier
 VITE_APP_ENV="production"
+
+# Optional Sentry Browser Error Tracking
+VITE_SENTRY_DSN="https://<public_key>@<org>.ingest.sentry.io/<project_id>"
+VITE_SENTRY_ENVIRONMENT="production"
 ```
 
 ---
@@ -41,9 +45,14 @@ DATABASE_URL="postgresql://postgres:password@db.supabase.co:5432/postgres"
 
 # AI Provider API Keys
 META_MODEL_API_KEY="meta-..."
+ZAI_API_KEY="zai-..."
 OPENAI_API_KEY="sk-proj-..."
 GEMINI_API_KEY="AIzaSyD..."
 INTERNAL_API_SECRET="..."
+
+# Optional Sentry Server & Edge Function Error Tracking
+SENTRY_DSN="https://<public_key>@<org>.ingest.sentry.io/<project_id>"
+SENTRY_ENVIRONMENT="production"
 
 # Asynchronous Task Queue (Valkey)
 VALKEY_URL="redis://valkey.railway.internal:6379/0"

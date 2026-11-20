@@ -1,0 +1,7 @@
+# Vendored agent-skill checkouts are not this product.
+tools/vendor/
+
+# Generated knowledge graphs and editor skill links
+.ua/
+.cursor/
+.agents/

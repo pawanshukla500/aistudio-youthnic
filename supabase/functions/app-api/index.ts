@@ -45,6 +45,7 @@ import {
   OPENAI_TERRA_VISION_ROUTE,
   FAST_PRODUCT_TRUTH_ROUTE,
   FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE,
+  FAST_PRODUCT_TRUTH_ZAI_ROUTE,
   FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
   PRODUCT_TRUTH_TIMEOUT_MS,
   VISION_GATEWAY_BUDGET_MS,
@@ -147,6 +148,7 @@ import {
   type AdminRateTable,
   type ProviderUsage,
 } from "./lib/providerCost.ts";
+import { sendSentryException, type SentryContext } from "./lib/sentry.ts";
 
 const SUPABASE_URL = requiredEnv("SUPABASE_URL");
 const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -154,7 +156,13 @@ const PUBLISHABLE_KEY = Deno.env.get("SB_PUBLISHABLE_KEY")?.trim() || Deno.env.g
 const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/app-api`;
 const OPENAI_MODEL = DEFAULT_IMAGE_GENERATION_ROUTE.model;
 const MAX_REFERENCES = MAX_IMAGE_REFERENCES;
-const visionLimiter = createConcurrencyLimiter(4);
+const visionLimiter = createConcurrencyLimiter(6);
+const metaInFlightByModel = new Map<string, number>();
+const metaRateLimitCooldownUntil = new Map<string, number>();
+const META_RATE_LIMIT_COOLDOWN_MS = 45_000;
+const zaiInFlightByModel = new Map<string, number>();
+const zaiRateLimitCooldownUntil = new Map<string, number>();
+const ZAI_RATE_LIMIT_COOLDOWN_MS = 45_000;
 const MAX_GENERATION_ATTEMPTS = 3;
 // GPT Image quality when a request, catalog or legacy job names none. Medium
 // keeps output tokens (and cost) well below high; Studio can still pick high.
@@ -626,6 +634,15 @@ function defaultVisionRoute(args: {
       { strictJson: true },
     );
   }
+  if (Deno.env.get("ZAI_API_KEY")?.trim()) {
+    return assertAllowedAiModelRoute(
+      args.purpose === "product_truth"
+        ? FAST_PRODUCT_TRUTH_ZAI_ROUTE
+        : { ...FAST_PRODUCT_TRUTH_ZAI_ROUTE, thinkingLevel: "low" },
+      args.purpose,
+      { strictJson: true },
+    );
+  }
   if (Deno.env.get("OPENAI_API_KEY")?.trim()) {
     return assertAllowedAiModelRoute(
       args.purpose === "product_truth" ? OPENAI_TERRA_VISION_ROUTE : CHEAP_OPENAI_VISION_ROUTE,
@@ -642,6 +659,13 @@ function defaultVisionRoute(args: {
 
 function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiModelRoute {
   if (args.purpose === "product_truth") {
+    if (Deno.env.get("ZAI_API_KEY")?.trim() && Deno.env.get("META_MODEL_API_KEY")?.trim()) {
+      return assertAllowedAiModelRoute(
+        FAST_PRODUCT_TRUTH_ZAI_ROUTE,
+        args.purpose,
+        { strictJson: true },
+      );
+    }
     return assertAllowedAiModelRoute(
       OPENAI_TERRA_VISION_ROUTE,
       args.purpose,
@@ -649,6 +673,13 @@ function defaultVisionFallback(args: { purpose: VisionPurpose }): NormalizedAiMo
     );
   }
   if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
+    if (Deno.env.get("ZAI_API_KEY")?.trim()) {
+      return assertAllowedAiModelRoute(
+        { ...FAST_PRODUCT_TRUTH_ZAI_ROUTE, thinkingLevel: "low" },
+        args.purpose,
+        { strictJson: true },
+      );
+    }
     return assertAllowedAiModelRoute(
       CHEAP_OPENAI_VISION_ROUTE,
       args.purpose,
@@ -675,23 +706,37 @@ function appendSafetyVisionFallbacks(args: {
     chain.some((route) => route.provider === provider && (!model || route.model === model));
 
   if (args.purpose === "product_truth") {
+    if (
+      args.primary?.provider === "meta" &&
+      !hasRoute("zai") &&
+      Deno.env.get("ZAI_API_KEY")?.trim()
+    ) {
+      chain.unshift(assertAllowedAiModelRoute(FAST_PRODUCT_TRUTH_ZAI_ROUTE, args.purpose, { strictJson: true }));
+    }
     const hasTerra = hasRoute("openai", "gpt-6.1-terra");
     const hasLuna = hasRoute("openai", "gpt-5.6-luna");
-    if (
-      hasTerra &&
-      !hasLuna &&
-      (args.primary?.provider === "openai" || chain.some((r) => r.provider === "openai") || Deno.env.get("OPENAI_API_KEY")?.trim())
-    ) {
-      chain.push(assertAllowedAiModelRoute(CHEAP_OPENAI_VISION_ROUTE, args.purpose, { strictJson: true }));
-    } else if (!hasTerra && hasLuna && args.primary?.provider === "meta" && chain.some((r) => r.provider === "openai")) {
+    const openAiAvailable = Boolean(
+      args.primary?.provider === "openai" ||
+      chain.some((r) => r.provider === "openai") ||
+      Deno.env.get("OPENAI_API_KEY")?.trim(),
+    );
+    if (!hasTerra && openAiAvailable) {
       chain.push(assertAllowedAiModelRoute(OPENAI_TERRA_VISION_ROUTE, args.purpose, { strictJson: true }));
     }
-  } else if (
-    (args.purpose === "qa" || args.purpose === "qa_escalation") &&
-    !hasRoute("openai") &&
-    Deno.env.get("OPENAI_API_KEY")?.trim()
-  ) {
-    chain.push(assertAllowedAiModelRoute(CHEAP_OPENAI_VISION_ROUTE, args.purpose, { strictJson: true }));
+    if (!hasLuna && openAiAvailable) {
+      chain.push(assertAllowedAiModelRoute(CHEAP_OPENAI_VISION_ROUTE, args.purpose, { strictJson: true }));
+    }
+  } else if (args.purpose === "qa" || args.purpose === "qa_escalation") {
+    if (
+      args.primary?.provider === "meta" &&
+      !hasRoute("zai") &&
+      Deno.env.get("ZAI_API_KEY")?.trim()
+    ) {
+      chain.unshift(assertAllowedAiModelRoute({ ...FAST_PRODUCT_TRUTH_ZAI_ROUTE, thinkingLevel: "low" }, args.purpose, { strictJson: true }));
+    }
+    if (!hasRoute("openai") && Deno.env.get("OPENAI_API_KEY")?.trim()) {
+      chain.push(assertAllowedAiModelRoute(CHEAP_OPENAI_VISION_ROUTE, args.purpose, { strictJson: true }));
+    }
   }
 
   if (
@@ -706,7 +751,15 @@ function appendSafetyVisionFallbacks(args: {
 
 function defaultVisionFallbacks(args: { purpose: VisionPurpose }): NormalizedAiModelRoute[] {
   if (args.purpose === "product_truth") {
-    const routes: NormalizedAiModelRoute[] = [
+    const routes: NormalizedAiModelRoute[] = [];
+    if (Deno.env.get("ZAI_API_KEY")?.trim() && Deno.env.get("META_MODEL_API_KEY")?.trim()) {
+      routes.push(assertAllowedAiModelRoute(
+        FAST_PRODUCT_TRUTH_ZAI_ROUTE,
+        args.purpose,
+        { strictJson: true },
+      ));
+    }
+    routes.push(
       assertAllowedAiModelRoute(
         OPENAI_TERRA_VISION_ROUTE,
         args.purpose,
@@ -717,24 +770,33 @@ function defaultVisionFallbacks(args: { purpose: VisionPurpose }): NormalizedAiM
         args.purpose,
         { strictJson: true },
       ),
-    ];
+    );
     return appendSafetyVisionFallbacks({ purpose: args.purpose, fallbacks: routes, fallbackEnabled: true });
   }
   if (Deno.env.get("META_MODEL_API_KEY")?.trim()) {
+    const routes: NormalizedAiModelRoute[] = [];
+    if (Deno.env.get("ZAI_API_KEY")?.trim()) {
+      routes.push(assertAllowedAiModelRoute(
+        { ...FAST_PRODUCT_TRUTH_ZAI_ROUTE, thinkingLevel: "low" },
+        args.purpose,
+        { strictJson: true },
+      ));
+    }
+    routes.push(
+      assertAllowedAiModelRoute(
+        CHEAP_OPENAI_VISION_ROUTE,
+        args.purpose,
+        { strictJson: true },
+      ),
+      assertAllowedAiModelRoute(
+        { ...OPENAI_TERRA_VISION_ROUTE, thinkingLevel: "low" },
+        args.purpose,
+        { strictJson: true },
+      ),
+    );
     return appendSafetyVisionFallbacks({
       purpose: args.purpose,
-      fallbacks: [
-        assertAllowedAiModelRoute(
-          CHEAP_OPENAI_VISION_ROUTE,
-          args.purpose,
-          { strictJson: true },
-        ),
-        assertAllowedAiModelRoute(
-          { ...OPENAI_TERRA_VISION_ROUTE, thinkingLevel: "low" },
-          args.purpose,
-          { strictJson: true },
-        ),
-      ],
+      fallbacks: routes,
       fallbackEnabled: true,
     });
   }
@@ -1065,6 +1127,13 @@ function scheduleBackground(promise: Promise<unknown>) {
   const runtime = (globalThis as unknown as { EdgeRuntime?: { waitUntil: (promise: Promise<unknown>) => void } }).EdgeRuntime;
   if (runtime?.waitUntil) runtime.waitUntil(promise.catch((error) => console.error("Background task failed", errorMessage(error))));
   else void promise.catch((error) => console.error("Background task failed", errorMessage(error)));
+}
+
+function reportSentryException(error: unknown, context: SentryContext = {}) {
+  const dsn = Deno.env.get("SENTRY_DSN")?.trim();
+  if (!dsn || isAbortError(error)) return;
+  const environment = Deno.env.get("SENTRY_ENVIRONMENT")?.trim() || Deno.env.get("RAILWAY_ENVIRONMENT")?.trim() || "production";
+  scheduleBackground(sendSentryException(error, { ...context, environment }, dsn));
 }
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -1520,7 +1589,7 @@ function assertVisionProviderConfigured(route: NormalizedAiModelRoute) {
     thinkingLevel: route.thinkingLevel,
     failure: unavailableVisionFailure(
       route.provider,
-      `${route.provider === "qwen" ? "Qwen" : route.provider === "meta" ? "Meta Muse Spark" : route.provider === "openai" ? "OpenAI" : "Gemini"} is selected for vision work but ${secretName} is not configured in Supabase Edge Function secrets.`,
+      `${route.provider === "qwen" ? "Qwen" : route.provider === "zai" ? "Z.ai GLM" : route.provider === "meta" ? "Meta Muse Spark" : route.provider === "openai" ? "OpenAI" : "Gemini"} is selected for vision work but ${secretName} is not configured in Supabase Edge Function secrets.`,
     ),
   });
 }
@@ -1674,7 +1743,21 @@ async function metaResponsesVisionJson(
   const content = responseContentFromParts(parts);
   const input = [{ role: "user", content }];
   const sibling = metaModelSibling(route.model);
-  const modelCandidates = sibling ? [route.model, sibling] : [route.model];
+  const rawCandidates = sibling ? [route.model, sibling] : [route.model];
+  const now = Date.now();
+  const activeCandidates = rawCandidates.filter((candidate) => (metaRateLimitCooldownUntil.get(candidate) || 0) <= now);
+  if (!activeCandidates.length) {
+    throw visionProviderError(route, {
+      status: 429,
+      message: "Meta Muse Spark per-minute token limit active; failing over to configured fallback.",
+      code: "rate_limit_exceeded",
+    });
+  }
+  const modelCandidates = activeCandidates.length === 2 &&
+      (metaInFlightByModel.get(activeCandidates[0]) || 0) >= 2 &&
+      (metaInFlightByModel.get(activeCandidates[1]) || 0) < (metaInFlightByModel.get(activeCandidates[0]) || 0)
+    ? [activeCandidates[1], activeCandidates[0]]
+    : activeCandidates;
 
   let lastError: unknown;
   const startedAt = Date.now();
@@ -1687,94 +1770,111 @@ async function metaResponsesVisionJson(
       if (remainingMs < 2_000) {
         throw lastError || visionHopTimeoutError("Meta Responses API timed out.");
       }
+      const attemptEffort = (effort === "medium" || effort === "high") && remainingMs < 60_000
+        ? "low"
+        : effort;
       let response: Response;
+      metaInFlightByModel.set(modelCandidate, (metaInFlightByModel.get(modelCandidate) || 0) + 1);
       try {
-        response = await fetch("https://api.meta.ai/v1/responses", {
-          method: "POST",
-          signal: combineTimeoutAndSignal(remainingMs, signal),
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${requiredEnv("META_MODEL_API_KEY")}`,
-          },
-          body: JSON.stringify({
-            model: modelCandidate,
-            input,
-            reasoning: { effort },
-            max_output_tokens: 16384,
-          }),
-        });
-      } catch (fetchErr) {
-        if (signal?.aborted || isAbortError(fetchErr)) throw fetchErr;
-        lastError = fetchErr;
-        const postElapsed = Date.now() - startedAt;
-        const postRemainingMs = timeoutMs - postElapsed;
-        const fastNetworkError =
-          postElapsed < 10_000 &&
-          postRemainingMs >= 30_000 &&
-          (fetchErr as { name?: string })?.name !== "TimeoutError";
-        console.error(
-          `[metaResponsesVisionJson] model=${modelCandidate} fetch_error elapsedMs=${postElapsed} msg=${errorMessage(fetchErr).slice(0, 200)}`,
-        );
-        if (fastNetworkError && transientAttempt === 0) {
-          await sleep(750);
-          continue;
-        }
-        if (fastNetworkError && modelCandidate === modelCandidates[0] && modelCandidates.length > 1) {
-          break;
-        }
-        throw fetchErr;
-      }
-
-      const rawBodyText = await response.text().catch(() => "");
-      let data: JsonRecord = {};
-      if (rawBodyText.trimStart().startsWith("data:")) {
         try {
-          data = parseMetaResponseSse(rawBodyText) as JsonRecord;
-        } catch (parseError) {
-          throw visionProviderError({ ...route, model: modelCandidate }, {
-            message: errorMessage(parseError),
+          response = await fetch("https://api.meta.ai/v1/responses", {
+            method: "POST",
+            signal: combineTimeoutAndSignal(remainingMs, signal),
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${requiredEnv("META_MODEL_API_KEY")}`,
+            },
+            body: JSON.stringify({
+              model: modelCandidate,
+              input,
+              reasoning: { effort: attemptEffort },
+              max_output_tokens: 16384,
+            }),
           });
+        } catch (fetchErr) {
+          if (signal?.aborted || isAbortError(fetchErr)) throw fetchErr;
+          lastError = fetchErr;
+          const postElapsed = Date.now() - startedAt;
+          const postRemainingMs = timeoutMs - postElapsed;
+          const fastNetworkError =
+            postElapsed < 10_000 &&
+            postRemainingMs >= 30_000 &&
+            (fetchErr as { name?: string })?.name !== "TimeoutError";
+          console.error(
+            `[metaResponsesVisionJson] model=${modelCandidate} fetch_error elapsedMs=${postElapsed} msg=${errorMessage(fetchErr).slice(0, 200)}`,
+          );
+          if (fastNetworkError && transientAttempt === 0) {
+            await sleep(750);
+            continue;
+          }
+          if (fastNetworkError && modelCandidate === modelCandidates[0] && modelCandidates.length > 1) {
+            break;
+          }
+          throw fetchErr;
         }
-      } else if (rawBodyText) {
-        try {
-          data = JSON.parse(rawBodyText) as JsonRecord;
-        } catch {
-          data = {};
+
+        const rawBodyText = await response.text().catch(() => "");
+        let data: JsonRecord = {};
+        if (rawBodyText.trimStart().startsWith("data:")) {
+          try {
+            data = parseMetaResponseSse(rawBodyText) as JsonRecord;
+          } catch (parseError) {
+            throw visionProviderError({ ...route, model: modelCandidate }, {
+              message: errorMessage(parseError),
+            });
+          }
+        } else if (rawBodyText) {
+          try {
+            data = JSON.parse(rawBodyText) as JsonRecord;
+          } catch {
+            data = {};
+          }
         }
+        if (!response.ok) {
+          const postElapsed = Date.now() - startedAt;
+          const postRemainingMs = timeoutMs - postElapsed;
+          const providerError = data.error as JsonRecord | undefined;
+          const rawErrText = String(providerError?.message || data.message || data.detail || rawBodyText.slice(0, 240) || "");
+          const rawErrCode = String(providerError?.code || providerError?.type || "");
+          console.error(
+            `[metaResponsesVisionJson] model=${modelCandidate} status=${response.status} code=${rawErrCode || "none"} elapsedMs=${postElapsed} msg=${rawErrText.slice(0, 200)}`,
+          );
+          lastError = visionProviderError({ ...route, model: modelCandidate }, {
+            status: response.status,
+            message: rawErrText || `Meta Muse Spark vision request failed (${response.status}).`,
+            code: rawErrCode,
+          });
+          const isRateLimited = response.status === 429 ||
+            (lastError instanceof VisionProviderError && lastError.failure.code === "provider_rate_limited");
+          if (isRateLimited) {
+            metaRateLimitCooldownUntil.set(modelCandidate, Date.now() + META_RATE_LIMIT_COOLDOWN_MS);
+          }
+          const isTransient = isRateLimited || response.status >= 500;
+          const canSwitchToSibling = isTransient && postRemainingMs >= 30_000;
+          const canRetrySameModel = !isRateLimited && response.status >= 500 && postElapsed < 10_000 && postRemainingMs >= 30_000;
+          if (canRetrySameModel && transientAttempt === 0) {
+            await sleep(750);
+            continue;
+          }
+          const isModelUnavailable =
+            (lastError instanceof VisionProviderError && lastError.failure.code === "provider_unavailable" && response.status < 500) ||
+            response.status === 404 ||
+            /not found|not available|does not exist|model_not_found|unsupported\s+model|model\s+(?:is\s+)?unsupported/i.test(`${rawErrCode} ${rawErrText}`);
+          // If 404/unavailable, 429 per-minute token rate-limited, or 5xx transient exhausted, try sibling model before falling back to OpenAI.
+          if ((isModelUnavailable || canSwitchToSibling) && modelCandidate === modelCandidates[0] && modelCandidates.length > 1) {
+            break;
+          }
+          throw lastError;
+        }
+        const text = extractResponseApiText(data);
+        if (!text) throw visionProviderError({ ...route, model: modelCandidate }, { message: "meta returned no structured visual response." });
+        metaRateLimitCooldownUntil.delete(modelCandidate);
+        return { raw: data, text, json: parseJsonResponse(text), actualModel: modelCandidate };
+      } finally {
+        const nextCount = Math.max(0, (metaInFlightByModel.get(modelCandidate) || 1) - 1);
+        if (nextCount === 0) metaInFlightByModel.delete(modelCandidate);
+        else metaInFlightByModel.set(modelCandidate, nextCount);
       }
-      if (!response.ok) {
-        const postElapsed = Date.now() - startedAt;
-        const postRemainingMs = timeoutMs - postElapsed;
-        const providerError = data.error as JsonRecord | undefined;
-        const rawErrText = String(providerError?.message || data.message || data.detail || rawBodyText.slice(0, 240) || "");
-        const rawErrCode = String(providerError?.code || providerError?.type || "");
-        console.error(
-          `[metaResponsesVisionJson] model=${modelCandidate} status=${response.status} code=${rawErrCode || "none"} elapsedMs=${postElapsed} msg=${rawErrText.slice(0, 200)}`,
-        );
-        lastError = visionProviderError({ ...route, model: modelCandidate }, {
-          status: response.status,
-          message: rawErrText || `Meta Muse Spark vision request failed (${response.status}).`,
-          code: rawErrCode,
-        });
-        const isTransient = response.status === 429 || response.status >= 500;
-        const canRetryQuickly = isTransient && postElapsed < 10_000 && postRemainingMs >= 30_000;
-        if (canRetryQuickly && transientAttempt === 0) {
-          await sleep(750);
-          continue;
-        }
-        const isModelUnavailable =
-          (lastError instanceof VisionProviderError && lastError.failure.code === "provider_unavailable" && response.status < 500) ||
-          response.status === 404 ||
-          /not found|not available|does not exist|model_not_found|unsupported\s+model|model\s+(?:is\s+)?unsupported/i.test(`${rawErrCode} ${rawErrText}`);
-        // If 404/unavailable (or fast transient exhausted), try sibling model if one remains.
-        if ((isModelUnavailable || canRetryQuickly) && modelCandidate === modelCandidates[0] && modelCandidates.length > 1) {
-          break;
-        }
-        throw lastError;
-      }
-      const text = extractResponseApiText(data);
-      if (!text) throw visionProviderError({ ...route, model: modelCandidate }, { message: "meta returned no structured visual response." });
-      return { raw: data, text, json: parseJsonResponse(text), actualModel: modelCandidate };
     }
   }
   throw lastError;
@@ -1811,6 +1911,156 @@ async function metaVisionJson(
       throw chatClassified.failure.status === 404 ? classified : chatClassified;
     }
   }
+}
+
+function zaiModelSibling(model: string): string | null {
+  if (model === "glm-5.3-flash") return "glm-5.3-flashx";
+  if (model === "glm-5.3-flashx") return "glm-5.3-flash";
+  return null;
+}
+
+function zaiReasoningEffort(level: AiThinkingLevel): "low" | "high" | "max" {
+  if (level === "none" || level === "minimal" || level === "low") return "low";
+  if (level === "xhigh" || level === "max") return "max";
+  // glm-5.3-flash supports low | high | max (defaults to max if omitted or unknown).
+  // Map medium -> high ("Enhanced Reasoning") so latency stays responsive.
+  return "high";
+}
+
+async function zaiVisionJson(
+  route: NormalizedAiModelRoute,
+  parts: JsonRecord[],
+  timeoutMs = VISION_PROVIDER_TIMEOUT_MS,
+  signal?: AbortSignal,
+) {
+  assertVisionProviderConfigured(route);
+  const content = chatContentFromParts(parts);
+  const sibling = zaiModelSibling(route.model);
+  const rawCandidates = sibling ? [route.model, sibling] : [route.model];
+  const now = Date.now();
+  const activeCandidates = rawCandidates.filter((candidate) => (zaiRateLimitCooldownUntil.get(candidate) || 0) <= now);
+  if (!activeCandidates.length) {
+    throw visionProviderError(route, {
+      status: 429,
+      message: "Z.ai GLM 5.3 Flash rate limit cooldown active; failing over to configured fallback.",
+      code: "rate_limit_exceeded",
+    });
+  }
+  // glm-5.3-flash supports 50 concurrent requests, glm-5.3-flashx supports 20.
+  const modelCandidates = activeCandidates.length === 2 &&
+      (zaiInFlightByModel.get(activeCandidates[0]) || 0) >= 40 &&
+      (zaiInFlightByModel.get(activeCandidates[1]) || 0) < 15
+    ? [activeCandidates[1], activeCandidates[0]]
+    : activeCandidates;
+
+  let lastError: unknown;
+  const startedAt = Date.now();
+
+  for (const modelCandidate of modelCandidates) {
+    for (let transientAttempt = 0; transientAttempt < 2; transientAttempt += 1) {
+      if (signal?.aborted) throw abortError();
+      const elapsed = Date.now() - startedAt;
+      const remainingMs = timeoutMs - elapsed;
+      if (remainingMs < 2_000) {
+        throw lastError || visionHopTimeoutError("Z.ai Chat Completions API timed out.");
+      }
+      const attemptLevel = (route.thinkingLevel === "medium" || route.thinkingLevel === "high" || route.thinkingLevel === "max") && remainingMs < 60_000
+        ? "low"
+        : route.thinkingLevel;
+      const reasoningEffort = zaiReasoningEffort(attemptLevel);
+      let response: Response;
+      zaiInFlightByModel.set(modelCandidate, (zaiInFlightByModel.get(modelCandidate) || 0) + 1);
+      try {
+        try {
+          response = await fetch("https://api.z.ai/api/paas/v4/chat/completions", {
+            method: "POST",
+            signal: combineTimeoutAndSignal(remainingMs, signal),
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${requiredEnv("ZAI_API_KEY")}`,
+            },
+            body: JSON.stringify({
+              model: modelCandidate,
+              messages: [{ role: "user", content }],
+              response_format: { type: "json_object" },
+              // glm-5.3-flash / glm-5.3-flashx are forced-thinking multimodal VLMs
+              thinking: { type: "enabled" },
+              reasoning_effort: reasoningEffort,
+              temperature: 1,
+              top_p: 0.95,
+              max_tokens: 16384,
+            }),
+          });
+        } catch (fetchErr) {
+          if (signal?.aborted || isAbortError(fetchErr)) throw fetchErr;
+          lastError = fetchErr;
+          const postElapsed = Date.now() - startedAt;
+          const postRemainingMs = timeoutMs - postElapsed;
+          const fastNetworkError =
+            postElapsed < 10_000 &&
+            postRemainingMs >= 25_000 &&
+            (fetchErr as { name?: string })?.name !== "TimeoutError";
+          console.error(
+            `[zaiVisionJson] model=${modelCandidate} fetch_error elapsedMs=${postElapsed} msg=${errorMessage(fetchErr).slice(0, 200)}`,
+          );
+          if (fastNetworkError && transientAttempt === 0) {
+            await sleep(500);
+            continue;
+          }
+          if (fastNetworkError && modelCandidate === modelCandidates[0] && modelCandidates.length > 1) {
+            break;
+          }
+          throw fetchErr;
+        }
+
+        const data = await response.json().catch(() => ({})) as JsonRecord;
+        if (!response.ok) {
+          const postElapsed = Date.now() - startedAt;
+          const postRemainingMs = timeoutMs - postElapsed;
+          const providerError = data.error as JsonRecord | undefined;
+          const rawErrText = String(providerError?.message || data.message || `Z.ai vision request failed (${response.status}).`);
+          const rawErrCode = String(providerError?.code || providerError?.type || "");
+          console.error(
+            `[zaiVisionJson] model=${modelCandidate} status=${response.status} code=${rawErrCode || "none"} elapsedMs=${postElapsed} msg=${rawErrText.slice(0, 200)}`,
+          );
+          lastError = visionProviderError({ ...route, model: modelCandidate }, {
+            status: response.status,
+            message: rawErrText,
+            code: rawErrCode,
+          });
+          const isRateLimited = response.status === 429 ||
+            (lastError instanceof VisionProviderError && lastError.failure.code === "provider_rate_limited");
+          if (isRateLimited) {
+            zaiRateLimitCooldownUntil.set(modelCandidate, Date.now() + ZAI_RATE_LIMIT_COOLDOWN_MS);
+          }
+          const isTransient = isRateLimited || response.status >= 500;
+          const canSwitchToSibling = isTransient && postRemainingMs >= 25_000;
+          const canRetrySameModel = !isRateLimited && response.status >= 500 && postElapsed < 10_000 && postRemainingMs >= 25_000;
+          if (canRetrySameModel && transientAttempt === 0) {
+            await sleep(500);
+            continue;
+          }
+          const isModelUnavailable =
+            (lastError instanceof VisionProviderError && lastError.failure.code === "provider_unavailable" && response.status < 500) ||
+            response.status === 404 ||
+            /not found|not available|does not exist|model_not_found|unsupported\s+model|model\s+(?:is\s+)?unsupported/i.test(`${rawErrCode} ${rawErrText}`);
+          if ((isModelUnavailable || canSwitchToSibling) && modelCandidate === modelCandidates[0] && modelCandidates.length > 1) {
+            break;
+          }
+          throw lastError;
+        }
+        const text = extractChatCompletionText(data);
+        if (!text) throw visionProviderError({ ...route, model: modelCandidate }, { status: 422, message: "Z.ai returned no structured visual response." });
+        zaiRateLimitCooldownUntil.delete(modelCandidate);
+        return { raw: data, text, json: parseJsonResponse(text), actualModel: modelCandidate };
+      } finally {
+        const nextCount = Math.max(0, (zaiInFlightByModel.get(modelCandidate) || 1) - 1);
+        if (nextCount === 0) zaiInFlightByModel.delete(modelCandidate);
+        else zaiInFlightByModel.set(modelCandidate, nextCount);
+      }
+    }
+  }
+  throw lastError;
 }
 
 async function qwenVisionJson(
@@ -1874,6 +2124,9 @@ async function invokeVisionRoute(
   }
   if (effectiveRoute.provider === "meta") {
     return metaVisionJson(effectiveRoute, parts, timeoutMs, signal);
+  }
+  if (effectiveRoute.provider === "zai") {
+    return zaiVisionJson(effectiveRoute, parts, timeoutMs, signal);
   }
   if (signal) return qwenVisionJson(effectiveRoute, parts, timeoutMs, signal);
   return qwenVisionJson(effectiveRoute, parts, timeoutMs);
@@ -1952,6 +2205,7 @@ async function visionJson(
             const providerError = asVisionProviderError(error, route);
             if (
               route.provider !== "meta" &&
+              route.provider !== "zai" &&
               providerError.failure.retryable &&
               attempt < 2 &&
               shouldRetrySameVisionRoute(providerError.failure)
@@ -2030,7 +2284,13 @@ function explicitBottomCutHint(bottomWearValue: unknown, productDetails: unknown
 const ANALYSIS_REFERENCE_DOWNLOAD_MS = 20_000;
 const ANALYSIS_REFERENCE_DOWNLOAD_ATTEMPTS = 2;
 const ANALYSIS_PREP_QUERY_MS = 8_000;
-const studioAnalysisFlights = new Map<string, Promise<JsonRecord>>();
+type StudioAnalysisFlight = {
+  promise: Promise<JsonRecord>;
+  orgId: string;
+  controller: AbortController;
+  clientSignals: Set<AbortSignal>;
+};
+const studioAnalysisFlights = new Map<string, StudioAnalysisFlight>();
 
 function withDeadline<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2071,13 +2331,38 @@ async function analyze(request: Request, args: JsonRecord) {
   const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${policyFingerprint}:${smallHash(housePreferences)}:${smallHash(fashionKnowledge)}:${smallHash(analysisLearning)}:${smallHash(showcaseFeedback)}`;
   const flightKey = `${orgId}:${cacheKey}`;
   const existingFlight = studioAnalysisFlights.get(flightKey);
-  if (existingFlight) return await existingFlight;
+  if (existingFlight) {
+    existingFlight.clientSignals.add(request.signal);
+    return await existingFlight.promise;
+  }
+  // Cancel any older flight for this organization whose client already aborted
+  // (e.g. user added another reference image or changed inputs) so obsolete
+  // intermediate requests do not keep burning Meta Muse Spark per-minute tokens.
+  for (const [oldKey, oldFlight] of studioAnalysisFlights.entries()) {
+    if (
+      oldFlight.orgId === orgId &&
+      oldKey !== flightKey &&
+      [...oldFlight.clientSignals].every((sig) => sig.aborted)
+    ) {
+      oldFlight.controller.abort();
+      studioAnalysisFlights.delete(oldKey);
+    }
+  }
+  const flightController = new AbortController();
   let resolveFlight!: (value: JsonRecord) => void;
   let rejectFlight!: (reason: unknown) => void;
-  const flight = new Promise<JsonRecord>((resolve, reject) => {
+  const flightPromise = new Promise<JsonRecord>((resolve, reject) => {
     resolveFlight = resolve;
     rejectFlight = reject;
   });
+  // Prevent Deno unhandledrejection crash when the leader rejects before any waiter attaches.
+  flightPromise.catch(() => {});
+  const flight: StudioAnalysisFlight = {
+    promise: flightPromise,
+    orgId,
+    controller: flightController,
+    clientSignals: new Set([request.signal]),
+  };
   studioAnalysisFlights.set(flightKey, flight);
   const finishAnalysis = (payload: JsonRecord) => {
     resolveFlight(payload);
@@ -2113,6 +2398,7 @@ async function analyze(request: Request, args: JsonRecord) {
         String(args.category || ""),
         { useStyleAsModelFace, hasModelReference: rawHasModelReference },
         {
+          signal: flightController.signal,
           timeoutMs: ANALYSIS_REFERENCE_DOWNLOAD_MS,
           maxAttempts: ANALYSIS_REFERENCE_DOWNLOAD_ATTEMPTS,
         },
@@ -2126,7 +2412,7 @@ async function analyze(request: Request, args: JsonRecord) {
       }) });
 
       const persistFailedHop = async (attempt: VisionAttempt) => {
-        if (attempt.outcome !== "failed" || request.signal.aborted) return;
+        if (attempt.outcome !== "failed" || flightController.signal.aborted) return;
         const hopIds = await recordVisionHopRuns({
           organizationId: orgId,
           runKind: "product_reference_analysis",
@@ -2147,13 +2433,16 @@ async function analyze(request: Request, args: JsonRecord) {
         console.info(`[studio.analyze] prepMs=${prepMs} visionBudgetMs=${gatewayBudgetMs}`);
         // The client connection is not the deadline. A proxy cut at 300s must
         // still let Muse finish and save the plan; the retry joins this flight.
+        // Only when a newer flight supersedes an aborted client request is
+        // flightController aborted.
         return await visionJson(policy, parts, {
           onAttempt: persistFailedHop,
+          signal: flightController.signal,
           gatewayBudgetMs,
           prepElapsedMs: prepMs,
         });
       } catch (error) {
-        if (request.signal.aborted || isAbortError(error)) {
+        if (flightController.signal.aborted || isAbortError(error)) {
           throw error;
         }
         const attempts = error instanceof VisionProviderError ? error.attempts : [];
@@ -2180,7 +2469,7 @@ async function analyze(request: Request, args: JsonRecord) {
       } finally {
         parts.length = 0;
       }
-    });
+    }, flightController.signal);
     normalized = normalizeAnalysis(result.json, String(args.category || "ethnic/fusion"), {
       modelDirection: String(args.modelDirection || ""),
     });
@@ -2502,7 +2791,7 @@ async function validatePose(args: {
     const parts = independent
       ? [...baseParts, { text: "INDEPENDENT RECHECK: disregard prior numeric scores, re-inspect each critical region separately, and return newly reasoned evidence-based scores." }]
       : baseParts;
-    const result = await visionJson(policy, parts);
+    const result = await visionLimiter.run(() => visionJson(policy, parts));
     return {
       result,
       qa: parseQaResponse(result.text, {
@@ -2516,31 +2805,36 @@ async function validatePose(args: {
     };
   };
 
-  const complex = ["saree", "lehenga", "suit", "multi-piece"].some((family) => garmentFamily.toLowerCase().includes(family));
-  const initialPolicy = await resolveVisionPolicy(args.organizationId, { purpose: "qa", garmentFamily });
-  let { result, qa } = await run(initialPolicy);
-  let usageMetadata = addUsage({}, result.raw);
+  try {
+    const complex = ["saree", "lehenga", "suit", "multi-piece"].some((family) => garmentFamily.toLowerCase().includes(family));
+    const initialPolicy = await resolveVisionPolicy(args.organizationId, { purpose: "qa", garmentFamily });
+    let { result, qa } = await run(initialPolicy);
+    let usageMetadata = addUsage({}, result.raw);
 
-  if (complex) {
-    if (qa.requiresIndependentRecheck) {
-      const independent = await run(await resolveVisionPolicy(args.organizationId, { purpose: "qa_escalation", garmentFamily }), true);
-      result = independent.result;
-      qa = independent.qa;
-      usageMetadata = addUsage(usageMetadata, result.raw);
+    if (complex) {
+      if (qa.requiresIndependentRecheck) {
+        const independent = await run(await resolveVisionPolicy(args.organizationId, { purpose: "qa_escalation", garmentFamily }), true);
+        result = independent.result;
+        qa = independent.qa;
+        usageMetadata = addUsage(usageMetadata, result.raw);
+      }
+      return { ...qa, usageMetadata, policy: result.policy, visionAttempts: result.attempts };
     }
-    return { ...qa, usageMetadata, policy: result.policy, visionAttempts: result.attempts };
-  }
 
-  const hasSevereDefects = qa.reason.includes("Critical attributes far below");
-  if (qa.automaticallyVerified || hasSevereDefects) {
-    return { ...qa, usageMetadata, policy: result.policy, visionAttempts: result.attempts };
-  }
+    const hasSevereDefects = qa.reason.includes("Critical attributes far below");
+    if (qa.automaticallyVerified || hasSevereDefects) {
+      return { ...qa, usageMetadata, policy: result.policy, visionAttempts: result.attempts };
+    }
 
-  const confirmation = await run(await resolveVisionPolicy(args.organizationId, { purpose: "qa_escalation", garmentFamily }), qa.requiresIndependentRecheck);
-  result = confirmation.result;
-  qa = confirmation.qa;
-  usageMetadata = addUsage(usageMetadata, result.raw);
-  return { ...qa, usageMetadata, policy: result.policy, visionAttempts: result.attempts };
+    const confirmation = await run(await resolveVisionPolicy(args.organizationId, { purpose: "qa_escalation", garmentFamily }), qa.requiresIndependentRecheck);
+    result = confirmation.result;
+    qa = confirmation.qa;
+    usageMetadata = addUsage(usageMetadata, result.raw);
+    return { ...qa, usageMetadata, policy: result.policy, visionAttempts: result.attempts };
+  } finally {
+    baseParts.length = 0;
+    releaseLoadedReferences(qaRefs);
+  }
 }
 async function kickWorker(jobId?: string) {
   return fetch(FUNCTION_URL, {
@@ -4220,6 +4514,8 @@ async function processWorker(request: Request, args: JsonRecord) {
     }
   } finally {
     stopLeaseHeartbeat();
+    releaseLoadedReferences(loadedReferences);
+    releaseLoadedReferences(approved);
   }
   // Last attempt: the archive and the QA history have to be written here, because
   // failPoseAndJob only touches pose status and never rewrites generation_data.
@@ -5285,6 +5581,7 @@ async function adminOverview(request: Request) {
       supabase: true, firebaseConfigured: Boolean(Deno.env.get("FIREBASE_SERVICE_ACCOUNT")),
       openaiConfigured: visionProviderConfigured("openai"), geminiConfigured: visionProviderConfigured("gemini"),
       qwenConfigured: visionProviderConfigured("qwen"), metaConfigured: visionProviderConfigured("meta"),
+      zaiConfigured: visionProviderConfigured("zai"),
       openaiAdminConfigured: Boolean(Deno.env.get("OPENAI_ADMIN_KEY")), emailConfigured: Boolean(Deno.env.get("RESEND_API_KEY") && Deno.env.get("RESEND_FROM")),
       memberCount: members.length, settingsCount: automationResult.data ? 1 : 0,
     },
@@ -8718,6 +9015,8 @@ async function probeAiRouteOperation(request: Request, args: JsonRecord) {
       await openAiVisionJson(probeRoute, parts, 25_000);
     } else if (route.provider === "meta") {
       await metaVisionJson(probeRoute, parts, 25_000);
+    } else if (route.provider === "zai") {
+      await zaiVisionJson(probeRoute, parts, 25_000);
     } else if (route.provider === "qwen") {
       await qwenVisionJson(route, parts);
     } else {
@@ -9127,6 +9426,9 @@ async function dnaExtractOperation(request: Request, args: JsonRecord) {
   if (typeof args.main_color === "string" && args.main_color.trim()) payload.main_color = args.main_color.trim();
   const modelIdentity = String(args.model_identity || args.modelIdentity || "").trim();
   if (modelIdentity) payload.model_identity = modelIdentity;
+  if (args.seed_analysis && typeof args.seed_analysis === "object" && !Array.isArray(args.seed_analysis)) {
+    payload.seed_analysis = args.seed_analysis;
+  }
 
   const healthBudgetMs = Math.min(15_000, Math.max(1_000, DNA_GATEWAY_BUDGET_MS - (Date.now() - dnaStarted)));
   try {
@@ -9256,10 +9558,14 @@ const appRequestHandler = async (request: Request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method === "GET") return new Response("ok", { status: 200, headers: corsHeaders });
   if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+  let operation = "request";
+  let sentrySkuId = "";
   try {
     const body = await request.json().catch(() => ({})) as JsonRecord;
-    const operation = String(body.operation || "");
+    const rawOperation = String(body.operation || "");
+    operation = rawOperation || "request";
     const args = (body.args && typeof body.args === "object" ? body.args : {}) as JsonRecord;
+    sentrySkuId = String(args.skuId || args.sku_id || "").trim();
     const handlers: Record<string, () => Promise<unknown>> = {
       "dna.extract": () => dnaExtractOperation(request, args),
       "dna.get": () => dnaGetOperation(request, args),
@@ -9472,11 +9778,15 @@ const appRequestHandler = async (request: Request) => {
       },
       "catalogProduction.automation": () => runCatalogProductionAutomationOperation(request),
     };
-    const handler = handlers[operation];
-    if (!handler) return json({ error: `Unknown operation: ${operation}` }, 404);
+    const handler = handlers[rawOperation];
+    if (!handler) return json({ error: `Unknown operation: ${rawOperation}` }, 404);
     return json({ data: await handler() });
   } catch (error) {
     console.error("app-api request failed", errorMessage(error));
+    reportSentryException(error, {
+      operation: `app-api.${operation}`,
+      ...(sentrySkuId ? { skuId: sentrySkuId } : {}),
+    });
     return json({ error: errorMessage(error) }, 200);
   }
 };

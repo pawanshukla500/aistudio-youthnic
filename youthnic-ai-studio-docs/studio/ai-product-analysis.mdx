@@ -5,7 +5,7 @@ description: "How Youthnic AI Studio's multi-modal vision engine decomposes uplo
 
 # AI Product Analysis
 
-Before generating a photoshoot, Youthnic AI Studio runs **AI Product Analysis** (`studio.analyze` + Product DNA V2 via LangGraph/FastAPI). By default, it uses **Meta Muse Spark (`high` thinking)** with **OpenAI GPT 6.1 Terra (`high` thinking)** fallback to extract geometric, structural, textile, and color features from your uploaded references (while strictly quarantining style-reference clothing) to build an immutable technical fashion profile and 6-pose choreography. Organizations can customize or disable fallback routes in **Administration → AI models**, and emergency hop budgets under `60s` clamp reasoning to `low`.
+Before generating a photoshoot, Youthnic AI Studio runs **AI Product Analysis** (`studio.analyze` + Product DNA V2 via LangGraph/FastAPI). By default, it uses **Meta Muse Spark (`medium` thinking)** with **Z.ai GLM 5.3 Flash (`glm-5.3-flash`, 50x concurrency)** as first high-concurrency fallback (when `ZAI_API_KEY` is set) and **OpenAI GPT 6.1 Terra (`medium` thinking) / GPT 5.6 Luna / Gemini 3.8 Flash** next to extract geometric, structural, textile, and color features from your uploaded references (while strictly quarantining style-reference clothing) to build an immutable technical fashion profile and 6-pose choreography. Organizations can customize or disable fallback routes in **Administration → AI models**, and emergency hop budgets under `60s` clamp reasoning to `low`.
 
 ```mermaid
 graph TD
@@ -21,20 +21,11 @@ graph TD
 
 ## Triggering Garment Analysis
 
-After uploading at least one front reference photo, click the **Analyze Garment** button at the top right of the Product Photos card.
+Reference images are resized and uploaded to cloud storage in the background immediately as you select or drop them. Once the required product references (for example `Front` + `Back`, or the required 4-slot Saree evidence set) and all selected reference images finish uploading, **AI Product Analysis automatically starts after 1 second (`1000ms`)**. You can also click **Analyze References Now** / **Re-analyze Ground Truth** manually at any time.
 
-[SCREENSHOT REQUIRED:
-Page: Studio (/studio)
-Exact State: Mouse hovering over the 'Analyze Garment' button, which shows a sparkling icon and tooltip 'Extract fashion taxonomy and color palette'.
-Exact UI Section: Top right corner of Product Photos card.
-Recommended Crop: 300x150
-Recommended Dimensions: 300x150
-Filename: studio-analyze-garment-button.webp]
-
-The analysis typically takes between 4 and 8 seconds. During this phase:
-1. High-resolution crops are created of the neckline, sleeve hems, fabric weave, and waistline.
-2. The vision engine processes the images against our specialized fashion taxonomy ontology.
-3. Extracted attributes are populated into the **Product Identity Profile**.
+- **Non-Interrupting Metadata & Notes:** Typing or editing **SKU Code** or **Product Name** never interrupts or invalidates a running or completed analysis. Typing director notes (**Garment Truth & Construction Notes**, **Scene Direction & Environment**, or **Garment Summary & Invariants**) while an analysis is in progress allows the active run to finish without cancellation.
+- **Seed-DNA Zero-Duplicate Fast Path:** As soon as `studio.analyze` locks product ground truth, its extracted `productIdentity` seeds FastAPI's **Product DNA V2** (`dna.extract`), persisting the immutable DNA version without re-downloading images or firing a duplicate VLM request.
+- **Multi-SKU Throughput (3–6+ SKUs/min):** Concurrent analyses automatically balance across `muse-spark-1.3-contributor` and `muse-spark-1.2-contributor` inside a 6-slot concurrency limiter, with instant 429 per-minute token limit failover to **Z.ai GLM 5.3 Flash** (50 concurrent requests) and OpenAI `gpt-6.1-terra:medium`.
 
 ---
 

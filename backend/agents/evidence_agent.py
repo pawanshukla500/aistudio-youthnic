@@ -1,16 +1,23 @@
+import atexit
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import io
 import logging
+import threading
 from typing import Dict, Any, List
 from PIL import Image
 
 from models.evidence import PRODUCT_AUTHORITY_ROLES
-from database import save_reference_evidence, save_region_crop
+from database import save_reference_evidence, save_region_crop, update_reference_evidence_dimensions
 from cache import cache_manager
 from services.ai_clients import load_reference_image
 from firebase_service import upload_bytes, get_storage_client
 
 logger = logging.getLogger(__name__)
+
+_EVIDENCE_BACKFILL_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="evidence-crop")
+_EVIDENCE_BACKFILL_SEMAPHORE = threading.BoundedSemaphore(24)
+atexit.register(_EVIDENCE_BACKFILL_EXECUTOR.shutdown, wait=False, cancel_futures=True)
 
 
 class ProductEvidenceAgent:
@@ -99,16 +106,36 @@ class ProductEvidenceAgent:
                     "source_fingerprint": cached_manifest["source_fingerprint"],
                 }
 
-        for ref in raw_references:
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _load_one(ref: Dict[str, Any]):
             role = str(ref.get("role", "additional_product"))
             url = str(ref.get("downloadUrl") or ref.get("download_url") or "")
             storage_path = str(ref.get("storagePath") or ref.get("storage_path") or "")
-
-            loaded = load_reference_image(
+            return load_reference_image(
                 {"role": role, "download_url": url, "storage_path": storage_path},
                 allow_local=allow_local,
                 organization_id=org_id,
             )
+
+        has_seed_and_hashes = (
+            not state.get("force_refresh")
+            and isinstance(state.get("seed_analysis"), dict)
+            and bool(raw_references)
+            and all(bool(r.get("hash") or r.get("sha256_hash")) for r in raw_references)
+        )
+        if has_seed_and_hashes:
+            loaded_list = [None for _ in raw_references]
+        elif len(raw_references) > 1:
+            with ThreadPoolExecutor(max_workers=min(6, len(raw_references))) as pool:
+                loaded_list = list(pool.map(_load_one, raw_references))
+        else:
+            loaded_list = [_load_one(ref) for ref in raw_references]
+
+        for ref, loaded in zip(raw_references, loaded_list):
+            role = str(ref.get("role", "additional_product"))
+            url = str(ref.get("downloadUrl") or ref.get("download_url") or "")
+            storage_path = str(ref.get("storagePath") or ref.get("storage_path") or "")
             raw_hash = ref.get("hash") or ref.get("sha256_hash")
             dimensions = ref.get("dimensions") or {}
             mime_type = str(ref.get("mimeType") or ref.get("mime_type") or "image/jpeg")
@@ -162,8 +189,43 @@ class ProductEvidenceAgent:
                 db_persisted_ok = False
                 logger.warning(f"Could not persist reference evidence: {e}")
 
-            if is_product_truth and loaded and evidence_id:
-                self._build_and_store_region_crop(org_id, evidence_id, sku_id, role, loaded)
+            if is_product_truth and evidence_id:
+                if loaded:
+                    self._build_and_store_region_crop(org_id, evidence_id, sku_id, role, loaded)
+                elif has_seed_and_hashes and (url or storage_path) and _EVIDENCE_BACKFILL_SEMAPHORE.acquire(blocking=False):
+                    def _backfill_one(
+                        _org_id: str = org_id,
+                        _evidence_id: str = evidence_id,
+                        _sku_id: str = sku_id,
+                        _role: str = role,
+                        _url: str = url,
+                        _storage_path: str = storage_path,
+                    ) -> None:
+                        try:
+                            fetched = load_reference_image(
+                                {"role": _role, "download_url": _url, "storage_path": _storage_path},
+                                allow_local=allow_local,
+                                organization_id=_org_id,
+                            )
+                            if not fetched:
+                                return
+                            if fetched.get("width") and fetched.get("height"):
+                                update_reference_evidence_dimensions(
+                                    _org_id,
+                                    _evidence_id,
+                                    {"width": int(fetched["width"]), "height": int(fetched["height"])},
+                                    mime_type=str(fetched.get("mime_type") or "") or None,
+                                )
+                            self._build_and_store_region_crop(_org_id, _evidence_id, _sku_id, _role, fetched)
+                        except Exception as exc:
+                            logger.debug(f"Seeded evidence backfill skipped for {_role}: {exc}")
+                        finally:
+                            _EVIDENCE_BACKFILL_SEMAPHORE.release()
+
+                    try:
+                        _EVIDENCE_BACKFILL_EXECUTOR.submit(_backfill_one)
+                    except Exception:
+                        _EVIDENCE_BACKFILL_SEMAPHORE.release()
 
         composite_fingerprint = hashlib.sha256("|".join(sorted(hash_parts)).encode()).hexdigest()
 

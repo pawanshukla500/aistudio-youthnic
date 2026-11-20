@@ -35,7 +35,10 @@ const basePoses: StudioPose[] = [
 ];
 
 const REQUIRED_POSE_COUNT = 6;
-const AUTO_ANALYZE_DELAY_MS = 1500;
+const AUTO_ANALYZE_DELAY_MS = 1000;
+const NOTE_ANALYZE_DELAY_MS = 2500;
+const ANALYZE_GATEWAY_RECOVERY_ATTEMPTS = 2;
+const ANALYZE_GATEWAY_RECOVERY_DELAY_MS = 1500;
 
 const defaultOptions: OutputOptions = {
   // Empty on purpose: the shoot follows the organization's configured route
@@ -218,6 +221,11 @@ export function Studio() {
     category: string;
     sourceKey: string;
     modelIdentity: string;
+    seedAnalysis?: {
+      product_identity: StudioAnalysis["productIdentity"];
+      provider?: string;
+      model?: string;
+    };
     references: Array<{
       role: ReferenceRole;
       downloadUrl?: string;
@@ -234,6 +242,7 @@ export function Studio() {
   const [analysis, setAnalysis] = useState<StudioAnalysis | null>(null);
   const [savingStylingPlan, setSavingStylingPlan] = useState(false);
   const [analysisSourceKey, setAnalysisSourceKey] = useState<string | null>(null);
+  const [failedAnalysisKey, setFailedAnalysisKey] = useState<string | null>(null);
   const [sceneDirectionNote, setSceneDirectionNote] = useState("");
   const [garmentSummaryNote, setGarmentSummaryNote] = useState("");
   const [options, setOptions] = useState(defaultOptions);
@@ -252,11 +261,15 @@ export function Studio() {
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string; jobId?: Id<"generationJobs"> } | null>(null);
   const analysisRequestRef = useRef(0);
   const analysisAbortRef = useRef<AbortController | null>(null);
+  const dnaAbortRef = useRef<AbortController | null>(null);
   const uploadPromisesRef = useRef(new Map<string, Promise<StudioReference>>());
+  const failedUploadIdsRef = useRef(new Set<string>());
   const autoAnalyzeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => {
+    if (autoAnalyzeTimerRef.current) clearTimeout(autoAnalyzeTimerRef.current);
     analysisAbortRef.current?.abort();
+    dnaAbortRef.current?.abort();
   }, []);
   const { data: submittedJob, error: submittedJobError } = useQuery(api.jobs.get, submittedJobId ? { jobId: submittedJobId } : "skip");
   const { data: queuePosition, error: _queuePositionError } = useQuery(api.jobs.getQueuePosition, submittedJobId && submittedJob?.status === "queued" ? { jobId: submittedJobId } : "skip");
@@ -318,6 +331,8 @@ export function Studio() {
     : Boolean(productReferences.front && productReferences.back);
   const effectiveSkuId = skuId.trim() || `studio-${(productReferences.saree_front_drape || productReferences.front)?.id.slice(0, 8) || "draft"}`;
   const effectiveSkuName = skuName.trim() || skuId.trim() || "Untitled studio product";
+  const latestSkuRef = useRef({ skuId: effectiveSkuId, skuName: effectiveSkuName });
+  latestSkuRef.current = { skuId: effectiveSkuId, skuName: effectiveSkuName };
 
   const derivedSceneDirection = useMemo(() => analysis ? [
     analysis.creativeDirection.backgroundStyle,
@@ -370,6 +385,10 @@ export function Studio() {
 
   const latestAnalysisKeyRef = useRef(analysisInputKey);
   latestAnalysisKeyRef.current = analysisInputKey;
+  const allReferencesUploaded = useMemo(
+    () => allReferences.length > 0 && allReferences.every((reference) => Boolean(reference.uploadedId)),
+    [allReferences],
+  );
   const analysisIsCurrent = Boolean(analysis && analysisSourceKey === analysisInputKey);
   const analysisIsStale = Boolean(analysis && !analysisIsCurrent);
   const enabledPoseCount = useMemo(() => poses.filter((pose) => pose.enabled && pose.prompt.trim()).length, [poses]);
@@ -379,8 +398,10 @@ export function Studio() {
   const markAnalysisStale = () => {
     analysisRequestRef.current += 1;
     analysisAbortRef.current?.abort();
+    dnaAbortRef.current?.abort();
     setAnalyzing(false);
     setAnalysisSourceKey(null);
+    setFailedAnalysisKey(null);
     setDnaState(null);
   };
 
@@ -390,12 +411,21 @@ export function Studio() {
     setNotice(null);
   };
 
+  // Editing text notes or scene/model direction must never abort an analysis
+  // already running; when idle, the auto-analyze effect rebuilds after a typing pause.
+  const updateDirectorNote = (setter: (value: string) => void, value: string) => {
+    setter(value);
+    setFailedAnalysisKey(null);
+    setNotice(null);
+  };
+
   const updateOptions = (next: OutputOptions) => {
     if (
       next.modelIdentity !== options.modelIdentity ||
       next.backgroundStyle !== options.backgroundStyle
     ) {
-      markAnalysisStale();
+      setFailedAnalysisKey(null);
+      setNotice(null);
     }
     setOptions(next);
   };
@@ -517,6 +547,43 @@ export function Studio() {
     }
   };
 
+  const uploadReferenceRef = useRef(uploadReference);
+  uploadReferenceRef.current = uploadReference;
+
+  useEffect(() => {
+    const pending = allReferences.filter(
+      (reference) =>
+        !reference.uploadedId &&
+        !uploadPromisesRef.current.has(reference.id) &&
+        !failedUploadIdsRef.current.has(reference.id),
+    );
+    if (!pending.length) return;
+    for (const reference of pending) {
+      void uploadReferenceRef.current(reference)
+        .then((uploaded) => {
+          setProductReferences((current) => {
+            const existing = current[uploaded.role as ProductReferenceRole];
+            if (!existing || existing.id !== uploaded.id || existing.uploadedId) return current;
+            return { ...current, [uploaded.role]: uploaded };
+          });
+          setStyleReferences((current) => {
+            if (!current.some((item) => item.id === uploaded.id && !item.uploadedId)) return current;
+            return current.map((item) => (item.id === uploaded.id ? uploaded : item));
+          });
+          setModelReference((current) =>
+            current && current.id === uploaded.id && !current.uploadedId ? uploaded : current,
+          );
+        })
+        .catch((err) => {
+          failedUploadIdsRef.current.add(reference.id);
+          setNotice({
+            tone: "error",
+            text: err instanceof Error ? err.message : "Could not upload reference image. Click Retry Analyze to try again.",
+          });
+        });
+    }
+  }, [allReferences]);
+
   const runAnalysis = async (sourceKey: string, automatic: boolean, forceRefresh = false) => {
     if (!requiredReady) {
       if (!automatic) setNotice({ tone: "error", text: isSareeCategory ? "Upload the required full front, rear drape, pallu spread, and body-detail saree references first." : "Upload the required front and back product images first." });
@@ -528,11 +595,13 @@ export function Studio() {
     }
     const requestId = ++analysisRequestRef.current;
     analysisAbortRef.current?.abort();
+    dnaAbortRef.current?.abort();
     const controller = new AbortController();
     analysisAbortRef.current = controller;
     setNotice(null);
     setAnalyzing(true);
     let analysisArgs: Record<string, unknown> | null = null;
+    const startedKey = sourceKey || latestAnalysisKeyRef.current;
     const acceptAnalysis = (result: StudioAnalysis) => {
       if (controller.signal.aborted || analysisRequestRef.current !== requestId) return false;
       setAnalysis(result);
@@ -569,15 +638,19 @@ export function Studio() {
         })),
         forceRefresh,
       };
-      const startedKey = latestAnalysisKeyRef.current;
       const result = await analyzeReferences(analysisArgs, { signal: controller.signal }) as StudioAnalysis;
       if (!acceptAnalysis(result)) return;
       const dnaParams = {
-        skuId: effectiveSkuId,
-        skuName: effectiveSkuName,
+        skuId: latestSkuRef.current.skuId,
+        skuName: latestSkuRef.current.skuName,
         category,
-        sourceKey,
+        sourceKey: startedKey,
         modelIdentity: options.modelIdentity,
+        seedAnalysis: {
+          product_identity: result.productIdentity,
+          provider: result.analysisProvider,
+          model: result.analysisModel,
+        },
         references: uploaded.map((reference) => ({
           role: reference.role,
           downloadUrl: reference.downloadUrl,
@@ -594,26 +667,40 @@ export function Studio() {
         const missingEvidence = result.sareeEvidenceIssues?.join(", ") || "fully spread pallu";
         setNotice({ tone: "success", text: `Saree detected. Front and rear references were preserved; now confirm or upload: ${missingEvidence}. Vision AI will reanalyse before generation.` });
       } else {
+        setFailedAnalysisKey(null);
         lastDnaParamsRef.current = dnaParams;
         void runDnaExtraction(dnaParams, requestId, forceRefresh);
         setAnalysisSourceKey(startedKey);
         setNotice({ tone: "success", text: "Authoritative product identity, creative direction, and the six-pose shoot plan are ready." });
       }
     } catch (error) {
-      const dropped = Boolean((error as { gatewayCut?: boolean }).gatewayCut);
-      if (dropped && analysisArgs && !controller.signal.aborted && analysisRequestRef.current === requestId) {
+      let currentError = error;
+      for (let attempt = 0; attempt < ANALYZE_GATEWAY_RECOVERY_ATTEMPTS; attempt++) {
+        const dropped = Boolean((currentError as { gatewayCut?: boolean })?.gatewayCut);
+        if (!dropped || !analysisArgs || controller.signal.aborted || analysisRequestRef.current !== requestId) {
+          break;
+        }
         try {
-          const recovered = await analyzeReferences({ ...(analysisArgs || {}), forceRefresh: false }, { signal: controller.signal }) as StudioAnalysis;
+          if (attempt > 0) {
+            await new Promise((resolve) => setTimeout(resolve, ANALYZE_GATEWAY_RECOVERY_DELAY_MS));
+          }
+          if (controller.signal.aborted || analysisRequestRef.current !== requestId) break;
+          const recovered = await analyzeReferences({ ...analysisArgs, forceRefresh: false }, { signal: controller.signal }) as StudioAnalysis;
           if (acceptAnalysis(recovered)) {
             const recoveredReferences = Array.isArray(analysisArgs?.references)
               ? analysisArgs.references as Array<{ role: ReferenceRole; downloadUrl?: string; storagePath?: string; hash?: string; mimeType?: string }>
               : [];
             const dnaParams = {
-              skuId: effectiveSkuId,
-              skuName: effectiveSkuName,
+              skuId: latestSkuRef.current.skuId,
+              skuName: latestSkuRef.current.skuName,
               category,
-              sourceKey: latestAnalysisKeyRef.current,
+              sourceKey: startedKey,
               modelIdentity: options.modelIdentity,
+              seedAnalysis: {
+                product_identity: recovered.productIdentity,
+                provider: recovered.analysisProvider,
+                model: recovered.analysisModel,
+              },
               references: recoveredReferences.map((reference) => ({
                 role: reference.role,
                 downloadUrl: reference.downloadUrl,
@@ -630,20 +717,23 @@ export function Studio() {
               const missingEvidence = recovered.sareeEvidenceIssues?.join(", ") || "fully spread pallu";
               setNotice({ tone: "success", text: `Saree detected. Front and rear references were preserved; now confirm or upload: ${missingEvidence}. Vision AI will reanalyse before generation.` });
             } else {
+              setFailedAnalysisKey(null);
               lastDnaParamsRef.current = dnaParams;
               void runDnaExtraction(dnaParams, requestId, false);
-              setAnalysisSourceKey(latestAnalysisKeyRef.current);
+              setAnalysisSourceKey(startedKey);
               setNotice({ tone: "success", text: "Authoritative product identity, creative direction, and the six-pose shoot plan are ready." });
             }
             return;
           }
+          break;
         } catch (retryError) {
-          error = retryError;
+          currentError = retryError;
         }
       }
       if (!controller.signal.aborted && analysisRequestRef.current === requestId) {
+        setFailedAnalysisKey(startedKey);
         setAnalysisSourceKey(null);
-        setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not analyze the references." });
+        setNotice({ tone: "error", text: currentError instanceof Error ? currentError.message : "Could not analyze the references." });
       }
     } finally {
       if (analysisAbortRef.current === controller) {
@@ -655,6 +745,8 @@ export function Studio() {
 
   const handleAnalyze = () => {
     if (autoAnalyzeTimerRef.current) clearTimeout(autoAnalyzeTimerRef.current);
+    failedUploadIdsRef.current.clear();
+    setFailedAnalysisKey(null);
     void runAnalysis(analysisInputKey, false, Boolean(analysis));
   };
 
@@ -678,7 +770,11 @@ export function Studio() {
     params: NonNullable<typeof lastDnaParamsRef.current>,
     requestId: number,
     forceRefresh = false,
+    useSeedAnalysis = true,
   ) => {
+    dnaAbortRef.current?.abort();
+    const dnaController = new AbortController();
+    dnaAbortRef.current = dnaController;
     setDnaState({
       skuId: params.skuId,
       sourceKey: params.sourceKey,
@@ -693,8 +789,9 @@ export function Studio() {
         model_identity: params.modelIdentity,
         references: params.references,
         force_refresh: forceRefresh,
-      })) as ProductDnaExtractResult;
-      if (analysisRequestRef.current !== requestId) return;
+        ...(useSeedAnalysis && params.seedAnalysis ? { seed_analysis: params.seedAnalysis } : {}),
+      }, { signal: dnaController.signal })) as ProductDnaExtractResult;
+      if (dnaController.signal.aborted || analysisRequestRef.current !== requestId) return;
       if (dnaRes?.product_dna) {
         setDnaState({
           skuId: params.skuId,
@@ -716,13 +813,17 @@ export function Studio() {
         });
       }
     } catch (reason) {
-      if (analysisRequestRef.current !== requestId) return;
+      if (dnaController.signal.aborted || analysisRequestRef.current !== requestId) return;
       setDnaState({
         skuId: params.skuId,
         sourceKey: params.sourceKey,
         extracting: false,
         error: reason instanceof Error ? reason.message : "Product DNA V2 extraction failed.",
       });
+    } finally {
+      if (dnaAbortRef.current === dnaController) {
+        dnaAbortRef.current = null;
+      }
     }
   };
 
@@ -733,11 +834,13 @@ export function Studio() {
       return;
     }
     const requestId = analysisRequestRef.current;
-    void runDnaExtraction(params, requestId, true);
+    void runDnaExtraction(params, requestId, true, false);
   };
 
   const handleImprovePosePlan = () => {
     if (autoAnalyzeTimerRef.current) clearTimeout(autoAnalyzeTimerRef.current);
+    failedUploadIdsRef.current.clear();
+    setFailedAnalysisKey(null);
     void runAnalysis(analysisInputKey, false, true);
   };
 
@@ -747,8 +850,8 @@ export function Studio() {
       !dnaState.version ||
       dnaState.persisted === false ||
       dnaState.productDna?.metadata?.analysis_source === "heuristic_offline" ||
-      dnaState.skuId !== effectiveSkuId ||
       dnaState.sourceKey !== analysisInputKey ||
+      dnaState.skuId !== effectiveSkuId ||
       analysisIsStale
     ) {
       setNotice({
@@ -772,39 +875,54 @@ export function Studio() {
 
   const runAnalysisRef = useRef(runAnalysis);
   runAnalysisRef.current = runAnalysis;
+  const runDnaExtractionRef = useRef(runDnaExtraction);
+  runDnaExtractionRef.current = runDnaExtraction;
+
+  // Keep Product DNA synced when operator edits optional SKU Code / Product Name after analysis,
+  // without aborting or re-running expensive Vision analysis (FastAPI clones via fingerprint/seed in <100ms).
+  useEffect(() => {
+    if (analyzing || !analysisSourceKey || analysisSourceKey !== analysisInputKey) return;
+    const params = lastDnaParamsRef.current;
+    if (!params || params.sourceKey !== analysisInputKey) return;
+    if (params.skuId === effectiveSkuId && params.skuName === effectiveSkuName) return;
+    const timer = setTimeout(() => {
+      const syncedParams = {
+        ...params,
+        skuId: effectiveSkuId,
+        skuName: effectiveSkuName,
+      };
+      lastDnaParamsRef.current = syncedParams;
+      void runDnaExtractionRef.current(syncedParams, analysisRequestRef.current, false, true);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [analysisInputKey, analysisSourceKey, analyzing, effectiveSkuId, effectiveSkuName]);
 
   useEffect(() => {
     analysisRequestRef.current += 1;
     analysisAbortRef.current?.abort();
-    setAnalysisSourceKey((current) => current === analysisInputKey ? current : null);
+    dnaAbortRef.current?.abort();
+    setFailedAnalysisKey(null);
+    setAnalysisSourceKey((current) => (current === latestAnalysisKeyRef.current ? current : null));
     if (!requiredReady) {
       setAnalyzing(false);
-      return;
     }
-    autoAnalyzeTimerRef.current = setTimeout(() => {
-      void runAnalysisRef.current(latestAnalysisKeyRef.current, true);
-    }, AUTO_ANALYZE_DELAY_MS);
-    return () => {
-      if (autoAnalyzeTimerRef.current) clearTimeout(autoAnalyzeTimerRef.current);
-      analysisAbortRef.current?.abort();
-    };
   }, [analysisPhotoKey, requiredReady]);
 
   useEffect(() => {
-    if (!requiredReady || analyzing || !analysis || !analysisSourceKey) return;
-    if (analysisSourceKey === analysisInputKey) return;
-    let sourcePhotos = "";
-    try {
-      sourcePhotos = JSON.stringify(JSON.parse(analysisSourceKey).references ?? null);
-    } catch {
-      return;
-    }
-    if (sourcePhotos !== analysisPhotoKey) return;
+    if (!requiredReady || !allReferencesUploaded || analyzing) return;
+    if (analysisSourceKey === analysisInputKey || failedAnalysisKey === analysisInputKey) return;
+    const delayMs = analysisSourceKey ? NOTE_ANALYZE_DELAY_MS : AUTO_ANALYZE_DELAY_MS;
     const timer = setTimeout(() => {
       void runAnalysisRef.current(latestAnalysisKeyRef.current, true);
-    }, AUTO_ANALYZE_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [analysis, analysisInputKey, analysisPhotoKey, analysisSourceKey, analyzing, requiredReady]);
+    }, delayMs);
+    autoAnalyzeTimerRef.current = timer;
+    return () => {
+      clearTimeout(timer);
+      if (autoAnalyzeTimerRef.current === timer) {
+        autoAnalyzeTimerRef.current = null;
+      }
+    };
+  }, [allReferencesUploaded, analysisInputKey, analysisSourceKey, analyzing, failedAnalysisKey, requiredReady]);
 
   const handleGenerate = async () => {
     setNotice(null);
@@ -818,6 +936,16 @@ export function Studio() {
     }
     setGenerating(true);
     try {
+      const activeParams = lastDnaParamsRef.current;
+      if (
+        activeParams &&
+        activeParams.sourceKey === analysisInputKey &&
+        (activeParams.skuId !== effectiveSkuId || (dnaState && dnaState.skuId !== effectiveSkuId))
+      ) {
+        const syncedParams = { ...activeParams, skuId: effectiveSkuId, skuName: effectiveSkuName };
+        lastDnaParamsRef.current = syncedParams;
+        await runDnaExtraction(syncedParams, analysisRequestRef.current, false, true);
+      }
       const result = await queueSku({
         organizationId: organization._id,
         createdBy: user._id,
@@ -825,13 +953,13 @@ export function Studio() {
         analysisFingerprint: analysis.analysisFingerprint,
         skuId: effectiveSkuId,
         skuName: effectiveSkuName,
-        productDetails: productDetails.trim(),
+        productDetails: [productDetails.trim(), garmentSummaryNote.trim()].filter(Boolean).join(". "),
         categoryStr: category,
         model: options.model,
         aspectRatio: options.aspectRatio,
         imageSize: options.imageSize,
         quality: options.quality,
-        backgroundStyle: options.backgroundStyle,
+        backgroundStyle: [options.backgroundStyle, sceneDirectionNote.trim()].filter(Boolean).join(". "),
         modelIdentity: options.modelIdentity,
         bottomWear: options.bottomWear,
         poseQa: options.poseQa,
@@ -945,9 +1073,9 @@ export function Studio() {
       {/* Production Stepper Indicator */}
       <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {[
-          { step: "1", title: "Product References", ready: requiredReady, desc: requiredReady ? "Evidence Ready" : "Front & Back Required" },
+          { step: "1", title: "Product References", ready: requiredReady, desc: requiredReady ? (allReferencesUploaded ? "Evidence Ready" : "Uploading Photos…") : "Front & Back Required" },
           { step: "2", title: "SKU & Output Engine", ready: Boolean(effectiveSkuId), desc: options.imageSize + " · " + options.aspectRatio },
-          { step: "3", title: "Vision Ground Truth", ready: analysisIsCurrent, desc: analyzing ? "Analyzing…" : analysisIsCurrent ? "Locked" : "Pending Analysis" },
+          { step: "3", title: "Vision Ground Truth", ready: analysisIsCurrent, desc: analyzing ? "Analyzing…" : analysisIsCurrent ? "Locked" : requiredReady && !allReferencesUploaded ? "Waiting for Uploads…" : "Pending Analysis" },
           { step: "4", title: "6-Pose Catalog Set", ready: enabledPoseCount === REQUIRED_POSE_COUNT, desc: `${enabledPoseCount}/${REQUIRED_POSE_COUNT} Poses Validated` },
         ].map((s) => (
           <div
@@ -1222,7 +1350,7 @@ export function Studio() {
                 </label>
                 <input
                   value={skuId}
-                  onChange={(event) => updateText(setSkuId, event.target.value)}
+                  onChange={(event) => setSkuId(event.target.value)}
                   placeholder="e.g. YTH-KUR-2041"
                   className="mt-1.5 h-11 w-full rounded-xl border border-outline-variant/70 bg-white px-3.5 font-mono text-sm text-on-surface outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
                 />
@@ -1234,7 +1362,7 @@ export function Studio() {
                 </label>
                 <input
                   value={skuName}
-                  onChange={(event) => updateText(setSkuName, event.target.value)}
+                  onChange={(event) => setSkuName(event.target.value)}
                   placeholder="e.g. Indigo printed kaftan set"
                   className="mt-1.5 h-11 w-full rounded-xl border border-outline-variant/70 bg-white px-3.5 text-sm text-on-surface outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
                 />
@@ -1265,7 +1393,7 @@ export function Studio() {
                 </label>
                 <textarea
                   value={productDetails}
-                  onChange={(event) => updateText(setProductDetails, event.target.value)}
+                  onChange={(event) => updateDirectorNote(setProductDetails, event.target.value)}
                   rows={2}
                   placeholder="Preserve the garment exactly from uploaded references: neckline, sleeves, embroidery, fabric drape, color tone, hem finish…"
                   className="mt-1.5 w-full resize-y rounded-xl border border-outline-variant/70 bg-white p-3 text-xs leading-relaxed text-on-surface outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
@@ -1294,14 +1422,14 @@ export function Studio() {
             current={analysisIsCurrent}
             onAnalyze={handleAnalyze}
             onImprovePosePlan={handleImprovePosePlan}
-            dnaCurrent={Boolean(dnaState && dnaState.skuId === effectiveSkuId && dnaState.sourceKey === analysisInputKey)}
+            dnaCurrent={Boolean(dnaState && dnaState.sourceKey === analysisInputKey && dnaState.skuId === effectiveSkuId)}
             dnaState={dnaState}
             onApproveDna={handleApproveDna}
             onRetryDna={handleRetryDnaExtraction}
             sceneDirection={sceneDirectionValue}
-            onSceneDirectionChange={(value) => updateText(setSceneDirectionNote, value)}
+            onSceneDirectionChange={(value) => updateDirectorNote(setSceneDirectionNote, value)}
             garmentSummary={garmentSummaryValue}
-            onGarmentSummaryChange={(value) => updateText(setGarmentSummaryNote, value)}
+            onGarmentSummaryChange={(value) => updateDirectorNote(setGarmentSummaryNote, value)}
           />
 
           {/* Styling Plan Editor */}

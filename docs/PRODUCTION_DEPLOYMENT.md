@@ -24,7 +24,7 @@ GitHub URL redirect. Do not ship another GitHub-URL stub entrypoint.
 ### Live Product Truth policy (`AI Studio App` / Railway + Supabase)
 
 Studio analyze/plan **honors** `organization_ai_model_policies` purpose
-`product_truth`. The runtime default chain runs **Meta Muse Spark (`medium`) → OpenAI `gpt-6.1-terra` (`medium`) → OpenAI `gpt-5.6-luna` (`low`) → Gemini 3.8 Flash**, defaulting to `medium` (while still honoring explicit `high` for Meta Muse Spark, `gpt-6.1-terra`, and `gpt-5.6-luna` during analysis & pose planning, dropping to `low` when under an emergency `< 60s` remaining gateway hop budget). For a saved policy, `resolveVisionPolicy` runs the saved primary first, the saved fallback second, and—when the primary is Meta and the fallback is OpenAI—appends one OpenAI safety-net (`gpt-5.6-luna:low` or `gpt-6.1-terra:low`) after the saved fallback. Each hop is capped by the remaining gateway budget even if the provider adapter ignores `timeoutMs`. Product-truth hops do not retry the same route (aside from Meta's fast transient retry and in-provider sibling retry `1.3-contributor` <-> `1.2-contributor`). Each hop writes its own `ai_runs` row **before the next hop starts**.
+`product_truth`. The runtime default chain runs **Meta Muse Spark (`medium`) → Z.ai `glm-5.3-flash` (`medium`, when `ZAI_API_KEY` is configured; 50x concurrency) → OpenAI `gpt-6.1-terra` (`medium`) → OpenAI `gpt-5.6-luna` (`low`) → Gemini 3.8 Flash**, defaulting to `medium` (while still honoring explicit `high` for Meta Muse Spark, Z.ai GLM 5.3 Flash, `gpt-6.1-terra`, and `gpt-5.6-luna` during analysis & pose planning, dropping to `low` when under an emergency `< 60s` remaining gateway hop budget). For a saved policy, `resolveVisionPolicy` runs the saved primary first, Z.ai GLM 5.3 Flash (when `ZAI_API_KEY` is set on Meta primary), the saved OpenAI fallback next, and appends OpenAI/Gemini safety nets after the saved fallback. Each hop is capped by the remaining gateway budget even if the provider adapter ignores `timeoutMs`. Product-truth hops do not retry the same route (aside from Meta's and Z.ai's fast transient retry and in-provider sibling retry `1.3-contributor` <-> `1.2-contributor` / `glm-5.3-flash` <-> `glm-5.3-flashx`). Each hop writes its own `ai_runs` row **before the next hop starts**.
 
 Recommended stored policy:
 
@@ -50,7 +50,7 @@ WHERE purpose = 'product_truth';
 ```
 
 Use `gpt-image-2.6-sunburst` (default) for flagship fidelity, latent garment memory, and textile detail, or `gpt-image-2.6-flare` for fast high-volume turns (`gpt-image-2.5-*` and `gpt-image-2` remain supported). Do not put secrets in SQL or in
-the repo. Required backend secrets: `META_MODEL_API_KEY`, `OPENAI_API_KEY`,
+the repo. Required backend secrets: `META_MODEL_API_KEY`, `ZAI_API_KEY` (for GLM 5.3 Flash fallback), `OPENAI_API_KEY`,
 `GEMINI_API_KEY`, `INTERNAL_API_SECRET`.
 
 After a Studio Analyze, `ai_runs` contains **one row per hop**. A Muse timeout

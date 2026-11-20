@@ -146,3 +146,79 @@ Deno.test("product truth policy coercion preserves Meta medium/high and GPT 6.1 
   assertEquals(metaPolicy.fallbackModel, "gpt-6.1-terra");
   assertEquals(metaPolicy.fallbackThinking, "high");
 });
+
+Deno.test("when Z.ai GLM 5.3 Flash is configured, product truth prefers Z.ai as fallback right after Meta Muse Spark", () => {
+  const registryWithZai: AdminAiRegistryEntry[] = [
+    ...registry,
+    {
+      provider: "zai",
+      configured: true,
+      models: [
+        { id: "glm-5.3-flash", label: "GLM 5.3 Flash", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "medium", "high"] },
+        { id: "glm-5.3-flashx", label: "GLM 5.3 FlashX", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "medium", "high"] },
+      ],
+    },
+  ];
+  const primary = preferredConfiguredProvider(registryWithZai, "product_truth");
+  assertEquals(primary?.provider, "meta");
+  const fallback = preferredConfiguredProvider(registryWithZai, "product_truth", {
+    exclude: primary?.provider,
+    fallback: true,
+  });
+  assertEquals(fallback?.provider, "zai");
+  assertEquals(
+    preferredModelId("zai", modelsForProviderPurpose(registryWithZai, "zai", "product_truth")),
+    "glm-5.3-flash",
+  );
+  const coerced = coerceAdminAiPolicy({
+    purpose: "product_truth",
+    primaryProvider: "meta",
+    primaryModel: "muse-spark-1.3-contributor",
+    primaryThinking: "medium",
+    fallbackEnabled: true,
+    fallbackProvider: "zai",
+    fallbackModel: "glm-5.3-flash",
+    fallbackThinking: "medium",
+  }, registryWithZai);
+  assertEquals(coerced.fallbackProvider, "zai");
+  assertEquals(coerced.fallbackModel, "glm-5.3-flash");
+  assertEquals(coerced.fallbackThinking, "medium");
+});
+
+Deno.test("coerceAdminAiPolicy skips unconfigured OpenAI and picks configured fallback provider", () => {
+  const partialRegistry: AdminAiRegistryEntry[] = [
+    {
+      provider: "meta",
+      configured: true,
+      models: [
+        { id: "muse-spark-1.3-contributor", label: "Contributor 1.3", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "medium", "high"] },
+      ],
+    },
+    {
+      provider: "openai",
+      configured: false,
+      models: [
+        { id: "gpt-6.1-terra", label: "GPT 6.1 Terra", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "medium", "high"] },
+      ],
+    },
+    {
+      provider: "gemini",
+      configured: true,
+      models: [
+        { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", purposes: ["product_truth", "qa"], thinkingLevels: ["low", "medium", "high"] },
+      ],
+    },
+  ];
+  const coerced = coerceAdminAiPolicy({
+    purpose: "product_truth",
+    primaryProvider: "meta",
+    primaryModel: "muse-spark-1.3-contributor",
+    primaryThinking: "medium",
+    fallbackEnabled: true,
+    fallbackProvider: "meta",
+    fallbackModel: "muse-spark-1.3-contributor",
+    fallbackThinking: "medium",
+  }, partialRegistry);
+  assertEquals(coerced.fallbackProvider, "gemini");
+  assertEquals(coerced.fallbackModel, "gemini-3.8-flash");
+});

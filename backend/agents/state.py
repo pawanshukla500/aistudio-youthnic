@@ -26,6 +26,7 @@ class AgentWorkflowState(TypedDict, total=False):
     # Reference evidence & DNA
     references: List[Dict[str, Any]]
     source_fingerprint: str
+    seed_analysis: Optional[Dict[str, Any]]
     product_dna: Optional[Dict[str, Any]]
     dna_approved: bool
     dna_persisted: bool

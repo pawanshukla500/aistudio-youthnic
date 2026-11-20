@@ -111,6 +111,8 @@ function formatModelName(model?: string | null): string {
     "muse-spark-1.3-contributor": "Meta Muse Spark 1.3",
     "muse-spark-1.3": "Meta Muse Spark 1.3",
     "muse-spark-1.2": "Meta Muse Spark 1.2",
+    "glm-5.3-flash": "Z.ai GLM 5.3 Flash",
+    "glm-5.3-flashx": "Z.ai GLM 5.3 FlashX",
     "gpt-6.1-terra": "GPT 6.1 Terra",
     "gpt-5.6-luna": "GPT 5.6 Luna",
     "gpt-5.6-terra": "GPT 5.6 Terra",

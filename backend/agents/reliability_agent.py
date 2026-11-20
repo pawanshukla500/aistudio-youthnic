@@ -15,6 +15,7 @@ class ReliabilityAgent:
     def check_health(self) -> Dict[str, Any]:
         openai_health = cache_manager.get_provider_health("openai")
         meta_health = cache_manager.get_provider_health("meta")
+        zai_health = cache_manager.get_provider_health("zai")
 
         return {
             "status": "operational",
@@ -22,6 +23,7 @@ class ReliabilityAgent:
             "providers": {
                 "openai": openai_health,
                 "meta": meta_health,
+                "zai": zai_health,
             },
         }
 
