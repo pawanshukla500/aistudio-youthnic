@@ -1,10 +1,12 @@
 import type { GenerationTraceViewModel, TracePose, TraceAttempt } from "./types";
 import type { Node, Edge } from "@xyflow/react";
+import { scopePoseRowsToJob } from "../../../../lib/generationRuns";
 
 export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
   const summary = rawBackendData.summary;
   const session = rawBackendData.session;
-  const rawPoses = rawBackendData.poses || [];
+  const rawPoseList = Array.isArray(rawBackendData.poses) ? rawBackendData.poses : [];
+  const rawPoses = summary?.job_id ? scopePoseRowsToJob(rawPoseList, String(summary.job_id)) : rawPoseList;
   const aiRuns = rawBackendData.aiRuns || [];
   const qaReviews = rawBackendData.qaReviews || [];
   const learnings = rawBackendData.learnings || (rawBackendData.learning ? [rawBackendData.learning] : []);
@@ -95,10 +97,15 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
     }
 
     return {
+      generation_id: p.generation_id,
       pose_index: p.pose_index,
       title: p.title,
       status: p.status,
       qa_status: p.qa_status,
+      error: p.error,
+      storage_path: p.storage_path,
+      updated_at: p.updated_at,
+      completed_at: p.completed_at,
       full_prompt: p.full_prompt,
       attempts,
       final_output_url: p.output_url,

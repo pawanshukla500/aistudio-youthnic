@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useRef, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { invokeAppApi } from '../../../lib/backend';
 import { parseTrace } from './graph/buildGenerationGraph';
@@ -14,14 +14,20 @@ export function GenerationFlowPage() {
   
   const [selectedGraphData, setSelectedGraphData] = useState<any | null>(null);
   const [isLoadingTrace, setIsLoadingTrace] = useState(true);
+  const [busyPose, setBusyPose] = useState<number | undefined>(undefined);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const latestFlowReqRef = useRef(0);
+  const poseActionLockRef = useRef(false);
 
   const fetchFlow = useCallback(async (silent = false) => {
     if (!jobId) return;
+    const requestId = ++latestFlowReqRef.current;
     if (!silent) setIsLoadingTrace(true);
     setError(null);
     try {
       const data = await invokeAppApi<any>('history.generationFlow.get', { jobId });
+      if (requestId !== latestFlowReqRef.current) return;
       if (data) {
         if (data.is_workflow_v2 || data.is_v2) {
           setSelectedGraphData(data);
@@ -31,20 +37,22 @@ export function GenerationFlowPage() {
         }
       }
     } catch (err: any) {
+      if (requestId !== latestFlowReqRef.current) return;
       setError(err.message);
     } finally {
-      if (!silent) setIsLoadingTrace(false);
+      if (!silent && requestId === latestFlowReqRef.current) setIsLoadingTrace(false);
     }
   }, [jobId]);
 
   useEffect(() => {
     if (!jobId) return;
     let ignore = false;
+    const requestId = ++latestFlowReqRef.current;
     const load = async () => {
       setError(null);
       try {
         const data = await invokeAppApi<any>('history.generationFlow.get', { jobId });
-        if (!ignore) {
+        if (!ignore && requestId === latestFlowReqRef.current) {
           if (data) {
             if (data.is_workflow_v2 || data.is_v2) {
               setSelectedGraphData(data);
@@ -55,11 +63,11 @@ export function GenerationFlowPage() {
           }
         }
       } catch (err: any) {
-        if (!ignore) {
+        if (!ignore && requestId === latestFlowReqRef.current) {
           setError(err.message);
         }
       } finally {
-        if (!ignore) {
+        if (!ignore && requestId === latestFlowReqRef.current) {
           setIsLoadingTrace(false);
         }
       }
@@ -98,6 +106,17 @@ export function GenerationFlowPage() {
       void supabase.removeChannel(channel);
     };
   }, [fetchFlow, selectedGraphData?.is_workflow_v2, selectedGraphData?.item?.id, selectedGraphData?.item?.workflow_stage]);
+
+  const traceSummaryStatus = String(selectedGraphData?.trace?.summary?.status || "");
+  useEffect(() => {
+    if (selectedGraphData?.is_workflow_v2 || !["queued", "processing", "cancelling"].includes(traceSummaryStatus)) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void fetchFlow(true);
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [fetchFlow, selectedGraphData?.is_workflow_v2, traceSummaryStatus]);
 
   if (error) {
     return (
@@ -142,6 +161,61 @@ export function GenerationFlowPage() {
   const summaryModel = selectedGraphData.is_v2 ? 'V2 Node Graph' : selectedGraphData.trace?.summary?.model;
   const summaryCost = selectedGraphData.is_v2 ? 0 : (selectedGraphData.trace?.summary?.actual_cost_usd || 0);
   const board = boardFromGenerationData(selectedGraphData);
+  const tracePoses = (selectedGraphData.trace?.poses || []) as Array<{ generation_id?: string; pose_index: number; storage_path?: string; final_output_url?: string }>;
+  const traceJobId = String(selectedGraphData.trace?.summary?.job_id || "");
+
+  const handleDownloadPose = async (poseIndex: number) => {
+    const pose = tracePoses.find((item) => Number(item.pose_index) === poseIndex);
+    const storagePath = String(pose?.storage_path || pose?.final_output_url || "").trim();
+    if (!traceJobId || !storagePath || poseActionLockRef.current) return;
+    poseActionLockRef.current = true;
+    setBusyPose(poseIndex);
+    setActionError(null);
+    try {
+      const result = await invokeAppApi<{ base64: string; mimeType: string }>("jobs.downloadAsset", {
+        jobId: traceJobId,
+        storagePath,
+      });
+      if (!result?.base64) throw new Error("Image asset was unavailable.");
+      const clean = result.base64.replace(/[\r\n\s]/g, "").replace(/-/g, "+").replace(/_/g, "/");
+      const binary = window.atob(clean);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: result.mimeType || "image/jpeg" });
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      const ext = (result.mimeType || "").includes("png") ? "png" : (result.mimeType || "").includes("webp") ? "webp" : "jpg";
+      const safeName = String(summarySku || "pose").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") || "pose";
+      anchor.download = `${safeName}-pose-${poseIndex}.${ext}`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(href), 30_000);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not download pose image.");
+    } finally {
+      poseActionLockRef.current = false;
+      setBusyPose(undefined);
+    }
+  };
+
+  const handleRegeneratePose = async (poseIndex: number, note: string) => {
+    const pose = tracePoses.find((item) => Number(item.pose_index) === poseIndex);
+    if (!pose?.generation_id || !note.trim() || poseActionLockRef.current) return;
+    poseActionLockRef.current = true;
+    setBusyPose(poseIndex);
+    setActionError(null);
+    try {
+      await invokeAppApi("jobs.regenerate", { poseId: pose.generation_id, extraInstructions: note.trim() });
+      await fetchFlow(true);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not queue pose re-generation.");
+    } finally {
+      poseActionLockRef.current = false;
+      setBusyPose(undefined);
+    }
+  };
 
   return (
     <div className="h-screen w-full flex flex-col relative overflow-hidden bg-[#f5f6f8]">
@@ -164,12 +238,21 @@ export function GenerationFlowPage() {
                 <span>Model: {summaryModel}</span>
                 <span>Cost: ${summaryCost.toFixed(3)}</span>
               </div>
+              {actionError && <p className="mt-1 text-xs font-medium text-red-600">{actionError}</p>}
             </div>
           </div>
         </div>
       </div>
       <div className="min-h-0 flex-1 p-3">
-        <CatalogPoseFlow references={board.references} poses={board.poses} storageKey={`flow-${jobId}`} />
+        <CatalogPoseFlow
+          references={board.references}
+          poses={board.poses}
+          storageKey={`flow-${jobId}`}
+          onBack={() => navigate('/history')}
+          onDownload={traceJobId ? handleDownloadPose : undefined}
+          onRegenerate={traceJobId ? handleRegeneratePose : undefined}
+          busyPose={busyPose}
+        />
       </div>
     </div>
   );
