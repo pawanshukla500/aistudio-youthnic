@@ -8,6 +8,7 @@ import { scopePoseRowsToJob } from "./generationRuns";
 import { buildPoseVersions, summarizeRegenerations } from "./poseVersions";
 import { isQueueCompatiblePosePlan } from "./posePlanCompatibility";
 import { ANALYSIS_RUN_KINDS, GENERATION_RUN_KIND, QA_RUN_KIND, attributeJobCostRuns, rollupSessionCost, type CostRun } from "./sessionCost";
+import { captureClientSentryException } from "./sentry";
 
 export type Id<_Table extends string> = string;
 export type BackendEndpoint = string;
@@ -220,6 +221,12 @@ async function invokeAppApiRequest<T>(
       gatewayCut?: boolean;
     };
     thrown.gatewayCut = isGatewayCutFailure(failure);
+    if (!options?.signal?.aborted) {
+      captureClientSentryException(thrown, {
+        operation,
+        tags: { status: status ?? undefined, gateway_cut: thrown.gatewayCut },
+      });
+    }
     throw thrown;
   }
   if (data?.error) throw new Error(String(data.error));

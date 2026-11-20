@@ -167,6 +167,32 @@ def get_latest_dna_version(org_id: str, sku_id: str) -> Optional[Dict[str, Any]]
         return None
 
 
+def get_dna_version_by_fingerprint(
+    org_id: str,
+    sku_id: str,
+    source_fingerprint: str,
+) -> Optional[Dict[str, Any]]:
+    """Fetch the most recent Product DNA version for an organization matching source_fingerprint."""
+    if not org_id or not source_fingerprint:
+        return None
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT * FROM public.product_dna_versions
+                    WHERE organization_id = %s AND source_fingerprint = %s
+                    ORDER BY (sku_id = %s) DESC, approved DESC, version DESC, created_at DESC
+                    LIMIT 1
+                    """,
+                    (org_id, source_fingerprint, sku_id),
+                )
+                return cur.fetchone()
+    except Exception as e:
+        logger.warning(f"Could not fetch DNA version by fingerprint from DB: {e}")
+        return None
+
+
 def list_dna_versions(org_id: str, sku_id: str) -> List[Dict[str, Any]]:
     """List all historical Product DNA versions for a given organization and SKU."""
     try:

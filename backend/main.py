@@ -10,6 +10,7 @@ from config import settings
 from database import close_pool, release_process_memory
 from cache import cache_manager, reset_valkey
 from graph import reset_compiled_graph
+from services.sentry_telemetry import capture_sentry_exception
 from routes import (
     dna_router,
     generation_router,
@@ -119,6 +120,12 @@ async def idle_resource_and_memory_middleware(request: Request, call_next):
                 _idle_timer = None
     try:
         return await call_next(request)
+    except Exception as exc:
+        capture_sentry_exception(
+            exc,
+            tags={"http_path": path, "http_method": request.method},
+        )
+        raise
     finally:
         if is_api_call:
             should_trim_now = path in ("/api/v1/dna/extract", "/api/v1/qa/evaluate")

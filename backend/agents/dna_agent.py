@@ -10,7 +10,7 @@ from models.dna_v2 import (
     SareeArchitecture,
 )
 from models.evidence import PRODUCT_AUTHORITY_ROLES
-from database import get_latest_dna_version, save_dna_version, approve_dna_version
+from database import get_dna_version_by_fingerprint, get_latest_dna_version, save_dna_version, approve_dna_version
 from cache import cache_manager
 from services.ai_clients import invoke_vision_json, load_reference_image
 
@@ -122,6 +122,79 @@ class ProductDNAAgent:
     Enforces style quarantine (never passes style_reference to extraction), Farshi salwar invariants,
     and saree unstitched-drape rules.
     """
+
+    def _raw_from_seed_analysis(self, seed_analysis: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(seed_analysis, dict):
+            return None
+        pi = seed_analysis.get("product_identity") or seed_analysis.get("productIdentity")
+        if not isinstance(pi, dict):
+            return None
+        main_color = str(pi.get("mainColor") or pi.get("main_color") or "").strip()
+        fabric = str(pi.get("fabric") or pi.get("fabric_type") or "").strip()
+        family = str(pi.get("garmentFamily") or pi.get("garment_family") or "").strip()
+        if not (main_color or fabric or family):
+            return None
+
+        emb_text = str(pi.get("embroidery") or "").strip()
+        has_emb = bool(emb_text and emb_text.lower() not in {"none", "not visible", "no embroidery", "n/a", "unknown"})
+        saree_truth = pi.get("sareeTruth") if isinstance(pi.get("sareeTruth"), dict) else {}
+        saree_drape = pi.get("sareeDrapePlan") if isinstance(pi.get("sareeDrapePlan"), dict) else {}
+        saree_pallu = saree_truth.get("pallu") if isinstance(saree_truth.get("pallu"), dict) else {}
+        saree_borders = saree_truth.get("borders") if isinstance(saree_truth.get("borders"), dict) else {}
+        saree_body = saree_truth.get("body") if isinstance(saree_truth.get("body"), dict) else {}
+        saree_blouse = saree_truth.get("blouse") if isinstance(saree_truth.get("blouse"), dict) else {}
+
+        bottom_details = str(pi.get("bottomWearDetails") or "").strip()
+        bottom_cut = str(pi.get("bottomWearCut") or "").strip().lower()
+        bottom_included = pi.get("bottomWearIncluded")
+        has_bottom = bool(bottom_included) if bottom_included is not None else bool(bottom_cut and bottom_cut != "none")
+
+        return {
+            "garment_family": family or "kurta_or_kurti_set",
+            "category": str(pi.get("category") or "ethnic/fusion"),
+            "silhouette": str(pi.get("silhouette") or "unknown"),
+            "fit": str(pi.get("fit") or "regular"),
+            "length": str(pi.get("length") or "unknown"),
+            "main_color": main_color or "unknown",
+            "secondary_colors": list(pi.get("secondaryColors") or pi.get("secondary_colors") or []),
+            "fabric_type": fabric or "unknown",
+            "fabric_texture": str(pi.get("texture") or pi.get("fabric_texture") or "unknown"),
+            "neckline": str(pi.get("neckline") or "unknown"),
+            "sleeve_type": str(pi.get("sleeveType") or pi.get("sleeve_type") or "unknown"),
+            "front_construction": str(pi.get("frontConstruction") or pi.get("front_construction") or "unknown"),
+            "back_construction": str(pi.get("backConstruction") or pi.get("back_construction") or "unknown"),
+            "pattern_geometry": {
+                "print_type": str(pi.get("pattern") or "unknown"),
+                "motif_inventory": [str(m) for m in (pi.get("detailPlacementMap") or [])],
+            },
+            "embroidery_geometry": {
+                "has_embroidery": has_emb,
+                "technique": emb_text if has_emb else "none",
+                "placement": emb_text if has_emb else "none",
+                "motif_structure": emb_text if has_emb else "none",
+                "border_construction": "none",
+            },
+            "bottom_wear": {
+                "has_bottom_wear": has_bottom,
+                "classification": bottom_details or bottom_cut or ("none" if not has_bottom else "unknown"),
+                "cut_class": bottom_cut or ("none" if not has_bottom else "unknown"),
+                "hem_trim": bottom_details or ("none" if not has_bottom else "unknown"),
+            },
+            "saree_details": {
+                "drape_style": str(saree_drape.get("drapeFamily") or "nivi"),
+                "pallu_direction": str(saree_drape.get("palluPlacement") or "over_left_shoulder"),
+                "pallu_zari_type": str(saree_pallu.get("zariOrThreadType") or "unknown"),
+                "pallu_artwork_description": str(saree_pallu.get("layoutSummary") or "derived from uploaded pallu reference"),
+                "border_weave_type": str(saree_borders.get("borderTechnique") or saree_borders.get("lowerBorder") or "unknown"),
+                "body_butti_type": str(saree_body.get("motifDescription") or "unknown"),
+                "blouse_fabric_coordination": str(saree_blouse.get("colorAndFabric") or "unknown"),
+                "blouse_sleeve_length": str(saree_blouse.get("sleeves") or "unknown"),
+                "blouse_back_neckline": str(saree_blouse.get("backDesign") or "unknown"),
+            },
+            "explicit_invariants": [str(inv) for inv in (pi.get("invariantDetails") or [])],
+            "prohibited_changes": [str(p) for p in (pi.get("absenceConstraints") or [])],
+            "confidence_score": 0.94,
+        }
 
     def _build_from_vlm(
         self,
@@ -454,6 +527,8 @@ class ProductDNAAgent:
         # 2. Check PostgreSQL for matching fingerprint (never reuse heuristic_offline rows)
         if not force_refresh:
             db_dna_row = get_latest_dna_version(org_id, sku_id)
+            if not db_dna_row or db_dna_row.get("source_fingerprint") != fingerprint:
+                db_dna_row = get_dna_version_by_fingerprint(org_id, sku_id, fingerprint)
             if db_dna_row:
                 dna_payload = db_dna_row.get("dna_payload", {})
                 src_mode = (dna_payload.get("metadata") or {}).get("analysis_source") if isinstance(dna_payload, dict) else None
@@ -462,9 +537,10 @@ class ProductDNAAgent:
                     and db_dna_row.get("source_fingerprint") == fingerprint
                     and src_mode != "heuristic_offline"
                 ):
+                    row_sku_id = str(db_dna_row.get("sku_id") or sku_id)
                     row_ver = int(db_dna_row.get("version") or dna_payload.get("version") or 1)
                     synced = self._sync_reuse_approval(
-                        org_id, sku_id, dna_payload,
+                        org_id, row_sku_id, dna_payload,
                         row_ver,
                         bool(db_dna_row.get("approved", False)),
                         auto_approve,
@@ -488,14 +564,9 @@ class ProductDNAAgent:
         )
 
         # 3. Filter strictly to AUTHORITATIVE product references (Style Quarantine!)
-        references = state.get("references", [])
-        auth_refs = [r for r in references if r.get("role", "additional_product") in PRODUCT_AUTHORITY_ROLES]
-        loaded_images = [
-            img
-            for r in auth_refs
-            if (img := load_reference_image(r, allow_local=allow_local, organization_id=org_id)) is not None
-        ]
+        from concurrent.futures import ThreadPoolExecutor
 
+        references = state.get("references", [])
         is_saree = (
             bool(re.search(r"\b(?:sarees?|sari)\b", sku_name.lower()))
             or any("saree" in str(r.get("role", "")).lower() for r in references)
@@ -503,7 +574,43 @@ class ProductDNAAgent:
         )
 
         dna: Optional[ProductDNAV2] = None
-        if loaded_images:
+        seed_analysis = state.get("seed_analysis") if not force_refresh else None
+        seed_raw = self._raw_from_seed_analysis(seed_analysis) if seed_analysis else None
+        if seed_raw is not None:
+            seed_provider = str((seed_analysis or {}).get("provider") or "meta").strip() or "meta"
+            seed_model = str((seed_analysis or {}).get("model") or "muse-spark-1.3-contributor").strip() or "muse-spark-1.3-contributor"
+            dna = self._build_from_vlm(
+                raw=seed_raw,
+                org_id=org_id,
+                sku_id=sku_id,
+                sku_name=sku_name,
+                fingerprint=fingerprint,
+                is_saree=is_saree,
+                references=references,
+                provider=seed_provider,
+                model=seed_model,
+            )
+
+        loaded_images: List[Dict[str, Any]] = []
+        if dna is None:
+            auth_refs = [r for r in references if r.get("role", "additional_product") in PRODUCT_AUTHORITY_ROLES]
+            if len(auth_refs) > 1:
+                with ThreadPoolExecutor(max_workers=min(6, len(auth_refs))) as pool:
+                    raw_loaded = list(
+                        pool.map(
+                            lambda r: load_reference_image(r, allow_local=allow_local, organization_id=org_id),
+                            auth_refs,
+                        )
+                    )
+                loaded_images = [img for img in raw_loaded if img is not None]
+            else:
+                loaded_images = [
+                    img
+                    for r in auth_refs
+                    if (img := load_reference_image(r, allow_local=allow_local, organization_id=org_id)) is not None
+                ]
+
+        if dna is None and loaded_images:
             remaining_after_load = total_budget - (time.monotonic() - caller_started_at)
             if remaining_after_load >= 12.0:
                 try:
