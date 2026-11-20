@@ -14,6 +14,9 @@ export type GenerationTraceSummary = {
   batch_id?: string;
   error_message?: string;
   current_pose?: number;
+  aspect_ratio?: string;
+  image_size?: string;
+  quality?: string;
 };
 
 export type TraceAnalysis = {
@@ -51,10 +54,13 @@ export type TraceAttempt = {
 };
 
 export type TracePose = {
+  generation_id?: string;
   pose_index: number;
   title: string;
   status: string;
   qa_status: string;
+  error?: string;
+  storage_path?: string;
   full_prompt?: string;
   attempts: TraceAttempt[];
   final_output_url?: string;

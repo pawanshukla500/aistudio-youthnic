@@ -3344,6 +3344,18 @@ async function jobIsStopping(jobId: unknown) {
 
 async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRecord, message: string, failureCode = "pose_consistency_failed") {
   const now = new Date().toISOString();
+  reportSentryException(new Error(message), {
+    operation: "generation.pose_failed",
+    organizationId: String(job.org_id || ""),
+    skuId: String(((job.job_data || {}) as JsonRecord).skuId || job.sku_name || ""),
+    provider: String(job.provider || ""),
+    model: String(job.model || ""),
+    tags: {
+      job_id: String(job.job_id || ""),
+      pose_index: Number(pose.pose_index || 0),
+      failure_code: failureCode,
+    },
+  });
   await service.from("session_generations").update({ status: "failed", qa_status: "failed", error: message.slice(0, 1000), updated_at: now }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
   const sessionData = (session.session_data || {}) as JsonRecord;
   const poseData = (pose.generation_data || {}) as JsonRecord;
@@ -5247,6 +5259,60 @@ async function adminGenerationFlowList(request: Request) {
   return { jobs: combined };
 }
 
+async function buildGenerationFlowTrace(job: JsonRecord, organizationId: string) {
+  const [session, poses, aiRuns, qaReviews, learning] = await Promise.all([
+    service.from("catalog_sessions").select("*").eq("session_id", job.session_id).maybeSingle(),
+    service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index"),
+    service.from("ai_runs").select("*").eq("job_id", String(job.job_id)).order("created_at"),
+    service.from("qa_reviews").select("*").eq("generation_job_id", String(job.job_id)).order("created_at"),
+    service.from("generation_learnings").select("*").eq("job_id", String(job.job_id)).order("created_at", { ascending: false }),
+  ]);
+
+  for (const result of [session, poses, aiRuns, qaReviews, learning]) {
+    if (result.error) throw new Error(result.error.message);
+  }
+
+  const rawSessionData = session.data?.session_data ? { ...(session.data.session_data as JsonRecord) } : null;
+  if (rawSessionData && Array.isArray(rawSessionData.references)) {
+    rawSessionData.references = await Promise.all(
+      (rawSessionData.references as JsonRecord[]).map(async (ref) => ({
+        ...ref,
+        downloadUrl: ref.storagePath
+          ? await signCatalogObject(organizationId, String(ref.storagePath), ref.storageBackend, String(ref.downloadUrl || ref.url || ""))
+          : (ref.downloadUrl || ref.url || ""),
+      })),
+    );
+  }
+
+  const signedPoses = await Promise.all(((poses.data || []) as JsonRecord[]).map(async (pose) => {
+    const outputUrl = pose.storage_path
+      ? await signCatalogObject(organizationId, String(pose.storage_path), pose.storage_backend, String(pose.output_url || ""))
+      : String(pose.output_url || "");
+    const genData = pose.generation_data && typeof pose.generation_data === "object" ? { ...(pose.generation_data as JsonRecord) } : {};
+    if (Array.isArray(genData.rejectedAttempts)) {
+      genData.rejectedAttempts = await Promise.all(
+        (genData.rejectedAttempts as JsonRecord[]).map(async (attempt) => ({
+          ...attempt,
+          url: attempt.storagePath
+            ? await signCatalogObject(organizationId, String(attempt.storagePath), attempt.storageBackend || pose.storage_backend, String(attempt.url || ""))
+            : String(attempt.url || ""),
+        })),
+      );
+    }
+    return { ...pose, output_url: outputUrl, generation_data: genData };
+  }));
+
+  return {
+    summary: job,
+    session: rawSessionData,
+    poses: signedPoses,
+    aiRuns: aiRuns.data || [],
+    qaReviews: qaReviews.data || [],
+    learnings: learning.data || [],
+    learning: learning.data?.[0] ?? null,
+  };
+}
+
 async function historyGenerationFlowGet(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request);
   
@@ -5282,27 +5348,7 @@ async function historyGenerationFlowGet(request: Request, args: JsonRecord) {
     throw new Error("You do not have permission to view diagnostics for this job.");
   }
 
-  const [session, poses, aiRuns, qaReviews, learning] = await Promise.all([
-    service.from("catalog_sessions").select("*").eq("session_id", job.session_id).maybeSingle(),
-    service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index"),
-    service.from("ai_runs").select("*").eq("job_id", jobId).order("created_at"),
-    service.from("qa_reviews").select("*").eq("generation_job_id", jobId).order("created_at"),
-    service.from("generation_learnings").select("*").eq("job_id", jobId).order("created_at", { ascending: false })
-  ]);
-
-  for (const result of [session, poses, aiRuns, qaReviews, learning]) {
-    if (result.error) throw new Error(result.error.message);
-  }
-
-  return {
-    summary: job,
-    session: session.data?.session_data ?? null,
-    poses: poses.data || [],
-    aiRuns: aiRuns.data || [],
-    qaReviews: qaReviews.data || [],
-    learnings: learning.data || [],
-    learning: learning.data?.[0] ?? null,
-  };
+  return buildGenerationFlowTrace(job as JsonRecord, workspace.organization.id);
 }
 
 async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
@@ -5334,27 +5380,7 @@ async function adminGenerationFlowGet(request: Request, args: JsonRecord) {
   const { data: job, error: jobError } = await service.from("generation_jobs").select("*").eq("job_id", jobId).eq("org_id", workspace.organization.id).single();
   if (jobError || !job) throw new Error("Job not found.");
 
-  const [session, poses, aiRuns, qaReviews, learning] = await Promise.all([
-    service.from("catalog_sessions").select("*").eq("session_id", job.session_id).maybeSingle(),
-    service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index"),
-    service.from("ai_runs").select("*").eq("job_id", jobId).order("created_at"),
-    service.from("qa_reviews").select("*").eq("generation_job_id", jobId).order("created_at"),
-    service.from("generation_learnings").select("*").eq("job_id", jobId).order("created_at", { ascending: false })
-  ]);
-
-  for (const result of [session, poses, aiRuns, qaReviews, learning]) {
-    if (result.error) throw new Error(result.error.message);
-  }
-
-  return {
-    summary: job,
-    session: session.data?.session_data ?? null,
-    poses: poses.data || [],
-    aiRuns: aiRuns.data || [],
-    qaReviews: qaReviews.data || [],
-    learnings: learning.data || [],
-    learning: learning.data?.[0] ?? null,
-  };
+  return buildGenerationFlowTrace(job as JsonRecord, workspace.organization.id);
 }
 
 const ADMIN_MANAGED_VISION_PURPOSES: VisionPurpose[] = ["product_truth", "qa"];
@@ -7157,6 +7183,13 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
     if (!args.requestId) scheduleBackground(kickCatalogPreflight(batchId));
     return { processed: true, requestId: variant.id, fingerprint: hashes.fingerprint };
   } catch (error) {
+    reportSentryException(error, {
+      operation: "catalog.preflight",
+      organizationId: String(batch.organization_id || ""),
+      skuId: String(variant.sku_name || variant.id || ""),
+      provider: hashes.policy.provider,
+      model: hashes.policy.model,
+    });
     const attempts = error instanceof VisionProviderError ? error.attempts : [];
     if (!attempts.length) {
       const failure = visionFailureRecord(error, hashes.policy);
@@ -9587,12 +9620,18 @@ const appRequestHandler = async (request: Request) => {
       "jobs.downloadAssets": () => downloadGeneratedAssets(request, args),
       "worker": async () => {
         assertInternal(request);
-        scheduleBackground(processWorker(request, args).catch(e => console.error(e)));
+        scheduleBackground(processWorker(request, args).catch((e) => {
+          console.error(e);
+          reportSentryException(e, { operation: "app-api.worker" });
+        }));
         return { ack: true };
       },
       "nodeWorker": async () => {
         assertInternal(request);
-        scheduleBackground(processNode(request, args).catch(e => console.error(e)));
+        scheduleBackground(processNode(request, args).catch((e) => {
+          console.error(e);
+          reportSentryException(e, { operation: "app-api.nodeWorker" });
+        }));
         return { ack: true };
       },
       "admin.overview": () => adminOverview(request),

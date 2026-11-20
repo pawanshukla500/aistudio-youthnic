@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { boardFromGenerationData } from "./boardFromGenerationData.ts";
 import { namesMatch, neighborIds, photosForPose, poseIsWorking, promptExcerpt } from "./flowLinks.ts";
 
 const photos = [
@@ -88,4 +89,56 @@ test("numbered sibling files do not cross-match", () => {
 
 test("stored file names still match the upload name", () => {
   assert.equal(namesMatch("a65ad731-988e-4912-a41d-5ab1992cb36f-BT217-Nandlal-Navy-5-.jpg", "BT217-Nandlal-Navy (5).jpg"), true);
+});
+
+test("boardFromGenerationData preserves downloadUrl references, manifest links, versions, and queued prompts", () => {
+  const board = boardFromGenerationData({
+    trace: {
+      summary: {
+        job_id: "job_1",
+        status: "completed",
+        model: "gpt-image-2.6-sunburst",
+        aspect_ratio: "3:4",
+        image_size: "2K",
+        quality: "medium",
+      },
+      session: {
+        references: [
+          { id: "ref_f", role: "front", downloadUrl: "https://cdn.example.com/front.jpg", filename: "front.jpg" },
+          { id: "ref_s", role: "style_reference", downloadUrl: "https://cdn.example.com/room.jpg", filename: "room.jpg" },
+        ],
+        posePlan: [
+          { id: "full_front", title: "Full Front", prompt: "Planned full front prompt" },
+        ],
+      },
+      poses: [
+        {
+          generation_id: "job_1:pose:1",
+          pose_index: 1,
+          title: "Full Front",
+          status: "completed",
+          full_prompt: "",
+          final_output_url: "https://cdn.example.com/out-1.jpg",
+          attempts: [
+            { attempt_index: 1, model: "gpt-image-2.6-sunburst", output_url: "https://cdn.example.com/rej-1.jpg", rejected: true, qa: { outcome: "rejected_by_qa" } },
+            { attempt_index: 2, model: "gpt-image-2.6-sunburst", output_url: "https://cdn.example.com/out-1.jpg", rejected: false, qa: { outcome: "automatically_verified" } },
+          ],
+          referenceManifest: {
+            references: [
+              { role: "front", filename: "front.jpg" },
+              { role: "style_reference", filename: "room.jpg" },
+            ],
+          },
+        },
+      ],
+    },
+  });
+  assert.equal(board.references.length, 2);
+  assert.equal(board.references[0].imageUrl, "https://cdn.example.com/front.jpg");
+  assert.equal(board.references[1].roomOnly, true);
+  assert.equal(board.poses[0].prompt, "Planned full front prompt");
+  assert.equal(board.poses[0].canRegenerate, true);
+  assert.equal(board.poses[0].versions?.length, 2);
+  assert.equal(board.poses[0].sent?.[0].fileName, "front.jpg");
+  assert.equal(board.poses[0].settings, "3:4 · 2K · medium");
 });

@@ -95,10 +95,13 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
     }
 
     return {
+      generation_id: p.generation_id,
       pose_index: p.pose_index,
       title: p.title,
       status: p.status,
       qa_status: p.qa_status,
+      error: p.error,
+      storage_path: p.storage_path,
       full_prompt: p.full_prompt,
       attempts,
       final_output_url: p.output_url,

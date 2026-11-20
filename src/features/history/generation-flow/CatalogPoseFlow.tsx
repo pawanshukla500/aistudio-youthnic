@@ -14,32 +14,9 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { neighborIds, photosForPose, poseIsWorking, promptExcerpt, referenceLane, type SentShot } from "./flowLinks";
+import { neighborIds, photosForPose, poseIsWorking, promptExcerpt, referenceLane, type FlowPose, type FlowReference } from "./flowLinks";
 
-export type FlowReference = {
-  id: string;
-  role: string;
-  label: string;
-  imageUrl: string;
-  fileName?: string;
-  roomOnly?: boolean;
-};
-
-export type FlowPose = {
-  poseIndex: number;
-  title: string;
-  prompt: string;
-  imageUrl: string;
-  referenceRoles: string[];
-  sent?: SentShot[];
-  model?: string;
-  status?: string;
-  error?: string;
-  versionCount?: number;
-  canRegenerate?: boolean;
-  settings?: string;
-  versions?: Array<{ version: number; at?: string; status?: string; imageUrl?: string }>;
-};
+export type { FlowPose, FlowReference };
 
 type ShotData = {
   title: string;

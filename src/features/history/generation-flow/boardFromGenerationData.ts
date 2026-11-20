@@ -1,4 +1,4 @@
-import type { FlowPose, FlowReference } from "./CatalogPoseFlow";
+import type { FlowPose, FlowReference } from "./flowLinks.ts";
 
 type Loose = Record<string, any>;
 
@@ -6,18 +6,36 @@ function imageFrom(record: Loose | null | undefined) {
   if (!record) return "";
   const outputs = record.outputs || {};
   const inputs = record.inputs || {};
-  return String(outputs.outputUrls?.[0] || outputs.url || outputs.output_url || inputs.imageUrl || inputs.url || "");
+  return String(
+    outputs.outputUrls?.[0] ||
+    outputs.url ||
+    outputs.output_url ||
+    outputs.downloadUrl ||
+    inputs.imageUrl ||
+    inputs.url ||
+    inputs.downloadUrl ||
+    "",
+  );
 }
 
 function referenceFrom(entry: Loose, fallbackId: string): FlowReference | null {
-  const imageUrl = String(entry.url || entry.imageUrl || entry.image_url || "");
+  const imageUrl = String(
+    entry.downloadUrl ||
+    entry.download_url ||
+    entry.url ||
+    entry.imageUrl ||
+    entry.image_url ||
+    "",
+  ).trim();
   if (!imageUrl) return null;
-  const role = String(entry.role || "reference");
+  const role = String(entry.role || entry.asset_role || "reference");
+  const fileName = String(entry.filename || entry.fileName || entry.storagePath?.split("/").pop() || "").trim();
   return {
     id: String(entry.id || fallbackId),
     role,
     label: role.replaceAll("_", " "),
     imageUrl,
+    ...(fileName ? { fileName } : {}),
     roomOnly: role.toLowerCase().includes("style"),
   };
 }
@@ -25,13 +43,38 @@ function referenceFrom(entry: Loose, fallbackId: string): FlowReference | null {
 export function boardFromGenerationData(data: Loose | null | undefined): { references: FlowReference[]; poses: FlowPose[] } {
   if (!data) return { references: [], poses: [] };
   if (data.trace) {
-    const poses: FlowPose[] = (data.trace.poses || []).map((pose: Loose) => ({
-      poseIndex: Number(pose.pose_index),
-      title: String(pose.title || `Pose ${pose.pose_index}`),
-      prompt: String(pose.full_prompt || "").trim(),
-      imageUrl: String(pose.final_output_url || pose.attempts?.find((attempt: Loose) => attempt.output_url)?.output_url || ""),
-      referenceRoles: (pose.referenceManifest?.references || []).map((reference: Loose) => String(reference.role || "")),
-    }));
+    const summary: Loose = data.trace.summary || {};
+    const posePlan: Loose[] = Array.isArray(data.trace.session?.posePlan) ? data.trace.session.posePlan : [];
+    const settingsText = [summary.aspect_ratio, summary.image_size, summary.quality].filter(Boolean).join(" · ");
+    const jobBusy = ["queued", "processing", "cancelling"].includes(String(summary.status || ""));
+    const poses: FlowPose[] = (data.trace.poses || []).map((pose: Loose) => {
+      const manifestRefs: Loose[] = Array.isArray(pose.referenceManifest?.references) ? pose.referenceManifest.references : [];
+      const attempts: Loose[] = Array.isArray(pose.attempts) ? pose.attempts : [];
+      const planned = posePlan[Number(pose.pose_index || 1) - 1] || posePlan.find((item) => item?.id === pose.pose_type);
+      const imageUrl = String(pose.final_output_url || attempts.find((attempt: Loose) => attempt.output_url)?.output_url || "");
+      return {
+        poseIndex: Number(pose.pose_index),
+        title: String(pose.title || planned?.title || `Pose ${pose.pose_index}`),
+        prompt: String(pose.full_prompt || planned?.prompt || "").trim(),
+        imageUrl,
+        referenceRoles: manifestRefs.map((reference: Loose) => String(reference.role || "")),
+        sent: manifestRefs.map((reference: Loose) => ({
+          role: String(reference.role || ""),
+          ...(reference.filename ? { fileName: String(reference.filename) } : {}),
+        })),
+        model: String(attempts.at(-1)?.model || summary.model || ""),
+        status: String(pose.status || ""),
+        error: String(pose.error || ""),
+        settings: settingsText,
+        versionCount: attempts.length || (imageUrl ? 1 : 0),
+        versions: attempts.slice().reverse().slice(0, 4).map((attempt: Loose, index: number) => ({
+          version: Number(attempt.attempt_index || attempts.length - index || 1),
+          status: String(attempt.qa?.outcome || (attempt.rejected ? "rejected_by_qa" : pose.status) || ""),
+          imageUrl: String(attempt.output_url || ""),
+        })),
+        canRegenerate: Boolean(pose.generation_id && !jobBusy),
+      };
+    });
     const sessionRows: Loose[] = Array.isArray(data.trace.session?.references) ? data.trace.session.references : [];
     const sessionReferences = sessionRows.map((entry, index) => referenceFrom(entry, `trace-${index}`)).filter((entry): entry is FlowReference => Boolean(entry));
     return { references: sessionReferences, poses };

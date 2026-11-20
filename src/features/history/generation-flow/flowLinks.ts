@@ -9,6 +9,31 @@ export type SentShot = {
   fileName?: string;
 };
 
+export type FlowReference = {
+  id: string;
+  role: string;
+  label: string;
+  imageUrl: string;
+  fileName?: string;
+  roomOnly?: boolean;
+};
+
+export type FlowPose = {
+  poseIndex: number;
+  title: string;
+  prompt: string;
+  imageUrl: string;
+  referenceRoles: string[];
+  sent?: SentShot[];
+  model?: string;
+  status?: string;
+  error?: string;
+  versionCount?: number;
+  canRegenerate?: boolean;
+  settings?: string;
+  versions?: Array<{ version: number; at?: string; status?: string; imageUrl?: string }>;
+};
+
 export function canonicalRole(role: string) {
   const value = role.toLowerCase().replace(/[^a-z0-9]+/g, "_");
   if (value.includes("model")) return "model_identity";
