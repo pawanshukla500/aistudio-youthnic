@@ -96,8 +96,10 @@ function providerLabel(provider: string) {
   const labels: Record<string, string> = {
     gemini: "Google Gemini",
     openai: "OpenAI",
+    zai: "Z.ai (GLM)",
     qwen: "Qwen",
     meta: "Meta Muse Spark",
+    reve: "Reve",
   };
   return labels[provider] || provider;
 }
@@ -544,17 +546,17 @@ export function Admin() {
   const thinkingLevelsFor = (provider: string, modelId: string, purpose: AiPolicyPurpose) => {
     if (provider === "qwen") return ["none"];
     const levels = modelsFor(provider, purpose).find((model) => model.id === modelId)?.thinkingLevels || [];
-    const safeLevels = provider === "meta" ? levels.filter((level) => level !== "none") : levels;
-    return safeLevels.length ? safeLevels : provider === "meta" ? ["low"] : ["none"];
+    const safeLevels = (provider === "meta" || provider === "zai") ? levels.filter((level) => level !== "none") : levels;
+    return safeLevels.length ? safeLevels : (provider === "meta" || provider === "zai") ? ["low"] : ["none"];
   };
   const normalizedThinking = (provider: string, modelId: string, purpose: AiPolicyPurpose, current: string | undefined) => {
     const levels = thinkingLevelsFor(provider, modelId, purpose);
     if (provider === "qwen") return "none";
-    if (provider === "meta" && current === "none") return levels.includes("high") ? "high" : levels.includes("low") ? "low" : levels[0] || "minimal";
+    if ((provider === "meta" || provider === "zai") && current === "none") return levels.includes("medium") ? "medium" : levels.includes("high") ? "high" : levels.includes("low") ? "low" : levels[0] || "minimal";
     if (purpose === "product_truth") {
-      if (provider === "meta" || (provider === "openai" && (modelId === "gpt-6.1-terra" || modelId === "gpt-5.6-luna"))) {
+      if (provider === "meta" || provider === "zai" || (provider === "openai" && (modelId === "gpt-6.1-terra" || modelId === "gpt-5.6-luna"))) {
         if (current && levels.includes(current)) return current;
-        if ((provider === "meta" || modelId === "gpt-6.1-terra") && levels.includes("medium")) return "medium";
+        if ((provider === "meta" || provider === "zai" || modelId === "gpt-6.1-terra") && levels.includes("medium")) return "medium";
         return levels.includes("low") ? "low" : levels.includes("high") ? "high" : levels[0] || "low";
       }
       if (current && ["none", "minimal", "low"].includes(current) && levels.includes(current)) {
@@ -635,26 +637,30 @@ export function Admin() {
   };
   const canApplyRecommendedProductTruth = useMemo(() => {
     const metaEntry = aiRegistry.find((entry) => entry.provider === "meta");
+    const zaiEntry = aiRegistry.find((entry) => entry.provider === "zai");
     const openAiEntry = aiRegistry.find((entry) => entry.provider === "openai");
     const metaModels = (metaEntry?.models || []).filter((model) => model.purposes.includes("product_truth"));
+    const zaiModels = (zaiEntry?.models || []).filter((model) => model.purposes.includes("product_truth"));
     const openAiModels = (openAiEntry?.models || []).filter((model) => model.purposes.includes("product_truth"));
     return Boolean(
       metaEntry?.configured &&
       metaModels.length > 0 &&
-      openAiEntry?.configured &&
-      openAiModels.length > 0,
+      ((zaiEntry?.configured && zaiModels.length > 0) || (openAiEntry?.configured && openAiModels.length > 0)),
     );
   }, [aiRegistry]);
 
   const applyRecommendedProductTruth = () => {
     const metaEntry = providerFor("meta");
+    const zaiEntry = providerFor("zai");
     const openAiEntry = providerFor("openai");
     const metaModels = modelsFor("meta", "product_truth");
+    const zaiModels = modelsFor("zai", "product_truth");
     const openAiModels = modelsFor("openai", "product_truth");
-    if (!metaEntry?.configured || !metaModels.length || !openAiEntry?.configured || !openAiModels.length) {
+    const useZaiFallback = Boolean(zaiEntry?.configured && zaiModels.length > 0);
+    if (!metaEntry?.configured || !metaModels.length || (!useZaiFallback && (!openAiEntry?.configured || !openAiModels.length))) {
       setNotice({
         tone: "error",
-        text: "Cannot apply recommendation: Meta and OpenAI must both be configured with available vision models.",
+        text: "Cannot apply recommendation: Meta and at least one fallback vision provider (Z.ai or OpenAI) must be configured.",
       });
       return;
     }
@@ -664,10 +670,12 @@ export function Admin() {
       metaModels.find((model) => model.id === "muse-spark-1.3") ||
       metaModels.find((model) => model.id === "muse-spark-1.2") ||
       metaModels[0];
-    const openAiModel =
-      openAiModels.find((model) => model.id === "gpt-6.1-terra") ||
-      openAiModels.find((model) => model.id === "gpt-5.6-luna") ||
-      openAiModels[0];
+    const fallbackProvider = useZaiFallback ? "zai" : "openai";
+    const fallbackModel = useZaiFallback
+      ? (zaiModels.find((model) => model.id === "glm-5.3-flash") || zaiModels[0])
+      : (openAiModels.find((model) => model.id === "gpt-6.1-terra") ||
+         openAiModels.find((model) => model.id === "gpt-5.6-luna") ||
+         openAiModels[0]);
 
     updateAiPolicy("product_truth", (current) => ({
       ...current,
@@ -675,9 +683,9 @@ export function Admin() {
       primaryModel: metaModel.id,
       primaryThinking: normalizedThinking("meta", metaModel.id, "product_truth", "medium"),
       fallbackEnabled: true,
-      fallbackProvider: "openai",
-      fallbackModel: openAiModel.id,
-      fallbackThinking: normalizedThinking("openai", openAiModel.id, "product_truth", "medium"),
+      fallbackProvider,
+      fallbackModel: fallbackModel.id,
+      fallbackThinking: normalizedThinking(fallbackProvider, fallbackModel.id, "product_truth", "medium"),
     }));
   };
 
@@ -1321,7 +1329,8 @@ export function Admin() {
                           <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Thinking<select value={policy.primaryThinking} disabled={saving || !overview.capabilities.canManageSettings || policy.primaryProvider === "qwen"} onChange={(event) => updateAiPolicy(policy.purpose, (current) => ({ ...current, primaryThinking: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50">{primaryThinkingLevels.map((level) => <option key={level} value={level}>{thinkingLabel(level)}</option>)}</select></label>
                         </div>
                         {policy.primaryProvider === "qwen" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Qwen structured vision runs with thinking off so the Product Truth JSON contract remains reliable.</p>}
-                        {policy.primaryProvider === "meta" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Muse Spark 1.2 Contributor is highly recommended for ultra-low token cost (~$0.10 / $0.20 per 1M tokens). Standard models (~$1.25 / $4.25) do not train on your data. Reasoning cannot be turned off.</p>}
+                        {policy.primaryProvider === "zai" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Z.ai GLM 5.3 Flash is a native multimodal VLM with forced deep thinking, 1M context, and a 50-concurrent-request limit (GLM 5.3 FlashX sibling runs at 200 tok/s with 20x concurrency).</p>}
+                        {policy.primaryProvider === "meta" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">Muse Spark 1.3 Contributor is highly recommended for ultra-low token cost (~$0.10 / $0.20 per 1M tokens). Standard models (~$1.25 / $4.25) do not train on your data. Reasoning cannot be turned off.</p>}
                         {primaryModels.find((model) => model.id === policy.primaryModel)?.help && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">{primaryModels.find((model) => model.id === policy.primaryModel)?.help}</p>}
                         {policy.purpose === "image_generation" && <p className="mt-3 rounded-lg bg-surface-container-low px-3 py-2 text-xs leading-5 text-secondary">GPT Image 2.6 (Sunburst default and Flare), GPT Image 2.5, and GPT Image 2 are supported for production catalog generation. Gemini, Qwen, and Muse Spark are available only for vision analysis or QA until a separately tested image-generation adapter is added.</p>}
                         {policy.repairRequired && <p className="mt-3 rounded-lg border border-warning/25 bg-warning-surface px-3 py-2 text-xs leading-5 text-warning">{policy.repairMessage || "This stored policy needs review. Save the displayed route to repair it."}</p>}
@@ -1329,7 +1338,7 @@ export function Admin() {
 
                       {policy.purpose !== "image_generation" && (
                         <div className="border-t border-outline-variant/25 pt-5">
-                          <label className="flex cursor-pointer items-start justify-between gap-3 rounded-xl border border-outline-variant/40 p-4"><span><span className="block text-sm font-bold text-on-surface">Use a fallback provider</span><span className="mt-1 block text-xs leading-5 text-secondary">Tried next, exactly as selected, when the primary fails for a reason another model can fix: model not available, missing or rejected API key, quota or billing, rate limit, timeout, or a server error. Use GPT 6.1 Terra (High) for Product truth &amp; pose planning, or GPT 5.6 Luna for QA.</span></span><input type="checkbox" checked={policy.fallbackEnabled} disabled={saving || !overview.capabilities.canManageSettings} onChange={(event) => { if (event.target.checked && !fallbackCandidates.some((entry) => entry.configured)) { setNotice({ tone: "error", text: "No other provider has its API key configured on the server, so there is no model to fall back to. Add that provider's key to the functions service first." }); return; } updateAiPolicy(policy.purpose, (current) => { if (!event.target.checked) return { ...current, fallbackEnabled: false }; const existingUsable = current.fallbackProvider && current.fallbackProvider !== current.primaryProvider && providerFor(current.fallbackProvider)?.configured === true && modelsFor(current.fallbackProvider, policy.purpose).some((model) => model.id === current.fallbackModel); const candidate = existingUsable ? providerFor(current.fallbackProvider!) : fallbackCandidates.find((entry) => entry.provider === "openai" && entry.configured) || fallbackCandidates.find((entry) => entry.configured); const options = candidate ? modelsFor(candidate.provider, policy.purpose) : []; const model = options.find((entry) => entry.id === preferredModelId(candidate?.provider || "", options, policy.purpose)) || options[0]; return { ...current, fallbackEnabled: true, fallbackProvider: existingUsable ? current.fallbackProvider : candidate?.provider, fallbackModel: existingUsable ? current.fallbackModel : model?.id, fallbackThinking: existingUsable ? current.fallbackThinking : candidate && model ? normalizedThinking(candidate.provider, model.id, policy.purpose, undefined) : undefined }; }); }} className="mt-1 h-4 w-4 accent-primary disabled:opacity-50" /></label>
+                          <label className="flex cursor-pointer items-start justify-between gap-3 rounded-xl border border-outline-variant/40 p-4"><span><span className="block text-sm font-bold text-on-surface">Use a fallback provider</span><span className="mt-1 block text-xs leading-5 text-secondary">Tried next, exactly as selected, when the primary fails for a reason another model can fix: model not available, missing or rejected API key, quota or billing, rate limit, timeout, or a server error. Recommended chain: Meta Muse Spark → Z.ai GLM 5.3 Flash (50x concurrency) → OpenAI GPT 6.1 Terra (Medium) → GPT 5.6 Luna.</span></span><input type="checkbox" checked={policy.fallbackEnabled} disabled={saving || !overview.capabilities.canManageSettings} onChange={(event) => { if (event.target.checked && !fallbackCandidates.some((entry) => entry.configured)) { setNotice({ tone: "error", text: "No other provider has its API key configured on the server, so there is no model to fall back to. Add that provider's key to the functions service first." }); return; } updateAiPolicy(policy.purpose, (current) => { if (!event.target.checked) return { ...current, fallbackEnabled: false }; const existingUsable = current.fallbackProvider && current.fallbackProvider !== current.primaryProvider && providerFor(current.fallbackProvider)?.configured === true && modelsFor(current.fallbackProvider, policy.purpose).some((model) => model.id === current.fallbackModel); const candidate = existingUsable ? providerFor(current.fallbackProvider!) : fallbackCandidates.find((entry) => entry.provider === "zai" && entry.configured) || fallbackCandidates.find((entry) => entry.provider === "openai" && entry.configured) || fallbackCandidates.find((entry) => entry.configured); const options = candidate ? modelsFor(candidate.provider, policy.purpose) : []; const model = options.find((entry) => entry.id === preferredModelId(candidate?.provider || "", options, policy.purpose)) || options[0]; return { ...current, fallbackEnabled: true, fallbackProvider: existingUsable ? current.fallbackProvider : candidate?.provider, fallbackModel: existingUsable ? current.fallbackModel : model?.id, fallbackThinking: existingUsable ? current.fallbackThinking : candidate && model ? normalizedThinking(candidate.provider, model.id, policy.purpose, undefined) : undefined }; }); }} className="mt-1 h-4 w-4 accent-primary disabled:opacity-50" /></label>
                           {policy.fallbackEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-3"><label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Fallback provider<select value={policy.fallbackProvider || ""} disabled={saving || !overview.capabilities.canManageSettings} onChange={(event) => { const provider = event.target.value; const options = modelsFor(provider, policy.purpose); const model = options.find((entry) => entry.id === preferredModelId(provider, options, policy.purpose)) || options[0]; updateAiPolicy(policy.purpose, (current) => ({ ...current, fallbackProvider: provider, fallbackModel: model?.id || "", fallbackThinking: normalizedThinking(provider, model?.id || "", policy.purpose, undefined) })); }} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50"><option value="" disabled>Select provider</option>{fallbackCandidates.map((entry) => <option key={entry.provider} value={entry.provider} disabled={!entry.configured && entry.provider !== policy.fallbackProvider}>{providerLabel(entry.provider)}{entry.configured ? "" : " · missing secret"}</option>)}</select></label>
                             <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Fallback model<select value={policy.fallbackModel || ""} disabled={saving || !overview.capabilities.canManageSettings || !fallbackModels.length} onChange={(event) => { const modelId = event.target.value; updateAiPolicy(policy.purpose, (current) => ({ ...current, fallbackModel: modelId, fallbackThinking: normalizedThinking(current.fallbackProvider || "", modelId, policy.purpose, current.fallbackThinking) })); }} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50"><option value="" disabled>Select model</option>{fallbackModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label>
                             <label className="text-[10px] font-bold uppercase tracking-wider text-secondary">Fallback thinking<select value={policy.fallbackThinking || "none"} disabled={saving || !overview.capabilities.canManageSettings || policy.fallbackProvider === "qwen"} onChange={(event) => updateAiPolicy(policy.purpose, (current) => ({ ...current, fallbackThinking: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-outline-variant bg-white px-3 text-sm font-semibold normal-case tracking-normal text-on-surface outline-none focus:border-primary disabled:opacity-50">{fallbackThinkingLevels.map((level) => <option key={level} value={level}>{thinkingLabel(level)}</option>)}</select></label></div>}

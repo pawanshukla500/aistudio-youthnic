@@ -74,6 +74,27 @@ Deno.test("vision cost calculates Meta Muse Spark Contributor low rates and cach
   assertEquals(calculated13.costSource, "estimated_public_rates_2026-09");
 });
 
+Deno.test("vision cost calculates Z.ai GLM 5.3 Flash and FlashX rates and cached tokens", () => {
+  const flash = extractVisionUsageAndCost({
+    usage: {
+      prompt_tokens: 12000,
+      completion_tokens: 1000,
+      prompt_tokens_details: { cached_tokens: 2000 },
+    },
+  }, "zai", "glm-5.3-flash");
+  assertEquals(flash.cachedTok, 2000);
+  assertAlmostEquals(flash.costUsd, (10000 * 0.10 + 2000 * 0.02 + 1000 * 0.40) / 1_000_000, 1e-8);
+  assertEquals(flash.costSource, "estimated_public_rates_2026-11");
+
+  const flashx = extractVisionUsageAndCost({
+    usage: {
+      prompt_tokens: 10000,
+      completion_tokens: 500,
+    },
+  }, "zai", "glm-5.3-flashx");
+  assertAlmostEquals(flashx.costUsd, (10000 * 0.20 + 500 * 0.80) / 1_000_000, 1e-8);
+});
+
 Deno.test("vision cost prefers OpenAI admin-derived rates when present", () => {
   const calculated = extractVisionUsageAndCost({
     usage: { prompt_tokens: 10000, completion_tokens: 500 },

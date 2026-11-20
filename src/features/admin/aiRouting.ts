@@ -56,12 +56,14 @@ export function preferredModelId(
   if (provider === "meta" && ids.includes("muse-spark-1.2-contributor")) return "muse-spark-1.2-contributor";
   if (provider === "meta" && ids.includes("muse-spark-1.3")) return "muse-spark-1.3";
   if (provider === "meta" && ids.includes("muse-spark-1.2")) return "muse-spark-1.2";
+  if (provider === "zai" && ids.includes("glm-5.3-flash")) return "glm-5.3-flash";
+  if (provider === "zai" && ids.includes("glm-5.3-flashx")) return "glm-5.3-flashx";
   if (provider === "gemini" && models.length && ids.includes("gemini-3.8-flash")) return "gemini-3.8-flash";
   return ids[0] || "";
 }
 
-const VISION_PROVIDER_PREFERENCE = ["meta", "openai", "qwen", "gemini"];
-const FALLBACK_PROVIDER_PREFERENCE = ["openai", "meta", "qwen", "gemini"];
+const VISION_PROVIDER_PREFERENCE = ["meta", "zai", "openai", "qwen", "gemini"];
+const FALLBACK_PROVIDER_PREFERENCE = ["zai", "openai", "meta", "qwen", "gemini"];
 
 export function preferredConfiguredProvider(
   registry: AdminAiRegistryEntry[],
@@ -72,8 +74,8 @@ export function preferredConfiguredProvider(
     ? ["openai"]
     : purpose === "product_truth"
     ? options?.fallback
-      ? ["openai", "qwen", "gemini"]
-      : ["meta", "openai", "qwen", "gemini"]
+      ? ["zai", "openai", "qwen", "gemini"]
+      : ["meta", "zai", "openai", "qwen", "gemini"]
     : options?.fallback
     ? FALLBACK_PROVIDER_PREFERENCE
     : VISION_PROVIDER_PREFERENCE;
@@ -99,9 +101,9 @@ function thinkingFor(
     .find((model) => model.id === modelId)?.thinkingLevels || [];
   if (provider === "qwen") return "none";
   if (purpose === "product_truth") {
-    if (provider === "meta" || (provider === "openai" && (modelId === "gpt-6.1-terra" || modelId === "gpt-5.6-luna"))) {
+    if (provider === "meta" || provider === "zai" || (provider === "openai" && (modelId === "gpt-6.1-terra" || modelId === "gpt-5.6-luna"))) {
       if (current && levels.includes(current)) return current;
-      if ((provider === "meta" || modelId === "gpt-6.1-terra") && levels.includes("medium")) return "medium";
+      if ((provider === "meta" || provider === "zai" || modelId === "gpt-6.1-terra") && levels.includes("medium")) return "medium";
       if (levels.includes("low")) return "low";
       if (levels.includes("high")) return "high";
     }
@@ -150,7 +152,8 @@ export function coerceAdminAiPolicy(
       next.fallbackProvider !== next.primaryProvider &&
       fallbackCandidates.some((entry) => entry.provider === next.fallbackProvider)
     ? next.fallbackProvider
-    : fallbackCandidates.find((entry) => entry.provider === "openai")?.provider ||
+    : fallbackCandidates.find((entry) => entry.provider === "zai" && entry.configured)?.provider ||
+      fallbackCandidates.find((entry) => entry.provider === "openai")?.provider ||
       fallbackCandidates.find((entry) => entry.configured)?.provider ||
       fallbackCandidates[0]?.provider ||
       "";

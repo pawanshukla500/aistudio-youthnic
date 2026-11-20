@@ -91,6 +91,11 @@ export const META_VISION_PRICING: Record<string, VisionTokenRates> = {
   "muse-spark-1.2-contributor": { input: 0.10, output: 0.20, cached: 0.002, version: "2026-09", source: "meta_contributor_muse" },
 };
 
+export const ZAI_VISION_PRICING: Record<string, VisionTokenRates> = {
+  "glm-5.3-flash": { input: 0.10, output: 0.40, cached: 0.02, version: "2026-11", source: "zai_standard_glm53_flash" },
+  "glm-5.3-flashx": { input: 0.20, output: 0.80, cached: 0.04, version: "2026-11", source: "zai_standard_glm53_flashx" },
+};
+
 export const ANALYSIS_RUN_KINDS = ["product_reference_analysis", "catalog_product_preflight"] as const;
 export const GENERATION_RUN_KIND = "image_generation";
 export const QA_RUN_KIND = "quality_assurance";
@@ -183,6 +188,9 @@ function publicVisionPricing(provider: string, model: string): VisionTokenRates 
   }
   if (provider === "meta") {
     return META_VISION_PRICING[model] || META_VISION_PRICING["muse-spark-1.3"] || null;
+  }
+  if (provider === "zai") {
+    return ZAI_VISION_PRICING[model] || ZAI_VISION_PRICING["glm-5.3-flash"] || null;
   }
   return null;
 }

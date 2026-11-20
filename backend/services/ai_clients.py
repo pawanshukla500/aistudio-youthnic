@@ -17,6 +17,7 @@ from PIL import Image
 from config import settings
 from cache import cache_manager
 from firebase_service import download_bytes
+from services.sentry_telemetry import capture_sentry_exception
 
 logger = logging.getLogger(__name__)
 
@@ -419,7 +420,12 @@ def _meta_vision_json(
                     last_err = RuntimeError(msg)
                     now_elapsed = time.monotonic() - started_at
                     remaining_after = (deadline - time.monotonic()) if deadline is not None else max(0.0, float(timeout_s) - now_elapsed)
-                    is_transient = resp.status_code == 429 or resp.status_code >= 500
+                    if resp.status_code == 429:
+                        if model_name == "muse-spark-1.3-contributor" and remaining_after >= 30.0:
+                            break
+                        should_stop = True
+                        break
+                    is_transient = resp.status_code >= 500
                     can_retry_fast = is_transient and now_elapsed < 10.0 and remaining_after >= 30.0
                     if can_retry_fast and transient_attempt == 0:
                         time.sleep(0.5)
@@ -470,6 +476,123 @@ def _meta_vision_json(
     if last_err is not None:
         cache_manager.record_provider_result("meta", False, str(last_err))
     raise RuntimeError(f"Meta vision call failed: {last_err}")
+
+
+def _zai_reasoning_effort(effort: str) -> str:
+    lower = (effort or "").strip().lower()
+    if lower in {"none", "minimal", "low"}:
+        return "low"
+    if lower in {"xhigh", "max"}:
+        return "max"
+    return "high"
+
+
+def _zai_vision_json(
+    prompt: str,
+    images: List[Dict[str, Any]],
+    model: str = "glm-5.3-flash",
+    reasoning_effort: str = "medium",
+    timeout_s: int = 60,
+    deadline: Optional[float] = None,
+) -> Dict[str, Any]:
+    api_key = (settings.ZAI_API_KEY or "").strip()
+    if not api_key:
+        raise RuntimeError("ZAI_API_KEY is not configured")
+
+    content_blocks: List[Dict[str, Any]] = []
+    for idx, img in enumerate(images, start=1):
+        content_blocks.append({"type": "text", "text": f"IMAGE {idx} ({img.get('role', 'reference')}):"})
+        content_blocks.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{img['mime_type']};base64,{img['base64']}"},
+        })
+    content_blocks.append({"type": "text", "text": prompt})
+
+    from langchain_core.messages import HumanMessage
+    from langchain_openai import ChatOpenAI
+
+    sibling = "glm-5.3-flashx" if model == "glm-5.3-flash" else ("glm-5.3-flash" if model == "glm-5.3-flashx" else None)
+    candidates = [model, sibling] if sibling else [model]
+    last_err: Optional[Exception] = None
+    started_at = time.monotonic()
+
+    for candidate in candidates:
+        elapsed = time.monotonic() - started_at
+        remaining = (
+            (deadline - time.monotonic())
+            if deadline is not None
+            else max(0.0, float(timeout_s) - elapsed)
+        )
+        if remaining < 5.0:
+            break
+        per_call_timeout = int(max(5, min(float(timeout_s), remaining)))
+        attempt_effort = "low" if (reasoning_effort in ("medium", "high", "max") and remaining < 60.0) else reasoning_effort
+        zai_effort = _zai_reasoning_effort(attempt_effort)
+        try:
+            llm = ChatOpenAI(
+                model=candidate,
+                api_key=api_key,
+                base_url="https://api.z.ai/api/paas/v4/",
+                temperature=1.0,
+                max_tokens=16384,
+                timeout=per_call_timeout,
+                model_kwargs={
+                    "top_p": 0.95,
+                    "response_format": {"type": "json_object"},
+                    "extra_body": {
+                        "thinking": {"type": "enabled"},
+                        "reasoning_effort": zai_effort,
+                    },
+                },
+            )
+            msg = HumanMessage(content=content_blocks)
+            response = llm.invoke([msg])
+            raw_content = response.content
+            if isinstance(raw_content, list):
+                raw_text = "\n".join(
+                    str(b.get("text") or "") if isinstance(b, dict) else str(b)
+                    for b in raw_content
+                )
+            else:
+                raw_text = str(raw_content or "")
+            parsed = parse_json_payload(raw_text)
+            if not parsed:
+                raise RuntimeError(f"Z.ai {candidate} returned empty/non-JSON output")
+            cache_manager.record_provider_result("zai", True)
+            return {
+                "provider": "zai",
+                "model": candidate,
+                "reasoning": attempt_effort,
+                "data": parsed,
+            }
+        except Exception as exc:
+            last_err = exc
+            lower_err = str(exc).lower()
+            now_elapsed = time.monotonic() - started_at
+            remaining_after = (deadline - time.monotonic()) if deadline is not None else max(0.0, float(timeout_s) - now_elapsed)
+            can_switch = (
+                remaining_after >= 25.0
+                and (
+                    "429" in lower_err
+                    or "rate limit" in lower_err
+                    or "too many requests" in lower_err
+                    or "404" in lower_err
+                    or "not found" in lower_err
+                    or "not available" in lower_err
+                    or "500" in lower_err
+                    or "502" in lower_err
+                    or "503" in lower_err
+                    or "504" in lower_err
+                    or now_elapsed < 10.0
+                )
+            )
+            if candidate == candidates[0] and len(candidates) > 1 and can_switch:
+                continue
+            break
+
+    if last_err is not None:
+        cache_manager.record_provider_result("zai", False, str(last_err))
+    raise RuntimeError(f"Z.ai vision call failed: {last_err}")
 
 
 def _langchain_openai_vision_json(
@@ -645,15 +768,16 @@ def invoke_vision_json(
     purpose: str = "product_truth",
     timeout_budget_s: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Call Meta Muse Spark (medium for analysis/pose_planning) -> GPT 6.1 Terra (medium) / Luna -> Gemini.
+    """Call Meta Muse Spark (medium for analysis/pose_planning) -> Z.ai GLM-5.3-Flash -> GPT 6.1 Terra (medium) / Luna -> Gemini.
 
     Returns None ONLY when no provider keys are configured (offline tests).
     """
     has_meta = bool((settings.META_MODEL_API_KEY or "").strip())
+    has_zai = bool((settings.ZAI_API_KEY or "").strip())
     has_openai = bool((settings.OPENAI_API_KEY or "").strip())
     has_gemini = bool((settings.GEMINI_API_KEY or "").strip())
 
-    if not (has_meta or has_openai or has_gemini):
+    if not (has_meta or has_zai or has_openai or has_gemini):
         return None
 
     is_analysis = purpose in ("product_truth", "pose_planning")
@@ -671,7 +795,7 @@ def invoke_vision_json(
 
     if has_meta:
         remaining = deadline - time.monotonic()
-        later_provider = has_openai or has_gemini
+        later_provider = has_zai or has_openai or has_gemini
         # Same reserve the OpenAI hops already use, so a Meta timeout still
         # leaves a fallback a real window. Meta alone keeps the whole budget.
         reserve = (
@@ -695,6 +819,32 @@ def invoke_vision_json(
         except Exception as exc:
             logger.warning(f"Primary Meta vision ({purpose}) failed: {exc}")
             errors.append(f"meta: {exc}")
+
+    if has_zai:
+        remaining = deadline - time.monotonic()
+        if remaining >= 5:
+            later_provider = has_openai or has_gemini
+            reserve = (
+                35.0 if remaining >= 95.0
+                else 18.0 if remaining >= 78.0
+                else max(12.0, min(20.0, remaining * 0.35))
+            )
+            usable = remaining - reserve if later_provider and remaining > reserve + 8.0 else remaining
+            zai_timeout = int(max(10, usable))
+            zai_deadline = min(deadline, time.monotonic() + float(zai_timeout))
+            zai_effort = "low" if (is_analysis and zai_timeout < 60) else ("medium" if is_analysis else "low")
+            try:
+                return _zai_vision_json(
+                    prompt,
+                    images,
+                    model="glm-5.3-flash",
+                    reasoning_effort=zai_effort,
+                    timeout_s=zai_timeout,
+                    deadline=zai_deadline,
+                )
+            except Exception as exc:
+                logger.warning(f"Z.ai GLM-5.3-Flash fallback ({purpose}) failed: {exc}")
+                errors.append(f"glm-5.3-flash: {exc}")
 
     if has_openai:
         openai_candidates = (
@@ -744,7 +894,13 @@ def invoke_vision_json(
                 cache_manager.record_provider_result("gemini", False, str(exc))
                 errors.append(f"gemini: {exc}")
 
-    raise RuntimeError("All configured vision providers failed: " + " | ".join(errors))
+    terminal_err = RuntimeError("All configured vision providers failed: " + " | ".join(errors))
+    capture_sentry_exception(
+        terminal_err,
+        tags={"purpose": purpose, "operation": "invoke_vision_json"},
+        extra={"provider_errors": errors},
+    )
+    raise terminal_err
 
 
 def normalize_image_size(aspect_ratio: str, image_size: str, model: str) -> str:

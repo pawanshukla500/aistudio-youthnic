@@ -50,8 +50,13 @@ class Settings(BaseSettings):
 
     # Model APIs
     META_MODEL_API_KEY: Optional[str] = None
+    ZAI_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
+
+    # Sentry Error Tracking
+    SENTRY_DSN: Optional[str] = None
+    SENTRY_ENVIRONMENT: str = "production"
 
     # Budgets & Timeouts (VISION_TIMEOUT_SECONDS stays inside synchronous 90s caller windows)
     MAX_JOB_COST_USD: float = 2.50

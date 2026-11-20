@@ -981,8 +981,16 @@ function objectValue(value: unknown): JsonRecord {
 }
 
 export function parseJsonResponse(text: string): JsonRecord {
-  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const parsed = JSON.parse(cleaned);
+  const withoutThink = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  const cleaned = withoutThink.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (err) {
+    const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!objectMatch) throw err;
+    parsed = JSON.parse(objectMatch[0]);
+  }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("The AI provider returned an invalid object.");
   return parsed as JsonRecord;
 }

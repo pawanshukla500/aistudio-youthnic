@@ -31,6 +31,7 @@ def get_workflow_overview() -> Dict[str, Any]:
         "edges": [{"source": e.source, "target": e.target, "conditional": e.conditional} for e in drawable.edges],
         "providers_configured": {
             "meta": bool((settings.META_MODEL_API_KEY or "").strip()),
+            "zai": bool((settings.ZAI_API_KEY or "").strip()),
             "openai": bool((settings.OPENAI_API_KEY or "").strip()),
             "gemini": bool((settings.GEMINI_API_KEY or "").strip()),
         },

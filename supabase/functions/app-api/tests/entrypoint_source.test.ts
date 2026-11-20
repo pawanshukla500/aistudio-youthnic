@@ -49,6 +49,8 @@ Deno.test("Railway idle sleep optimization: useQuery polls only active work and 
 Deno.test("Shockproof resilience contracts: safety fallbacks, retries, and delayed retry wakeup are wired", () => {
   const indexSource = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
   assertEquals(indexSource.includes("function appendSafetyVisionFallbacks("), true);
+  assertEquals(indexSource.includes("async function zaiVisionJson("), true);
+  assertEquals(indexSource.includes("FAST_PRODUCT_TRUTH_ZAI_ROUTE"), true);
   assertEquals(indexSource.includes("return qwenVisionJson(effectiveRoute, parts, timeoutMs);"), true);
   assertEquals(indexSource.includes("async function fetchAssetBlobWithRetry("), true);
   assertEquals(indexSource.includes("await response.body?.cancel().catch(() => {});"), true);
@@ -58,4 +60,9 @@ Deno.test("Shockproof resilience contracts: safety fallbacks, retries, and delay
 
   const studioSource = Deno.readTextFileSync(new URL("../../../../src/features/studio/Studio.tsx", import.meta.url)).replace(/\r\n/g, "\n");
   assertEquals(studioSource.includes("!hasRequiredSareeReferences(productReferences)"), true);
+  assertEquals(studioSource.includes("const AUTO_ANALYZE_DELAY_MS = 1000;"), true);
+  assertEquals(studioSource.includes("if (!requiredReady || !allReferencesUploaded || analyzing) return;"), true);
+  assertEquals(studioSource.includes("onChange={(event) => setSkuId(event.target.value)}"), true);
+  assertEquals(studioSource.includes("onChange={(event) => setSkuName(event.target.value)}"), true);
+  assertEquals(studioSource.includes("onChange={(event) => updateDirectorNote(setProductDetails, event.target.value)}"), true);
 });

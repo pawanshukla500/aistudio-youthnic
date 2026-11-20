@@ -8,7 +8,7 @@
  * and tests without accidentally accepting an arbitrary model/base URL.
  */
 
-export const AI_PROVIDERS = ["gemini", "openai", "qwen", "meta", "reve"] as const;
+export const AI_PROVIDERS = ["gemini", "openai", "zai", "qwen", "meta", "reve"] as const;
 export type AiProvider = typeof AI_PROVIDERS[number];
 
 export const AI_MODEL_PURPOSES = [
@@ -118,6 +118,11 @@ export const AI_MODEL_REGISTRY: Registry = {
     qa: ["qwen3.8-max"],
     qa_escalation: ["qwen3.8-max"],
   },
+  zai: {
+    product_truth: ["glm-5.3-flash", "glm-5.3-flashx"],
+    qa: ["glm-5.3-flash", "glm-5.3-flashx"],
+    qa_escalation: ["glm-5.3-flash", "glm-5.3-flashx"],
+  },
   meta: {
     product_truth: [
       "muse-spark-1.3",
@@ -150,6 +155,7 @@ const VISION_PURPOSES: readonly AiModelPurpose[] = [
 ];
 
 const GEMINI_THINKING: readonly AiThinkingLevel[] = ["low", "medium", "high"];
+const ZAI_THINKING: readonly AiThinkingLevel[] = ["low", "medium", "high", "max"];
 const OPENAI_THINKING: readonly AiThinkingLevel[] = [
   "none",
   "low",
@@ -193,6 +199,7 @@ export function isVisionPurpose(purpose: AiModelPurpose | string) {
 export function providerSecretName(provider: AiProvider): string {
   if (provider === "gemini") return "GEMINI_API_KEY";
   if (provider === "openai") return "OPENAI_API_KEY";
+  if (provider === "zai") return "ZAI_API_KEY";
   if (provider === "qwen") return "QWEN_API_KEY";
   if (provider === "reve") return "REVE_API_KEY";
   return "META_MODEL_API_KEY";
@@ -223,6 +230,7 @@ export function allowedThinkingLevels(
   if (purpose === "image_generation") return ["none"];
   if (provider === "qwen" && options.strictJson !== false) return ["none"];
   if (provider === "gemini") return GEMINI_THINKING;
+  if (provider === "zai") return ZAI_THINKING;
   if (provider === "openai") return OPENAI_THINKING;
   if (provider === "meta") {
     return text(route.model) === "muse-spark-1.3"
@@ -239,14 +247,14 @@ export function defaultThinkingLevel(
 ): AiThinkingLevel {
   const allowed = allowedThinkingLevels(route, purpose, options);
   if (purpose === "image_generation") return "none";
-  // Product-truth analysis defaults to medium thinking for Meta Muse Spark and
-  // OpenAI GPT 6.1 Terra for deep garment truth + pose planning within the Studio
-  // timeout window; other vision models default to low when omitted so legacy
-  // routes stay safely within Edge time.
+  // Product-truth analysis defaults to medium thinking for Meta Muse Spark,
+  // Z.ai GLM 5.3 Flash, and OpenAI GPT 6.1 Terra for deep garment truth + pose
+  // planning within the Studio timeout window; other vision models default to
+  // low when omitted so legacy routes stay safely within Edge time.
   if (purpose === "product_truth") {
     const provider = text(route.provider);
     const model = text(route.model);
-    if ((provider === "meta" || model === "gpt-6.1-terra") && allowed.includes("medium")) return "medium";
+    if ((provider === "meta" || provider === "zai" || model === "gpt-6.1-terra") && allowed.includes("medium")) return "medium";
     if (provider === "openai" && allowed.includes("low")) return "low";
     if (allowed.includes("low")) return "low";
     if (allowed.includes("medium")) return "medium";
@@ -275,6 +283,12 @@ export const FAST_PRODUCT_TRUTH_ROUTE = {
 export const FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE = {
   provider: "meta",
   model: "muse-spark-1.3-contributor",
+  thinkingLevel: "medium",
+} as const satisfies NormalizedAiModelRoute;
+
+export const FAST_PRODUCT_TRUTH_ZAI_ROUTE = {
+  provider: "zai",
+  model: "glm-5.3-flash",
   thinkingLevel: "medium",
 } as const satisfies NormalizedAiModelRoute;
 
@@ -371,12 +385,12 @@ export function clampProductTruthThinking(route: NormalizedAiModelRoute): AiThin
   const allowed = allowedThinkingLevels(route, "product_truth", { strictJson: true });
   if (route.thinkingLevel === "none" && allowed.includes("none")) return "none";
   if (route.thinkingLevel === "minimal" && allowed.includes("minimal")) return "minimal";
-  // Meta Muse Spark, GPT 6.1 Terra, and Luna preserve medium/high thinking when
+  // Meta Muse Spark, Z.ai GLM 5.3 Flash, GPT 6.1 Terra, and Luna preserve medium/high thinking when
   // configured for deep reasoning across scene, styling, and 6-pose plans.
   if (
     (route.thinkingLevel === "medium" || route.thinkingLevel === "high") &&
     allowed.includes(route.thinkingLevel) &&
-    (route.provider === "meta" || route.model === "gpt-6.1-terra" || route.model === "gpt-5.6-luna")
+    (route.provider === "meta" || route.provider === "zai" || route.model === "gpt-6.1-terra" || route.model === "gpt-5.6-luna")
   ) {
     return route.thinkingLevel;
   }
@@ -543,11 +557,27 @@ export function remainingVisionTimeoutMs(args: {
     args.gatewayBudgetMs - args.elapsedMs - VISION_GATEWAY_RESERVE_MS,
   );
   if (remainingWall <= 0) return 0;
-  // Product truth gives this hop the whole remaining window. The next model
-  // runs only after a fast failure (missing model, auth, quota), which leaves
-  // that window intact. Holding a fallback reserve back is what aborted Muse
-  // while the photos were still being read.
-  if (args.purpose === "product_truth") return remainingWall;
+  // Product truth: the last hop gets whatever is left of the Studio wait. An
+  // earlier hop holds back one fallback window (60s) so a Meta timeout or slow
+  // failure still leaves OpenAI GPT-6.1 Terra (>= 60s medium reasoning) / Luna
+  // enough runway to finish before the 280s proxy deadline.
+  if (args.purpose === "product_truth") {
+    if (args.remainingRouteCount <= 1) return remainingWall;
+    if (
+      (args.prepElapsedMs ?? 0) >= 60_000 &&
+      args.elapsedMs < 5_000 &&
+      args.gatewayBudgetMs >= 120_000 &&
+      args.gatewayBudgetMs <= ANALYZE_PROXY_BUDGET_MS &&
+      remainingWall < 200_000
+    ) return remainingWall;
+    const reserve = remainingWall > PRODUCT_TRUTH_FALLBACK_RESERVE_MS + PRODUCT_TRUTH_MIN_SLICE_MS
+      ? PRODUCT_TRUTH_FALLBACK_RESERVE_MS
+      : Math.max(20_000, Math.min(PRODUCT_TRUTH_FALLBACK_RESERVE_MS, Math.floor(remainingWall * 0.4)));
+    return Math.max(
+      Math.min(PRODUCT_TRUTH_MIN_SLICE_MS, remainingWall),
+      remainingWall - reserve,
+    );
+  }
   const preferred = args.preferredTimeoutMs ?? VISION_PROVIDER_TIMEOUT_MS;
   if (args.remainingRouteCount <= 1) return Math.min(preferred, remainingWall);
   const reservedForLater = PRODUCT_TRUTH_MIN_SLICE_MS *
@@ -605,6 +635,7 @@ export function visionAttemptTelemetryRows(
 const PROVIDER_LABELS: Record<string, string> = {
   openai: "OpenAI",
   meta: "Meta",
+  zai: "Z.ai",
   gemini: "Gemini",
   qwen: "Qwen",
   reve: "Reve",
@@ -779,9 +810,7 @@ export async function runVisionProviderChain<T>(args: {
         attemptNumber: index + 1,
       });
       const remaining = args.routes.length - index - 1;
-      const usedTheWindow = args.purpose === "product_truth" &&
-        hopLatency >= PRODUCT_TRUTH_FAST_FAILURE_MS;
-      if (usedTheWindow || !shouldContinueVisionFallback(failure, remaining)) {
+      if (!shouldContinueVisionFallback(failure, remaining)) {
         await settleWrites();
         throw chainError(failure, route);
       }
@@ -812,6 +841,8 @@ export function aiModelDisplayLabel(model: string): string {
     "muse-spark-1.2": "Muse Spark 1.2 · Standard",
     "muse-spark-1.3-contributor": "Muse Spark 1.3 Contributor · trains on prompts",
     "muse-spark-1.2-contributor": "Muse Spark 1.2 Contributor · trains on prompts",
+    "glm-5.3-flash": "GLM 5.3 Flash · high-concurrency VLM fallback (50x concurrency)",
+    "glm-5.3-flashx": "GLM 5.3 FlashX · ultra-fast 200 tok/s VLM (20x concurrency)",
     "gemini-3.8-flash": "Gemini 3.8 Flash",
     "gemini-3.6-flash": "Gemini 3.6 Flash",
     "gemini-3.1-pro": "Gemini 3.1 Pro",
@@ -829,6 +860,12 @@ export function aiModelHelpText(model: string): string {
   }
   if (text(model) === "muse-spark-1.3" || text(model) === "muse-spark-1.2") {
     return "Standard Muse Spark does not train on your data. About $1.25 / 1M input and $4.25 / 1M output.";
+  }
+  if (text(model) === "glm-5.3-flash") {
+    return "Z.ai GLM 5.3 Flash is a native multimodal VLM (320B total / 18B active parameters, 1M context, 128K output) with forced deep thinking and a 50-concurrent-request limit — ideal fallback after Meta Muse Spark before OpenAI GPT.";
+  }
+  if (text(model) === "glm-5.3-flashx") {
+    return "Z.ai GLM 5.3 FlashX is the ultra-fast 200 tokens/s sibling VLM with forced deep thinking and a 20-concurrent-request limit.";
   }
   if (text(model) === "gpt-6.1-terra") {
     return "GPT 6.1 Terra runs high-reasoning vision analysis & pose planning as primary fallback (~$1.00 / 1M input, $5.00 / 1M output).";
@@ -882,6 +919,8 @@ export function preferredModelId(
   if (provider === "meta" && models.includes("muse-spark-1.2-contributor")) return "muse-spark-1.2-contributor";
   if (provider === "meta" && models.includes("muse-spark-1.3")) return "muse-spark-1.3";
   if (provider === "meta" && models.includes("muse-spark-1.2")) return "muse-spark-1.2";
+  if (provider === "zai" && models.includes("glm-5.3-flash")) return "glm-5.3-flash";
+  if (provider === "zai" && models.includes("glm-5.3-flashx")) return "glm-5.3-flashx";
   if (provider === "gemini" && models.includes("gemini-3.8-flash")) return "gemini-3.8-flash";
   return models[0];
 }
@@ -999,6 +1038,13 @@ export function validateAiModelRoute(
         valid: false,
         message:
           "Muse Spark requires a reasoning effort of minimal, low, medium, high, or xhigh.",
+      };
+    }
+    if (providerRaw === "zai" && normalized.thinkingLevel === "none") {
+      return {
+        valid: false,
+        message:
+          "Z.ai GLM 5.3 Flash uses forced thinking and requires low, medium, or high reasoning.",
       };
     }
     return {
@@ -1139,6 +1185,23 @@ export function classifyVisionProviderFailure(
 ): VisionProviderFailure {
   const status = statusNumber(input.status);
   const detail = failureText(input);
+  const perMinuteRateLimit =
+    status !== 402 &&
+    !/monthly\s+(?:spend|spending)|spend(?:ing)?\s+cap|project\s+spend|billing|daily\s+limit|payment\s+required/
+      .test(detail) &&
+    /tokens?\s+per\s+min|\btpm\b|\brpm\b|requests?\s+per\s+min|per[_\s-]minute(?:\s+token|\s+request|\s+rate|\s+limit|\s+quota)?|rate[_\s-]*limit|too\s+many\s+requests|throttl/
+      .test(detail);
+  if (perMinuteRateLimit) {
+    return failure(
+      provider,
+      "provider_rate_limited",
+      status,
+      true,
+      true,
+      "It is rate-limited right now. Try again shortly.",
+    );
+  }
+
   const budgetExhausted =
     status === 402 ||
     /monthly\s+(?:spend|spending)|spend(?:ing)?\s+cap|project\s+spend|billing|budget(?:\s+(?:has\s+)?(?:been\s+)?exceeded)?|quota(?:\s+(?:has\s+)?(?:been\s+)?exceeded)?|resource[_\s-]*exhausted|daily\s+limit/
@@ -1236,7 +1299,7 @@ export function classifyVisionProviderFailure(
   }
 
   if (
-    /unexpected token|invalid json|json parse|not valid json|incomplete json|invalid object|returned an invalid object|no structured (?:visual )?response/
+    /unexpected token|invalid json|json parse|not valid json|incomplete json|invalid object|returned an invalid object|no structured (?:visual )?response|stream ended without a response/
       .test(detail)
   ) {
     return failure(
