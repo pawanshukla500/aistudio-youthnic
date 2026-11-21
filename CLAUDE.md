@@ -4,7 +4,7 @@ Six-pose fashion catalog photoshoots generated from product references.
 
 - **Frontend:** React + Vite (`src/`).
 - **Edge Gateway:** Deno Supabase Edge Function `supabase/functions/app-api/`, running on Railway (`functions`).
-- **Agentic Workflow Backend:** Python FastAPI + LangGraph (`PostgresSaver`) + Celery (`backend/`), running on Railway (`FastAPI`, `celery-worker`) with `Valkey` cache/broker.
+- **Python Backend:** FastAPI + LangGraph (`PostgresSaver`) (`backend/`), running on Railway (`FastAPI`) with `Valkey` cache. It extracts Product DNA V2 (`/api/v1/dna/*`) and plans Pose 4/6 and expressions (`/api/v1/plan`); generation, QA and correction run only in the Edge worker. Celery, the `celery-worker` service and the Python generation/QA/memory routes were retired in Nov 2026.
 - **Database:** Postgres migrations in `supabase/migrations/`.
 - **Auth:** Firebase.
 - **Knowledge Graph:** `/graphify` index at `graphify-out/graph.json` and `graphify-out/GRAPH_REPORT.md`.
@@ -71,6 +71,8 @@ Six-pose fashion catalog photoshoots generated from product references.
 8. **Defaults:**
    - image model `gpt-image-2.6-sunburst`;
    - image quality `medium` (`DEFAULT_IMAGE_QUALITY`);
+   - a Product DNA V2 version a person approved for the job's SKU adds its invariants and prohibited changes to that
+     job's prompt, QA and DNA check (`lib/productDnaLock.ts`; workflow approvals and a different kind of product are skipped);
    - product DNA consistency check (shape, color, material, logo, details) always on for every pose: each failed
      attempt is archived (one upload retry; a storage outage is logged) and the pose retried within the existing retry limit; after the last attempt (or a repeat of
      the previous DNA defect) a frame that failed only this check is kept for human review (`requires_human_review`),
@@ -96,7 +98,8 @@ Six-pose fashion catalog photoshoots generated from product references.
 | LangGraph pose & expression planner (`POST /api/v1/plan`) | `backend/agents/pose_plan_agents.py`, `backend/routes/planning.py`, `backend/graph.py` (`run_pose_planning`) |
 | QA and the always-on DNA consistency check | `supabase/functions/app-api/lib/qa.ts` |
 | History data layer | `src/lib/backend.ts` |
-| LangGraph, FastAPI, Product DNA V2 & Celery | `backend/main.py`, `backend/graph.py`, `backend/agents/`, `backend/services/` |
+| LangGraph, FastAPI & Product DNA V2 extraction | `backend/main.py`, `backend/graph.py`, `backend/agents/`, `backend/services/` |
+| Approved Product DNA as a generation lock | `supabase/functions/app-api/lib/productDnaLock.ts` |
 | Pipeline, version history, LangGraph architecture | `docs/GENERATION_ORCHESTRATION.md` |
 | Repository Knowledge Graph (`/graphify`) | `graphify-out/graph.json`, `graphify-out/GRAPH_REPORT.md` |
 | In-app user docs (source of `src/features/docs/docsData.ts`) | `youthnic-ai-studio-docs/` |

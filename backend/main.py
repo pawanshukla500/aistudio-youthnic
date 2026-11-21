@@ -13,9 +13,6 @@ from graph import reset_compiled_graph
 from services.sentry_telemetry import capture_sentry_exception
 from routes import (
     dna_router,
-    generation_router,
-    qa_router,
-    memory_router,
     health_router,
     workflow_router,
     planning_router,
@@ -103,7 +100,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Youthnic AI Fashion Studio Orchestrator",
     version="2.0.0",
-    description="Agentic Multi-Agent AI Fashion Photography Orchestrator with Product DNA V2, LangGraph Postgres Checkpointing, and CV QA",
+    description="Product DNA V2 extraction and the LangGraph pose & expression planner, with Postgres checkpoints",
     lifespan=lifespan,
 )
 
@@ -129,7 +126,7 @@ async def idle_resource_and_memory_middleware(request: Request, call_next):
         raise
     finally:
         if is_api_call:
-            should_trim_now = path in ("/api/v1/dna/extract", "/api/v1/qa/evaluate")
+            should_trim_now = path == "/api/v1/dna/extract"
             with _activity_lock:
                 _active_api_requests = max(0, _active_api_requests - 1)
                 _last_api_activity_mono = time.monotonic()
@@ -150,9 +147,6 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(dna_router)
-app.include_router(generation_router)
-app.include_router(qa_router)
-app.include_router(memory_router)
 app.include_router(workflow_router)
 app.include_router(planning_router)
 
@@ -163,7 +157,7 @@ async def root():
         "service": "Youthnic AI Fashion Studio Orchestration API",
         "version": "2.0.0",
         "status": "online",
-        "engines": ["langgraph", "langchain", "celery", "pgvector", "valkey"],
+        "engines": ["langgraph", "langchain", "valkey"],
         "docs": "/docs",
     }
 

@@ -63,35 +63,19 @@ def test_dna_extract_endpoint(monkeypatch):
     data = response.json()
     assert data["status"] == "success"
     assert data["product_dna"]["sku_id"] == "api_test_sku"
-    assert data["pose_plans_count"] == 6
+    assert "pose_plans_count" not in data
 
 
-def test_qa_evaluate_endpoint(monkeypatch):
+def test_retired_generation_qa_memory_routes_are_gone(monkeypatch):
+    """The Edge worker owns generation and QA; the Python duplicates were retired."""
     from config import settings
 
     monkeypatch.setattr(settings, "INTERNAL_API_SECRET", "test_internal_secret")
-    payload = {
-        "organization_id": "7d56360f-2c96-4eb2-923e-f22b7fe36605",
-        "job_id": "job_eval_01",
-        "generation_id": "gen_eval_01",
-        "sku_id": "sku_eval_01",
-        "pose_index": 1,
-        "pose_type": "full_front",
-        "product_dna": {"bottom_wear": {"cut_class": "straight"}},
-        "ai_raw_evaluation": {
-            "scores": {"garment_identity": 98.0, "colors": 96.0},
-            "checks": {"garment_identity": "pass", "colors": "pass"},
-        },
-    }
-    response = client.post(
-        "/api/v1/qa/evaluate",
-        json=payload,
-        headers={"x-internal-secret": "test_internal_secret"},
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "evaluated"
-    assert data["outcome"] == "pass"
+    headers = {"x-internal-secret": "test_internal_secret"}
+    assert client.post("/api/v1/generation/submit", json={}, headers=headers).status_code == 404
+    assert client.post("/api/v1/qa/evaluate", json={}, headers=headers).status_code == 404
+    assert client.post("/api/v1/memory/search", json={}, headers=headers).status_code == 404
+    assert client.post("/api/v1/memory/feedback", json={}, headers=headers).status_code == 404
 
 
 def test_internal_api_auth_enforcement(monkeypatch):

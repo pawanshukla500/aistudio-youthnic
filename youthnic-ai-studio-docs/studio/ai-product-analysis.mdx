@@ -25,6 +25,7 @@ Reference images are resized and uploaded to cloud storage in the background imm
 
 - **Non-Interrupting Metadata & Notes:** Typing or editing **SKU Code** or **Product Name** never interrupts or invalidates a running or completed analysis. Typing director notes (**Garment Truth & Construction Notes**, **Scene Direction & Environment**, or **Garment Summary & Invariants**) while an analysis is in progress allows the active run to finish without cancellation.
 - **Seed-DNA Zero-Duplicate Fast Path:** As soon as `studio.analyze` locks product ground truth, its extracted `productIdentity` seeds FastAPI's **Product DNA V2** (`dna.extract`), persisting the immutable DNA version without re-downloading images or firing a duplicate VLM request.
+- **Approved DNA Carries Into Every Shoot of the SKU:** When you approve a Product DNA version, its invariants and prohibited changes are added to the image prompt and the product consistency check of every later shoot with the same SKU Code. They are not used when that DNA describes a different kind of product (for example saree vs. kurti, or a Farshi bottom vs. another cut), and anything the current analysis already says is not repeated.
 - **Multi-SKU Throughput (3–6+ SKUs/min):** Concurrent analyses automatically balance across `muse-spark-1.3-contributor` and `muse-spark-1.2-contributor` inside a 6-slot concurrency limiter, with instant 429 per-minute token limit failover to **Z.ai GLM 5.3 Flash** (50 concurrent requests) and OpenAI `gpt-6.1-terra:medium`.
 
 ---

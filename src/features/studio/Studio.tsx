@@ -220,7 +220,6 @@ export function Studio() {
     skuName: string;
     category: string;
     sourceKey: string;
-    modelIdentity: string;
     seedAnalysis?: {
       product_identity: StudioAnalysis["productIdentity"];
       provider?: string;
@@ -645,7 +644,6 @@ export function Studio() {
         skuName: latestSkuRef.current.skuName,
         category,
         sourceKey: startedKey,
-        modelIdentity: options.modelIdentity,
         seedAnalysis: {
           product_identity: result.productIdentity,
           provider: result.analysisProvider,
@@ -695,7 +693,6 @@ export function Studio() {
               skuName: latestSkuRef.current.skuName,
               category,
               sourceKey: startedKey,
-              modelIdentity: options.modelIdentity,
               seedAnalysis: {
                 product_identity: recovered.productIdentity,
                 provider: recovered.analysisProvider,
@@ -786,7 +783,6 @@ export function Studio() {
         sku_id: params.skuId,
         sku_name: params.skuName,
         category: params.category,
-        model_identity: params.modelIdentity,
         references: params.references,
         force_refresh: forceRefresh,
         ...(useSeedAnalysis && params.seedAnalysis ? { seed_analysis: params.seedAnalysis } : {}),

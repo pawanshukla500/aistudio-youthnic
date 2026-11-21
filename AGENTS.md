@@ -63,11 +63,11 @@ Every AI agent accessing or modifying this repository **MUST** follow `MEMORY.md
 
 1. **Dual-Service Backend Architecture (`Railway` project `AI Studio App`):**
    - **Edge Gateway (`supabase/functions/app-api/`):** `functions` service handling auth, `organization_ai_model_policies`, image generation jobs, Firebase Storage proxying, and orchestration delegation. Keep `supabase/functions/app-api/lib/aiModelPolicy.ts` pure (no DB queries, network fetches, or env reads).
-   - **LangGraph Agentic Service (`backend/`):** `FastAPI` + `celery-worker` services backed by Supabase Postgres (`PostgresSaver` checkpoints, Product DNA V2 immutable versions) and `Valkey` (cache + Celery broker), providing `/api/v1/dna/extract`, `/api/v1/studio/generate`, `/api/v1/qa/evaluate`, `/api/v1/plan` (pose & expression planning graph), and `/health`.
+   - **LangGraph Service (`backend/`):** `FastAPI` service backed by Supabase Postgres (`PostgresSaver` checkpoints, Product DNA V2 immutable versions) and `Valkey` (hot DNA cache), providing `/api/v1/dna/*` (extract, get, versions, approve), `/api/v1/plan` (pose & expression planning graph), `/api/v1/workflows/*` (checkpoint inspection), and `/health`. It never generates or judges images: generation, QA and correction live in the Edge worker, which reads a person-approved DNA version as a product lock (`lib/productDnaLock.ts`). Celery and the Python generation/QA/memory routes were retired in Nov 2026; do not reintroduce a second generation path.
 2. **Atomic Commits & Verification:**
    - Deno checks & tests: `node $npxCli deno check --frozen supabase/functions/app-api/index.ts` and `node $npxCli deno test -A supabase/functions/app-api/tests/` (using full `test:catalog-workflow` list before push).
    - Python backend tests: `$env:PYTHONPATH = "backend"; python -m pytest backend/tests/ -q`.
    - Frontend lint & build (also regenerates `src/features/docs/docsData.ts`): `node $npmCli run lint` and `node $npmCli run build`.
    - Never push or merge changes that break existing tests.
 3. **Workflow & PR Governance:**
-   - Run pre-commit CodeRabbit (`code-reviewer`), fix findings on PRs, squash-merge into `main`, and actively monitor GitHub Actions (`Validate application`, `Deploy Supabase database and Edge Function`, `Deploy web app to Cloud Run`) and Railway deployments (`functions`, `FastAPI`, `celery-worker`) until green completion.
+   - Run pre-commit CodeRabbit (`code-reviewer`), fix findings on PRs, squash-merge into `main`, and actively monitor GitHub Actions (`Validate application`, `Deploy Supabase database and Edge Function`, `Deploy web app to Cloud Run`) and Railway deployments (`functions`, `FastAPI`) until green completion.
