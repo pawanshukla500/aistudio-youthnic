@@ -13,6 +13,7 @@ import { detectGarmentPoseFamily, resolveBottomWearPresentation } from "./garmen
 import { PRODUCT_REFERENCE_ROLES } from "./referencePolicy.ts";
 import { type PromptPatternKind } from "./promptPatterns.ts";
 import { effectiveShowcaseShot, normalizeShowcaseShotType } from "./showcaseFeature.ts";
+import { storedPosePlanning } from "./posePlanning.ts";
 
 export const GENERATION_MEMORY_VERSION = 1;
 export const MAX_MEMORY_ASSETS = 12;
@@ -176,7 +177,16 @@ function mergeCorrections(existing: MemoryCorrection[], incoming: MemoryCorrecti
   return merged.slice(-MAX_MEMORY_CORRECTIONS);
 }
 
-function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirection: JsonRecord, bottomWearMode?: unknown) {
+/** "Pose 4", "Pose 6", "Pose 4 and Pose 6" or "" from a stored session_data.posePlanning. */
+function referencePoseFrames(posePlanning: unknown) {
+  const slots = storedPosePlanning({ posePlanning })?.slots;
+  return [
+    slots?.creative.source === "reference" ? "Pose 4" : "",
+    slots?.showcase.source === "reference" ? "Pose 6" : "",
+  ].filter(Boolean).join(" and ");
+}
+
+function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirection: JsonRecord, bottomWearMode?: unknown, posePlanning?: unknown) {
   const details: string[] = [];
   const invariant = boundedText(productIdentity.invariantDetails, 180);
   if (invariant) details.push(`Product invariants: ${invariant}`);
@@ -214,7 +224,10 @@ function preservedDetailsFromProduct(productIdentity: JsonRecord, creativeDirect
       details.push(`Pose 6 showcase intent: ${showcaseIntent}`);
     }
   }
-  details.push("Product images are garment/SKU truth. Style reference is set/backdrop/jewellery taste only.");
+  const postureFrames = referencePoseFrames(posePlanning);
+  details.push(postureFrames
+    ? `Product images are garment/SKU truth. Style reference is set/backdrop/jewellery taste, plus its posture in ${postureFrames} only; never its outfit or handheld objects.`
+    : "Product images are garment/SKU truth. Style reference is set/backdrop/jewellery taste only.");
   return details.slice(0, MAX_MEMORY_PRESERVED_DETAILS);
 }
 
@@ -273,6 +286,8 @@ export function buildGenerationMemory(args: {
   corrections?: unknown[];
   referenceFingerprint?: string;
   existing?: unknown;
+  /** session_data.posePlanning; omitted keeps the legacy style-reference line. */
+  posePlanning?: unknown;
 }): GenerationMemory {
   const existing = normalizeGenerationMemory(args.existing);
   const references = Array.isArray(args.references) ? args.references : [];
@@ -285,7 +300,7 @@ export function buildGenerationMemory(args: {
   const productRoles = rolesOfClass(references, "product");
   const styleRoles = rolesOfClass(references, "style");
   const modelRoles = rolesOfClass(references, "model");
-  const preservedDetails = preservedDetailsFromProduct(productIdentity, creativeDirection, args.bottomWearMode);
+  const preservedDetails = preservedDetailsFromProduct(productIdentity, creativeDirection, args.bottomWearMode, args.posePlanning);
   let generatedAssets = Array.isArray(args.generatedAssets)
     ? snapshotAssets(args.generatedAssets)
     : existing.generatedAssets;
@@ -331,6 +346,8 @@ export function formatGenerationMemoryBrief(args: {
   references?: Array<{ role?: string }>;
   memory?: unknown;
   useStyleReferenceAsModelIdentity?: boolean;
+  /** session_data.posePlanning; omitted keeps the legacy style-reference line. */
+  posePlanning?: unknown;
 }): string {
   const memory = normalizeGenerationMemory(args.memory);
   const live = Array.isArray(args.references) ? args.references : [];
@@ -338,9 +355,10 @@ export function formatGenerationMemoryBrief(args: {
   const style = rolesOfClass(live, "style");
   const model = rolesOfClass(live, "model");
   const approved = rolesOfClass(live, "approved");
+  const postureFrames = referencePoseFrames(args.posePlanning);
   const lines: string[] = [];
   lines.push(`Product images (SKU/garment truth only): ${product.join(", ") || memory.productRoles.join(", ") || "none labeled in this request"}.`);
-  lines.push(`Style reference (photoshoot set, backdrop, lighting, jewellery taste only): ${style.join(", ") || (memory.styleRoles.length ? `${memory.styleRoles.join(", ")} uploaded for this session` : "none")}.`);
+  lines.push(`Style reference (photoshoot set, backdrop, lighting, jewellery taste${postureFrames ? `, and posture in ${postureFrames} only` : " only"}): ${style.join(", ") || (memory.styleRoles.length ? `${memory.styleRoles.join(", ")} uploaded for this session` : "none")}.`);
   // Only name a face the request actually attaches. Remembered model roles
   // without that image would outrank the style face the prompt is using.
   if (model.length) {
@@ -425,7 +443,7 @@ export function extractLearnedPromptPatterns(args: {
       extracted.push(pattern(
         "scene",
         "style-reference-backdrop-lock",
-        "When a style reference is supplied, rebuild the wall, floor, furniture, and lighting from that image only. Discard product-photo backgrounds. Do not copy its pose, objects in the hands, or garment.",
+        "When a style reference is supplied, rebuild the wall, floor, furniture, and lighting from that image only. Discard product-photo backgrounds. Never copy its garment or objects in the hands; copy its posture only in Pose 4/6 when the pose plan adopts it.",
         sceneOutcome,
       ));
     }
@@ -439,7 +457,7 @@ export function extractLearnedPromptPatterns(args: {
       extracted.push(pattern(
         "pose",
         "seated-pose-4-lock",
-        "When seated coverage is required, only pose 4 sits. Keep garment, hem, bottom wear, and footwear fully visible on a set-matching seat.",
+        "When seated coverage is required, pose 4 sits (pose 6 only when the pose plan adopts a seated style reference). Keep garment, hem, bottom wear, and footwear fully visible on a set-matching seat.",
         seatedOutcome,
       ));
     }
@@ -517,7 +535,7 @@ export function extractLearnedPromptPatterns(args: {
     extracted.push(pattern(
       "garment",
       "product-reference-sole-truth",
-      "The style reference supplies the backdrop, and the face only when no separate model photo was uploaded. Discard its clothing, pose, and handheld props. Product cut, print, and bottom wear come only from the product photos.",
+      "The style reference supplies the backdrop, and the face only when no separate model photo was uploaded. Discard its clothing and handheld props; its posture is copied only in a plan-adopted Pose 4/6. Product cut, print, and bottom wear come only from the product photos.",
       overallOutcome,
     ));
   }

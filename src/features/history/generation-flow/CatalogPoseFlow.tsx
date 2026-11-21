@@ -87,7 +87,7 @@ function allowedConnection(source?: string | null, target?: string | null) {
 function referenceCaption(reference: FlowReference) {
   const lane = referenceLane(reference.role);
   if (lane === "face") return "Model face";
-  if (lane === "room") return "Room only";
+  if (lane === "room") return reference.postureFor?.length ? `Room + Pose ${reference.postureFor.join(" & ")} posture, no outfit` : "Room only, no outfit";
   return "Product";
 }
 

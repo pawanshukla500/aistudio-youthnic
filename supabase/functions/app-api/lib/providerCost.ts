@@ -621,11 +621,14 @@ export const DEFAULT_ESTIMATED_IMAGE_COST_USD: Record<string, number> = {
 };
 
 export const DEFAULT_ESTIMATED_QA_COST_PER_POSE_USD = 0.005;
+export const DEFAULT_ESTIMATED_DNA_CHECK_COST_PER_POSE_USD = 0.004;
 export const DEFAULT_ESTIMATED_ANALYSIS_COST_USD = 0.03;
 
 /**
  * Real job cost estimate based on pose count, image model rates, quality,
- * pose QA and actual/estimated product analysis cost.
+ * actual/estimated product analysis cost, and per-pose verification: full pose
+ * QA when it is on (it also scores product DNA), otherwise the always-on
+ * product DNA consistency check.
  */
 export function estimateJobCostUsd(args: {
   posesCount: number;
@@ -649,7 +652,7 @@ export function estimateJobCostUsd(args: {
   const quality = String(args.quality || "high").toLowerCase();
   const qualityFactor = quality === "low" ? 0.75 : quality === "medium" ? 0.9 : 1.0;
   const imageTotal = poses * (basePerImage * qualityFactor);
-  const qaTotal = args.poseQa ? poses * DEFAULT_ESTIMATED_QA_COST_PER_POSE_USD : 0;
+  const qaTotal = poses * (args.poseQa ? DEFAULT_ESTIMATED_QA_COST_PER_POSE_USD : DEFAULT_ESTIMATED_DNA_CHECK_COST_PER_POSE_USD);
   const analysisCost = typeof args.analysisCostUsd === "number" && args.analysisCostUsd >= 0
     ? args.analysisCostUsd
     : DEFAULT_ESTIMATED_ANALYSIS_COST_USD;

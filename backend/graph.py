@@ -1,8 +1,10 @@
 import logging
+import re
 import threading
 from typing import Optional, Dict, Any, List
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import RetryPolicy
 try:
     from langgraph.checkpoint.postgres import PostgresSaver
 except ImportError:
@@ -10,8 +12,9 @@ except ImportError:
 
 from config import settings
 from database import get_pool, get_db, get_pool_generation
-from agents.state import AgentWorkflowState
+from agents.state import AgentWorkflowState, PosePlanningState
 from agents.supervisor import SupervisorOrchestratorAgent
+from agents import pose_plan_agents
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,8 @@ _checkpointer_initialized = False
 _checkpointer_pool_gen = -1
 _compiled_graph = None
 _compiled_graph_pool_gen = -2
+_compiled_planning_graph = None
+_compiled_planning_graph_pool_gen = -2
 _topology_graph = None
 _checkpointer_lock = threading.Lock()
 
@@ -111,6 +116,34 @@ def build_studio_graph(checkpointer=None):
     return workflow.compile()
 
 
+PLANNING_NODES = ("analyze_references", "recall_outcomes", "plan_poses", "plan_expression", "validate_plan")
+
+
+def route_after_plan_validation(state: PosePlanningState) -> str:
+    if state.get("validation_errors") and int(state.get("plan_attempts") or 0) < pose_plan_agents.MAX_PLAN_ATTEMPTS:
+        return "plan_poses"
+    return END
+
+
+def build_planning_graph(checkpointer=None):
+    """Reference-led pose & expression planner (POST /api/v1/plan); no LLM calls."""
+    workflow = StateGraph(PosePlanningState)
+    retry = RetryPolicy(max_attempts=3)
+    for name in PLANNING_NODES:
+        workflow.add_node(name, getattr(pose_plan_agents, name), retry_policy=retry)
+    workflow.add_edge(START, PLANNING_NODES[0])
+    for source, target in zip(PLANNING_NODES, PLANNING_NODES[1:]):
+        workflow.add_edge(source, target)
+    workflow.add_conditional_edges(
+        "validate_plan",
+        route_after_plan_validation,
+        {"plan_poses": "plan_poses", END: END},
+    )
+    if checkpointer is not None:
+        return workflow.compile(checkpointer=checkpointer)
+    return workflow.compile()
+
+
 def _lock_checkpoint_tables(pool) -> None:
     """Enforce RLS and service_role-only access on LangGraph checkpoint tables after saver.setup()."""
     with pool.connection() as conn:
@@ -169,11 +202,14 @@ def get_postgres_checkpointer():
 def reset_compiled_graph() -> None:
     """Release cached checkpointer and compiled graph references during idle pool cleanup."""
     global _postgres_checkpointer, _checkpointer_pool_gen, _compiled_graph, _compiled_graph_pool_gen
+    global _compiled_planning_graph, _compiled_planning_graph_pool_gen
     with _checkpointer_lock:
         _postgres_checkpointer = None
         _checkpointer_pool_gen = -1
         _compiled_graph = None
         _compiled_graph_pool_gen = -2
+        _compiled_planning_graph = None
+        _compiled_planning_graph_pool_gen = -2
 
 
 def get_topology_graph():
@@ -207,6 +243,84 @@ def get_compiled_graph():
         return _compiled_graph
 
 
+def get_compiled_planning_graph():
+    """Build or reuse the compiled pose planning graph on the shared checkpointer (MemorySaver offline)."""
+    global _compiled_planning_graph, _compiled_planning_graph_pool_gen
+    try:
+        checkpointer = get_postgres_checkpointer()
+    except Exception as e:
+        logger.warning(f"Could not initialize PostgresSaver for pose planning, falling back to MemorySaver: {e}")
+        checkpointer = None
+    with _checkpointer_lock:
+        if checkpointer is not None:
+            gen = get_pool_generation()
+            if _compiled_planning_graph is None or _compiled_planning_graph_pool_gen != gen:
+                _compiled_planning_graph = build_planning_graph(checkpointer=checkpointer)
+                _compiled_planning_graph_pool_gen = gen
+            return _compiled_planning_graph
+        if _compiled_planning_graph is None or _compiled_planning_graph_pool_gen != -1:
+            _compiled_planning_graph = build_planning_graph(checkpointer=MemorySaver())
+            _compiled_planning_graph_pool_gen = -1
+        return _compiled_planning_graph
+
+
+def planning_thread_id(organization_id: str, thread_key: str) -> str:
+    return f"thread_plan_{organization_id}_{re.sub(r'[^A-Za-z0-9_-]', '_', thread_key)[:80]}"
+
+
+def run_pose_planning(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Run the planning graph for one analysis and return the /api/v1/plan response."""
+    org_id = str(payload.get("organization_id") or "").strip()
+    thread_key = str(payload.get("thread_key") or "").strip()
+    if not org_id or not thread_key:
+        raise ValueError("organization_id and thread_key are required")
+    thread_id = planning_thread_id(org_id, thread_key)
+    initial_state = {
+        "organization_id": org_id,
+        "thread_key": thread_key,
+        **{
+            key: payload.get(key)
+            for key in (
+                "pose_family", "bottom_cut_class", "garment_family", "category",
+                "showcase_feature_region", "showcase_shot_type", "sit_requested", "closeup_mode",
+                "reference_pose", "expression_plan", "pose_expressions", "local_plan",
+            )
+        },
+        # Reset derived fields so a previous checkpoint on this thread never bleeds into this plan.
+        "outcome_rows": [],
+        "learned_signals": [],
+        "forced_product_slots": [],
+        "slots": {},
+        "expressions": {},
+        "validation_errors": [],
+        "plan_attempts": 0,
+        "steps": [],
+        "status": "planning",
+    }
+    final_state = get_compiled_planning_graph().invoke(initial_state, config={"configurable": {"thread_id": thread_id}})
+    return {
+        "slots": final_state.get("slots") or {},
+        "expressions": final_state.get("expressions") or {},
+        "plan_key": f"{final_state.get('pose_family') or 'other'}|{final_state.get('bottom_cut_class') or 'none'}",
+        "thread_id": thread_id,
+        "learned_signals": [
+            {"slot": s.get("slot"), "outcome_key": s.get("outcome_key"), "effect": s.get("effect")}
+            for s in final_state.get("learned_signals") or []
+        ],
+        "validation": {
+            "attempts": int(final_state.get("plan_attempts") or 0),
+            "errors": list(final_state.get("validation_errors") or []),
+        },
+        "steps": list(final_state.get("steps") or []),
+        "status": final_state.get("status"),
+    }
+
+
+def _like_prefix(prefix: str) -> str:
+    """LIKE pattern matching ids that start with `prefix` literally (its _ and % are not wildcards)."""
+    return prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
 def list_workflow_threads(limit: int = 30, organization_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Inspect recent LangGraph checkpointed threads stored in PostgreSQL, optionally scoped to an org."""
     with get_db() as conn:
@@ -218,12 +332,16 @@ def list_workflow_threads(limit: int = 30, organization_id: Optional[str] = None
                            COUNT(*)::int AS checkpoint_count,
                            MAX(checkpoint_id) AS latest_checkpoint_id
                     FROM public.checkpoints
-                    WHERE thread_id LIKE %s
+                    WHERE thread_id LIKE %s ESCAPE '\\' OR thread_id LIKE %s ESCAPE '\\'
                     GROUP BY thread_id
                     ORDER BY MAX(checkpoint_id) DESC
                     LIMIT %s
                     """,
-                    (f"thread_dna_{organization_id}_%", limit),
+                    (
+                        _like_prefix(f"thread_dna_{organization_id}_"),
+                        _like_prefix(f"thread_plan_{organization_id}_"),
+                        limit,
+                    ),
                 )
             else:
                 cur.execute(
@@ -243,22 +361,33 @@ def list_workflow_threads(limit: int = 30, organization_id: Optional[str] = None
 
 def get_thread_state_history(thread_id: str, limit: int = 20) -> List[Dict[str, Any]]:
     """Retrieve persisted step-by-step state snapshots for a LangGraph thread."""
-    graph = get_compiled_graph()
+    is_planning = thread_id.startswith("thread_plan_")
+    graph = get_compiled_planning_graph() if is_planning else get_compiled_graph()
     config = {"configurable": {"thread_id": thread_id}}
     history: List[Dict[str, Any]] = []
     for snap in graph.get_state_history(config):
         values = snap.values if isinstance(snap.values, dict) else {}
-        history.append({
+        entry: Dict[str, Any] = {
             "checkpoint_id": (snap.config.get("configurable") or {}).get("checkpoint_id"),
             "next": list(snap.next or ()),
             "status": values.get("status"),
-            "sku_id": values.get("sku_id"),
-            "dna_approved": values.get("dna_approved"),
-            "pose_plans_count": len(values.get("pose_plans") or []),
-            "correction_decision": values.get("correction_decision"),
-            "requires_human_review": values.get("requires_human_review"),
-            "metadata": snap.metadata,
-        })
+        }
+        if is_planning:
+            entry.update({
+                "slot_sources": {slot: (plan or {}).get("source") for slot, plan in (values.get("slots") or {}).items()},
+                "plan_attempts": values.get("plan_attempts"),
+                "validation_errors": values.get("validation_errors") or [],
+            })
+        else:
+            entry.update({
+                "sku_id": values.get("sku_id"),
+                "dna_approved": values.get("dna_approved"),
+                "pose_plans_count": len(values.get("pose_plans") or []),
+                "correction_decision": values.get("correction_decision"),
+                "requires_human_review": values.get("requires_human_review"),
+            })
+        entry["metadata"] = snap.metadata
+        history.append(entry)
         if len(history) >= limit:
             break
     return history

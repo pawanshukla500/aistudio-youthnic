@@ -20,7 +20,7 @@ Earlier versions broke this rule in several ways, and none of them may come back
 | Purpose (`organization_ai_model_policies.purpose`) | Admin label | Used by | Fallback |
 | --- | --- | --- | --- |
 | `product_truth` | Product truth & pose planning | Studio **Analyze**, catalog preflight and variant analysis | Yes |
-| `qa` | Image QA | Per-pose consistency QA, when QA is on | Yes |
+| `qa` | Image QA | The product DNA consistency check on every pose (always on), and per-pose consistency QA when QA is on | Yes |
 | `qa_escalation` | *(no separate card)* | Independent recheck for complex garments | Uses the `qa` policy unless its own row exists |
 | `image_generation` | Image Generation | The final images (OpenAI Images API) | No |
 
@@ -63,6 +63,17 @@ Product analysis is one large multimodal JSON call that must finish inside Studi
 - Legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, `gemini-*`) run at **low** reasoning (or lowest supported level; explicit `"none"` or `"minimal"` is preserved; Qwen runs with thinking off).
 - When any hop runs under an emergency tight deadline (`timeoutMs < 60s`), thinking is dynamically clamped to **low** (`clampProductTruthHopThinking`) to avoid timeout cascades while still letting Meta/Z.ai/Terra finish cleanly under standard failover budgets.
 QA keeps its saved reasoning, except that Gemini Flash models run at low.
+
+## Product DNA consistency check
+
+Every generated pose gets one DNA consistency call (`buildDnaConsistencyPrompt` in `lib/qa.ts`) before it is
+accepted. It runs as purpose `qa` through the same saved chain, at **low** reasoning, and scores shape, color,
+material, logo and details (pass floor 85 per attribute; logo is skipped when the product has none). When full
+pose QA runs for that pose, no separate call is made: the verdict is derived from the QA scores
+(`dnaConsistencyFromQaScores`). If every hop fails, the image ships `unverified` and the check is recorded as
+unavailable; it never blocks delivery.
+
+The pose planning graph (`POST /api/v1/plan`) makes no model call and has no purpose row.
 
 ## Time budget (product analysis)
 
@@ -138,7 +149,8 @@ dynamic job costs for generation jobs enqueued via Studio (`studio.queue`) or ca
 processing (`catalog.process`), replacing the former fixed $0.25 placeholder:
 - Primary generation: `posesCount × basePrice(model) × qualityMultiplier`
 - Image quality multipliers: low (0.75x), medium (0.9x), high (1.0x)
-- Pose QA allowance: `$0.005` per pose when QA is enabled
+- Pose QA allowance: `$0.005` per pose when QA is enabled (it also yields the DNA verdict)
+- DNA consistency check allowance: `$0.004` per pose when QA is off (`DEFAULT_ESTIMATED_DNA_CHECK_COST_PER_POSE_USD`)
 - Product analysis allowance: `$0.03` default amortized per job (or actual analysis cost when available)
 - Pose regenerations: computed for the exact number of regenerated poses
 

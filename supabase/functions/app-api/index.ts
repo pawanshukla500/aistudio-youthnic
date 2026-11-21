@@ -6,6 +6,8 @@ import { claimGenerationRun, queueReuseResponse, scopePoseRowsToJob, type PoseRo
 import { deliveredVersionTiming, stampPoseTiming } from "../../../src/lib/poseVersions.ts";
 import { applyRequestedBackground } from "./lib/sceneLock.ts";
 import { fetchFastApiWithRetry } from "./lib/fastApiClient.ts";
+import { ADOPTABLE_SLOTS, isStyleReferenceProfile, type StyleReferenceProfile } from "./lib/posePlanning.ts";
+import { cacheableStyleProfile, STYLE_PROFILE_CACHE_KIND, styleProfileCacheKey, wakeFastApi, withGraphPosePlanning, type FastApiTarget } from "./lib/posePlanningClient.ts";
 import { matchImageAsset } from "./lib/downloadAssetMatching.ts";
 import {
   ANALYSIS_VERSION,
@@ -27,8 +29,25 @@ import {
   type StudioPose,
   type StylingPlanProfile,
 } from "./profiles.ts";
-import { appendRejectedAttemptHistory, buildPoseQaPrompt, canSalvageExhaustedPoseQa, parseQaResponse, qaStorageDisposition, unavailableQaResult } from "./qa.ts";
-import { assertGenerationPromptWithinLimit, composeGenerationPrompt } from "./lib/generationPrompt.ts";
+import {
+  appendRejectedAttemptHistory,
+  buildDnaConsistencyPrompt,
+  buildPoseQaPrompt,
+  canSalvageExhaustedPoseQa,
+  DNA_CONSISTENCY_VERSION,
+  dnaConsistencyFromQaScores,
+  dnaCorrectionText,
+  dnaHoldsForReview,
+  normalizeDnaConsistencyResult,
+  parseQaResponse,
+  qaStorageDisposition,
+  repeatsLastDnaFailure,
+  unavailableDnaConsistency,
+  unavailableQaResult,
+  type DnaConsistencyResult,
+} from "./qa.ts";
+import { assertGenerationPromptWithinLimit, composeGenerationPrompt, isFarshiGeneration, promptReferenceSlots } from "./lib/generationPrompt.ts";
+import { buildPoseScores, humanVerdictTransition, observationFromDna, posePlanObservationVersion } from "./lib/posePlanOutcomes.ts";
 import {
   AI_MODEL_REGISTRY,
   AI_PROVIDERS,
@@ -126,6 +145,7 @@ import {
   markListingStarted,
   reconcileExistingGenerations,
   recordHumanProductLearningRule,
+  recordPosePlanOutcome,
   recordShowcaseFeatureOutcome,
   reviewCatalogQc,
   reviewCatalogPose,
@@ -145,6 +165,7 @@ import {
   roundUsd,
   usageCostUsd,
   estimateJobCostUsd,
+  QA_RUN_KIND,
   type AdminRateTable,
   type ProviderUsage,
 } from "./lib/providerCost.ts";
@@ -1030,6 +1051,7 @@ function sessionGenerationMemory(sessionData: JsonRecord, extras: {
     revokeApprovedPoseIndexes: extras.revokeApprovedPoseIndexes,
     corrections: extras.corrections,
     referenceFingerprint: extras.referenceFingerprint,
+    posePlanning: sessionData.posePlanning,
   });
 }
 
@@ -1361,13 +1383,17 @@ async function loadVisionReferenceParts(
   garmentFamily: string,
   roleOptions: { useStyleAsModelFace: boolean; hasModelReference: boolean },
   options: { signal?: AbortSignal; timeoutMs?: number; maxAttempts?: number } = {},
-): Promise<{ manifest: Array<{ number: number; role: string }>; parts: JsonRecord[] }> {
+): Promise<{ manifest: Array<{ number: number; role: string }>; parts: JsonRecord[]; styleReferencesLoaded: boolean }> {
+  const requested = collapseDuplicateUploads(references);
   const loaded = await loadAvailableReferences(
-    collapseDuplicateUploads(references),
+    requested,
     orgId,
     garmentFamily,
     { retainBlob: false, signal: options.signal, timeoutMs: options.timeoutMs, maxAttempts: options.maxAttempts },
   );
+  // Optional references that fail to download are dropped: a style profile is cached only when every style image was seen.
+  const styleCount = (list: ReadonlyArray<{ role: string }>) => list.filter((reference) => reference.role === "style_reference").length;
+  const styleReferencesLoaded = styleCount(loaded) === styleCount(requested);
   const manifest: Array<{ number: number; role: string }> = [];
   const parts: JsonRecord[] = [];
   try {
@@ -1379,7 +1405,7 @@ async function loadVisionReferenceParts(
   } finally {
     releaseLoadedReferences(loaded);
   }
-  return { manifest, parts };
+  return { manifest, parts, styleReferencesLoaded };
 }
 
 /**
@@ -2303,6 +2329,32 @@ function withDeadline<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> 
   });
 }
 
+async function cachedStyleReferenceProfile(orgId: string, cacheKey: string): Promise<StyleReferenceProfile | null> {
+  if (!orgId || !cacheKey) return null;
+  const { data, error } = await service.from("analysis_cache").select("payload").eq("org_key", orgId)
+    .eq("cache_kind", STYLE_PROFILE_CACHE_KIND).eq("cache_key", cacheKey).gt("expires_at", new Date().toISOString()).maybeSingle();
+  if (error) {
+    console.warn(`Style reference profile cache lookup skipped: ${error.message}`);
+    return null;
+  }
+  return isStyleReferenceProfile(data?.payload) ? data.payload : null;
+}
+
+/** Caches the style profile of an analysis that saw every style image. Never throws. */
+async function saveStyleReferenceProfile(orgId: string, cacheKey: string, normalized: ReturnType<typeof normalizeAnalysis>) {
+  const profile = orgId && cacheKey ? cacheableStyleProfile(normalized) : null;
+  if (!profile) return;
+  try {
+    const { error } = await service.from("analysis_cache").upsert({
+      organization_id: orgId, org_key: orgId, cache_kind: STYLE_PROFILE_CACHE_KIND, cache_key: cacheKey, payload: profile,
+      expires_at: new Date(Date.now() + 3 * 365 * 86400_000).toISOString(), updated_at: new Date().toISOString(),
+    }, { onConflict: "org_key,cache_kind,cache_key" });
+    if (error) throw new Error(error.message);
+  } catch (error) {
+    console.warn(`Could not cache the style reference profile: ${errorMessage(error)}`);
+  }
+}
+
 async function analyze(request: Request, args: JsonRecord) {
   const requestStarted = Date.now();
   const { workspace } = await workspaceFor(request, "studio.generate");
@@ -2372,28 +2424,44 @@ async function analyze(request: Request, args: JsonRecord) {
   let cacheHit = false;
   let normalized: ReturnType<typeof normalizeAnalysis> | null = null;
   const forceRefresh = args.forceRefresh === true;
+  // SKU name and notes feed the pose-planning guards (Farshi by SKU, a seated request); not the cache key.
+  const analysisOptions = {
+    skuName: String(args.skuName || ""),
+    productDetails: String(args.productDetails || ""),
+    modelDirection: String(args.modelDirection || ""),
+    hasBottomReference: references.some((reference) => reference.role === "bottom"),
+  };
   if (!forceRefresh) {
     const { data: cached, error: cachedError } = await service.from("analysis_cache").select("payload").eq("org_key", orgId).eq("cache_kind", "studio_product_analysis").eq("cache_key", cacheKey).gt("expires_at", new Date().toISOString()).maybeSingle();
     if (cachedError) throw new Error(cachedError.message);
     if (cached?.payload) {
-      normalized = normalizeAnalysis(cached.payload as JsonRecord, String(args.category || "ethnic/fusion"), {
-        modelDirection: String(args.modelDirection || ""),
-      });
+      normalized = normalizeAnalysis(cached.payload as JsonRecord, String(args.category || "ethnic/fusion"), analysisOptions);
       cacheHit = true;
     }
   }
   const started = Date.now();
   const analysisRunIds: string[] = [];
   if (!normalized) {
+    const fastApi = optionalFastApiTarget();
+    // Wakes the scale-to-zero pose planner now, so it is warm when the vision call returns.
+    void wakeFastApi(fastApi);
     const rawHasModelReference = hasExplicitModelIdentity(references);
     const useStyleAsModelFace = hasCollapsedModelIdentity(references);
+    const styleCacheKey = styleProfileCacheKey(references, { sceneDirection: args.sceneDirection, modelDirection: args.modelDirection });
+    // forceRefresh skips only the lookup: the fresh profile below still overwrites the row.
+    const cachedStyleProfile = styleCacheKey && !forceRefresh
+      ? await withDeadline(cachedStyleReferenceProfile(orgId, styleCacheKey), ANALYSIS_PREP_QUERY_MS, null)
+      : null;
+    let styleReferencesLoaded = false;
     const analysisInputSummary = {
       referenceCount: references.length,
       roles: references.map((reference) => reference.role),
+      styleProfileCacheHit: Boolean(cachedStyleProfile),
     };
     const result = await visionLimiter.run(async () => {
-      const { manifest, parts } = await loadVisionReferenceParts(
-        references,
+      const { manifest, parts, styleReferencesLoaded: allStyleLoaded } = await loadVisionReferenceParts(
+        // A cached style profile stands in for the style image (token reduction).
+        cachedStyleProfile ? references.filter((reference) => reference.role !== "style_reference") : references,
         orgId,
         String(args.category || ""),
         { useStyleAsModelFace, hasModelReference: rawHasModelReference },
@@ -2403,12 +2471,14 @@ async function analyze(request: Request, args: JsonRecord) {
           maxAttempts: ANALYSIS_REFERENCE_DOWNLOAD_ATTEMPTS,
         },
       );
+      styleReferencesLoaded = allStyleLoaded;
       parts.push({ text: buildCombinedAnalysisPrompt({
         skuName: String(args.skuName || "Untitled studio product"), productDetails: String(args.productDetails || ""),
         category: String(args.category || "ethnic/fusion"), modelDirection: String(args.modelDirection || ""),
         sceneDirection: String(args.sceneDirection || ""), referenceManifest: manifest, housePreferences, fashionKnowledge, analysisLearning, showcaseFeedback,
         hasModelReference: rawHasModelReference,
         useStyleAsModelFace,
+        cachedStyleProfile: cachedStyleProfile ?? undefined,
       }) });
 
       const persistFailedHop = async (attempt: VisionAttempt) => {
@@ -2470,9 +2540,17 @@ async function analyze(request: Request, args: JsonRecord) {
         parts.length = 0;
       }
     }, flightController.signal);
-    normalized = normalizeAnalysis(result.json, String(args.category || "ethnic/fusion"), {
-      modelDirection: String(args.modelDirection || ""),
+    normalized = await withGraphPosePlanning({
+      target: fastApi,
+      normalized: normalizeAnalysis(result.json, String(args.category || "ethnic/fusion"), analysisOptions),
+      rawAnalysis: result.json,
+      category: String(args.category || "ethnic/fusion"),
+      options: analysisOptions,
+      organizationId: orgId,
+      threadKey: fingerprint,
+      remainingBudgetMs: productTruthRemainingBudgetMs(Date.now() - requestStarted, Number(Deno.env.get("VISION_GATEWAY_BUDGET_MS") || "")),
     });
+    if (styleCacheKey && !cachedStyleProfile && styleReferencesLoaded) await saveStyleReferenceProfile(orgId, styleCacheKey, normalized);
     await service.from("analysis_cache").upsert({
       organization_id: orgId, org_key: orgId, cache_kind: "studio_product_analysis", cache_key: cacheKey,
       sku_name: String(args.skuName || ""), product_category: String(args.category || ""), payload: normalized,
@@ -2489,6 +2567,8 @@ async function analyze(request: Request, args: JsonRecord) {
         ...analysisInputSummary,
         policy: visionPolicySnapshot(policy, result.attempts),
         usedFallback: result.attempts.some((attempt) => attempt.outcome === "failed"),
+        posePlanner: normalized.posePlanning?.planner,
+        posePlanThreadId: normalized.posePlanning?.threadId,
       },
       output_json: normalized, status: "completed", latency_ms: Date.now() - started, cost_usd: calculated.costUsd,
       cost_source: calculated.costSource,
@@ -2556,6 +2636,7 @@ async function analyze(request: Request, args: JsonRecord) {
       mimeType: String((asset.metadata as JsonRecord)?.mimeType || "image/jpeg"), size: Number((asset.metadata as JsonRecord)?.size || 0),
     })), productIdentity: normalized.productIdentity, creativeDirection: normalized.creativeDirection,
     modelIdentity: normalized.modelIdentity, stylingPlan: normalized.stylingPlan, posePlan: normalized.posePlan, consistencyRules: CONSISTENCY_RULES,
+    ...(normalized.posePlanning ? { posePlanning: normalized.posePlanning } : {}),
     analysisModel: usedPolicy.model,
     analysisProvider: usedPolicy.provider,
     analysisPolicy: visionPolicySnapshot(usedPolicy),
@@ -2566,6 +2647,7 @@ async function analyze(request: Request, args: JsonRecord) {
       productIdentity: normalized.productIdentity,
       creativeDirection: normalized.creativeDirection,
       referenceFingerprint: rHash,
+      posePlanning: normalized.posePlanning,
     }),
   };
   const { error: sessionError } = await service.from("catalog_sessions").insert({
@@ -2730,10 +2812,29 @@ function generationFailureCode(error: unknown, message: string) {
   return status === 400 ? "provider_request_invalid" : "pose_consistency_failed";
 }
 
+/**
+ * The Farshi verdict and Pose 4 / Pose 6 posture adoptions composeGenerationPrompt
+ * uses for this shoot (isFarshiGeneration + promptReferenceSlots over the same
+ * inputs), so QA's Farshi rules, REFERENCE POSE MATCH and style-reference label and
+ * the DNA check's posture describe the prompt that made the frame.
+ */
+function adoptedReferenceSlots(
+  session: JsonRecord,
+  references: Array<{ role: string }>,
+  sku: { skuName?: string; productDetails?: string; bottomWearMode?: unknown },
+) {
+  const farshi = isFarshiGeneration({
+    session, skuName: sku.skuName, productDetails: sku.productDetails, references, bottomWearMode: sku.bottomWearMode,
+  });
+  return { farshi, slots: promptReferenceSlots(session, farshi) };
+}
+
 async function validatePose(args: {
   generated: { base64: string; mimeType: string }; references: LoadedReference[];
   approved: LoadedReference[]; session: JsonRecord; pose: StudioPose & { poseNumber: number }; organizationId: string;
   aspectRatio?: string;
+  /** The SKU text composeGenerationPrompt was given, for adoptedReferenceSlots. */
+  skuName?: string; productDetails?: string; bottomWearMode?: unknown;
 }) {
   const garmentFamily = String((args.session.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
   const qaRefs = await withInlineBase64(
@@ -2747,6 +2848,9 @@ async function validatePose(args: {
     qaRefs.some((reference) => reference.role === "style_reference") &&
     (hasCollapsedModelIdentity(sessionReferences) || hasCollapsedModelIdentity(args.references));
   const styling = args.session.stylingPlan ? normalizeStylingPlan(args.session.stylingPlan) : null;
+  const { farshi, slots: adopted } = adoptedReferenceSlots(args.session, qaRefs, args);
+  const referencePoseNumbers = [adopted.creative ? 4 : 0, adopted.showcase ? 6 : 0].filter(Boolean);
+  const qaLabel = (role: string) => roleLabel(role, { useStyleAsModelFace, hasModelReference: qaHasModelReference, hasApprovedAnchor: args.approved.length > 0, referencePoseNumbers });
   const prompt = buildPoseQaPrompt({
     poseNumber: args.pose.poseNumber, poseType: args.pose.id, poseTitle: args.pose.title, poseDirection: args.pose,
     productIdentity: args.session.productIdentity, creativeDirection: args.session.creativeDirection,
@@ -2762,7 +2866,9 @@ async function validatePose(args: {
     hasApprovedAnchor: args.approved.length > 0,
     hasModelReference: qaHasModelReference,
     useStyleAsModelFace,
-    referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role, { useStyleAsModelFace, hasModelReference: qaHasModelReference, hasApprovedAnchor: args.approved.length > 0 })}`),
+    referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${qaLabel(reference.role)}`),
+    referencePoseMatch: (args.pose.id === "creative" || args.pose.id === "showcase" ? adopted[args.pose.id] : null) ?? undefined,
+    farshi,
   });
   const baseParts: JsonRecord[] = [
     { text: prompt },
@@ -2770,7 +2876,7 @@ async function validatePose(args: {
     { inlineData: { mimeType: args.generated.mimeType, data: args.generated.base64 } },
   ];
   qaRefs.forEach((reference) => {
-    baseParts.push({ text: roleLabel(reference.role, { useStyleAsModelFace, hasModelReference: qaHasModelReference, hasApprovedAnchor: args.approved.length > 0 }) });
+    baseParts.push({ text: qaLabel(reference.role) });
     baseParts.push({ inlineData: { mimeType: reference.mimeType, data: reference.base64 } });
   });
 
@@ -2836,6 +2942,136 @@ async function validatePose(args: {
     releaseLoadedReferences(qaRefs);
   }
 }
+
+// The always-on DNA check is one short vision call, bounded on its own so it never
+// holds a pose for the full QA gateway budget. With too little of it left the check
+// is skipped and the frame ships with DNA marked unavailable.
+const DNA_CHECK_BUDGET_MS = 90_000;
+
+/**
+ * Product DNA consistency check (shape, colour, material, logo, details), modelled
+ * on validatePose. Never throws: any failure returns an unavailable verdict, plus
+ * the vision result when a paid call completed so its cost is still recorded.
+ */
+async function validateProductDna(args: {
+  generated: { base64: string; mimeType: string }; references: LoadedReference[];
+  session: JsonRecord; pose: StudioPose & { poseNumber: number }; organizationId: string; skuName: string;
+  /** The honoured Pose 4 / Pose 6 reference posture (adoptedReferenceSlots), else undefined. */
+  referencePosture?: string;
+}): Promise<{ dna: DnaConsistencyResult; result: VisionResult | null; latencyMs: number; skipped: boolean; failure?: unknown }> {
+  const started = Date.now();
+  const garmentFamily = String(jsonRecord(args.session.productIdentity).garmentFamily || "");
+  let refs: LoadedReference[] = [];
+  let result: VisionResult | null = null;
+  try {
+    // validatePose's selection and labels, product images only: the prompt quarantines
+    // style, face and anchor clothing, so sending them would only cost tokens.
+    refs = await withInlineBase64(
+      selectReferences(args.references, [], args.pose.id, garmentFamily, MAX_REFERENCES, args.pose.primaryReference)
+        .filter((reference) => (PRODUCT_REFERENCE_ROLES as readonly string[]).includes(reference.role)),
+    );
+    if (!refs.length) {
+      return { dna: unavailableDnaConsistency("No product reference was available for the DNA check."), result, latencyMs: Date.now() - started, skipped: true };
+    }
+    const labels = refs.map((reference) => roleLabel(reference.role));
+    const prompt = buildDnaConsistencyPrompt({
+      productIdentity: args.session.productIdentity,
+      skuName: args.skuName,
+      pose: { id: args.pose.id, title: args.pose.title },
+      referenceLabels: labels,
+      bottomWearMode: args.session.bottomWearMode,
+      referencePosture: args.referencePosture,
+    });
+    const policy = await resolveVisionPolicy(args.organizationId, { purpose: "qa", garmentFamily });
+    const remainingMs = DNA_CHECK_BUDGET_MS - (Date.now() - started);
+    if (remainingMs < VISION_HOP_MIN_MS) {
+      return { dna: unavailableDnaConsistency("Too little time was left for the DNA consistency check."), result, latencyMs: Date.now() - started, skipped: true };
+    }
+    const parts: JsonRecord[] = [
+      { text: prompt },
+      { text: "IMAGE A: NEWLY GENERATED POSE UNDER TEST" },
+      { inlineData: { mimeType: args.generated.mimeType, data: args.generated.base64 } },
+      ...refs.flatMap((reference, index) => [
+        { text: `IMAGE ${index + 1}: ${labels[index]}` },
+        { inlineData: { mimeType: reference.mimeType, data: reference.base64 } },
+      ]),
+    ];
+    result = await visionLimiter.run(() => visionJson(policy, parts, { gatewayBudgetMs: remainingMs }));
+    return { dna: normalizeDnaConsistencyResult(result.json), result, latencyMs: Date.now() - started, skipped: false };
+  } catch (error) {
+    return {
+      dna: unavailableDnaConsistency(`DNA consistency check could not run: ${errorMessage(error)}`),
+      result,
+      latencyMs: Date.now() - started,
+      skipped: false,
+      failure: error,
+    };
+  } finally {
+    releaseLoadedReferences(refs);
+  }
+}
+
+/**
+ * The worker's always-on DNA gate. Full pose QA already scores the same attributes,
+ * so its verdict is derived from those scores (no second call); otherwise one DNA
+ * check runs and is recorded as a quality_assurance ai_run (input_summary.check).
+ */
+async function productDnaGate(args: {
+  qa: { scores: Record<string, number> }; qaRan: boolean;
+  generated: { base64: string; mimeType: string }; references: LoadedReference[];
+  job: JsonRecord; pose: JsonRecord; poseData: StudioPose & { poseNumber: number }; session: JsonRecord;
+  attempt: number; generationEpoch: number; skuName: string; prompt: string; referencePosture?: string;
+}): Promise<{ dna: DnaConsistencyResult; costUsd: number }> {
+  if (args.qaRan && Object.keys(args.qa.scores || {}).length) {
+    return { dna: dnaConsistencyFromQaScores(args.qa.scores), costUsd: 0 };
+  }
+  const check = await validateProductDna({
+    generated: args.generated, references: args.references, session: args.session, pose: args.poseData,
+    organizationId: String(args.job.org_id), skuName: args.skuName, referencePosture: args.referencePosture,
+  });
+  if (check.skipped) return { dna: check.dna, costUsd: 0 };
+  const run = {
+    organization_id: args.job.org_id, planning_request_id: args.job.planning_request_id, batch_id: args.job.batch_id || null,
+    job_id: args.job.job_id, session_id: args.job.session_id, pose_index: args.pose.pose_index, run_kind: QA_RUN_KIND,
+    generation_id: args.pose.generation_id, generation_epoch: args.generationEpoch, attempt_number: args.attempt,
+    purpose: "qa", input_fingerprint: smallHash(args.prompt), latency_ms: check.latencyMs,
+  };
+  if (!check.result) {
+    const failure = visionFailureRecord(check.failure, { model: "unknown", provider: "unknown", thinkingLevel: "none" });
+    await recordAiRun({
+      ...run,
+      ...failure,
+      input_summary: {
+        check: "dna_consistency", pose: args.pose.pose_index, attempt: args.attempt, dnaVersion: DNA_CONSISTENCY_VERSION,
+        attempts: check.failure instanceof VisionProviderError ? check.failure.attempts : [],
+      },
+      output_json: { ...failure.output_json, dna: check.dna, dnaVersion: DNA_CONSISTENCY_VERSION },
+      status: "failed", cost_usd: 0, cost_source: "provider_cost_not_available",
+    });
+    return { dna: check.dna, costUsd: 0 };
+  }
+  const policy = check.result.policy;
+  const calculated = await pricedVisionUsage(check.result.raw, policy.provider, policy.model);
+  await recordAiRun({
+    ...run,
+    model: policy.model, provider: policy.provider, thinking_level: policy.thinkingLevel,
+    input_summary: {
+      check: "dna_consistency", pose: args.pose.pose_index, attempt: args.attempt, dnaVersion: DNA_CONSISTENCY_VERSION,
+      policy: visionPolicySnapshot(policy, check.result.attempts),
+    },
+    output_json: { dna: check.dna, dnaVersion: DNA_CONSISTENCY_VERSION },
+    // A paid call whose answer had no scores is still an executed QA run.
+    status: "completed",
+    provider_request_id: "",
+    input_tokens: calculated.inTok, input_text_tokens: calculated.inTok, input_image_tokens: 0,
+    output_tokens: calculated.outTok, total_tokens: calculated.totalTok, thoughts_token_count: calculated.thoughtsTok,
+    cached_content_token_count: calculated.cachedTok,
+    usage_payload: { providerQa: jsonRecord(check.result.raw.usageMetadata || check.result.raw.usage), attempts: check.result.attempts },
+    cost_usd: calculated.costUsd, cost_source: calculated.costSource,
+  });
+  return { dna: check.dna, costUsd: calculated.costUsd };
+}
+
 async function kickWorker(jobId?: string) {
   return fetch(FUNCTION_URL, {
     method: "POST",
@@ -3176,8 +3412,40 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
     footwear: String((sessionData.productIdentity as JsonRecord | undefined)?.footwearDetails || ""),
     background_style: String((sessionData.creativeDirection as JsonRecord | undefined)?.backgroundStyle || ""),
     showcase_framing: "3:4", cost_source: "estimated_from_generation_attempts",
+    pose_planning: jsonRecord(sessionData.posePlanning),
+    pose_scores: buildPoseScores(poses, smallHash),
   });
   if (learningObservationError) console.error(`Could not record generation observation: ${learningObservationError.message}`);
+  // Pose-plan learning: each Pose 4 / Pose 6 plan's final DNA verdict. Legacy sessions
+  // (no posePlanning) and unavailable checks write nothing; recordPosePlanOutcome never throws.
+  if (sessionData.posePlanning) {
+    const observed = { ...jsonRecord(jsonRecord(job.job_data).posePlanObserved) };
+    let observedChanged = false;
+    for (const slot of ADOPTABLE_SLOTS) {
+      const slotPose = poses.find((pose) => String(pose.pose_type || jsonRecord(pose.generation_data).id || "") === slot);
+      const expression = String(jsonRecord(jsonRecord(sessionData.posePlanning).expressions)[slot] || jsonRecord(slotPose?.generation_data).expression || "");
+      const observation = observationFromDna(jsonRecord(slotPose?.qa_payload).dna, expression);
+      if (!slotPose || !observation) continue;
+      // A single-pose regeneration re-finalizes this job: count each delivered version once.
+      const version = posePlanObservationVersion(slotPose);
+      if (observed[slot] === version) continue;
+      await recordPosePlanOutcome(service, {
+        organizationId: String(job.org_id || ""),
+        sessionId: String(job.session_id || ""),
+        slot,
+        observation,
+        sessionData,
+        job,
+      });
+      observed[slot] = version;
+      observedChanged = true;
+    }
+    if (observedChanged) {
+      const { error: observedError } = await service.from("generation_jobs")
+        .update({ job_data: { ...jsonRecord(job.job_data), posePlanObserved: observed } }).eq("job_id", job.job_id);
+      if (observedError) console.error(`Could not mark pose plan observations: ${observedError.message}`);
+    }
+  }
   try {
     await recordPromptPatternOutcomes({
       organizationId: String(job.org_id || ""),
@@ -3288,13 +3556,14 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   if (job.batch_id) {
     const batchId = String(job.batch_id);
     const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
-    const anchor = poses.find((pose) => Number(pose.pose_index) === 1 && pose.status === "completed" && canUsePoseOneAnchor(garmentFamily, pose.qa_status, Boolean(job.pose_qa)));
+    const anchor = poses.find((pose) => Number(pose.pose_index) === 1 && pose.status === "completed" && canUsePoseOneAnchor(garmentFamily, pose.qa_status, Boolean(job.pose_qa))
+      && !dnaHoldsForReview(pose.qa_status, jsonRecord(pose.qa_payload).dna));
     if (anchor?.output_url) {
       // Merged in the database for the same reason as the styling plan: a stylist
       // approving a plan at this moment must not lose the anchor, and vice versa.
       const { error: anchorError } = await service.rpc("merge_catalog_memory", {
         p_batch_id: batchId,
-        p_patch: { anchorOutputUrl: anchor.output_url, anchorStoragePath: anchor.storage_path, anchorStorageBackend: anchor.storage_backend || "firebase", anchorJobId: job.job_id, anchorQaStatus: anchor.qa_status, anchorGarmentFamily: garmentFamily },
+        p_patch: { anchorOutputUrl: anchor.output_url, anchorStoragePath: anchor.storage_path, anchorStorageBackend: anchor.storage_backend || "firebase", anchorJobId: job.job_id, anchorQaStatus: anchor.qa_status, anchorDna: jsonRecord(anchor.qa_payload).dna ?? null, anchorGarmentFamily: garmentFamily },
         p_require_absent: null,
       });
       // Stamping the memory as current after a failed merge would claim an anchor
@@ -3418,20 +3687,23 @@ async function archiveRejectedAttempt(args: {
   generated: { blob: Blob; mimeType: string };
   qa: { reason: string; score: number; failed: string[] };
 }): Promise<JsonRecord | null> {
-  try {
-    const storagePath = `organizations/${args.job.org_id}/generated/${args.job.job_id}/rejected/${args.pose.pose_index}-attempt-${args.attempt}-${crypto.randomUUID()}.${extensionForMimeType(args.generated.mimeType)}`;
-    const stored = await uploadCatalogObject({ orgId: String(args.job.org_id), storagePath, blob: args.generated.blob, mimeType: args.generated.mimeType });
-    return {
-      attempt: args.attempt, generationEpoch: Number(args.pose.generation_epoch || 1),
-      url: stored.downloadUrl, storagePath: stored.storagePath,
-      storageBackend: stored.storageBackend,
-      mimeType: args.generated.mimeType, reason: args.qa.reason, failed: args.qa.failed,
-      score: args.qa.score, createdAt: Date.now(),
-    };
-  } catch (error) {
-    console.error("Could not archive the QA-rejected attempt", errorMessage(error));
-    return null;
+  const storagePath = `organizations/${args.job.org_id}/generated/${args.job.job_id}/rejected/${args.pose.pose_index}-attempt-${args.attempt}-${crypto.randomUUID()}.${extensionForMimeType(args.generated.mimeType)}`;
+  // Paid output: one retry for a transient storage error before the copy is given up.
+  for (let upload = 1; upload <= 2; upload++) {
+    try {
+      const stored = await uploadCatalogObject({ orgId: String(args.job.org_id), storagePath, blob: args.generated.blob, mimeType: args.generated.mimeType });
+      return {
+        attempt: args.attempt, generationEpoch: Number(args.pose.generation_epoch || 1),
+        url: stored.downloadUrl, storagePath: stored.storagePath,
+        storageBackend: stored.storageBackend,
+        mimeType: args.generated.mimeType, reason: args.qa.reason, failed: args.qa.failed,
+        score: args.qa.score, createdAt: Date.now(),
+      };
+    } catch (error) {
+      console.error(`Could not archive the QA-rejected attempt (upload ${upload}/2)`, errorMessage(error));
+    }
   }
+  return null;
 }
 
 async function deferPoseRetry(args: {
@@ -3441,6 +3713,8 @@ async function deferPoseRetry(args: {
   message: string;
   corrections: string[];
   rejectedAttempts: JsonRecord[];
+  /** This attempt's failed DNA attribute set, for the next attempt's repeated-defect stop. */
+  lastDnaFailed?: JsonRecord | null;
   attemptCost: number;
   qaCost?: number;
   usage?: ProviderUsage;
@@ -3467,7 +3741,7 @@ async function deferPoseRetry(args: {
     service.from("session_generations").update({
       status: "queued", qa_status: "pending", error: retryMessage,
       attempt_count: args.attempt, updated_at: now,
-      generation_data: { ...poseData, corrections: args.corrections, correction: args.corrections.join("\n"), rejectedAttempts: args.rejectedAttempts, retryAvailableAt: availableAt },
+      generation_data: { ...poseData, corrections: args.corrections, correction: args.corrections.join("\n"), rejectedAttempts: args.rejectedAttempts, lastDnaFailed: args.lastDnaFailed ?? null, retryAvailableAt: availableAt },
       ...usagePatch,
     }).eq("session_id", args.job.session_id).eq("generation_id", args.pose.generation_id),
     service.from("generation_jobs").update({
@@ -3638,7 +3912,10 @@ async function handleAiVisualAnalysisNode(node: JsonRecord, sessionId: string) {
   });
   const normalized = normalizeAnalysis(result.json, category, {
     bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+    skuName: String(variant?.sku_name || ""),
+    productDetails: String(variant?.product_description || ""),
     modelDirection: String(settings.modelDirection || ""),
+    hasBottomReference: references.some((reference) => reference.role === "bottom"),
   });
 
   // Store baseAnalysis into catalog_memory
@@ -3735,6 +4012,8 @@ async function handleMemoryAndPlanningNode(node: JsonRecord, sessionId: string) 
   sessionData.modelIdentity = normalized.modelIdentity;
   sessionData.stylingPlan = normalized.stylingPlan;
   sessionData.posePlan = normalized.posePlan;
+  if (normalized.posePlanning) sessionData.posePlanning = normalized.posePlanning;
+  else delete sessionData.posePlanning;
   await service.from("catalog_sessions").update({ session_data: sessionData }).eq("session_id", sessionId);
 
   return { stylingPlan: normalized.stylingPlan, posePlan: normalized.posePlan };
@@ -3915,17 +4194,18 @@ async function resolvePoseReferences(job: JsonRecord, sessionData: JsonRecord, p
   // state with the reference downloads, so the two run together.
   const anchorLookup = async () => {
     let { data: anchorPose } = Number(pose.pose_index) > 1
-      ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title,qa_status").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
+      ? await service.from("session_generations").select("output_url,storage_path,storage_backend,title,qa_status,qa_payload").eq("session_id", job.session_id).eq("pose_index", 1).eq("status", "completed").maybeSingle()
       : { data: null };
     if (!anchorPose?.output_url && !anchorPose?.storage_path && job.batch_id) {
       const { data: batchRow, error: batchRowError } = await service.from("planning_batches").select("catalog_memory").eq("id", String(job.batch_id)).maybeSingle();
       if (batchRowError) throw new Error(batchRowError.message);
       const memory = (batchRow?.catalog_memory || {}) as JsonRecord;
       if ((memory.anchorOutputUrl || memory.anchorStoragePath) && canUsePoseOneAnchor(garmentFamily, memory.anchorQaStatus, Boolean(job.pose_qa))) {
-        anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor", qa_status: String(memory.anchorQaStatus || "") };
+        anchorPose = { output_url: String(memory.anchorOutputUrl || ""), storage_path: String(memory.anchorStoragePath || ""), storage_backend: String(memory.anchorStorageBackend || "firebase"), title: "catalog anchor", qa_status: String(memory.anchorQaStatus || ""), qa_payload: { dna: memory.anchorDna } };
       }
     }
-    if (anchorPose && !canUsePoseOneAnchor(garmentFamily, anchorPose.qa_status, Boolean(job.pose_qa))) return null;
+    // A Pose 1 the DNA gate kept only for human review never anchors poses 2-6 (even with QA off).
+    if (anchorPose && (!canUsePoseOneAnchor(garmentFamily, anchorPose.qa_status, Boolean(job.pose_qa)) || dnaHoldsForReview(anchorPose.qa_status, jsonRecord(anchorPose.qa_payload).dna))) return null;
     return anchorPose;
   };
   let [loadedReferences, anchorPose] = await Promise.all([
@@ -4100,6 +4380,7 @@ async function compilePosePrompt(
     generationMemory: formatGenerationMemoryBrief({
       references: selected,
       useStyleReferenceAsModelIdentity,
+      posePlanning: sessionData.posePlanning,
       memory: sessionGenerationMemory(sessionData, {
         references: selected,
         referenceFingerprint: String(session.reference_hash || ""),
@@ -4197,6 +4478,12 @@ async function processWorker(request: Request, args: JsonRecord) {
   const { loadedReferences, approved, poseData, selected, authoritativeBackReference, storedPoseData } = resolvedPoseReferences;
   // QA follows the job, or this pose alone when its regeneration asked for it.
   const poseQaEnabled = Boolean(job.pose_qa) || storedPoseData.poseQaRequested === true;
+  // The SKU text compilePosePrompt hands composeGenerationPrompt, reused by QA and the DNA check.
+  const skuText = {
+    skuName: String((job.job_data as JsonRecord | undefined)?.skuName || job.sku_name || "Untitled product"),
+    productDetails: String((job.job_data as JsonRecord | undefined)?.productDetails || ""),
+    bottomWearMode: sessionData.bottomWearMode ?? (job.job_data as JsonRecord | undefined)?.bottomWearMode,
+  };
   const attempt = Number(pose.attempt_count || 0) + 1;
   if (attempt > MAX_GENERATION_ATTEMPTS) {
     await failPoseAndJob(job, session, pose, `Pose ${pose.pose_index} exhausted ${MAX_GENERATION_ATTEMPTS} generation attempts.`);
@@ -4222,6 +4509,7 @@ async function processWorker(request: Request, args: JsonRecord) {
   if (qaCorrections.length > 1) qaCorrections = [qaCorrections[qaCorrections.length - 1]];
   let learningRuleIds: string[] = [];
   let rejectedAttempts = Array.isArray(storedPoseData.rejectedAttempts) ? storedPoseData.rejectedAttempts as JsonRecord[] : [];
+  let lastDnaFailed: JsonRecord | null = null;
   let lastError = "Generation did not complete.";
   let terminalFailureCode = "pose_consistency_failed";
   let attemptCost = 0;
@@ -4279,7 +4567,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     if (poseQaEnabled) {
       try {
         qaStarted = Date.now();
-        qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData, organizationId: String(job.org_id), aspectRatio: String(job.aspect_ratio || "3:4") });
+        qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData, organizationId: String(job.org_id), aspectRatio: String(job.aspect_ratio || "3:4"), ...skuText });
         qaLatencyMs = Date.now() - qaStarted;
       } catch (error) {
         qaUnavailable = errorMessage(error);
@@ -4355,6 +4643,18 @@ async function processWorker(request: Request, args: JsonRecord) {
          cost_usd: calculated.costUsd, cost_source: calculated.costSource,
        });
     }
+    // Always-on Product DNA gate, before anything is stored. It never throws: an
+    // outage is an unavailable verdict, and the paid image must not be dropped for it.
+    const dnaGate = await productDnaGate({
+      qa, qaRan: poseQaEnabled && !qaUnavailable, generated, references: loadedReferences,
+      job, pose, poseData, session: sessionData, attempt, generationEpoch, skuName: skuText.skuName, prompt,
+      // The posture the prompt honoured for Pose 4 / Pose 6 (same selection compilePosePrompt used).
+      referencePosture: poseData.id === "creative" || poseData.id === "showcase"
+        ? adoptedReferenceSlots(sessionData, selected, skuText).slots[poseData.id]?.posture
+        : undefined,
+    }).catch((error) => ({ dna: unavailableDnaConsistency(`DNA consistency check could not run: ${errorMessage(error)}`), costUsd: 0 }));
+    const dna = dnaGate.dna;
+    qaAttemptCost += dnaGate.costUsd;
     let salvagedAfterMaxAttempts = false;
     if (!qa.pass && attempt >= MAX_GENERATION_ATTEMPTS) {
       const salvageProductRecord = (sessionData.productIdentity && typeof sessionData.productIdentity === "object"
@@ -4386,29 +4686,61 @@ async function processWorker(request: Request, args: JsonRecord) {
         };
       }
     }
-    if (!qa.pass) {
+    // A DNA mismatch rejects like QA does; an unavailable verdict never blocks. On the
+    // attempt that ends retries (the last one, or a repeat of the previous DNA defect)
+    // a frame QA did not reject is kept for human review instead of being lost.
+    const dnaCorrection = dnaCorrectionText(dna);
+    let dnaRejects = !dna.pass && !dna.unavailable;
+    let dnaSalvaged = false;
+    if (dnaRejects && qa.pass) {
+      // Compares failed attribute sets: the correction text carries scores and free text, so it never repeats verbatim.
+      const repeatsLastDefect = repeatsLastDnaFailure(storedPoseData.lastDnaFailed, dna, { generationEpoch, attempt });
+      if (attempt >= MAX_GENERATION_ATTEMPTS || repeatsLastDefect) {
+        dnaRejects = false;
+        dnaSalvaged = true;
+        salvagedAfterMaxAttempts = true;
+        qa = {
+          ...qa,
+          pass: true,
+          automaticallyVerified: false,
+          outcome: "requires_human_review",
+          reviewRecommended: true,
+          reason: `Salvaged on attempt ${attempt}/${MAX_GENERATION_ATTEMPTS} for human review: ${dna.reason} ${qa.reason}`.trim(),
+        };
+      }
+    }
+    if (!qa.pass || dnaRejects) {
       const defect = [
-        qa.correction || qa.reason,
-        qa.failed.length ? `Failed checks: ${qa.failed.join(", ")}.` : "",
-        qa.weakest.length ? `Weakest matches against the product references: ${qa.weakest.join(", ")} - rebuild these from the reference images rather than adjusting them by feel.` : "",
-        `Product fidelity scored ${qa.productFidelity}%.`,
+        ...(qa.pass ? [] : [
+          qa.correction || qa.reason,
+          qa.failed.length ? `Failed checks: ${qa.failed.join(", ")}.` : "",
+          qa.weakest.length ? `Weakest matches against the product references: ${qa.weakest.join(", ")} - rebuild these from the reference images rather than adjusting them by feel.` : "",
+          `Product fidelity scored ${qa.productFidelity}%.`,
+        ]),
+        dnaRejects ? dnaCorrection : "",
       ].filter(Boolean).join(" ").trim();
+      const verdict = {
+        reason: [qa.pass ? "" : qa.reason, dnaRejects ? dna.reason : ""].filter(Boolean).join(" "),
+        score: qa.pass ? Number(dna.score ?? 0) : qa.score,
+        failed: [...(qa.pass ? [] : qa.failed), ...(dnaRejects ? dna.failed.map((attribute) => `dna_${attribute}`) : [])],
+      };
       const isRepeatedDefect = qaCorrections.length > 0 && qaCorrections[qaCorrections.length - 1].includes(defect);
       qaCorrections = [...qaCorrections, `Attempt ${attempt}: ${defect}`].slice(-MAX_GENERATION_ATTEMPTS);
-      const archived = await archiveRejectedAttempt({ job, pose, attempt, generated, qa });
+      if (dnaRejects) lastDnaFailed = { generationEpoch, attempt, failed: dna.failed };
+      const archived = await archiveRejectedAttempt({ job, pose, attempt, generated, qa: verdict });
       if (archived) rejectedAttempts = appendRejectedAttemptHistory(rejectedAttempts, archived, REJECTED_ATTEMPT_HISTORY_LIMIT);
       // The verdict is written now, not on the way out: neither deferPoseRetry nor
       // failPoseAndJob touches qa_payload, so a pose that exhausts its retries
       // would otherwise show an archived image with no fidelity breakdown.
       await service.from("session_generations").update({
-        qa_status: "rejected_by_qa", qa_payload: { ...qa, attempt, qaUnavailable: "", qaVersion: QA_VERSION }, updated_at: new Date().toISOString(),
+        qa_status: "rejected_by_qa", qa_payload: { ...qa, dna, attempt, qaUnavailable, qaEnabled: poseQaEnabled, qaVersion: QA_VERSION }, updated_at: new Date().toISOString(),
       }).eq("session_id", job.session_id).eq("generation_id", pose.generation_id);
-      lastError = `Consistency QA failed: ${qa.reason}`;
+      lastError = qa.pass ? `Product DNA check failed: ${dna.reason}` : `Consistency QA failed: ${verdict.reason}`;
       await service.from("qa_reviews").insert({
         organization_id: job.org_id, planning_request_id: job.planning_request_id, generation_job_id: job.job_id,
-        pose_index: pose.pose_index, reviewer_type: "gemini_auto", score: qa.score, passed: false,
-        issues: qa.failed, notes: qa.reason, qa_version: QA_VERSION, outcome: "rejected_by_qa",
-        generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt, metadata: { qa },
+        pose_index: pose.pose_index, reviewer_type: "gemini_auto", score: verdict.score, passed: false,
+        issues: verdict.failed, notes: verdict.reason, qa_version: QA_VERSION, outcome: "rejected_by_qa",
+        generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt, metadata: { qa, dna },
       });
       const qaError = new Error(lastError) as Error & { code?: string };
       qaError.code = isRepeatedDefect ? "same_defect_repeated" : "consistency_qa_failed";
@@ -4421,13 +4753,15 @@ async function processWorker(request: Request, args: JsonRecord) {
     const storagePath = `organizations/${job.org_id}/generated/${job.job_id}/${pose.pose_index}-${safeSku}-${crypto.randomUUID()}.${extensionForMimeType(generated.mimeType)}`;
     const stored = await uploadCatalogObject({ orgId: String(job.org_id), storagePath, blob: generated.blob, mimeType: generated.mimeType });
     const completedAt = new Date().toISOString();
-    const { qaStatus } = qaStorageDisposition({ qaEnabled: poseQaEnabled, qaUnavailable: Boolean(qaUnavailable), outcome: qa.outcome });
+    const disposition = qaStorageDisposition({ qaEnabled: poseQaEnabled, qaUnavailable: Boolean(qaUnavailable), outcome: qa.outcome });
+    // A frame the DNA check kept after its last retry needs a human, even with QA off.
+    const qaStatus = dnaSalvaged ? "requires_human_review" : disposition.qaStatus;
     const usagePatch = accumulatedUsage(pose as JsonRecord, generated.usage, generated.requestId, attemptCost);
     const versionTiming = deliveredVersionTiming(poseTiming, { completedAt, attempt, generationMs });
     await Promise.all([
       service.from("session_generations").update({
         status: "completed", output_url: stored.downloadUrl, storage_path: stored.storagePath, storage_backend: stored.storageBackend,
-        qa_status: qaStatus, qa_payload: { ...qa, qaUnavailable, qaVersion: QA_VERSION, qaEnabled: poseQaEnabled, ...(salvagedAfterMaxAttempts ? { salvagedAfterMaxAttempts: true } : {}) },
+        qa_status: qaStatus, qa_payload: { ...qa, dna, qaUnavailable, qaVersion: QA_VERSION, qaEnabled: poseQaEnabled, ...(salvagedAfterMaxAttempts ? { salvagedAfterMaxAttempts: true } : {}) },
         error: qaUnavailable ? `Delivered without automatic consistency QA: ${qaUnavailable}`.slice(0, 1000) : "", updated_at: completedAt,
         // A review decision belongs to the image it was made on. The earlier
         // version keeps its archive row; this new image has not been reviewed.
@@ -4450,7 +4784,7 @@ async function processWorker(request: Request, args: JsonRecord) {
         prompt, image_url: stored.downloadUrl, storage_path: stored.storagePath, generation_job_id: job.job_id,
         sku_matched: true, asset_role: "generated", storage_backend: stored.storageBackend,
         metadata: {
-          poseIndex: pose.pose_index, poseType: pose.pose_type, qa, qaStatus, qaVersion: QA_VERSION, qaEnabled: poseQaEnabled,
+          poseIndex: pose.pose_index, poseType: pose.pose_type, qa, dna, qaStatus, qaVersion: QA_VERSION, qaEnabled: poseQaEnabled,
           ...(salvagedAfterMaxAttempts ? { salvagedAfterMaxAttempts: true } : {}),
           model: imageGenerationRoute.model, provider: imageGenerationRoute.provider, quality: job.quality,
           providerRequestId: generated.requestId, usage: generated.usage.raw, actualCostUsd: attemptCost,
@@ -4466,9 +4800,12 @@ async function processWorker(request: Request, args: JsonRecord) {
         pose_index: pose.pose_index,
         reviewer_type: !poseQaEnabled ? "qa_disabled" : qaUnavailable ? "gemini_auto_unavailable" : "gemini_auto",
         score: qa.score, passed: !qaUnavailable && poseQaEnabled && qa.automaticallyVerified,
-        issues: qaUnavailable ? ["qa_unavailable"] : !poseQaEnabled ? ["qa_disabled"] : qa.failed,
+        issues: [
+          ...(qaUnavailable ? ["qa_unavailable"] : !poseQaEnabled ? ["qa_disabled"] : qa.failed),
+          ...(dnaSalvaged ? dna.failed.map((attribute) => `dna_${attribute}`) : []),
+        ],
         notes: qa.reason, qa_version: QA_VERSION, outcome: qaStatus,
-        generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt, metadata: { qa, qaUnavailable, ...(salvagedAfterMaxAttempts ? { salvagedAfterMaxAttempts: true } : {}) },
+        generation_epoch: Number(pose.generation_epoch || 1), attempt_number: attempt, metadata: { qa, dna, qaUnavailable, ...(salvagedAfterMaxAttempts ? { salvagedAfterMaxAttempts: true } : {}) },
       }),
     ]);
     const { data: allPoses, error: allPosesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
@@ -4476,6 +4813,8 @@ async function processWorker(request: Request, args: JsonRecord) {
     const completedCount = (allPoses || []).filter((entry) => entry.status === "completed").length;
     const failedCount = (allPoses || []).filter((entry) => entry.status === "failed").length;
     const generatedAssets = (allPoses || []).filter((entry) => entry.output_url).map((entry) => ({ poseIndex: entry.pose_index, url: entry.output_url, storagePath: entry.storage_path, qaStatus: entry.qa_status }));
+    // Frames the DNA gate kept only for human review are neither the Pose 1 anchor nor approved memory.
+    const dnaHeldPoses = new Set((allPoses || []).filter((entry) => dnaHoldsForReview(entry.qa_status, jsonRecord(entry.qa_payload).dna)).map((entry) => entry.pose_index));
     await Promise.all([
       service.from("generation_jobs").update({
         completed_poses: completedCount, failed_poses: failedCount,
@@ -4493,10 +4832,10 @@ async function processWorker(request: Request, args: JsonRecord) {
       // verdict, so a set can be audited later without replaying the job.
       service.from("catalog_sessions").update({
         session_data: {
-          ...sessionData, generatedAssets, approvedAssets: generatedAssets.filter((asset) => asset.poseIndex === 1 && canUsePoseOneAnchor(String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), asset.qaStatus, Boolean(job.pose_qa))),
+          ...sessionData, generatedAssets, approvedAssets: generatedAssets.filter((asset) => asset.poseIndex === 1 && !dnaHeldPoses.has(asset.poseIndex) && canUsePoseOneAnchor(String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), asset.qaStatus, Boolean(job.pose_qa))),
           generationMemory: sessionGenerationMemory(sessionData, {
             generatedAssets,
-            approvedAssets: generatedAssets.filter((asset) => (
+            approvedAssets: generatedAssets.filter((asset) => !dnaHeldPoses.has(asset.poseIndex) && (
               (asset.poseIndex === 1 && canUsePoseOneAnchor(String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || ""), asset.qaStatus, Boolean(job.pose_qa)))
               || ["automatically_verified", "human_approved"].includes(String(asset.qaStatus || ""))
             )),
@@ -4508,7 +4847,7 @@ async function processWorker(request: Request, args: JsonRecord) {
             ...(sessionData.validation && typeof sessionData.validation === "object" ? sessionData.validation as JsonRecord : {}),
             [`pose${pose.pose_index}`]: {
               productFidelity: qa.productFidelity, scores: qa.scores, weakest: qa.weakest,
-              qaStatus, qaVersion: QA_VERSION, attempt, checkedAt: Date.now(),
+              qaStatus, qaVersion: QA_VERSION, attempt, checkedAt: Date.now(), dna,
             },
           },
         },
@@ -4522,7 +4861,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     lastError = errorMessage(error);
     terminalFailureCode = generationFailureCode(error, lastError);
     if (!permanentProviderError(error) && attempt < MAX_GENERATION_ATTEMPTS) {
-      return deferPoseRetry({ job, pose, attempt, message: lastError, corrections: qaCorrections, rejectedAttempts, attemptCost, qaCost: qaAttemptCost, usage: attemptUsage, providerRequestId, error });
+      return deferPoseRetry({ job, pose, attempt, message: lastError, corrections: qaCorrections, rejectedAttempts, lastDnaFailed, attemptCost, qaCost: qaAttemptCost, usage: attemptUsage, providerRequestId, error });
     }
   } finally {
     stopLeaseHeartbeat();
@@ -4622,24 +4961,29 @@ async function approvePose(request: Request, args: JsonRecord) {
   // The service client bypasses RLS, so confirm the pose belongs to this
   // organization before writing; the old order updated first and checked after.
   const { data: ownedPose, error: ownedPoseError } = await service.from("session_generations")
-    .select("session_id").eq("generation_id", generationId).maybeSingle();
+    .select("session_id,approval_status").eq("generation_id", generationId).maybeSingle();
   if (ownedPoseError || !ownedPose) throw new Error("Could not update approval status or pose not found.");
   const { data: ownerSession, error: ownerSessionError } = await service.from("catalog_sessions")
     .select("session_id").eq("session_id", ownedPose.session_id).eq("organization_id", workspace.organization.id).maybeSingle();
   if (ownerSessionError || !ownerSession) throw new Error("Could not update approval status or pose not found.");
 
-  const { data: pose, error: poseError } = await service.from("session_generations")
+  // Compare-and-set on the status read above: a concurrent review cannot be counted twice.
+  const approvalUpdate = service.from("session_generations")
     .update({
       approval_status: status,
       approved_by: workspace.member.id,
       approved_at: new Date().toISOString(),
       approval_notes: notes
     })
-    .eq("generation_id", generationId)
+    .eq("generation_id", generationId);
+  const { data: pose, error: poseError } = await (ownedPose.approval_status == null
+    ? approvalUpdate.is("approval_status", null)
+    : approvalUpdate.eq("approval_status", ownedPose.approval_status))
     .select("generation_id,session_id,pose_index,pose_type,output_url,storage_path,qa_status,generation_data")
-    .single();
+    .maybeSingle();
 
-  if (poseError || !pose) throw new Error("Could not update approval status or pose not found.");
+  if (poseError) throw new Error("Could not update approval status or pose not found.");
+  if (!pose) throw new Error("This pose was reviewed by someone else just now. Reload to see the latest decision.");
 
   const { data: session, error: sessionError } = await service.from("catalog_sessions")
     .select("session_id,planning_request_id,reference_hash,session_data")
@@ -4671,6 +5015,19 @@ async function approvePose(request: Request, args: JsonRecord) {
       updated_at: new Date().toISOString(),
     }).eq("session_id", session.session_id);
     if (memoryError) console.error(`Could not persist approval generation memory: ${memoryError.message}`);
+    // A human verdict on Pose 4 / Pose 6 teaches the pose planner (best-effort), once per
+    // status transition: the same status again writes nothing, a flip moves both counters.
+    const humanObservation = humanVerdictTransition(ownedPose.approval_status, status);
+    if (humanObservation) {
+      await recordPosePlanOutcome(service, {
+        organizationId: workspace.organization.id,
+        sessionId: String(session.session_id),
+        slot: String(pose.pose_type || jsonRecord(pose.generation_data).id || ""),
+        observation: humanObservation,
+        sessionData,
+        jobId: poseOwnerJobId(pose),
+      });
+    }
   }
   if (status === "rejected" && notes.trim() && session?.planning_request_id) {
     await recordHumanProductLearningRule({
@@ -4774,10 +5131,14 @@ async function cancelJob(request: Request, args: JsonRecord) {
 // A session can hold several jobs once it has been re-run, so ".single()" on
 // session_id threw "multiple rows" and broke regenerate/QA for that session.
 // Resolve the job that produced this pose, falling back to the newest one.
-async function jobForPose(pose: JsonRecord, organizationId: string) {
+function poseOwnerJobId(pose: JsonRecord) {
   const generationId = String(pose.generation_id || "");
-  const ownerJobId = String(((pose.generation_data || {}) as JsonRecord).jobId || "")
+  return String(((pose.generation_data || {}) as JsonRecord).jobId || "")
     || (generationId.includes(":pose:") ? generationId.split(":pose:")[0] : "");
+}
+
+async function jobForPose(pose: JsonRecord, organizationId: string) {
+  const ownerJobId = poseOwnerJobId(pose);
   if (ownerJobId) {
     const { data, error } = await service.from("generation_jobs").select("*").eq("job_id", ownerJobId).eq("org_id", organizationId).maybeSingle();
     if (error) throw new Error(error.message);
@@ -4873,6 +5234,8 @@ async function syncCatalogAnchorQa(
   pose: JsonRecord,
   sessionData: JsonRecord,
   outcome: string,
+  /** The pose's DNA verdict after this review; undefined leaves the stored anchorDna as is. */
+  dna?: unknown,
 ) {
   if (!job.batch_id || Number(pose.pose_index) !== 1) return;
   const { data: batch, error: batchError } = await service.from("planning_batches")
@@ -4882,7 +5245,7 @@ async function syncCatalogAnchorQa(
   const ownsCurrentAnchor = String(memory.anchorJobId || "") === String(job.job_id);
   const hasAnchor = Boolean(memory.anchorOutputUrl || memory.anchorStoragePath);
   const garmentFamily = String((sessionData.productIdentity as JsonRecord | undefined)?.garmentFamily || "");
-  const canPromote = !hasAnchor && canUsePoseOneAnchor(garmentFamily, outcome, Boolean(job.pose_qa));
+  const canPromote = !hasAnchor && canUsePoseOneAnchor(garmentFamily, outcome, Boolean(job.pose_qa)) && !dnaHoldsForReview(outcome, dna);
   if (!ownsCurrentAnchor && !canPromote) return;
   const patch = canPromote
     ? {
@@ -4893,8 +5256,9 @@ async function syncCatalogAnchorQa(
       anchorQaStatus: outcome,
       anchorQaVersion: QA_VERSION,
       anchorGarmentFamily: garmentFamily,
+      anchorDna: dna ?? null,
     }
-    : { anchorQaStatus: outcome, anchorQaVersion: QA_VERSION };
+    : { anchorQaStatus: outcome, anchorQaVersion: QA_VERSION, ...(dna !== undefined ? { anchorDna: dna } : {}) };
   const { error } = await service.rpc("merge_catalog_memory", {
     p_batch_id: job.batch_id,
     p_patch: patch,
@@ -4932,9 +5296,17 @@ async function rerunPoseQa(request: Request, args: JsonRecord) {
   }, workspace.organization.id);
   const poseData = { ...((pose.generation_data || {}) as StudioPose), poseNumber: Number(pose.pose_index) } as StudioPose & { poseNumber: number };
   const reviewedAt = new Date().toISOString();
+  // The worker's Product DNA verdict survives a QA rerun, so History and finalize keep it.
+  const priorDna = jsonRecord(pose.qa_payload).dna;
+  const keptDna = priorDna ? { dna: priorDna } : {};
   let qa: Awaited<ReturnType<typeof validatePose>>;
   try {
-    qa = await validatePose({ generated, references, approved: [], session: sessionData, pose: poseData, organizationId: workspace.organization.id, aspectRatio: String(job.aspect_ratio || "3:4") });
+    qa = await validatePose({
+      generated, references, approved: [], session: sessionData, pose: poseData, organizationId: workspace.organization.id, aspectRatio: String(job.aspect_ratio || "3:4"),
+      skuName: String((job.job_data as JsonRecord | undefined)?.skuName || job.sku_name || "Untitled product"),
+      productDetails: String((job.job_data as JsonRecord | undefined)?.productDetails || ""),
+      bottomWearMode: sessionData.bottomWearMode ?? (job.job_data as JsonRecord | undefined)?.bottomWearMode,
+    });
   } catch (error) {
     const message = errorMessage(error);
     const unavailable = unavailableQaResult(`Automatic consistency QA could not run: ${message}`);
@@ -4948,7 +5320,7 @@ async function rerunPoseQa(request: Request, args: JsonRecord) {
       }),
       service.from("session_generations").update({
         qa_status: "unverified",
-        qa_payload: { ...unavailable, qaVersion: QA_VERSION, rerunAt: reviewedAt, previousQa: pose.qa_payload || null },
+        qa_payload: { ...unavailable, ...keptDna, qaVersion: QA_VERSION, rerunAt: reviewedAt, previousQa: pose.qa_payload || null },
         updated_at: reviewedAt,
       }).eq("generation_id", generationId),
       service.from("audit_logs").insert({
@@ -4958,24 +5330,31 @@ async function rerunPoseQa(request: Request, args: JsonRecord) {
       }),
     ]);
     assertSupabaseResults(results, "Could not save the unavailable QA attempt");
-    await syncCatalogAnchorQa(job as JsonRecord, pose as JsonRecord, sessionData, "unverified");
+    await syncCatalogAnchorQa(job as JsonRecord, pose as JsonRecord, sessionData, "unverified", priorDna);
     return { success: false, outcome: "unverified", error: message, qaVersion: QA_VERSION };
   }
+  // Fresh QA scores re-derive the DNA verdict; without them the worker's verdict stands.
+  // A failing DNA verdict keeps the frame out of automatic verification.
+  const derivedDna = dnaConsistencyFromQaScores((qa as { scores?: Record<string, number> }).scores || {});
+  const rerunDna = derivedDna.unavailable ? priorDna : derivedDna;
+  const dnaFailed = jsonRecord(rerunDna).pass === false && jsonRecord(rerunDna).unavailable !== true;
+  const rerunOutcome = dnaFailed && qa.outcome === "automatically_verified" ? "requires_human_review" : qa.outcome;
+  const rerunDnaPayload = rerunDna ? { dna: rerunDna } : {};
   const results = await Promise.all([
     service.from("qa_reviews").insert({
       organization_id: workspace.organization.id, planning_request_id: job.planning_request_id,
       generation_job_id: job.job_id, pose_index: pose.pose_index, reviewer_type: "gemini_admin_rerun",
-      score: qa.score, passed: qa.automaticallyVerified, issues: qa.failed, notes: qa.reason,
+      score: qa.score, passed: qa.automaticallyVerified && !dnaFailed, issues: qa.failed, notes: qa.reason,
       qa_version: QA_VERSION, outcome: qa.outcome, generation_epoch: Number(pose.generation_epoch || 1),
-      attempt_number: Number(pose.attempt_count || 1), metadata: { qa, rerunByMemberId: workspace.member.id },
+      attempt_number: Number(pose.attempt_count || 1), metadata: { qa, dna: rerunDna ?? null, rerunOutcome, rerunByMemberId: workspace.member.id },
     }),
     service.from("session_generations").update({
-      qa_status: qa.outcome, qa_payload: { ...qa, qaVersion: QA_VERSION, rerunAt: reviewedAt }, updated_at: reviewedAt,
+      qa_status: rerunOutcome, qa_payload: { ...qa, ...rerunDnaPayload, qaVersion: QA_VERSION, rerunAt: reviewedAt }, updated_at: reviewedAt,
     }).eq("generation_id", generationId),
     service.from("audit_logs").insert({
       organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
       action: "generation.qa.rerun", resource_type: "session_generation", resource_id: generationId,
-      metadata: { jobId: job.job_id, poseIndex: pose.pose_index, qaVersion: QA_VERSION, outcome: qa.outcome },
+      metadata: { jobId: job.job_id, poseIndex: pose.pose_index, qaVersion: QA_VERSION, outcome: rerunOutcome, qaOutcome: qa.outcome },
     }),
   ]);
   assertSupabaseResults(results, "Could not save the QA rerun");
@@ -5013,8 +5392,8 @@ async function rerunPoseQa(request: Request, args: JsonRecord) {
       updated_at: reviewedAt,
     }).eq("job_id", job.job_id);
   }
-  await syncCatalogAnchorQa(job as JsonRecord, pose as JsonRecord, sessionData, qa.outcome);
-  return { success: true, outcome: qa.outcome, score: qa.score, qaVersion: QA_VERSION, costUsd: calculated.costUsd };
+  await syncCatalogAnchorQa(job as JsonRecord, pose as JsonRecord, sessionData, rerunOutcome, rerunDna);
+  return { success: true, outcome: rerunOutcome, score: qa.score, qaVersion: QA_VERSION, costUsd: calculated.costUsd };
 }
 
 // Requeues every pose in a failed job that didn't complete, so one bad pose (or the cascading
@@ -6326,6 +6705,8 @@ async function analyzeCatalogVariant(
   references: ReferenceInput[],
   suppliedPolicy?: VisionPolicy,
   onAttempt?: (attempt: VisionHopAttempt) => Promise<void>,
+  /** catalogAnalysisFingerprint(...).fingerprint: the LangGraph planner thread key. */
+  analysisFingerprint?: string,
 ) {
   const settings = (batch.generation_settings || {}) as JsonRecord;
   const orgId = String(batch.organization_id || "");
@@ -6398,12 +6779,14 @@ async function analyzeCatalogVariant(
         attempts: result.attempts,
         usage: result.raw.usageMetadata || result.raw.usage,
         isColorwayDelta: true,
+        styleProfileCacheHit: false,
       };
       }
     }
   }
 
   // Full base analysis for the first SKU in the batch (check persistent analysis_cache first)
+  const analysisStarted = Date.now();
   const catalogCutHint = explicitBottomCutHint(
     settings.bottomWear ?? settings.bottomWearMode,
     variant.product_description,
@@ -6432,6 +6815,14 @@ async function analyzeCatalogVariant(
   let usedPolicy = policy;
   let attempts: VisionHopAttempt[] = [];
   let usage: unknown = {};
+  let styleProfileCacheHit = false;
+  const analysisOptions = {
+    bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
+    skuName: String(variant.sku_name || ""),
+    productDetails: String(variant.product_description || ""),
+    modelDirection: String(settings.modelDirection || ""),
+    hasBottomReference: references.some((reference) => reference.role === "bottom"),
+  };
 
   if (!forceRefresh && orgId) {
     const { data: cached, error: cachedError } = await service
@@ -6443,23 +6834,34 @@ async function analyzeCatalogVariant(
       .gt("expires_at", new Date().toISOString())
       .maybeSingle();
     if (!cachedError && cached?.payload) {
-      normalized = normalizeAnalysis(cached.payload as JsonRecord, category, {
-        bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
-        modelDirection: String(settings.modelDirection || ""),
-      });
+      normalized = normalizeAnalysis(cached.payload as JsonRecord, category, analysisOptions);
     }
   }
 
   if (!normalized) {
+    const fastApi = optionalFastApiTarget();
+    // Wakes the scale-to-zero pose planner now, so it is warm when the vision call returns.
+    void wakeFastApi(fastApi);
     const rawHasModelReference = hasExplicitModelIdentity(references);
     const useStyleAsModelFace = hasCollapsedModelIdentity(references);
+    const styleCacheKey = orgId
+      ? styleProfileCacheKey(references, { sceneDirection: settings.sceneDirection, modelDirection: settings.modelDirection })
+      : "";
+    // forceRefresh skips only the lookup: the fresh profile below still overwrites the row.
+    const cachedStyleProfile = styleCacheKey && !forceRefresh
+      ? await withDeadline(cachedStyleReferenceProfile(orgId, styleCacheKey), ANALYSIS_PREP_QUERY_MS, null)
+      : null;
+    styleProfileCacheHit = Boolean(cachedStyleProfile);
+    let styleReferencesLoaded = false;
     const result = await visionLimiter.run(async () => {
-      const { manifest, parts } = await loadVisionReferenceParts(
-        references,
+      const { manifest, parts, styleReferencesLoaded: allStyleLoaded } = await loadVisionReferenceParts(
+        // A cached style profile stands in for the style image (token reduction).
+        cachedStyleProfile ? references.filter((reference) => reference.role !== "style_reference") : references,
         orgId,
         category,
         { useStyleAsModelFace, hasModelReference: rawHasModelReference },
       );
+      styleReferencesLoaded = allStyleLoaded;
       parts.push({ text: buildCombinedAnalysisPrompt({
         skuName: String(variant.sku_name), productDetails: String(variant.product_description || ""), category,
         modelDirection: String(settings.modelDirection || ""), sceneDirection: String(settings.sceneDirection || ""), referenceManifest: manifest,
@@ -6469,6 +6871,7 @@ async function analyzeCatalogVariant(
         showcaseFeedback,
         hasModelReference: rawHasModelReference,
         useStyleAsModelFace,
+        cachedStyleProfile: cachedStyleProfile ?? undefined,
       }) });
       try {
         return await visionJson(policy, parts, { onAttempt });
@@ -6476,10 +6879,17 @@ async function analyzeCatalogVariant(
         parts.length = 0;
       }
     });
-    normalized = normalizeAnalysis(result.json, category, {
-      bottomWearMode: settings.bottomWear ?? settings.bottomWearMode,
-      modelDirection: String(settings.modelDirection || ""),
+    normalized = await withGraphPosePlanning({
+      target: fastApi,
+      normalized: normalizeAnalysis(result.json, category, analysisOptions),
+      rawAnalysis: result.json,
+      category,
+      options: analysisOptions,
+      organizationId: orgId,
+      threadKey: analysisFingerprint || smallHash(catalogCacheKey),
+      remainingBudgetMs: productTruthRemainingBudgetMs(Date.now() - analysisStarted, Number(Deno.env.get("VISION_GATEWAY_BUDGET_MS") || "")),
     });
+    if (styleCacheKey && !cachedStyleProfile && styleReferencesLoaded) await saveStyleReferenceProfile(orgId, styleCacheKey, normalized);
     usedPolicy = result.policy;
     attempts = result.attempts;
     usage = result.raw.usageMetadata || result.raw.usage || {};
@@ -6533,6 +6943,7 @@ async function analyzeCatalogVariant(
     attempts,
     usage,
     isColorwayDelta: false,
+    styleProfileCacheHit,
   };
 }
 
@@ -7116,7 +7527,7 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
     });
   };
   try {
-    const analysis = await analyzeCatalogVariant(batch as JsonRecord, variant as JsonRecord, references, hashes.policy, persistFailedHop);
+    const analysis = await analyzeCatalogVariant(batch as JsonRecord, variant as JsonRecord, references, hashes.policy, persistFailedHop, hashes.fingerprint);
     const normalized = analysis.normalized;
     const now = new Date().toISOString();
     const detectedSaree = String(normalized.productIdentity.garmentFamily || "").trim().toLowerCase() === "saree";
@@ -7142,7 +7553,7 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
           organization_id: batch.organization_id, planning_request_id: variant.id, batch_id: batchId,
           job_id: "", run_kind: "catalog_product_preflight", model: analysis.policy.model,
           provider: analysis.policy.provider, purpose: analysis.policy.purpose, thinking_level: analysis.policy.thinkingLevel, input_fingerprint: hashes.fingerprint,
-          input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(hashes.policy, analysis.attempts), isColorwayDelta: analysis.isColorwayDelta },
+          input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(hashes.policy, analysis.attempts), isColorwayDelta: analysis.isColorwayDelta, styleProfileCacheHit: analysis.styleProfileCacheHit, posePlanner: normalized.posePlanning?.planner, posePlanThreadId: normalized.posePlanning?.threadId },
           output_json: normalized, status: "completed", latency_ms: Date.now() - started,
           cost_usd: calculatedIncomplete.costUsd, cost_source: calculatedIncomplete.costSource,
           input_tokens: calculatedIncomplete.inTok, input_text_tokens: calculatedIncomplete.inTok, input_image_tokens: 0, output_tokens: calculatedIncomplete.outTok,
@@ -7164,7 +7575,7 @@ async function processCatalogPreflight(request: Request, args: JsonRecord) {
         organization_id: batch.organization_id, planning_request_id: variant.id, batch_id: batchId,
         job_id: "", run_kind: "catalog_product_preflight", model: analysis.policy.model,
         provider: analysis.policy.provider, purpose: analysis.policy.purpose, thinking_level: analysis.policy.thinkingLevel, input_fingerprint: hashes.fingerprint,
-        input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(hashes.policy, analysis.attempts), isColorwayDelta: analysis.isColorwayDelta },
+        input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(hashes.policy, analysis.attempts), isColorwayDelta: analysis.isColorwayDelta, styleProfileCacheHit: analysis.styleProfileCacheHit, posePlanner: normalized.posePlanning?.planner, posePlanThreadId: normalized.posePlanning?.threadId },
         output_json: normalized, status: "completed", latency_ms: Date.now() - started,
         cost_usd: calculated.costUsd, cost_source: calculated.costSource,
         input_tokens: calculated.inTok, input_text_tokens: calculated.inTok, input_image_tokens: 0, output_tokens: calculated.outTok,
@@ -7300,6 +7711,9 @@ async function queueCatalogVariantGeneration(
   const storedNormalized = variant.ai_analysis
     ? normalizeAnalysis(variant.ai_analysis as JsonRecord, category, {
       bottomWearMode: generationSettings.bottomWear ?? generationSettings.bottomWearMode,
+      skuName: String(variant.sku_name || ""),
+      productDetails: String(variant.product_description || ""),
+      hasBottomReference: references.some((reference) => reference.role === "bottom"),
     })
     : null;
   const hasCurrentAnalysis = variant.analysis_status === "ready"
@@ -7310,15 +7724,17 @@ async function queueCatalogVariantGeneration(
   let analysisPolicy = analysisHashes.policy;
   let analysisAttempts: VisionAttempt[] = [];
   let analysisUsage: unknown = undefined;
+  let styleProfileCacheHit = false;
   let normalized: ReturnType<typeof normalizeAnalysis>;
   if (hasCurrentAnalysis) {
     normalized = applyCatalogMemory(batch, storedNormalized!);
   } else {
-    const analysis = await analyzeCatalogVariant(batch, variant, references, analysisHashes.policy);
+    const analysis = await analyzeCatalogVariant(batch, variant, references, analysisHashes.policy, undefined, analysisHashes.fingerprint);
     normalized = analysis.normalized;
     analysisPolicy = analysis.policy;
     analysisAttempts = analysis.attempts;
     analysisUsage = analysis.usage;
+    styleProfileCacheHit = analysis.styleProfileCacheHit;
   }
 
   const { data: workflowItem, error: workflowItemError } = await service.from("catalog_work_items")
@@ -7387,7 +7803,10 @@ async function queueCatalogVariantGeneration(
       purpose: analysisPolicy.purpose,
       thinking_level: analysisPolicy.thinkingLevel,
       input_fingerprint: analysisHashes.fingerprint,
-      input_summary: { referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(analysisHashes.policy, analysisAttempts) },
+      input_summary: {
+        referenceCount: references.length, referenceRoles: references.map((entry) => entry.role), policy: visionPolicySnapshot(analysisHashes.policy, analysisAttempts),
+        styleProfileCacheHit, posePlanner: normalized.posePlanning?.planner, posePlanThreadId: normalized.posePlanning?.threadId,
+      },
       output_json: normalized,
       status: "completed",
       latency_ms: Date.now() - analysisStartedAt,
@@ -7472,6 +7891,7 @@ async function queueCatalogVariantGeneration(
     modelIdentity: normalized.modelIdentity,
     stylingPlan: normalized.stylingPlan,
     posePlan: poses,
+    ...(normalized.posePlanning ? { posePlanning: normalized.posePlanning } : {}),
     bottomWearMode,
     consistencyRules: CONSISTENCY_RULES,
     workflowDirection: workflowDirection || null,
@@ -7488,6 +7908,7 @@ async function queueCatalogVariantGeneration(
       creativeDirection: normalized.creativeDirection,
       bottomWearMode,
       referenceFingerprint: analysisHashes.rHash,
+      posePlanning: normalized.posePlanning,
     }),
   };
   const { error: sessionInsertError } = await service.from("catalog_sessions").insert({
@@ -9374,6 +9795,12 @@ function fastApiHeaders(includeJson = true): Record<string, string> {
   return headers;
 }
 
+/** Best-effort FastAPI calls (wake, pose planner) are skipped while the internal secret is not configured. */
+function optionalFastApiTarget(): FastApiTarget | null {
+  const secret = Deno.env.get("CATALOG_WORKER_SECRET")?.trim();
+  return secret ? { baseUrl: fastApiBaseUrl(), secret } : null;
+}
+
 async function warmFastApiProductDna(input: {
   organizationId: string;
   skuId: string;
@@ -9567,7 +9994,9 @@ async function workflowCheckpointsOperation(request: Request, args: JsonRecord) 
   const { workspace } = await workspaceFor(request, "planning.view");
   const skuId = String(args.skuId || args.sku_id || "");
   const threadId = String(args.threadId || args.thread_id || (skuId ? `thread_dna_${workspace.organization.id}_${skuId}` : ""));
-  if (threadId && !threadId.startsWith(`thread_dna_${workspace.organization.id}_`)) {
+  // Product DNA and pose-planning graph threads are both tenant-scoped by prefix.
+  const tenantPrefixes = [`thread_dna_${workspace.organization.id}_`, `thread_plan_${workspace.organization.id}_`];
+  if (threadId && !tenantPrefixes.some((prefix) => threadId.startsWith(prefix))) {
     throw new Error("Forbidden: cross-tenant workflow checkpoint access.");
   }
   const orgQuery = `organization_id=${encodeURIComponent(workspace.organization.id)}`;

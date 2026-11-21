@@ -4,6 +4,7 @@ from routes.qa import router as qa_router
 from routes.memory import router as memory_router
 from routes.health import router as health_router
 from routes.workflows import router as workflow_router
+from routes.planning import router as planning_router
 
 __all__ = [
     "dna_router",
@@ -12,4 +13,5 @@ __all__ = [
     "memory_router",
     "health_router",
     "workflow_router",
+    "planning_router",
 ]

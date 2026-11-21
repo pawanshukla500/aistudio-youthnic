@@ -13,7 +13,7 @@ The board is an interactive node canvas that rebuilds the shoot exactly as it ra
 graph LR
     A[Product references] --> D[Pose prompt]
     B[Model face] --> D
-    C[Style room only] --> D
+    C[Style: room + Pose 4/6 posture] --> D
     D --> E[Generated pose + versions]
 ```
 
@@ -35,7 +35,7 @@ Filename: history-flow-board.webp]
 
 ## Reading the Board
 
-- **Reference cards (left)** — every current product upload (front, back, bottom, fabric, mannequin, additional detail), the **Model face** card, and the **Room only** style card. The style card is backdrop authority only; its clothing is never used.
+- **Reference cards (left)** — every current product upload (front, back, bottom, fabric, mannequin, additional detail), the **Model face** card, and the style card. The style card is the backdrop authority and reads **Room only, no outfit**; when the shoot's plan matched the reference posture it reads **Room + Pose 4 posture, no outfit** (or Pose 6, or both). Its clothing, face, hair and handheld objects are never used.
 - **Pose prompt cards (middle)** — the short pose line for each of the six frames. Click **Full prompt** to read the complete stored prompt that was sent to the image model.
 - **Generated pose cards (right)** — the current image, the reference thumbnails that fed the pose, the model and settings actually used (for example `gpt-image-2.6-sunburst · 4:5 · 2K · medium`), and one row per saved version. Clicking a version row opens that exact image full-screen, so no earlier output is ever lost.
 - **Color-coded connections** — blue lines carry product photos, orange lines carry the model face, green lines carry the style room, and grey lines carry the compiled prompt into the frame. Selecting any card highlights the poses it feeds; selecting a pose highlights the references that fed it.

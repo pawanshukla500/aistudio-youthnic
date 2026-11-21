@@ -246,19 +246,19 @@ Deno.test("deriveAdminRateTable prices image models from billed dollars and imag
   assertAlmostEquals(scaled["gpt-image-2.5-flare"]?.imageOutput || 0, 60, 1e-8);
 });
 
-Deno.test("estimateJobCostUsd scales by pose count, model, quality, QA, and analysis", () => {
-  // 6 poses with gpt-image-2, high quality (1.0), QA off, default analysis ($0.03)
-  // 0.03 + 6 * 0.28 = 1.71
+Deno.test("estimateJobCostUsd scales by pose count, model, quality, QA or DNA check, and analysis", () => {
+  // 6 poses with gpt-image-2, high quality (1.0), QA off so the DNA check runs (6 * 0.004), default analysis ($0.03)
+  // 0.03 + 6 * 0.28 + 0.024 = 1.734
   const sixPosesGptImage2 = estimateJobCostUsd({
     posesCount: 6,
     imageModel: "gpt-image-2",
     quality: "high",
     poseQa: false,
   });
-  assertEquals(sixPosesGptImage2, 1.71);
+  assertEquals(sixPosesGptImage2, 1.734);
 
-  // 1 pose with gpt-image-2, high quality, QA off, 0 analysis cost (e.g. single regeneration)
-  // 0 + 1 * 0.28 = 0.28
+  // 1 pose with gpt-image-2, high quality, QA off (DNA check 0.004), 0 analysis cost (e.g. single regeneration)
+  // 0 + 1 * 0.28 + 0.004 = 0.284
   const singlePoseGptImage2 = estimateJobCostUsd({
     posesCount: 1,
     imageModel: "gpt-image-2",
@@ -266,9 +266,9 @@ Deno.test("estimateJobCostUsd scales by pose count, model, quality, QA, and anal
     poseQa: false,
     analysisCostUsd: 0,
   });
-  assertEquals(singlePoseGptImage2, 0.28);
+  assertEquals(singlePoseGptImage2, 0.284);
 
-  // 6 poses with gpt-image-2.5-flare (cheaper: 0.16/img), medium quality (0.9x), QA on (6 * 0.005), actual analysis $0.025
+  // 6 poses with gpt-image-2.5-flare (cheaper: 0.16/img), medium quality (0.9x), QA on (6 * 0.005, covers DNA), actual analysis $0.025
   // 0.025 + 6 * (0.16 * 0.9) + 6 * 0.005 = 0.025 + 0.864 + 0.03 = 0.919
   const flareWithQa = estimateJobCostUsd({
     posesCount: 6,
@@ -279,7 +279,7 @@ Deno.test("estimateJobCostUsd scales by pose count, model, quality, QA, and anal
   });
   assertEquals(flareWithQa, 0.919);
 
-  // 0 poses returns only analysis cost
+  // 0 poses returns only analysis cost (no per-pose QA or DNA check)
   const zeroPoses = estimateJobCostUsd({
     posesCount: 0,
     imageModel: "gpt-image-2",
@@ -289,7 +289,7 @@ Deno.test("estimateJobCostUsd scales by pose count, model, quality, QA, and anal
 
   // adminRates scaling: gpt-image-2 public rate imageOutput is 50 ($0.28/img).
   // With admin rate snapshot of imageOutput: 25, price scales down to $0.14/img.
-  // 6 poses at high quality with default analysis $0.03 = 0.03 + 6 * 0.14 = 0.87 (vs 1.71).
+  // 6 poses at high quality with default analysis $0.03 and the DNA check = 0.03 + 6 * 0.14 + 0.024 = 0.894 (vs 1.734).
   const adminDerivedEstimate = estimateJobCostUsd({
     posesCount: 6,
     imageModel: "gpt-image-2",
@@ -299,9 +299,9 @@ Deno.test("estimateJobCostUsd scales by pose count, model, quality, QA, and anal
       "gpt-image-2": { imageOutput: 25 },
     },
   });
-  assertEquals(adminDerivedEstimate, 0.87);
+  assertEquals(adminDerivedEstimate, 0.894);
 
-  // analysisCostUsd: null (e.g. query failed) falls back to default $0.03 analysis allowance
+  // analysisCostUsd: null (e.g. query failed) falls back to default $0.03 analysis allowance (+ 0.004 DNA check)
   const failedAnalysisLoad = estimateJobCostUsd({
     posesCount: 1,
     imageModel: "gpt-image-2",
@@ -309,6 +309,6 @@ Deno.test("estimateJobCostUsd scales by pose count, model, quality, QA, and anal
     poseQa: false,
     analysisCostUsd: null,
   });
-  assertEquals(failedAnalysisLoad, 0.31);
+  assertEquals(failedAnalysisLoad, 0.314);
 });
 

@@ -113,6 +113,9 @@ export function PosePlan({
                     </div>
                     <p className="mt-1.5 line-clamp-1 text-xs font-bold text-on-surface">{pose.title}</p>
                     <p className="mt-0.5 line-clamp-2 text-[10px] leading-tight text-secondary">{pose.purpose}</p>
+                    {pose.referencePosture && (
+                      <p className="mt-1 truncate text-[9px] font-bold text-indigo-700">Matches reference · {pose.referencePosture}</p>
+                    )}
                   </div>
 
                   <div className="mt-3 flex items-center justify-between border-t border-outline-variant/30 pt-2 text-[9px] font-medium text-secondary">
@@ -138,9 +141,19 @@ export function PosePlan({
                   </span>
                   <h3 className="font-manrope text-lg font-bold tracking-tight text-on-surface">{selected.title}</h3>
                 </div>
-                <span className="rounded-full bg-soft-blush px-3 py-1 text-xs font-semibold text-primary border border-primary/20">
-                  {selected.purpose}
-                </span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {selected.referencePosture && (
+                    <span
+                      title="Copies the style reference person's body position only, never their outfit, face, hair or anything in their hands."
+                      className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-800"
+                    >
+                      Matches reference · {selected.referencePosture}
+                    </span>
+                  )}
+                  <span className="rounded-full bg-soft-blush px-3 py-1 text-xs font-semibold text-primary border border-primary/20">
+                    {selected.purpose}
+                  </span>
+                </div>
               </div>
 
               <p className="mt-3 text-xs leading-relaxed text-secondary">{selected.description}</p>
@@ -212,6 +225,7 @@ export function PosePlan({
                 <div className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest/80 p-3">
                   <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-secondary">Expression</span>
                   <span className="font-semibold text-on-surface">{selected.expression || "Poised editorial fashion expression"}</span>
+                  {selected.attitude && <span className="mt-1 block text-[11px] text-secondary">Attitude: {selected.attitude}</span>}
                 </div>
               </div>
 

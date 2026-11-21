@@ -270,6 +270,22 @@ function record(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
 }
 
+/** qa.dna: the always-on product DNA check (DnaConsistencyResult in lib/qa.ts). Absent on older poses. */
+export type DnaConsistencySummary = {
+  pass?: boolean;
+  unavailable?: boolean;
+  score?: number | null;
+  scores?: Partial<Record<"shape" | "color" | "material" | "logo" | "details", number | null>>;
+  source?: string;
+  reason?: string;
+};
+
+function dnaConsistency(value: unknown): DnaConsistencySummary | null {
+  const dna = record(value);
+  // Only a recorded verdict counts; a partial payload must not render as "Passed".
+  return typeof dna.pass === "boolean" ? dna as DnaConsistencySummary : null;
+}
+
 async function resolveAssetRow<T extends Record<string, any>>(row: T, urlField: "image_url" | "output_url" = "image_url") {
   const resolvedUrl = await resolveCatalogAssetUrl({
     storageBackend: row.storage_backend,
@@ -514,6 +530,7 @@ async function getJob(jobId: string) {
       fidelityWeakest: (Array.isArray(record(pose.qa_payload).weakest) ? record(pose.qa_payload).weakest : []) as string[],
       fidelityReviewRecommended: record(pose.qa_payload).reviewRecommended === true,
       qaReason: String(record(pose.qa_payload).reason || ""),
+      dnaConsistency: dnaConsistency(record(pose.qa_payload).dna),
       qaHistory: (qaReviewsResult.data || []).filter((review) => Number(review.pose_index) === Number(pose.pose_index)),
     };
   });
@@ -567,6 +584,8 @@ async function getJob(jobId: string) {
       fidelityWeakest: (Array.isArray(record(metadata.qa).weakest) ? record(metadata.qa).weakest : []) as string[],
       fidelityReviewRecommended: record(metadata.qa).reviewRecommended === true,
       qaReason: String(record(metadata.qa).reason || ""),
+      // The worker stores the verdict at metadata.dna; metadata.qa.dna is accepted too.
+      dnaConsistency: dnaConsistency(metadata.dna) ?? dnaConsistency(record(metadata.qa).dna),
       qaHistory: (qaReviewsResult.data || []).filter((review) => Number(review.pose_index) === poseNumber),
     });
   }

@@ -55,7 +55,7 @@ The platform populates the standard 6-pose commercial plan:
 1. **Full Front Hero**: Clean commercial anchor.
 2. **Three-Quarter Side**: Reveals drape depth and side construction.
 3. **Rear Full View**: Shoulders away, dupatta draped forward.
-4. **Creative Editorial Pose**: Elegant seated pose if demanded by the style reference or product notes; otherwise, dynamic walking or swirl movement.
+4. **Creative Editorial Pose**: Seated when product notes ask for it; otherwise matches the style reference person's posture when it suits the product; otherwise a relaxed editorial stance with both feet grounded.
 5. **Intimate Detail Close-Up**: Tight chest-to-waist crop highlighting embroidery or weave.
 
 Users can enable/disable poses, customize camera framing, or modify specific prompt instructions.
@@ -76,7 +76,7 @@ Suggested Filename: `videos/studio/generation-lifecycle.mp4`]
 ---
 
 ### Stage 6: Quality Assurance & Review
-Every generated image passes through an automated QA validator:
+Every generated image passes the product consistency check (shape, colour, material, logo and details against the product photos); a failed image is archived and the pose regenerated, and on the last attempt an image that failed only this check is kept for human review. When automatic QA is switched on, it also:
 - Assesses facial photorealism, eye alignment, and skin texture.
 - Validates that front and back garment details match the authoritative reference images.
 - Tags images as `automatically_verified` or `unverified` for manual human review.

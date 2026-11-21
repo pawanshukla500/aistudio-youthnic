@@ -25,7 +25,7 @@ graph LR
 | Card in Administration | What it does | Fallback |
 | --- | --- | --- |
 | **Product truth & pose planning** | Reads the uploaded product photos and builds the six-pose plan (Studio **Analyze**, catalog preflight). | Yes |
-| **Image QA** | Checks each generated pose against the product photos, when QA is switched on. | Yes |
+| **Image QA** | Runs the product consistency check (shape, colour, material, logo, details) on every generated pose, at low thinking, and the full pose QA review when QA is switched on. | Yes |
 | **Image Generation** | Generates the final images. | No |
 
 For each card choose **Provider**, **Model** and **Thinking**, then tick **Use a fallback

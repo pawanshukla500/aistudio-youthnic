@@ -1,11 +1,28 @@
 ---
 title: "Quality Validation"
-description: "How Youthnic AI Studio automatically evaluates generated images for anatomical coherence, garment fidelity, and marketplace compliance."
+description: "The always-on product consistency check, and how opt-in automatic QA evaluates generated images for anatomical coherence, garment fidelity, and marketplace compliance."
 ---
 
 # Quality Validation
 
-To ensure no defective images reach your product listings, Youthnic AI Studio features an automated multi-point **Quality Assurance (QA) Engine**. Every generated photo undergoes rigorous optical validation before being marked as completed.
+To ensure no defective images reach your product listings, Youthnic AI Studio checks generated photos in two layers:
+
+- the **product consistency check**, which runs on every pose of every shoot;
+- full **automatic QA**, which runs only when you switch it on for the shoot or tick it when regenerating a pose.
+
+## Product Consistency Check (Always On)
+
+Before a pose is accepted, it is compared with your product photos on five attributes: **shape**, **colour**, **material**, **logo** and **details** (embroidery, print, trims and their placement). Logo is skipped for products without one.
+
+- Any attribute below the pass mark fails the check. The image is saved to the rejected archive instead of being deleted (unless storage is unavailable) and the pose is regenerated within the normal retry limit, with the failed attributes named in the retry. If the last attempt fails only this check (automatic QA, when on, passed it), that image is kept and marked for human review instead of being discarded. An image that automatic QA also rejects follows QA's own rules for the last attempt.
+- If the check cannot run (for example a model outage), the image is delivered and marked unverified; the check is shown as unavailable.
+- When full automatic QA is on, the five scores are taken from the QA review, so the check is not run twice.
+
+In **History**, open a pose to see **Product consistency check**: Passed, Failed or Unavailable, with the five scores.
+
+## Full Automatic QA (Opt-In)
+
+When automatic QA is on, each photo also gets the multi-point review below before it is marked completed.
 
 ```mermaid
 graph TD

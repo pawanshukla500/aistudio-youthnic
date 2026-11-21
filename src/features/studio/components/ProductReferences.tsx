@@ -287,7 +287,7 @@ export function StyleReferences({
           Style & Scene References ({references.length}/3)
         </h4>
         <p className="mt-0.5 text-[10px] leading-relaxed text-secondary">
-          Guides backdrop, lighting, camera mood & composition. Product references remain authoritative.
+          Guides backdrop, lighting, camera mood & composition, and the posture of Pose 4/6 when it suits the product. Its outfit is never copied; product references remain authoritative.
         </p>
       </div>
 

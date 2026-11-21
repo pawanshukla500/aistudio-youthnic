@@ -35,14 +35,15 @@ graph TD
 
 ### Backend Infrastructure (`Railway: AI Studio App`)
 - **Edge API Runtime (`functions`)**: Deno Supabase Edge Function `supabase/functions/app-api/` handling auth, RBAC, AI routing (`organization_ai_model_policies`), job scheduling, and Firebase Storage proxying.
-- **Agentic Workflow Service (`FastAPI` + `celery-worker`)**: Python FastAPI + LangGraph (`PostgresSaver` checkpoints) + Product DNA V2 (`/api/v1/dna/extract`, `/api/v1/studio/generate`, `/api/v1/qa/evaluate`), backed by `Valkey` for caching & Celery queuing and configured with scale-to-zero idle sleep (`sleepApplication: true`).
+- **Agentic Workflow Service (`FastAPI` + `celery-worker`)**: Python FastAPI + LangGraph (`PostgresSaver` checkpoints) + Product DNA V2 (`/api/v1/dna/extract`, `/api/v1/studio/generate`, `/api/v1/qa/evaluate`) + the reference-led pose & expression planning graph (`/api/v1/plan`, no model calls, checkpoints `thread_plan_<org>_<key>`), backed by `Valkey` for caching & Celery queuing and configured with scale-to-zero idle sleep (`sleepApplication: true`).
 - **Database**: PostgreSQL with row-level security (RLS) managed via Supabase migrations (`dna_versions`, `generation_jobs`, `session_generations`, `planning_assets`, `ai_runs`).
 - **Object Storage**: Firebase Storage buckets (`ai-studio-app-be068.firebasestorage.app`).
 
 ### Generative AI Pipeline
 - **Vision & Pose Extraction**: Meta Muse Spark (`muse-spark-1.3-contributor:medium` / `1.2-contributor:medium`) primary -> OpenAI **GPT 6.1 Terra** (`gpt-6.1-terra:medium`) fallback -> OpenAI Luna (`gpt-5.6-luna:low`) / Gemini Flash (`gemini-3.8-flash`).
 - **Image Synthesis**: OpenAI **GPT Image 2.6 Sunburst** (`gpt-image-2.6-sunburst`, default 3:4 at 2K / `1536x2048`) via `/v1/images/edits` with role-isolated reference manifests and scene locks.
-- **Automated CV QA**: Cut-isolated anatomical checks (strictly 2 arms, 2 hands), Farshi 4-inch upper-hem taper verification (strictly isolated to Farshi SKUs), and set continuity validation.
+- **Product DNA Consistency Check**: Every pose is scored on shape, colour, material, logo and details against the product references (`qa` purpose, low reasoning) before it is accepted (if the check cannot run, for example a model outage, missing product references or too little time left, the frame ships `unverified`); each failed attempt is archived and the pose regenerated within the retry limit, and after the last attempt a frame that failed only this check (QA off or passed) is kept for human review (`requires_human_review`), never discarded.
+- **Automated CV QA (opt-in)**: Cut-isolated anatomical checks (strictly 2 arms, 2 hands), Farshi 4-inch upper-hem taper verification (strictly isolated to Farshi SKUs), and set continuity validation.
 
 ---
 

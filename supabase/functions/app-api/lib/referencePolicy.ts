@@ -173,12 +173,25 @@ export function missingRequiredReferenceLabels(references: ReferenceLike[], garm
 
 export function roleLabel(
   role: string,
-  options: { useStyleAsModelFace?: boolean; hasModelReference?: boolean; hasApprovedAnchor?: boolean } = {},
+  options: {
+    useStyleAsModelFace?: boolean;
+    hasModelReference?: boolean;
+    hasApprovedAnchor?: boolean;
+    /** Pose numbers (4 and/or 6) whose stored pose plan copies the style-reference posture. */
+    referencePoseNumbers?: number[];
+  } = {},
 ) {
   const useStyleAsModelFace = Boolean(options.useStyleAsModelFace);
   const castFreshModelNote = !useStyleAsModelFace && options.hasModelReference === false && !options.hasApprovedAnchor
     ? ", casting one fresh photorealistic adult model in Pose 1 locked across all six poses"
     : "";
+  const postureFrames = (options.referencePoseNumbers ?? []).filter((n) => n === 4 || n === 6).map((n) => `Pose ${n}`).join(" and ");
+  // Without an adopted slot no frame copies the posture, so the legacy wording stays exact.
+  const styleCopyRule = postureFrames
+    ? `Copy the room. Never copy the ${useStyleAsModelFace ? "" : "person's face, "}outfit or objects in the hands (cups, totes, sunglasses); copy the person's posture only in ${postureFrames}, which the pose plan matched to this reference.`
+    : useStyleAsModelFace
+    ? "Copy the room only: do not copy the pose or objects in the hands (no leaning posture, cups, totes, or sunglasses)."
+    : "Copy the room only: do not copy the pose or objects in the hands (ignore the person's face, leaning/sitting posture, cups, totes, and sunglasses).";
   const labels: Record<string, string> = {
     model_identity: "MODEL FACE REFERENCE - exact face, hair, skin tone and body-proportion truth; any garment, pose, or object in the hands, and any background, must not influence the SKU or set",
     front: "FRONT PRODUCT - authoritative front garment design and construction ONLY. Pre-shoot background, walls, arches, urns, pots, plants, floor, and location in this image MUST BE 100% DISCARDED; never reproduce them. Any face or body in this photo is not the model",
@@ -198,8 +211,8 @@ export function roleLabel(
       ? "APPROVED POSE 1 - scene, lighting, styling, and shoot-continuity anchor only. Copy the room, not its pose or objects in the hands. Original product references always outrank its garment. The face comes from the MODEL FACE / STYLE IDENTITY reference; never a different person"
       : "APPROVED POSE 1 - authoritative model-identity, hair, styling, footwear, lighting, and room continuity anchor for poses 2-6. Copy the room, not its pose or objects in the hands. Keep that model's exact face and styling without repeating a stiff pose. Original product references always outrank its garment",
     style_reference: useStyleAsModelFace
-      ? "STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, mood, and lighting on every pose, including the back view. Copy the room only: do not copy the pose or objects in the hands (no leaning posture, cups, totes, or sunglasses). The clothing in this image must be 100% DISCARDED; dress the model ONLY in the uploaded product. Because this same photo was also uploaded as MODEL FACE REFERENCE, this image's face, hair, skin tone, and body proportions are the model identity for all six poses"
-      : `STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, mood, and lighting on every pose, including the back view. Copy the room only: do not copy the pose or objects in the hands (ignore the person's face, leaning/sitting posture, cups, totes, and sunglasses). The clothing in this image must be 100% DISCARDED; dress the model ONLY in the uploaded product${castFreshModelNote}`,
+      ? `STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, mood, and lighting on every pose, including the back view. ${styleCopyRule} The clothing in this image must be 100% DISCARDED; dress the model ONLY in the uploaded product. Because this same photo was also uploaded as MODEL FACE REFERENCE, this image's face, hair, skin tone, and body proportions are the model identity for all six poses`
+      : `STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, mood, and lighting on every pose, including the back view. ${styleCopyRule} The clothing in this image must be 100% DISCARDED; dress the model ONLY in the uploaded product${castFreshModelNote}`,
   };
   return labels[role] || role.toUpperCase();
 }

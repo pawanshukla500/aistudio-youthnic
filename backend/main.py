@@ -18,6 +18,7 @@ from routes import (
     memory_router,
     health_router,
     workflow_router,
+    planning_router,
 )
 
 logging.basicConfig(
@@ -153,6 +154,7 @@ app.include_router(generation_router)
 app.include_router(qa_router)
 app.include_router(memory_router)
 app.include_router(workflow_router)
+app.include_router(planning_router)
 
 
 @app.get("/")

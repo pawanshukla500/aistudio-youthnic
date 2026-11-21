@@ -40,7 +40,7 @@ Filename: studio-reference-role-dropdown.webp]
 | `back` | **Back Reference** | Defines back neck drop, zipper closures, tassel doris, and rear pattern placement. | Recommended |
 | `fabric_pattern` | **Fabric / Pattern** | Locks thread count texture, woven jacquard patterns, digital prints, and fabric sheen into micro-detail attention. | Optional |
 | `bottom` | **Bottom Garment** | Informs trousers, palazzos, cigarette pants, or lehenga skirt construction when shot separately from the top. | Optional (For separates) |
-| `style_reference` | **Style / Mood Reference** | Informs background set architecture, lighting direction, color grading, and editorial posture without affecting garment details. | Optional |
+| `style_reference` | **Style / Mood Reference** | Informs background set architecture, lighting direction, color grading, and the posture of Pose 4 and Pose 6 when it suits the product. Its outfit, face, hair and handheld objects are never copied. | Optional |
 | `model_identity` | **Model Face / Identity** | Locks a specific face and demographic persona into the generation across multiple photoshoot batches. | Optional |
 | `mannequin` | **Mannequin Shot** | Signals the model removal pipeline to excise the hollow neck/mannequin form while retaining garment draping geometry. | Optional |
 | `additional_product` | **Additional Detail** | Secondary angle shot (e.g. cuff detailing, sleeve tassels, pocket accents). | Optional |
@@ -50,11 +50,11 @@ Filename: studio-reference-role-dropdown.webp]
 ## Understanding Style Reference vs. Garment Reference
 
 <Warning>
-**Critical Distinction**: A **Style Reference** is used strictly for ambient lighting, set architecture, and camera angles. It will **NEVER** alter your garment. Conversely, a **Front Reference** is strictly preserved as the garment itself.
+**Critical Distinction**: A **Style Reference** is used for ambient lighting, set architecture, and camera angles, and for the body posture of Pose 4 and Pose 6 when it suits the product. It will **NEVER** alter your garment: the outfit, face, hair and anything in the hands of the person in it are never copied. Conversely, a **Front Reference** is strictly preserved as the garment itself.
 </Warning>
 
 - **Front / Back References**: The AI's highest priority is 100% geometric and textile preservation.
-- **Style Reference**: The AI extracts color temperature (e.g. golden hour vs. overcast studio), architectural depth (e.g. neoclassical archways vs. concrete brutalism), and framing proximity.
+- **Style Reference**: The AI extracts color temperature (e.g. golden hour vs. overcast studio), architectural depth (e.g. neoclassical archways vs. concrete brutalism), framing proximity, and the person's posture and attitude. Posture matching applies to Pose 4 and Pose 6 only; see [Pose Planning](/studio/pose-planning).
 
 ---
 

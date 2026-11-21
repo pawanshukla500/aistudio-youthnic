@@ -17,12 +17,12 @@ description: "Frequently asked questions regarding textile preservation, custom 
     **Yes.** Hover over the specific pose tile you wish to update and click **Regenerate**. You can adjust the prompt or roll a new latent seed. Only that single pose is re-rendered, costing just **1 credit**, while the other 5 completed images remain completely untouched.
   </Accordion>
 
-  <Accordion title="Why did Pose 4 render a seated model instead of walking?" icon="couch">
-    Pose 4 features context-aware editorial logic:
-    - If your uploaded **Style Reference** contains a seated model,
-    - If the product notes specify relaxed lifestyle wear or kaftans,
-    - Or if the category favors lounging, the AI generates a poised seated shot on a sandstone settee.
-    - To force a walking shot instead: click **Edit Pose 4**, change posture to `Force Walking Motion`, and regenerate for 1 credit.
+  <Accordion title="Why did Pose 4 render a seated model?" icon="couch">
+    Pose 4 is seated when:
+    - the person in your **Style Reference** is seated and the pose plan matched that posture (Studio shows a **Matches reference · seated** badge on Pose 4), or
+    - your product notes ask for a seated shot.
+
+    A seated reference is never matched for Farshi bottom wear, and Pose 4 never freezes a walking stride. See [Pose Planning](/studio/pose-planning) for every rule that keeps Pose 4 standing.
   </Accordion>
 
   <Accordion title="Can I train or upload a custom exclusive model face for my brand?" icon="user-plus">

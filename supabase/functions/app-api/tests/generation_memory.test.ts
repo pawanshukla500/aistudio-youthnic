@@ -116,7 +116,7 @@ Deno.test("learned prompt patterns stay generic and fail closed without a catego
   const titles = learned.map((pattern) => pattern.title);
   assertEquals(titles.includes("style-reference-backdrop-lock"), true);
   const backdropLock = learned.find((pattern) => pattern.title === "style-reference-backdrop-lock")?.patternText ?? "";
-  assertStringIncludes(backdropLock, "Do not copy its pose, objects in the hands, or garment.");
+  assertStringIncludes(backdropLock, "Never copy its garment or objects in the hands; copy its posture only in Pose 4/6 when the pose plan adopts it.");
   assertEquals(backdropLock.includes("props"), false);
   assertEquals(titles.includes("seated-pose-4-lock"), true);
   assertEquals(titles.includes("pose1-continuity-lock"), true);
