@@ -59,8 +59,8 @@ Deno.test("analysis sees one copy when the model photo and the style photo are t
     { role: "mannequin", hash: "flat-row", storagePath: "organizations/org/references/flat.jpg" },
     { role: "style_reference", hash: "row-style", storagePath: "organizations/org/references/whatsapp.jpg" },
   ]);
-  // The kept style copy takes the model photo's identity slot.
-  assertEquals(collapsed.map((reference) => reference.role), ["style_reference", "front", "fabric_pattern"]);
+  // Analysis keeps the style copy in its own slot; image generation moves it into the identity slot.
+  assertEquals(collapsed.map((reference) => reference.role), ["front", "fabric_pattern", "style_reference"]);
 });
 
 Deno.test("an identical model-face and style upload is sent once, as the style reference in the identity slot", () => {

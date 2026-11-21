@@ -308,7 +308,7 @@ export function selectReferences<T extends ReferenceLike>(
     const style = references.filter((reference) => reference.role === "style_reference").slice(0, 1);
     const anchor = approved.slice(0, 1);
     const priority = [...rearProduct, ...bottomProduct, ...model, ...style, ...anchor];
-    return collapseDuplicateUploads(priority).slice(0, maxReferences);
+    return collapseDuplicateUploads(priority, { identitySlot: true }).slice(0, maxReferences);
   }
   const order = preferredProductOrder(poseType, normalizedFamily, preferredRole);
 
@@ -363,7 +363,7 @@ export function selectReferences<T extends ReferenceLike>(
   const priority = poseType === "back"
     ? [...productPriority, ...model, ...anchor]
     : [...model, ...protectedProduct, ...style, ...anchor, ...remainingProduct];
-  return collapseDuplicateUploads(priority).slice(0, maxReferences);
+  return collapseDuplicateUploads(priority, { identitySlot: true }).slice(0, maxReferences);
 }
 
 /**
@@ -372,11 +372,11 @@ export function selectReferences<T extends ReferenceLike>(
  * Keep the style copy, which still supplies the face when no separate model
  * photo remains, and drop any later image of the same stored file. A content
  * hash, storage path, or download URL is enough; a missing hash must not let
- * the duplicate through. The kept copy takes the model photo's place (the
- * identity slot, first for front poses) rather than the style slot after the
- * product photos, or the face loses its priority.
+ * the duplicate through. With `identitySlot` (image generation) the kept copy
+ * takes the model photo's place, first for front poses, rather than the style
+ * slot after the product photos, or the face loses its priority.
  */
-export function collapseDuplicateUploads<T extends ReferenceLike>(selected: T[]): T[] {
+export function collapseDuplicateUploads<T extends ReferenceLike>(selected: T[], options: { identitySlot?: boolean } = {}): T[] {
   const model = selected.find((reference) => reference.role === "model_identity");
   const style = selected.find((reference) => reference.role === "style_reference");
   const modelMatchesStyle = Boolean(model && style && sameUploadedImage(model, style));
@@ -385,6 +385,7 @@ export function collapseDuplicateUploads<T extends ReferenceLike>(selected: T[])
   const seenModel = new Set<string>();
   const unique: T[] = [];
   for (const candidate of selected) {
+    if (modelMatchesStyle && candidate.role === "model_identity" && !options.identitySlot) continue;
     const reference = modelMatchesStyle && candidate.role === "model_identity" ? style! : candidate;
     const keys = uploadIdentityKeys(reference);
     if (keys.length > 0) {

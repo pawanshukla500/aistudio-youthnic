@@ -68,6 +68,9 @@ Deno.test("a shared face/style photo keeps the identity slot and is sent once", 
   assertEquals(selectReferences(references, [], "full_front", "kurta_or_kurti_set").map((r) => r.role), ["style_reference", "front", "bottom", "back"]);
   assertEquals(selectReferences(references, [], "back", "kurta_or_kurti_set").map((r) => r.role), ["back", "bottom", "style_reference"]);
   assertEquals(collapseDuplicateUploads([{ role: "front", hash: "f" }, { role: "style_reference", hash: "s" }]).map((r) => r.role), ["front", "style_reference"]);
+  const shared = [{ role: "model_identity", hash: "x" }, { role: "front", hash: "f" }, { role: "style_reference", hash: "x" }];
+  assertEquals(collapseDuplicateUploads(shared).map((r) => r.role), ["front", "style_reference"]);
+  assertEquals(collapseDuplicateUploads(shared, { identitySlot: true }).map((r) => r.role), ["style_reference", "front"]);
 });
 
 Deno.test("requested props carry over in every frame except the Pose 5 crop, and the generic bans narrow", () => {
