@@ -185,6 +185,22 @@ function qaReferencePoseMatch(match: { posture: string; directive: string } | un
   return { posture, directive: referencePoseDirectiveText(posture, match.directive), low: isLowPosture(posture) };
 }
 
+// The pose plan's own fields (StudioPose). A stored pose row also carries run state - earlier
+// QA corrections, rejected attempts with their verdicts, reference manifests - and QA that
+// read it repeated its previous verdict on every retry ("sixth consecutive failure").
+const QA_POSE_PLAN_FIELDS = [
+  "id", "title", "description", "cameraAngle", "framing", "bodyPosition", "handPlacement", "expression",
+  "highlightedDetails", "productVisibilityRules", "primaryReference", "purpose", "consistencyNotes", "prompt",
+  "enabled", "referencePosture", "attitude", "poseNumber",
+] as const;
+
+/** Only the pose plan fields of a pose direction; anything that is not a record passes through. */
+export function posePlanFieldsForQa(pose: unknown): unknown {
+  if (!pose || typeof pose !== "object" || Array.isArray(pose)) return pose;
+  const source = pose as Record<string, unknown>;
+  return Object.fromEntries(QA_POSE_PLAN_FIELDS.filter((key) => key in source).map((key) => [key, source[key]]));
+}
+
 export function buildPoseQaPrompt(args: {
   poseNumber: number; poseType: string; poseTitle: string; poseDirection: unknown;
   productIdentity: unknown; creativeDirection: unknown; modelIdentity: unknown;
@@ -200,6 +216,7 @@ export function buildPoseQaPrompt(args: {
   /** Props the product notes ask for (requestedHandheldProps); they must appear, not fail. */
   requestedProps?: RequestedHandheldProps;
 }) {
+  const poseDirection = posePlanFieldsForQa(args.poseDirection);
   // QA must judge the shoot as it was configured. A top-only shoot has no
   // coordinated bottom to match, so bottom-wear fidelity is not a gate there.
   const productRecord = record(args.productIdentity);
@@ -237,7 +254,7 @@ export function buildPoseQaPrompt(args: {
   const exampleScores = Object.fromEntries(checkKeys.map((key) => [key, 100]));
   const closeupMode = args.poseType === "closeup"
     ? resolveCloseupMode({
-      pose: record(args.poseDirection),
+      pose: record(poseDirection),
       creative: record(args.creativeDirection),
     })
     : "";
@@ -256,7 +273,7 @@ export function buildPoseQaPrompt(args: {
   const resolvedAspectRatio = resolveAspectRatioLabel(args.aspectRatio);
   const resolvedOrientation = resolveAspectRatioOrientation(resolvedAspectRatio);
   const orientationDescriptor = resolvedOrientation === "portrait" ? "vertical portrait" : resolvedOrientation;
-  const qaPoseDirection = sanitizePoseDirectionForAspectRatio(args.poseDirection, resolvedAspectRatio);
+  const qaPoseDirection = sanitizePoseDirectionForAspectRatio(poseDirection, resolvedAspectRatio);
   const isCroppedAboveAnklesPose = args.poseType === "closeup" ||
     showcaseTightCrop ||
     isAboveAnkleCropFraming(qaPoseDirection);
