@@ -59,7 +59,7 @@ Six-pose fashion catalog photoshoots generated from product references.
    - image model `gpt-image-2.6-sunburst`;
    - image quality `medium` (`DEFAULT_IMAGE_QUALITY`);
    - product DNA consistency check (shape, color, material, logo, details) always on for every pose: each failed
-     attempt is archived and the pose retried within the existing retry limit; after the last attempt (or a repeat of
+     attempt is archived (one upload retry; a storage outage is logged) and the pose retried within the existing retry limit; after the last attempt (or a repeat of
      the previous DNA defect) a frame that failed only this check is kept for human review (`requires_human_review`),
      never discarded; a check outage ships the image `unverified`;
    - full pose QA off unless the job or a regeneration asks for it (when on, the DNA verdict comes from its scores);

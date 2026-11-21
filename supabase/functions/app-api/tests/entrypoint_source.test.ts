@@ -201,3 +201,11 @@ Deno.test("reference pose planning: analysis guards see the SKU, a DNA-held Pose
   // The immutable rerun row records the DNA verdict it used and the final outcome.
   assertEquals(source.includes("metadata: { qa, dna: rerunDna ?? null, rerunOutcome, rerunByMemberId: workspace.member.id },"), true);
 });
+
+Deno.test("CodeAnt Major: a rejected attempt's archive upload is retried once before the copy is given up", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  const start = source.indexOf("async function archiveRejectedAttempt(");
+  const body = source.slice(start, source.indexOf("async function deferPoseRetry(", start));
+  assertEquals(body.includes("for (let upload = 1; upload <= 2; upload++) {"), true);
+  assertEquals(body.indexOf("return null;") > body.indexOf("for (let upload = 1; upload <= 2; upload++) {"), true);
+});

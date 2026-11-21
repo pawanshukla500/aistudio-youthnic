@@ -171,7 +171,7 @@ Analyses made before this feature have no expression plan. Their poses keep the 
 
 Every generated pose is checked against your product photos before it is accepted, whether or not automatic QA is on. The check scores five things: **shape**, **colour**, **material**, **logo** and **details** (embroidery, print, trims and their placement).
 
-- If any score falls below the pass mark, the image is archived (never deleted) and the pose is regenerated within the normal retry limit. If the last attempt still fails the check, that image is kept and marked for human review instead of being discarded.
+- If any score falls below the pass mark, the image is saved to the rejected archive instead of being deleted (unless storage is unavailable) and the pose is regenerated within the normal retry limit. If the last attempt still fails the check, that image is kept and marked for human review instead of being discarded.
 - If the check itself cannot run, the image is still delivered and marked unverified.
 - When full automatic QA is on, the same five scores come from the QA review, so no second check is made.
 

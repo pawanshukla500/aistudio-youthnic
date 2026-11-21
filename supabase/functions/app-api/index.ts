@@ -3687,20 +3687,23 @@ async function archiveRejectedAttempt(args: {
   generated: { blob: Blob; mimeType: string };
   qa: { reason: string; score: number; failed: string[] };
 }): Promise<JsonRecord | null> {
-  try {
-    const storagePath = `organizations/${args.job.org_id}/generated/${args.job.job_id}/rejected/${args.pose.pose_index}-attempt-${args.attempt}-${crypto.randomUUID()}.${extensionForMimeType(args.generated.mimeType)}`;
-    const stored = await uploadCatalogObject({ orgId: String(args.job.org_id), storagePath, blob: args.generated.blob, mimeType: args.generated.mimeType });
-    return {
-      attempt: args.attempt, generationEpoch: Number(args.pose.generation_epoch || 1),
-      url: stored.downloadUrl, storagePath: stored.storagePath,
-      storageBackend: stored.storageBackend,
-      mimeType: args.generated.mimeType, reason: args.qa.reason, failed: args.qa.failed,
-      score: args.qa.score, createdAt: Date.now(),
-    };
-  } catch (error) {
-    console.error("Could not archive the QA-rejected attempt", errorMessage(error));
-    return null;
+  const storagePath = `organizations/${args.job.org_id}/generated/${args.job.job_id}/rejected/${args.pose.pose_index}-attempt-${args.attempt}-${crypto.randomUUID()}.${extensionForMimeType(args.generated.mimeType)}`;
+  // Paid output: one retry for a transient storage error before the copy is given up.
+  for (let upload = 1; upload <= 2; upload++) {
+    try {
+      const stored = await uploadCatalogObject({ orgId: String(args.job.org_id), storagePath, blob: args.generated.blob, mimeType: args.generated.mimeType });
+      return {
+        attempt: args.attempt, generationEpoch: Number(args.pose.generation_epoch || 1),
+        url: stored.downloadUrl, storagePath: stored.storagePath,
+        storageBackend: stored.storageBackend,
+        mimeType: args.generated.mimeType, reason: args.qa.reason, failed: args.qa.failed,
+        score: args.qa.score, createdAt: Date.now(),
+      };
+    } catch (error) {
+      console.error(`Could not archive the QA-rejected attempt (upload ${upload}/2)`, errorMessage(error));
+    }
   }
+  return null;
 }
 
 async function deferPoseRetry(args: {
