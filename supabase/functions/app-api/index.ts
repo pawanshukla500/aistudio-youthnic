@@ -5161,11 +5161,20 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
     && !workspace.permissions.includes("planning.generate_images")) {
     throw new Error("Permission required: planning.approve or planning.generate_images");
   }
-  const generationId = String(args.poseId || args.generationId || "");
-  const { data: pose, error: poseError } = await service.from("session_generations").select("*").eq("generation_id", generationId).single();
+  // A batch (poseIds) is queued in one request: the worker runs queued poses in pose order,
+  // so a regenerated Pose 1 finishes and anchors the rest without the browser staying open.
+  const generationIds = Array.isArray(args.poseIds)
+    ? [...new Set(args.poseIds.map((id) => String(id || "").trim()).filter(Boolean))]
+    : [String(args.poseId || args.generationId || "")];
+  if (!generationIds.length || !generationIds[0]) throw new Error("Pose not found.");
+  if (generationIds.length > 12) throw new Error("Select at most 12 poses to regenerate at once.");
+  const { data: poseRows, error: poseError } = await service.from("session_generations").select("*").in("generation_id", generationIds);
   if (poseError) throw new Error(poseError.message);
-  if (!pose) throw new Error("Pose not found.");
-  const job = await jobForPose(pose as JsonRecord, workspace.organization.id);
+  const poses = (poseRows || []) as JsonRecord[];
+  if (poses.length !== generationIds.length) throw new Error("Pose not found.");
+  const pose = poses[0];
+  if (poses.some((entry) => entry.session_id !== pose.session_id)) throw new Error("Regenerate poses from one photoshoot at a time.");
+  const job = await jobForPose(pose, workspace.organization.id);
   if (!job) throw new Error("Generation job not found.");
   const { data: activeJobs, error: activeJobsError } = await service.from("generation_jobs").select("job_id")
     .eq("session_id", pose.session_id).eq("org_id", workspace.organization.id).in("status", ["queued", "processing", "cancelling"]).limit(1);
@@ -5174,38 +5183,37 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
   if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid && !options.allowManagedCatalog) throw new Error("You can regenerate only your own generation jobs.");
   const extraInstructions = String(args.extraInstructions || "").trim();
   if (extraInstructions.length > 1000) throw new Error("Regeneration instructions must be 1,000 characters or fewer.");
-  const history = Array.isArray(pose.regeneration_history) ? pose.regeneration_history as JsonRecord[] : [];
-  const previousOutputRetained = Boolean(pose.output_url || pose.storage_path);
-  const poseGenerationData = (pose.generation_data || {}) as JsonRecord;
   const regenerationRequestedAt = new Date().toISOString();
-  await recordShowcaseFeatureOutcome(service, {
+  await Promise.all(poses.map((entry) => recordShowcaseFeatureOutcome(service, {
     organizationId: workspace.organization.id,
-    sessionId: String(pose.session_id || ""),
-    poseIndex: Number(pose.pose_index),
-    poseType: String(pose.pose_type || ""),
+    sessionId: String(entry.session_id || ""),
+    poseIndex: Number(entry.pose_index),
+    poseType: String(entry.pose_type || ""),
     outcome: "regenerated",
-  });
-  const regenerationResults = await Promise.all([
-    service.from("session_generations").update({
+  })));
+  const queuePose = (entry: JsonRecord) => {
+    const history = Array.isArray(entry.regeneration_history) ? entry.regeneration_history as JsonRecord[] : [];
+    const previousOutputRetained = Boolean(entry.output_url || entry.storage_path);
+    return service.from("session_generations").update({
       status: "queued", attempt_count: 0, qa_status: "pending", error: "",
       // Never clear paid output before the replacement has actually been
       // generated and stored. A failed preflight must leave the prior version
       // visible and downloadable for human review.
-      generation_epoch: Math.max(1, Number(pose.generation_epoch || 1)) + 1,
+      generation_epoch: Math.max(1, Number(entry.generation_epoch || 1)) + 1,
       regeneration_instructions: extraInstructions,
       regeneration_history: [...history, {
         instructions: extraInstructions,
-        previousOutputUrl: pose.output_url || "",
-        previousStoragePath: pose.storage_path || "",
-        previousStorageBackend: pose.storage_backend || "firebase",
+        previousOutputUrl: entry.output_url || "",
+        previousStoragePath: entry.storage_path || "",
+        previousStorageBackend: entry.storage_backend || "firebase",
         requestedAt: regenerationRequestedAt,
         requestedByMemberId: workspace.member.id,
         previousOutputRetained,
-        previousApprovalStatus: String(pose.approval_status || "pending"),
-        previousGenerationEpoch: Math.max(1, Number(pose.generation_epoch || 1)),
+        previousApprovalStatus: String(entry.approval_status || "pending"),
+        previousGenerationEpoch: Math.max(1, Number(entry.generation_epoch || 1)),
       }],
       generation_data: {
-        ...poseGenerationData,
+        ...((entry.generation_data || {}) as JsonRecord),
         previousOutputRetained,
         regenerationQueuedAt: regenerationRequestedAt,
         // The dialog's "Run Gemini consistency QA" checkbox. It checks this
@@ -5213,24 +5221,28 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
         poseQaRequested: args.poseQa === true,
       },
       updated_at: regenerationRequestedAt,
-    }).eq("generation_id", generationId),
+    }).eq("generation_id", String(entry.generation_id));
+  };
+  const countStatus = (status: string) => poses.filter((entry) => entry.status === status).length;
+  const regenerationResults = await Promise.all([
+    ...poses.map(queuePose),
     service.from("generation_jobs").update({
       status: "queued", readiness_status: "ready", readiness_reasons: [], attempt_count: 0,
-      completed_poses: Math.max(0, Number(job.completed_poses || 0) - (pose.status === "completed" ? 1 : 0)),
-      failed_poses: Math.max(0, Number(job.failed_poses || 0) - (pose.status === "failed" ? 1 : 0)),
+      completed_poses: Math.max(0, Number(job.completed_poses || 0) - countStatus("completed")),
+      failed_poses: Math.max(0, Number(job.failed_poses || 0) - countStatus("failed")),
       current_pose: null, available_at: regenerationRequestedAt, error_code: "", error_message: "", completed_at: null,
       lock_expires_at: null, locked_at: null, updated_at: regenerationRequestedAt,
     }).eq("job_id", job.job_id),
     service.from("catalog_sessions").update({ status: "generating", updated_at: regenerationRequestedAt }).eq("session_id", pose.session_id),
-    service.from("audit_logs").insert({
+    service.from("audit_logs").insert(poses.map((entry) => ({
       organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
-      action: "generation.pose.regenerated", resource_type: "session_generation", resource_id: generationId,
-      metadata: { jobId: job.job_id, poseIndex: pose.pose_index, extraInstructions },
-    }),
+      action: "generation.pose.regenerated", resource_type: "session_generation", resource_id: String(entry.generation_id),
+      metadata: { jobId: job.job_id, poseIndex: entry.pose_index, extraInstructions, ...(poses.length > 1 ? { batchSize: poses.length } : {}) },
+    }))),
   ]);
   assertSupabaseResults(regenerationResults, "Could not queue the pose re-generation");
   scheduleBackground(kickWorker());
-  return { success: true };
+  return { success: true, queued: poses.length };
 }
 
 async function syncCatalogAnchorQa(

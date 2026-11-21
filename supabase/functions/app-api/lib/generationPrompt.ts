@@ -246,6 +246,13 @@ function rearOnlySareeTruth(evidence: JsonRecord[]) {
   };
 }
 
+/** The full line (with its newline) that starts with `prefix`, or `prefix` itself when absent. */
+function lineStartingWith(prompt: string, prefix: string) {
+  const start = prompt.indexOf(prefix);
+  const end = start < 0 ? -1 : prompt.indexOf("\n", start + prefix.length);
+  return end < 0 ? prefix : prompt.slice(start, end + 1);
+}
+
 function compactPromptBlock(prompt: string, startMarker: string, endMarkers: string[], maxChars: number) {
   const start = prompt.indexOf(startMarker);
   if (start < 0) return prompt;
@@ -388,7 +395,8 @@ export function compactFullPromptSafely(prompt: string): string {
   );
   compacted = compactPromptBlock(
     compacted,
-    "\n- SET ONLY: the direction below is backdrop, light, and camera. It does not set the pose, the garment, or handheld props.\n",
+    // The whole line: requested props rewrite its ending ("unrequested handheld props").
+    lineStartingWith(compacted, "\n- SET ONLY: the direction below is backdrop, light, and camera."),
     ["\nAPPROVED STYLING PLAN", "\nSTYLING ADDITION", "\nALLOWED DELTA"],
     450,
   );
@@ -1776,7 +1784,7 @@ ${directedCreative.suggestedAccessories ? `The stylist has proposed adding: ${bo
 ${dupattaLock}
 ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:
 ${allowedDelta.map((value) => `- ${value}`).join("\n")}
-- Hand placement: ${boundedText(sanitizeHeldObjectText(catalogPoseText(args.pose.handPlacement, RELAXED_HANDS, poseScrub), RELAXED_HANDS, [args.skuName, args.productDetails].filter(Boolean).join(" ")), 360)}
+- Hand placement: ${promptProps.groups.length ? "the hands carry the requested props exactly as the REQUESTED PROPS line directs; a hand free of them follows this plan: " : ""}${boundedText(sanitizeHeldObjectText(catalogPoseText(args.pose.handPlacement, RELAXED_HANDS, poseScrub), RELAXED_HANDS, [args.skuName, args.productDetails].filter(Boolean).join(" ")), 360)}
 - Everything not named here stays locked.
 
 POSE REQUIREMENT:

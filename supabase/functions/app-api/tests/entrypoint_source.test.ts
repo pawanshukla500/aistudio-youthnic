@@ -218,3 +218,18 @@ Deno.test("CodeAnt Major: a studio pose review compare-and-sets the status it re
   assertEquals(source.includes(': approvalUpdate.eq("approval_status", ownedPose.approval_status))'), true);
   assertEquals(source.includes('if (!pose) throw new Error("This pose was reviewed by someone else just now. Reload to see the latest decision.");'), true);
 });
+
+Deno.test("batch regeneration queues every selected pose in one request, and History sends them together", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  const start = source.indexOf("async function regeneratePose(");
+  const body = source.slice(start, source.indexOf("async function syncCatalogAnchorQa(", start));
+  assertEquals(body.includes("Array.isArray(args.poseIds)"), true);
+  assertEquals(body.includes('if (poses.some((entry) => entry.session_id !== pose.session_id)) throw new Error("Regenerate poses from one photoshoot at a time.");'), true);
+  assertEquals(body.includes("...poses.map(queuePose),"), true);
+  assertEquals(body.includes('completed_poses: Math.max(0, Number(job.completed_poses || 0) - countStatus("completed")),'), true);
+  // The worker runs queued poses lowest pose first, so a regenerated Pose 1 anchors the rest.
+  assertEquals(source.includes('.eq("session_id", job.session_id).eq("status", "queued").order("pose_index").limit(1).maybeSingle();'), true);
+  const history = Deno.readTextFileSync(new URL("../../../../src/features/history/History.tsx", import.meta.url)).replace(/\r\n/g, "\n");
+  assertEquals(history.includes("poseIds: eligible.map((pose: any) => pose._id),"), true);
+  assertEquals(history.includes("batchWaitRef"), false);
+});

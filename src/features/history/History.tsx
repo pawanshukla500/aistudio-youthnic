@@ -227,9 +227,7 @@ type BatchEntry = {
   poseId: string;
   poseNumber: number;
   title: string;
-  state: "waiting" | "submitting" | "submitted" | "failed" | "skipped";
-  instructions: string;
-  poseQa: boolean;
+  state: "submitting" | "submitted" | "failed";
   error?: string;
 };
 
@@ -250,12 +248,9 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const [batchSelection, setBatchSelection] = useState<string[]>([]);
   const [batchNote, setBatchNote] = useState("");
   const [batchPoseQa, setBatchPoseQa] = useState(false);
+  // The whole batch is queued on the server in one request; the worker runs the poses in
+  // pose order (a regenerated Pose 1 first, so it anchors the rest), so the window can close.
   const [batchEntries, setBatchEntries] = useState<BatchEntry[]>([]);
-  // The server refuses a pose regeneration while the job is queued/processing,
-  // and each regeneration re-queues the whole job, so a batch has to go one
-  // pose at a time: submit, wait for the job to settle, then submit the next.
-  const batchWaitRef = useRef<{ poseId: string; previousCompletedAt: number; sawActive: boolean } | null>(null);
-  const batchSubmittingRef = useRef(false);
   const [regeneratingId, setRegeneratingId] = useState<Id<"generationPoses"> | null>(null);
   const [zipping, setZipping] = useState<"" | "all" | "approved">("");
   const [selectedPoseSnapshot, setSelectedPose] = useState<any | null>(null);
@@ -566,71 +561,30 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [previewOpen]);
 
-  const batchRunning = batchEntries.some((entry) => entry.state === "waiting" || entry.state === "submitting");
-  useEffect(() => {
-    if (!job || batchSubmittingRef.current) return;
-    const jobActive = ACTIVE_JOB_STATUSES.includes(job.status);
-    const wait = batchWaitRef.current;
-    if (wait) {
-      if (jobActive) {
-        wait.sawActive = true;
-        return;
-      }
-      // A poll from before the submission can still report the job as idle;
-      // only move on once the server has visibly picked the previous pose up.
-      const waitedPose = job.poses.find((pose: any) => pose._id === wait.poseId);
-      if (!wait.sawActive && waitedPose && waitedPose.completedAt === wait.previousCompletedAt) return;
-      batchWaitRef.current = null;
-    }
-    if (jobActive) return;
-    const next = batchEntries.find((entry) => entry.state === "waiting");
-    if (!next) return;
-    const pose = job.poses.find((entry: any) => entry._id === next.poseId);
-    const markEntry = (patch: Partial<BatchEntry>) =>
-      setBatchEntries((entries) => entries.map((entry) => (entry.poseId === next.poseId ? { ...entry, ...patch } : entry)));
-    batchSubmittingRef.current = true;
-    markEntry({ state: "submitting" });
-    void regeneratePose({
-      poseId: next.poseId,
-      requestedBy: user._id,
-      poseQa: next.poseQa,
-      extraInstructions: next.instructions,
-    })
-      .then(() => {
-        batchWaitRef.current = { poseId: next.poseId, previousCompletedAt: Number(pose?.completedAt || 0), sawActive: false };
-        batchSubmittingRef.current = false;
-        markEntry({ state: "submitted" });
-      })
-      .catch((reason) => {
-        batchSubmittingRef.current = false;
-        markEntry({ state: "failed", error: reason instanceof Error ? reason.message : "Could not queue this regeneration." });
-      });
-  }, [job, batchEntries, regeneratePose, user._id]);
+  const batchRunning = batchEntries.some((entry) => entry.state === "submitting");
 
-  const startBatchRegeneration = () => {
+  const startBatchRegeneration = async () => {
     if (!job) return;
     const eligible = job.poses
       .filter((pose: any) => batchSelection.includes(pose._id) && canRegeneratePose(pose, job.status))
       .sort((left: any, right: any) => left.poseNumber - right.poseNumber);
     if (!eligible.length) return;
-    batchWaitRef.current = null;
     setBatchEntries(
-      eligible.map((pose: any) => ({
-        poseId: pose._id,
-        poseNumber: pose.poseNumber,
-        title: pose.title,
-        state: "waiting" as const,
-        instructions: batchNote.trim(),
-        poseQa: batchPoseQa,
-      }))
+      eligible.map((pose: any) => ({ poseId: pose._id, poseNumber: pose.poseNumber, title: pose.title, state: "submitting" as const }))
     );
     setBatchSelection([]);
-  };
-
-  const stopBatchRegeneration = () => {
-    setBatchEntries((entries) =>
-      entries.map((entry) => (entry.state === "waiting" ? { ...entry, state: "skipped", error: "Stopped before it was queued." } : entry))
-    );
+    try {
+      await regeneratePose({
+        poseIds: eligible.map((pose: any) => pose._id),
+        requestedBy: user._id,
+        poseQa: batchPoseQa,
+        extraInstructions: batchNote.trim(),
+      });
+      setBatchEntries((entries) => entries.map((entry) => ({ ...entry, state: "submitted" as const })));
+    } catch (reason) {
+      const error = reason instanceof Error ? reason.message : "Could not queue this regeneration.";
+      setBatchEntries((entries) => entries.map((entry) => ({ ...entry, state: "failed" as const, error })));
+    }
   };
 
   if (job === undefined) {
@@ -873,7 +827,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 <span className="text-[11px] text-secondary">
                   {batchSelectedCount
                     ? `${batchSelectedCount} of ${batchEligiblePoses.length} eligible poses selected`
-                    : "Check multiple pose cards below to regenerate them in sequence with a shared director's note."}
+                    : "Check multiple pose cards below to regenerate them together with a shared director's note."}
                 </span>
               </div>
             </div>
@@ -931,11 +885,12 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 
               <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                 <p className="text-[11px] text-secondary">
-                  Poses queue sequentially to guarantee strict model identity. Keep this window open until complete.
+                  The selected poses are queued on the server together and run in pose order, so a regenerated Pose 1 finishes
+                  first and anchors the rest. You can close this window.
                 </p>
                 <button
                   type="button"
-                  onClick={startBatchRegeneration}
+                  onClick={() => void startBatchRegeneration()}
                   className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:bg-primary-dark hover:shadow-lg active:scale-95"
                 >
                   <RefreshCcw className="h-4 w-4" />
@@ -964,15 +919,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   ` · ${batchEntries.filter((entry) => entry.state === "failed").length} failed`}
               </span>
             </div>
-            {batchRunning ? (
-              <button
-                type="button"
-                onClick={stopBatchRegeneration}
-                className="rounded-lg border border-outline-variant px-3 py-1.5 text-xs font-bold text-secondary hover:bg-surface-container"
-              >
-                Stop after current
-              </button>
-            ) : (
+            {batchRunning ? null : (
               <button
                 type="button"
                 onClick={() => setBatchEntries([])}
@@ -986,12 +933,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             {batchEntries.map((entry) => {
               const livePose = job.poses.find((pose: any) => pose._id === entry.poseId);
               const label =
-                entry.state === "waiting"
-                  ? "Waiting for previous pose to settle"
-                  : entry.state === "submitting"
+                entry.state === "submitting"
                   ? "Submitting to worker…"
-                  : entry.state === "skipped"
-                  ? entry.error || "Skipped"
                   : entry.state === "failed"
                   ? `Failed: ${entry.error || "Could not queue"}`
                   : `Queued · worker status: ${livePose?.status || "unknown"}`;

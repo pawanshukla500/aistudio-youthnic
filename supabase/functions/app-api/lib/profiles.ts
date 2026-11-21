@@ -1825,27 +1825,43 @@ export function withRequestedPropsAllowed(text: string, requested: Pick<Requeste
 
 /**
  * A styling list ("no tote, no coffee cup, no sunglasses") without the entries that
- * exclude a requested prop. Only whole comma/semicolon entries that start with a negation
- * are dropped; every other entry is kept verbatim.
+ * exclude a requested prop. Whole comma/semicolon entries that start with a negation are
+ * dropped, and so is a bare prop that continues a negated comma list ("no dupatta, belt, bag
+ * included with SKU"), whose trailing words stay on the entry before it. Every other entry
+ * is kept verbatim.
  */
 export function withoutNegatedRequestedProps(text: unknown, requested: Pick<RequestedHandheldProps, "groups">): string {
   const value = String(text ?? "");
   if (!requested.groups.length) return value;
+  const words = requestedPropWords(requested.groups);
   // An optional lead-in ("none - no tote") survives on the next kept entry.
-  const negated = new RegExp(`^(\\s*(?:none\\s*[-:]\\s*)?)(?:-\\s*)?(?:no|never|without)\\s+(?:[a-z-]+\\s+){0,2}(?:${requestedPropWords(requested.groups)})\\b`, "i");
+  const negated = new RegExp(`^(\\s*(?:none\\s*[-:]\\s*)?)(?:-\\s*)?(?:no|never|without)\\s+(?:[a-z-]+\\s+){0,2}(?:${words})\\b`, "i");
+  const startsNegated = /^\s*(?:none\s*[-:]\s*)?(?:-\s*)?(?:no|never|without)\b/i;
+  const listedProp = new RegExp(`^\\s*(?:(?:a|an|the|any)\\s+)?(?:${words})\\b(.*)$`, "i");
   const parts = value.split(/([,;])/);
   const kept: string[] = [];
   // The separator before the first dropped entry of a run is the one the next kept entry inherits.
   let pendingSeparator: string | undefined;
   let leadIn = "";
+  let negatedList = false;
   for (let index = 0; index < parts.length; index += 2) {
     const separator = parts[index - 1];
+    if (separator === ";") negatedList = false;
     const dropped = parts[index].match(negated);
     if (dropped) {
       pendingSeparator ??= separator;
       leadIn ||= dropped[1].trim() ? `${dropped[1].trim()} ` : "";
+      negatedList = true;
       continue;
     }
+    const listed = negatedList && separator === "," ? parts[index].match(listedProp) : null;
+    // "bag-style pocket" names a garment detail, not the prop.
+    if (listed && !PROP_AS_DESCRIPTOR.test(listed[1])) {
+      const rest = listed[1].trimEnd();
+      if (rest && kept.length) kept[kept.length - 1] = `${kept[kept.length - 1].trimEnd()}${rest}`;
+      continue;
+    }
+    if (startsNegated.test(parts[index])) negatedList = true;
     const entry = leadIn ? `${kept.length ? " " : ""}${leadIn}${parts[index].trimStart()}` : parts[index];
     kept.push(kept.length ? `${pendingSeparator ?? separator ?? ","}${entry}` : entry.trimStart());
     pendingSeparator = undefined;
