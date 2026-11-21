@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { compactManifestBlock, composeGenerationPrompt, IMAGE_PROMPT_SAFE_CHARS } from "../lib/generationPrompt.ts";
+import { compactManifestBlock, composeGenerationPrompt, IMAGE_PROMPT_SAFE_CHARS, rearViewChecklist, requestedPropsBlock } from "../lib/generationPrompt.ts";
 import { buildPoseQaPrompt } from "../lib/qa.ts";
-import { requestedHandheldProps, withRequestedPropsAllowed } from "../lib/profiles.ts";
+import { requestedHandheldProps, withoutNegatedRequestedProps, withRequestedPropsAllowed } from "../lib/profiles.ts";
 import { collapseDuplicateUploads, selectReferences } from "../lib/referencePolicy.ts";
 
 const POSE_IDS = ["full_front", "angled", "back", "creative", "closeup", "showcase"];
@@ -52,12 +52,15 @@ Deno.test("requested props come only from holding sentences in the notes", () =>
   }
 });
 
-Deno.test("withRequestedPropsAllowed narrows bans to unrequested props and drops 'no <prop>' clauses", () => {
+Deno.test("withRequestedPropsAllowed narrows only the fixed ban phrases and never deletes product text", () => {
   const props = requestedHandheldProps(PROP_NOTE);
-  const text = "Never copy handheld props (coffee cups, mugs, bottles, tote bags, handbags, sunglasses, phones). ornaments: no tote, no coffee cup, no sunglasses";
+  const text = "Never copy handheld props (coffee cups, mugs, bottles, tote bags, handbags, sunglasses, phones). No flowers on the back panel; no padded cups. Never let the bag strap cross the yoke.";
   const out = withRequestedPropsAllowed(text, props);
-  assertEquals(out, "Never copy unrequested handheld props (any prop the product notes did not request). ornaments: no sunglasses");
+  assertEquals(out, "Never copy unrequested handheld props (any prop the product notes did not request). No flowers on the back panel; no padded cups. Never let the bag strap cross the yoke.");
   assertEquals(withRequestedPropsAllowed(text, { groups: [] }), text);
+  // Styling lists drop only whole entries that exclude a requested prop.
+  assertEquals(withoutNegatedRequestedProps("none - no dupatta, stole, bag included with SKU; no tote, no coffee cup, no sunglasses", props), "none - no dupatta, stole, bag included with SKU; no sunglasses");
+  assertEquals(withoutNegatedRequestedProps("no tote, no coffee cup", { groups: [] }), "no tote, no coffee cup");
 });
 
 Deno.test("a shared face/style photo keeps the identity slot and is sent once", () => {
@@ -84,7 +87,7 @@ Deno.test("requested props carry over in every frame except the Pose 5 crop, and
     assert(!prompt.includes("no tote"), id);
     assert(prompt.length <= IMAGE_PROMPT_SAFE_CHARS);
   }
-  assertStringIncludes(compose("closeup", `Beige kurti. ${PROP_NOTE}`), "This Pose 5 craft crop keeps every prop out of frame");
+  assertStringIncludes(compose("closeup", `Beige kurti. ${PROP_NOTE}`), "This tight detail crop keeps every prop out of frame");
   const back = compose("back", `Beige kurti. ${PROP_NOTE}`, BACK_REFS);
   assertStringIncludes(back, "the bag hangs from one shoulder or forearm at the side");
   assertStringIncludes(back, "must not cover the back neckline, the stripes or print, the side slits or the hem");
@@ -145,4 +148,69 @@ Deno.test("manifest compaction keeps a label for every attached image", () => {
   assert(compacted.endsWith(["", "EDIT GOAL:", "rest"].join("\n")));
   const short = ["Intro", "REFERENCE MANIFEST IN UPLOAD ORDER:", "IMAGE 1: FRONT", "", "EDIT GOAL:"].join("\n");
   assertEquals(compactManifestBlock(short, 1_200), short);
+});
+
+Deno.test("prop requests ignore colour, sleeve and garment names, other verbs' objects and negated clauses", () => {
+  for (const note of [
+    "Umbrella kurta set with dupatta held in one hand.",
+    "Kurta in two shades of blue, model holding the dupatta in one hand.",
+    "Model holding the coffee brown dupatta",
+    "Matcha green kurta set, dupatta held in one hand.",
+    "Model holding dupatta, cup sleeves and pleated hem.",
+    "Kurta with bag sleeves, model holding the dupatta",
+    "Hand-embroidered flowers, model holding the dupatta",
+    "coffee glass hold nahi karna, bag bhi nahi",
+    "bag mat pakdo, sirf dupatta hold karo",
+  ]) assertEquals(requestedHandheldProps(note).groups, [], note);
+  // The negation belongs to its own clause only.
+  assertEquals(requestedHandheldProps("She holds a coffee cup, no sunglasses.").groups, ["drink"]);
+  assertEquals(requestedHandheldProps("Hold the bag but don't cover the embroidery.").groups, ["bag"]);
+  assertEquals(requestedHandheldProps("Holding a coffee glass and a handbag as in the reference image, not covering the print.").groups, ["drink", "bag"]);
+  assertEquals(requestedHandheldProps("coffee in hand").groups, ["drink"]);
+  assertEquals(requestedHandheldProps("sling bag on her shoulder").groups, ["bag"]);
+  assertEquals(requestedHandheldProps("haath mein coffee pakde hue").groups, ["drink"]);
+});
+
+Deno.test("the props prompt keeps its compaction markers and drops the contradicting hand and ornament lines", () => {
+  // Notes with a trailing negated clause and no full stop once merged the notes into the next marker.
+  const notes = `${"Beige pinstripe kurti, red butti, notch neckline. ".repeat(30)}Holding a tote bag like the reference image. No bag strap over the yoke`;
+  const prompt = compose("full_front", notes);
+  assert(prompt.length <= IMAGE_PROMPT_SAFE_CHARS);
+  assert(prompt.length > 20_000, `prompt collapsed to ${prompt.length} characters`);
+  assertStringIncludes(prompt, "Output only the finished photograph");
+  assertStringIncludes(prompt, "REQUESTED PROPS (FROM THE PRODUCT NOTES - CARRY THEM OVER)");
+  assertStringIncludes(prompt, "IDENTITY CHECK");
+  assert(!prompt.includes("holding nothing copied from the style or model photo"));
+  const props = compose("full_front", `Beige kurti. ${PROP_NOTE}`);
+  assertStringIncludes(props, "- Ornaments and accessories: none");
+  assert(!/- Ornaments and accessories: \n/.test(props));
+});
+
+Deno.test("tight crops keep props out of frame and extra props never need a third hand", () => {
+  const props = requestedHandheldProps("She is holding a coffee cup, a tote bag and a phone as in the reference image.");
+  assertEquals(props.groups, ["drink", "bag", "phone"]);
+  assertStringIncludes(requestedPropsBlock(props, "showcase", true), "This tight detail crop keeps every prop out of frame");
+  assertStringIncludes(requestedPropsBlock(props, "full_front"), "never a third hand");
+  assertEquals(requestedPropsBlock({ groups: [], labels: [], note: "" }, "full_front"), "");
+});
+
+Deno.test("the identity check skips faceless crops", () => {
+  const productDetail = composeGenerationPrompt({
+    skuName: "BEIGE-KURTI", productDetails: "Beige kurti", pose: pose("closeup"),
+    session: { ...SESSION, creativeDirection: { ...SESSION.creativeDirection, closeupMode: "product_detail" } },
+    references: FRONT_REFS, useStyleReferenceAsModelIdentity: true,
+  });
+  assert(!productDetail.includes("IDENTITY CHECK"));
+  assertStringIncludes(compose("closeup", "Beige kurti"), "IDENTITY CHECK");
+});
+
+Deno.test("the rear checklist keeps high-low hems uneven and takes only real side slits", () => {
+  const checklist = rearViewChecklist({
+    length: "high-low hem: front hem at mid-thigh, back hem longer at the knee",
+    detailPlacementMap: ["front placket: center front slit with three button loops", "hem: straight, no side slits"],
+  }, false);
+  assertStringIncludes(checklist, "back hem longer at the knee.");
+  assert(!checklist.includes("same height as the front hem"));
+  assert(!checklist.includes("Side slits"));
+  assertEquals(rearViewChecklist({}, false), "");
 });

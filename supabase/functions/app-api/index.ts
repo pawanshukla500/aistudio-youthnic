@@ -22,6 +22,7 @@ import {
   recordedSeatedPoseDemand,
   parseJsonResponse,
   requestedHandheldProps,
+  withoutNegatedRequestedProps,
   ACTIVE_GENERATION_JOB_STATUSES,
   REQUIRED_POSE_IDS,
   sareeAnalysisIssues,
@@ -2852,6 +2853,7 @@ async function validatePose(args: {
   const { farshi, slots: adopted } = adoptedReferenceSlots(args.session, qaRefs, args);
   const referencePoseNumbers = [adopted.creative ? 4 : 0, adopted.showcase ? 6 : 0].filter(Boolean);
   const qaLabel = (role: string) => roleLabel(role, { useStyleAsModelFace, hasModelReference: qaHasModelReference, hasApprovedAnchor: args.approved.length > 0, referencePoseNumbers });
+  const requestedProps = requestedHandheldProps(args.productDetails);
   const prompt = buildPoseQaPrompt({
     poseNumber: args.pose.poseNumber, poseType: args.pose.id, poseTitle: args.pose.title, poseDirection: args.pose,
     productIdentity: args.session.productIdentity, creativeDirection: args.session.creativeDirection,
@@ -2861,7 +2863,7 @@ async function validatePose(args: {
     consistencyRules: [
       ...((args.session.consistencyRules as string[]) || CONSISTENCY_RULES),
       ...(styling
-        ? [`APPROVED STYLING PLAN - footwear: ${styling.footwear}; jewellery: ${styling.jewellery}; ornaments: ${styling.ornaments}; makeup: ${styling.makeup}; hair: ${styling.hair}.${styling.stylingNotes ? ` Stylist notes: ${styling.stylingNotes}` : ""}`]
+        ? [`APPROVED STYLING PLAN - footwear: ${styling.footwear}; jewellery: ${styling.jewellery}; ornaments: ${withoutNegatedRequestedProps(styling.ornaments, requestedProps)}; makeup: ${styling.makeup}; hair: ${styling.hair}.${styling.stylingNotes ? ` Stylist notes: ${styling.stylingNotes}` : ""}`]
         : []),
     ],
     hasApprovedAnchor: args.approved.length > 0,
@@ -2870,7 +2872,7 @@ async function validatePose(args: {
     referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${qaLabel(reference.role)}`),
     referencePoseMatch: (args.pose.id === "creative" || args.pose.id === "showcase" ? adopted[args.pose.id] : null) ?? undefined,
     farshi,
-    requestedProps: requestedHandheldProps(`${args.skuName ?? ""} ${args.productDetails ?? ""}`),
+    requestedProps,
   });
   const baseParts: JsonRecord[] = [
     { text: prompt },

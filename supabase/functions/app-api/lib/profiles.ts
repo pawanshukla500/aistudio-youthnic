@@ -1679,41 +1679,79 @@ const REQUESTABLE_PROP_GROUPS: ReadonlyArray<{ id: string; label: string; words:
   { id: "flowers", label: "the flowers", words: String.raw`flowers?|bouquets?` },
   { id: "umbrella", label: "the umbrella", words: String.raw`umbrellas?` },
 ];
-// A prop counts as requested only when the sentence holds or carries it, so material
-// words ("glass beads", "hand embroidery", "cup sleeves") never turn into props.
-const PROP_HOLD_PATTERN = /\b(?:hold|holds|holding|held|carry|carries|carrying|carried|sip|sips|sipping|in\s+(?:her|his|their|one|the|a)\s+hands?)\b/i;
-const PROP_NEGATION_PATTERN = /\b(?:no|not|never|without|avoid|remove|exclude|don'?t|do\s+not)\b/i;
+const PROP_HOLD_VERB = /\b(?:hold|holds|holding|held|carry|carries|carrying|carried|sip|sips|sipping)\b/i;
+// Hinglish puts the object before the verb: "haath mein coffee pakde hue", "bag hold karo".
+const PROP_HINDI_HOLD = /\b(?:hold|pakad\w*|pakd\w*)\s+(?:karo|kare|karen|karein|kiya|kiye|karna|karke|kar|hue|huye|rakho|rakhe|rakhi)\b/i;
+const PROP_IN_HAND = /\bin\s+(?:her|his|their|one|the|a)\s+hands?\b|\bin\s+hand\b|\bon\s+(?:her|his|their|the|one)\s+shoulders?\b/i;
+const PROP_NEGATION_PATTERN = /\b(?:no|not|never|without|avoid|remove|exclude|don'?t|do\s+not|nahi|nahin|nhi|mat)\b/i;
+// A prop word used as a colour, sleeve or garment name: "coffee brown", "cup sleeves", "shades of blue".
+const PROP_AS_DESCRIPTOR = /^[\s-]*(?:brown|green|beige|black|white|red|blue|pink|gold|cream|grey|gray|colou?r(?:ed)?|shades?|tones?|hued?|sleeves?|cut|flare|hem|prints?|motifs?|embroider\w*|butti|work|dupatta|kurta|kurti|stole|saree|lehenga|of)\b/i;
+const PROP_WINDOW_WORDS = 10;
+const PROP_LIST_ITEM = /^(?:(?:and|or|plus|&)\s+)?(?:a|an|the|her|his|their|some|one)\b/i;
 
 export type RequestedHandheldProps = {
   /** REQUESTABLE_PROP_GROUPS ids, e.g. ["drink", "bag"]. Empty when nothing is requested. */
   groups: string[];
   labels: string[];
-  /** The requesting sentences from the notes, bounded. */
+  /** The requesting clauses from the notes, bounded. */
   note: string;
 };
 
+/** The text after a holding verb (or before a Hinglish one) where its object sits, or "". */
+function propWindow(clause: string): string {
+  const hindi = clause.match(PROP_HINDI_HOLD);
+  if (hindi && hindi.index !== undefined) return clause.slice(0, hindi.index);
+  const verb = clause.match(PROP_HOLD_VERB);
+  if (verb && verb.index !== undefined) {
+    return clause.slice(verb.index + verb[0].length).trim().split(/\s+/).slice(0, PROP_WINDOW_WORDS).join(" ");
+  }
+  return PROP_IN_HAND.test(clause) ? clause : "";
+}
+
 /**
  * Props the product notes explicitly ask the model to hold or carry ("she holds a coffee
- * glass and a hand bag as in the reference image"). Negated sentences never count.
- * Requested props carry over from the STYLE REFERENCE; every other handheld object stays
- * excluded.
+ * glass and a hand bag as in the reference image"). Each clause is read on its own: the prop
+ * must follow a holding/carrying verb (or sit "in her hand"), a negated clause never counts,
+ * and a prop word used as a colour, sleeve or garment name is not a prop. Requested props
+ * carry over from the STYLE REFERENCE; every other handheld object stays excluded.
  */
 export function requestedHandheldProps(notes: unknown): RequestedHandheldProps {
-  const sentences = String(notes ?? "").split(/(?<=[.!?;])\s+|\n+/).map((sentence) => sentence.trim()).filter(Boolean);
   const groups = new Set<string>();
   const kept: string[] = [];
-  for (const sentence of sentences) {
-    if (!PROP_HOLD_PATTERN.test(sentence) || PROP_NEGATION_PATTERN.test(sentence)) continue;
-    const hits = REQUESTABLE_PROP_GROUPS.filter((group) => new RegExp(`\\b(?:${group.words})\\b`, "i").test(sentence));
-    if (!hits.length) continue;
-    for (const group of hits) groups.add(group.id);
-    kept.push(sentence);
+  // A list after the verb spans commas ("holding a coffee cup, a tote bag and a phone"):
+  // a clause right after a holding clause continues it when it starts like a list item.
+  let continuesHold = false;
+  for (const rawClause of String(notes ?? "").split(/([.;!?\n]+|,|\bbut\b)/i)) {
+    if (/^(?:[.;!?\n]+|but)$/i.test(rawClause.trim())) {
+      continuesHold = false;
+      continue;
+    }
+    if (rawClause === ",") continue;
+    const clause = rawClause.trim();
+    if (!clause || PROP_NEGATION_PATTERN.test(clause)) {
+      continuesHold = false;
+      continue;
+    }
+    const ownWindow = propWindow(clause);
+    const propText: string = ownWindow || (continuesHold && PROP_LIST_ITEM.test(clause) ? clause : "");
+    continuesHold = Boolean(ownWindow) || Boolean(propText);
+    if (!propText) continue;
+    let matched = false;
+    for (const group of REQUESTABLE_PROP_GROUPS) {
+      for (const match of propText.matchAll(new RegExp(`\\b(?:${group.words})\\b`, "gi"))) {
+        if (PROP_AS_DESCRIPTOR.test(propText.slice((match.index ?? 0) + match[0].length))) continue;
+        groups.add(group.id);
+        matched = true;
+        break;
+      }
+    }
+    if (matched) kept.push(clause);
   }
   const ordered = REQUESTABLE_PROP_GROUPS.filter((group) => groups.has(group.id));
   return {
     groups: ordered.map((group) => group.id),
     labels: ordered.map((group) => group.label),
-    note: kept.join(" ").replace(/\s+/g, " ").slice(0, 300),
+    note: kept.join(". ").replace(/\s+/g, " ").slice(0, 300),
   };
 }
 
@@ -1722,30 +1760,70 @@ export function requestedPropWords(groups: readonly string[]): string {
   return REQUESTABLE_PROP_GROUPS.filter((group) => groups.includes(group.id)).map((group) => group.words).join("|");
 }
 
-// The fixed "never copy handheld props" phrasings used across the prompt, QA and
-// reference labels, rewritten to exclude only the props the notes did not request.
+// The fixed "never copy handheld props" phrasings used across the image prompt, QA, the
+// analysis prompt and reference labels, rewritten to exclude only unrequested props.
+// Fixed phrases only: free-form clauses (product truth, absence locks) are never touched.
 const GENERIC_PROP_BANS: ReadonlyArray<[RegExp, string]> = [
   [/handheld coffee cups\/totes\/bags/g, "unrequested handheld props"],
+  [/handheld coffee\/bags/g, "unrequested handheld props"],
+  [/no handheld coffee\/bag\/sunglasses copied from style reference/g, "no unrequested handheld props copied from style reference"],
+  [/without copied drinks\/bags\/phones/g, "carrying only the requested props"],
   [/\(coffee cups, mugs, bottles, tote bags, handbags, sunglasses, phones\)/g, "(any prop the product notes did not request)"],
   [/a coffee cup, tote bag, sunglass case, or leaning stance/g, "an unrequested prop or a leaning stance"],
   [/a coffee cup, tote bag, or sunglass case/g, "an unrequested prop"],
+  [/coffee cups, or tote bags from the style reference/g, "unrequested props from the style reference"],
   [/\(no leaning posture, cups, totes, or sunglasses\)/g, "(no leaning posture or unrequested props)"],
   [/leaning\/sitting posture, cups, totes, and sunglasses/g, "leaning/sitting posture and unrequested props"],
-  [/\((?:cups, totes, sunglasses|cups, totes, phones, sunglasses)\)/g, "(unrequested props)"],
+  [/\((?:cups, totes, sunglasses|cups, totes, phones, sunglasses|cups, totes, sunglasses, bags|sunglasses, coffee cups, or tote bags)\)/g, "(unrequested props)"],
+  [/\((?:coffee cup, tote bag, handbag, sunglasses|such as iced coffee cups, drinks, tote bags, purses, phones, or sunglasses)\)/g, "(other than the requested props)"],
+  [/coffee cups, tote bags, or accessories/g, "unrequested props, or accessories"],
+  [/sunglasses, coffee cup, tote bag, or clothing/g, "unrequested props, or clothing"],
+  [/style-reference coffee cups, tote bags, sunglasses, or dead-hanging/g, "unrequested style-reference props, or dead-hanging"],
+  [/never copy any coffee cup\/tote bag or objects in the hands/g, "never copy unrequested props"],
+  [/style-reference bags, cups, or objects excluded/g, "other style-reference objects excluded"],
+  [/holding nothing copied from the style or model photo/g, "holding only the requested props"],
+  [/belt, bag, hair ornament or any other accessory this plan does not list/g, "belt, hair ornament or any other accessory this plan or the requested props do not list"],
   [/(?<!unrequested )\b([Oo])bjects (in the hands|held in the style or model photo)\b/g, "$1bjects $2 other than the requested props"],
   [/(?<!unrequested )\bhandheld (props|objects)\b/g, "unrequested handheld $1"],
 ];
 
-/**
- * Prompt text with the generic prop bans narrowed to unrequested props and every
- * "no <requested prop>" clause removed. Unchanged when nothing is requested.
- */
+/** Prompt text with the fixed no-props phrasings narrowed to unrequested props. Unchanged when nothing is requested. */
 export function withRequestedPropsAllowed(text: string, requested: Pick<RequestedHandheldProps, "groups">): string {
   if (!requested.groups.length) return text;
   let out = text;
   for (const [pattern, replacement] of GENERIC_PROP_BANS) out = out.replace(pattern, replacement);
-  const words = requestedPropWords(requested.groups);
-  return out.replace(new RegExp(`\\b(?:no|never|without)\\s+(?:[a-z-]+\\s+){0,2}(?:${words})\\b[^,;.\\n]*[,;]?\\s*`, "gi"), "");
+  return out;
+}
+
+/**
+ * A styling list ("no tote, no coffee cup, no sunglasses") without the entries that
+ * exclude a requested prop. Only whole comma/semicolon entries that start with a negation
+ * are dropped; every other entry is kept verbatim.
+ */
+export function withoutNegatedRequestedProps(text: unknown, requested: Pick<RequestedHandheldProps, "groups">): string {
+  const value = String(text ?? "");
+  if (!requested.groups.length) return value;
+  // An optional lead-in ("none - no tote") survives on the next kept entry.
+  const negated = new RegExp(`^(\\s*(?:none\\s*[-:]\\s*)?)(?:-\\s*)?(?:no|never|without)\\s+(?:[a-z-]+\\s+){0,2}(?:${requestedPropWords(requested.groups)})\\b`, "i");
+  const parts = value.split(/([,;])/);
+  const kept: string[] = [];
+  // The separator before the first dropped entry of a run is the one the next kept entry inherits.
+  let pendingSeparator: string | undefined;
+  let leadIn = "";
+  for (let index = 0; index < parts.length; index += 2) {
+    const separator = parts[index - 1];
+    const dropped = parts[index].match(negated);
+    if (dropped) {
+      pendingSeparator ??= separator;
+      leadIn ||= dropped[1].trim() ? `${dropped[1].trim()} ` : "";
+      continue;
+    }
+    const entry = leadIn ? `${kept.length ? " " : ""}${leadIn}${parts[index].trimStart()}` : parts[index];
+    kept.push(kept.length ? `${pendingSeparator ?? separator ?? ","}${entry}` : entry.trimStart());
+    pendingSeparator = undefined;
+    leadIn = "";
+  }
+  return (kept.join("") || leadIn).trim();
 }
 
 export function sanitizeHeldObjectText(value: unknown, replacement: string, allowNotes = ""): string {
@@ -2061,7 +2139,7 @@ ${JSON.stringify({
   ].filter(Boolean).join(" ");
   const hasExplicitFarshiNotes = /\b(?:farshi|farsi|fasi)\b/i.test(positiveNotes);
   const isFarshiSku = hasExplicitFarshiNotes;
-  return `You are the visual merchandiser and shoot planner for a fashion e-commerce studio.
+  const analysisPrompt = `You are the visual merchandiser and shoot planner for a fashion e-commerce studio.
 
 Analyze EVERY supplied image before answering.
 ${manifest}
@@ -2084,10 +2162,10 @@ First, determine the garmentFamily from the references: "kurta_or_kurti_set", "s
 SKU: ${args.skuName}
 Declared category: ${args.category}
 User product notes: ${args.productDetails}${(() => {
-  const props = requestedHandheldProps(`${args.skuName} ${args.productDetails}`);
+  const props = requestedHandheldProps(args.productDetails);
   return props.groups.length
     ? `
-PROPS REQUESTED IN THE PRODUCT NOTES: "${props.note}". The user wants ${props.labels.join(" and ")} carried over from the STYLE REFERENCE. Name them in stylingPlan.ornaments as that image shows them, plan handPlacement so a visible hand holds or carries them in every frame except the Pose 5 craft crop, and never write "no ${props.groups[0]}" or exclude them. All other handheld objects stay excluded.`
+PROPS REQUESTED IN THE PRODUCT NOTES: "${props.note}". The user wants ${props.labels.join(" and ")} carried over from the STYLE REFERENCE. Name them in stylingPlan.ornaments as that image shows them, plan handPlacement so a visible hand holds or carries them in every frame except the Pose 5 craft crop, and never exclude them anywhere in the plan. All other handheld objects stay excluded.`
     : "";
 })()}
 Requested model direction: ${args.modelDirection || "one consistent professional adult fashion model"}
@@ -2256,6 +2334,8 @@ REFERENCE IMAGE SCOPE: ${hasExplicitModelRef || useStyleAsModelFace ? "Model fac
 
 Return STRICT JSON only:
 {"productIdentity":{"garmentFamily":"","category":"","mainColor":"","secondaryColors":[],"fabric":"","pattern":"","print":"","patternGeometry":{"type":"","scale":"","orientation":"","density":"","repeat":"","placementByPanel":[],"accentColors":[],"motifInventory":[]},"embroideryGeometry":{"placement":"","geometry":"","motifStructure":"","scaleRelativeToGarment":"","colorsAndMaterial":"","borders":"","necklineRelation":""},"texture":"","neckline":"","sleeveType":"","length":"","fit":"","silhouette":"","frontConstruction":"","backConstruction":"","buttons":"","zippers":"","pockets":"","embroidery":"","logos":"","accessoriesIncluded":"","bottomWearDetails":"","footwearDetails":"","detailPlacementMap":[],"absenceConstraints":[],"invariantDetails":[],"uncertaintyNotes":[],"garmentEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeTruth":{"body":{"mainFabric":"","weave":"","weaveGeometry":"","texture":"","transparency":"","shine":"","baseColor":"","secondaryColors":[],"pattern":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","motifPlacement":"","embellishment":"","bodyOrientation":""},"borders":{"upperBorder":"","lowerBorder":"","borderWidth":"","upperBorderWidth":"","lowerBorderWidth":"","borderColors":"","construction":"","motifGeometry":"","edgeTreatment":"","continuityRules":"","tasselColor":"","tasselConstruction":"","tasselSpacing":""},"pallu":{"hasDistinctPallu":false,"startingRegion":"","baseColor":"","motifInventory":[],"motifScale":"","motifOrientation":"","motifRepeat":"","motifDensity":"","borders":"","artwork":"","zari":"","embroidery":"","tassels":"","edgeTreatment":"","visualOrientation":"","evidenceReferences":"","uncertainty":""},"pleatZone":{"patternBehavior":"","borderBehavior":"","embellishmentBehavior":"","hasSpecialPanel":false},"blouse":{"hasBlouse":false,"color":"","fabric":"","frontConstruction":"","backConstruction":"","neckline":"","sleeves":"","ties":"","closure":"","embroidery":"","border":"","pattern":"","fit":"","isUnstitchedPiece":false},"physics":{"weight":"","stiffness":"","fluidity":"","transparency":"","shine":"","creaseBehavior":"","expectedFall":""},"regionEvidence":[{"region":"","state":"unknown","visibleConstruction":"","visibleDecoration":"","closures":"","explicitlyAbsent":[],"uncertainty":""}]},"sareeDrapePlan":{"baseDrapeFamily":"","shoulderSide":"","waistTuck":"","frontPleatTreatment":"","palluShoulderPlacement":"","openOrPleatedPallu":"","palluSpread":"","palluFallDirection":"","palluVisibleLength":"","handInteraction":"","movementAmount":"","pinningBehavior":"","borderVisibility":"","blouseVisibility":"","coverageConstraints":"","poseSpecificDrapeState":""},"creativeDirection":{"backgroundStyle":"","studioEnvironment":"","lighting":"","cameraPerspective":"","composition":"","framing":"","mood":"","colorTreatment":"","modelStyling":"","photographyStyle":"","propUsage":"","shadowStyle":"","editorialCommercialFeel":"","lensAndCamera":"","setContinuity":"","realismRules":"","suggestedAccessories":"","seatedPoseRequired":"no","seatedPoseReason":"","closeupMode":"face_and_detail","closeupHeroDetail":""},"showcasePlan":{"heroFeature":"","featureRegion":"","shotType":"","whyItSells":"","evidenceReference":"","framing":"","cameraAngle":"","bodyPosition":"","handPlacement":"","expression":"","distinctFrom":"","visibilityRules":[]},"referencePose":{"posture":"standing|seated|leaning|kneeling|crouching|reclining|walking|other|none","description":"body position only (torso, legs, arms, head) — no clothing, face, jewellery, props","seatOrSupport":"what the body rests on, or ''","distinctiveness":"generic|signature","signatureDescription":"what makes it unusual, '' if generic","attitude":"the reference person's attitude as a style cue","suitableForProduct":"yes|no","suitabilityReason":"short reason"},"expressionPlan":{"attitude":"...","energy":"serene|calm|warm|playful|confident|dramatic","gaze":"...","smile":"none|soft|warm|open","rationale":"why this suits both the style reference and the product"},"modelIdentity":{"castingDirection":"","face":"","faceRealism":"","hair":"","makeup":"","bodyProportions":"","stylingLock":""},"stylingPlan":{"footwear":"","jewellery":"","ornaments":"","makeup":"","hair":"","stylingNotes":"","themeInterpretation":""},"posePlan":[{"id":"full_front","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"angled","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"back","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"creative","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"closeup","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""},{"id":"showcase","title":"","description":"","cameraAngle":"","framing":"","bodyPosition":"","handPlacement":"","expression":"","highlightedDetails":[],"productVisibilityRules":[],"purpose":"","consistencyNotes":"","prompt":""}]}  `;
+  // Props the notes ask for narrow the fixed no-props phrasings here too.
+  return withRequestedPropsAllowed(analysisPrompt, requestedHandheldProps(args.productDetails));
 }
 
 export const CONSISTENCY_RULES = [

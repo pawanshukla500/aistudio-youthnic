@@ -19,6 +19,7 @@ import {
   sanitizeHeldObjectText,
   sanitizePoseDirectionForAspectRatio,
   stripGroundedFeetForCroppedFrame,
+  withoutNegatedRequestedProps,
   withRequestedPropsAllowed,
 } from "./profiles.ts";
 import {
@@ -975,10 +976,10 @@ function referenceImageScopeDirective(hasModelReference: boolean, useStyleAsMode
  * Uncompacted tail block for props the product notes ask for (requestedHandheldProps).
  * Empty when nothing is requested, so every other shoot keeps its no-props rules.
  */
-export function requestedPropsBlock(props: RequestedHandheldProps, poseId: string): string {
+export function requestedPropsBlock(props: RequestedHandheldProps, poseId: string, tightCrop = poseId === "closeup"): string {
   if (!props.groups.length) return "";
-  if (poseId === "closeup") {
-    return `REQUESTED PROPS (FROM THE PRODUCT NOTES): "${props.note}". This Pose 5 craft crop keeps every prop out of frame so the craft detail stays clear.`;
+  if (tightCrop) {
+    return `REQUESTED PROPS (FROM THE PRODUCT NOTES): "${props.note}". This tight detail crop keeps every prop out of frame so the garment detail stays clear.`;
   }
   const back = poseId === "back";
   const holds = [
@@ -986,9 +987,11 @@ export function requestedPropsBlock(props: RequestedHandheldProps, poseId: strin
     props.groups.includes("bag")
       ? back ? "the bag hangs from one shoulder or forearm at the side" : "the bag hangs from the opposite shoulder or forearm, as the STYLE REFERENCE carries it"
       : "",
-    props.groups.some((group) => group !== "drink" && group !== "bag") ? "any other requested prop is held as the STYLE REFERENCE shows it" : "",
+    props.groups.some((group) => group !== "drink" && group !== "bag")
+      ? "any other requested prop is worn or carried with these (sunglasses on the head or eyes, others in the same hand or hung with the bag) - never a third hand"
+      : "",
   ].filter(Boolean).join("; ");
-  return `REQUESTED PROPS (FROM THE PRODUCT NOTES - CARRY THEM OVER): "${props.note}". Carry over ${props.labels.join(" and ")} exactly as the STYLE REFERENCE shows them (same object, shape, colour, material and size), identical in every frame: ${holds}. ${back
+  return `REQUESTED PROPS (FROM THE PRODUCT NOTES - CARRY THEM OVER): "${props.note}". Carry over ${props.labels.join(" and ")} exactly as the STYLE REFERENCE shows them (same object, shape, colour, material and size; a prop that is part of the product follows the product photos), identical in every frame: ${holds}. ${back
     ? "From behind they stay at the sides and must not cover the back neckline, the stripes or print, the side slits or the hem."
     : "They must not cover the neckline, the embroidery or print, the side slits, the hem or the bottom-wear construction."} Each prop is held by a visible hand joined to its forearm or hangs from a shoulder or forearm - exactly two arms and two hands. This request overrides the general no-props rules for these props only; every other handheld object stays excluded.`;
 }
@@ -1009,12 +1012,15 @@ export function rearViewChecklist(productIdentity: unknown, includesBottomWear: 
   const product = objectValue(productIdentity);
   const fact = (value: unknown, max = 220) => boundedText(String(value ?? "").replace(/\s+/g, " "), max);
   const orientation = objectValue(product.patternGeometry).orientation;
+  // Only real side-slit entries: a front placket slit is front-only and "no side slits" is not a slit.
   const slits = (Array.isArray(product.detailPlacementMap) ? product.detailPlacementMap : [])
     .map((entry) => String(entry ?? ""))
-    .filter((entry) => /\bslits?\b/i.test(entry))
+    .filter((entry) => /\bside[- ]slits?\b/i.test(entry) && !/\b(?:no|without|not|none)\b/i.test(entry))
     .slice(0, 2);
+  // A high-low or asymmetric hem must not be told to sit level with the front.
+  const unevenHem = /\bhigh[- ]low\b|\basymmetr|\blonger\b|\bshorter\b|\bdip(?:ped)?\b|\btrail/i.test(String(product.length ?? ""));
   const lines = [
-    product.length ? `- Length and hem: ${fact(product.length)}; the back hem sits at the same height as the front hem.` : "",
+    product.length ? `- Length and hem: ${fact(product.length)}${unevenHem ? "." : "; the back hem sits at the same height as the front hem."}` : "",
     product.backConstruction ? `- Back panel: ${fact(product.backConstruction)}.` : "",
     orientation ? `- Print or stripe direction: ${fact(orientation, 160)}, running the same way as in the BACK PRODUCT image.` : "",
     slits.length ? `- Side slits: ${slits.map((entry) => fact(entry, 160)).join("; ")}. Seen from behind at both side seams, at the same height as the front.` : "",
@@ -1408,7 +1414,7 @@ export function composeGenerationPrompt(args: {
   const useStyleModelIdentity = !hasModelReference && hasStyleReference && Boolean(args.useStyleReferenceAsModelIdentity);
   const referencePoseNumbers = [adoptedSlots.creative ? 4 : 0, adoptedSlots.showcase ? 6 : 0].filter(Boolean);
   const manifest = promptReferences.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role, { useStyleAsModelFace: useStyleModelIdentity, hasModelReference, hasApprovedAnchor, referencePoseNumbers })}`).join("\n");
-  const requestedProps = requestedHandheldProps(`${args.skuName ?? ""} ${args.productDetails ?? ""}`);
+  const requestedProps = requestedHandheldProps(args.productDetails);
   const identityImageNumber = promptReferences.findIndex((reference) => reference.role === (hasModelReference ? "model_identity" : "style_reference")) + 1;
   const identityLine = (hasModelReference || useStyleModelIdentity) && identityImageNumber > 0
     ? identityCheckLine(identityImageNumber, hasModelReference ? "MODEL FACE REFERENCE" : "the photo uploaded as both MODEL FACE REFERENCE and STYLE REFERENCE", isTrueBack)
@@ -1735,7 +1741,7 @@ ${creativeJson}
 ${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in every frame:
 - Footwear: ${boundedText(poseInstructionText(styling.footwear, poseScrub, ""), 360)}
 - Jewellery: ${boundedText(poseInstructionText(styling.jewellery, poseScrub, ""), 360)}
-- Ornaments and accessories: ${boundedText(poseInstructionText(styling.ornaments, poseScrub, ""), 360)}
+- Ornaments and accessories: ${boundedText(requestedProps.groups.length ? (withoutNegatedRequestedProps(styling.ornaments, requestedProps) || "none besides the requested props") : poseInstructionText(styling.ornaments, poseScrub, ""), 360)}
 - Makeup: ${boundedText(poseInstructionText(styling.makeup, poseScrub, ""), 360)}
 - Hair: ${boundedText(poseInstructionText(styling.hair, poseScrub, ""), 360)}
 ${stylingNotes ? `- Stylist notes: ${boundedText(stylingNotes, 600)}` : ""}
@@ -1834,9 +1840,10 @@ Product accuracy is more important than style matching.${
 ${isCloseup ? `${pose5HardRule({ closeupMode, heroDetail: closeupHeroDetail, expression: plannedExpression })}
 ` : ""}${isShowcase ? `${pose6HardRule({ showcaseShot, showcaseIntent, poseFamily, closeupHeroDetail: recordedCloseupHeroDetail, expression: plannedExpression, referencePosture: referenceSlot?.posture })}
 ` : ""}${[
-    identityLine,
+    // A faceless crop gets no face reminder: it must not pull a face into the craft detail.
+    faceRequired || isTrueBack ? identityLine : "",
     isTrueBack && !isSaree ? rearViewChecklist(product, bottomWear.includesBottomWear) : "",
-    requestedPropsBlock(requestedProps, args.pose.id),
+    requestedPropsBlock(requestedProps, args.pose.id, isCloseup || isMacroShowcase),
   ].filter(Boolean).map((block) => `${block}\n`).join("")}Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
 
   // Props the notes ask for narrow every generic no-props line before compaction measures the prompt.

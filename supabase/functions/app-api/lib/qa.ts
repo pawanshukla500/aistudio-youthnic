@@ -282,7 +282,7 @@ export function buildPoseQaPrompt(args: {
   const requestedPropsRule = requestedProps?.groups.length
     ? args.poseType === "closeup"
       ? `REQUESTED PROPS: the product notes ask for ${requestedProps.labels.join(" and ")} ("${requestedProps.note}"), but this Pose 5 craft crop keeps props out of frame. Fail pose_requirement only when a prop hides the craft detail.`
-      : `REQUESTED PROPS: the product notes ask for ${requestedProps.labels.join(" and ")} ("${requestedProps.note}"), carried over from the STYLE REFERENCE. Fail pose_requirement when a requested prop is missing${args.poseType === "back" ? " (in this back view a prop the body hides from behind is acceptable)" : ""}, does not match the STYLE REFERENCE object, is held by a hand not joined to a visible forearm, or covers the neckline, embroidery or print, side slits, hem or bottom-wear construction. Do not fail it for carrying the requested props.`
+      : `REQUESTED PROPS: the product notes ask for ${requestedProps.labels.join(" and ")} ("${requestedProps.note}"), carried over from the STYLE REFERENCE. Fail pose_requirement when a requested prop is missing${args.poseType === "back" ? " (in this back view a prop the body hides from behind is acceptable)" : args.poseType === "showcase" ? " (a tight detail crop that leaves the props out of frame is acceptable)" : ""}, does not match the STYLE REFERENCE object, is held by a hand not joined to a visible forearm, or covers the neckline, embroidery or print, side slits, hem or bottom-wear construction. Do not fail it for carrying the requested props.`
     : "";
   const prompt = `You are a strict fashion e-commerce consistency validator.
 
