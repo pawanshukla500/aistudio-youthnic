@@ -4948,7 +4948,7 @@ async function loadStudioSession(request: Request, args: JsonRecord) {
   const sessionId = String(args.sessionId || "").trim();
   if (!sessionId) throw new Error("Session not found.");
   const { data: session, error } = await service.from("catalog_sessions")
-    .select("session_id,analysis_fingerprint,product_hash,reference_hash,session_data")
+    .select("session_id,planning_request_id,analysis_fingerprint,product_hash,reference_hash,session_data")
     .eq("session_id", sessionId).eq("organization_id", workspace.organization.id).maybeSingle();
   if (error) throw new Error(error.message);
   if (!session) throw new Error("Session not found or belongs to another organization.");
@@ -4961,7 +4961,8 @@ async function loadStudioSession(request: Request, args: JsonRecord) {
   const analysisVersion = String(data.analysisVersion || "");
   return {
     sessionId: session.session_id,
-    skuId: String(data.skuId || ""),
+    // cloneJob stores its new planning request id as skuId; that internal id is not a SKU code to show.
+    skuId: String(data.skuId || "") === String(session.planning_request_id || "") ? "" : String(data.skuId || ""),
     skuName: String(data.skuName || ""),
     productDetails: String(data.productDetails || ""),
     category: String(data.category || "ethnic/fusion"),

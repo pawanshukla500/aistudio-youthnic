@@ -279,6 +279,9 @@ Deno.test("Clone Session opens in the Studio with its references and analysis in
   assert(body.includes('.eq("session_id", sessionId).eq("organization_id", workspace.organization.id).maybeSingle();'));
   assert(body.includes("analysisCurrent: analysisVersion === ANALYSIS_VERSION,"));
   assert(body.includes("analysisFingerprint: String(session.analysis_fingerprint || \"\"),"));
+  // A clone's skuId is its planning request id, never shown as a SKU code.
+  assert(body.includes('.select("session_id,planning_request_id,analysis_fingerprint,product_hash,reference_hash,session_data")'));
+  assert(body.includes('skuId: String(data.skuId || "") === String(session.planning_request_id || "") ? "" : String(data.skuId || ""),'));
   const studio = Deno.readTextFileSync(new URL("../../../../src/features/studio/Studio.tsx", import.meta.url)).replace(/\r\n/g, "\n");
   assert(studio.includes('const sessionParam = searchParams.get("session") || "";'));
   assert(studio.includes('invokeAppApi<LoadedStudioSession>("studio.loadSession", { sessionId: sessionParam })'));
