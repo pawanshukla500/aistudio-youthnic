@@ -1815,6 +1815,9 @@ const GENERIC_PROP_BANS: ReadonlyArray<[RegExp, string]> = [
   [/(?<!unrequested )\bhandheld (props|objects)\b/g, "unrequested handheld $1"],
 ];
 
+// What may trail a bare prop that continues a negated list: nothing, or a qualifier of the whole list.
+const NEGATED_LIST_QUALIFIER = /^(?:\s+(?:is|are))?(?:\s+(?:included|provided|supplied|copied|added|allowed))?(?:\s+(?:with|in|from|by)\s+(?:the\s+)?(?:sku|product|set|style\s+reference|reference))?\s*$/i;
+
 /** Prompt text with the fixed no-props phrasings narrowed to unrequested props. Unchanged when nothing is requested. */
 export function withRequestedPropsAllowed(text: string, requested: Pick<RequestedHandheldProps, "groups">): string {
   if (!requested.groups.length) return text;
@@ -1825,29 +1828,55 @@ export function withRequestedPropsAllowed(text: string, requested: Pick<Requeste
 
 /**
  * A styling list ("no tote, no coffee cup, no sunglasses") without the entries that
- * exclude a requested prop. Only whole comma/semicolon entries that start with a negation
- * are dropped; every other entry is kept verbatim.
+ * exclude a requested prop. Whole comma/semicolon entries that start with a negation are
+ * dropped, and so is a bare prop that continues a negated comma list ("no dupatta, belt, bag
+ * included with SKU"): it must follow a kept short entry of that list directly, and only a
+ * list-level qualifier ("included with SKU") may trail it, which moves to the entry before.
+ * A prop with a placement ("tote bag on shoulder") is never a continuation. Every other
+ * entry is kept verbatim.
  */
 export function withoutNegatedRequestedProps(text: unknown, requested: Pick<RequestedHandheldProps, "groups">): string {
   const value = String(text ?? "");
   if (!requested.groups.length) return value;
+  const words = requestedPropWords(requested.groups);
   // An optional lead-in ("none - no tote") survives on the next kept entry.
-  const negated = new RegExp(`^(\\s*(?:none\\s*[-:]\\s*)?)(?:-\\s*)?(?:no|never|without)\\s+(?:[a-z-]+\\s+){0,2}(?:${requestedPropWords(requested.groups)})\\b`, "i");
+  const negated = new RegExp(`^(\\s*(?:none\\s*[-:]\\s*)?)(?:-\\s*)?(?:no|never|without)\\s+(?:[a-z-]+\\s+){0,2}(?:${words})\\b`, "i");
+  const startsNegated = /^\s*(?:none\s*[-:]\s*)?(?:-\s*)?(?:no|never|without)\b/i;
+  const listedProp = new RegExp(`^\\s*(?:(?:a|an|the|any)\\s+)?(?:${words})(?:\\s+(?:${words}))*\\b(.*)$`, "i");
   const parts = value.split(/([,;])/);
   const kept: string[] = [];
-  // The separator before the first dropped entry of a run is the one the next kept entry inherits.
+  // The separator before the first dropped entry of a run is the one the next kept entry inherits; ";" outranks ",".
   let pendingSeparator: string | undefined;
   let leadIn = "";
+  let negatedList = false;
+  let afterNegatedDrop = false;
   for (let index = 0; index < parts.length; index += 2) {
     const separator = parts[index - 1];
-    const dropped = parts[index].match(negated);
+    if (separator === ";") negatedList = false;
+    const negation = parts[index].match(negated);
+    // "no bag-style pocket" or "no coffee brown tones" constrains the garment, not the prop ("no bag of any kind" stays a prop).
+    const tail = negation ? parts[index].slice(negation[0].length) : "";
+    const dropped = negation && !(PROP_AS_DESCRIPTOR.test(tail) && !/^\s*of\b/i.test(tail)) ? negation : null;
     if (dropped) {
-      pendingSeparator ??= separator;
+      pendingSeparator = pendingSeparator === ";" || separator === ";" ? ";" : pendingSeparator ?? separator;
       leadIn ||= dropped[1].trim() ? `${dropped[1].trim()} ` : "";
+      negatedList = true;
+      afterNegatedDrop = true;
       continue;
     }
+    const listed = negatedList && !afterNegatedDrop && separator === "," && kept.length ? parts[index].match(listedProp) : null;
+    if (listed && NEGATED_LIST_QUALIFIER.test(listed[1])) {
+      const rest = listed[1].trimEnd();
+      if (rest) kept[kept.length - 1] = `${kept[kept.length - 1].trimEnd()}${rest}`;
+      continue;
+    }
+    afterNegatedDrop = false;
+    // A kept positive entry longer than a bare item ("silver bangles on wrist") ends the negated list.
+    if (startsNegated.test(parts[index])) negatedList = true;
+    else if (parts[index].trim().split(/\s+/).length > 3) negatedList = false;
     const entry = leadIn ? `${kept.length ? " " : ""}${leadIn}${parts[index].trimStart()}` : parts[index];
-    kept.push(kept.length ? `${pendingSeparator ?? separator ?? ","}${entry}` : entry.trimStart());
+    const joiner = pendingSeparator === ";" || separator === ";" ? ";" : pendingSeparator ?? separator ?? ",";
+    kept.push(kept.length ? `${joiner}${entry}` : entry.trimStart());
     pendingSeparator = undefined;
     leadIn = "";
   }

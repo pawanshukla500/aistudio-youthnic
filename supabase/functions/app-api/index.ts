@@ -3303,6 +3303,7 @@ async function nextJob(args: JsonRecord) {
 async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonRecord[]) {
   const completed = poses.filter((pose) => pose.status === "completed").length;
   const failed = poses.filter((pose) => pose.status === "failed").length;
+  const cancelledPoses = poses.filter((pose) => pose.status === "failed" && String(pose.error || "") === "Generation cancelled by the user.").length;
   // A complete pose-set delivery is an operational result, not fidelity
   // evidence. In particular, Gemini outages intentionally leave paid images
   // unverified. Keep that distinction in the immutable observation ledger so
@@ -3324,7 +3325,11 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   const failureCode = promptBudgetFailure ? "prompt_budget_exceeded" : String(job.error_code || "pose_consistency_failed");
   const failureSummary = promptBudgetFailure
     ? `Pose ${Number(firstFailure?.pose_index || 1)} was blocked before image generation: ${firstFailureMessage}`.slice(0, 1000)
-    : `${failed} of ${poses.length} pose(s) exhausted automatic generation/QA retries${completed ? `; ${completed} pose(s) passed and can be downloaded or regenerated individually` : ""}.`;
+    : `${[
+      // A pose left failed by an earlier cancellation never ran out of retries; say which it was.
+      failed - cancelledPoses ? `${failed - cancelledPoses} of ${poses.length} pose(s) exhausted automatic generation/QA retries` : "",
+      cancelledPoses ? `${cancelledPoses} pose(s) were cancelled before they finished` : "",
+    ].filter(Boolean).join("; ")}${completed ? `; ${completed} pose(s) passed and can be downloaded or regenerated individually` : ""}.`;
   const readinessReason = promptBudgetFailure
     ? "A prompt compilation safeguard blocked the provider request before image generation."
     : `${failed} pose(s) failed consistency validation.`;
@@ -3673,7 +3678,19 @@ async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRe
     return;
   }
   if (remaining.length) {
-    await service.from("session_generations").update({ status: "failed", qa_status: "failed", error: "Skipped because pose 1 is the identity anchor for the set and could not be produced.", updated_at: now }).eq("session_id", job.session_id).eq("status", "queued");
+    const skipped = "Skipped because pose 1 is the identity anchor for the set and could not be produced.";
+    await Promise.all(remaining.map((entry) => {
+      const history = Array.isArray(entry.regeneration_history) ? entry.regeneration_history as JsonRecord[] : [];
+      const last = (history[history.length - 1] || {}) as JsonRecord;
+      // A regeneration that never ran goes back to the version it would have replaced, in its earlier state.
+      const restore = Boolean(entry.output_url || entry.storage_path) && ["completed", "requires_human_review"].includes(String(last.previousStatus || ""));
+      return service.from("session_generations").update(restore
+        ? {
+          status: String(last.previousStatus), qa_status: String(last.previousQaStatus || "pending"), error: "",
+          regeneration_history: [...history.slice(0, -1), { ...last, skipped: true, skippedReason: skipped }], updated_at: now,
+        }
+        : { status: "failed", qa_status: "failed", error: skipped, updated_at: now }).eq("generation_id", entry.generation_id).eq("status", "queued");
+    }));
   }
   const { data: finalPoses, error: finalPosesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
   if (finalPosesError) console.error(finalPosesError.message);
@@ -5161,12 +5178,25 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
     && !workspace.permissions.includes("planning.generate_images")) {
     throw new Error("Permission required: planning.approve or planning.generate_images");
   }
-  const generationId = String(args.poseId || args.generationId || "");
-  const { data: pose, error: poseError } = await service.from("session_generations").select("*").eq("generation_id", generationId).single();
+  // A batch (poseIds) is queued in one request: the worker runs queued poses in pose order,
+  // so a regenerated Pose 1 finishes and anchors the rest without the browser staying open.
+  const generationIds = Array.isArray(args.poseIds)
+    ? [...new Set(args.poseIds.map((id) => String(id || "").trim()).filter(Boolean))]
+    : [String(args.poseId || args.generationId || "")];
+  if (!generationIds.length || !generationIds[0]) throw new Error("Pose not found.");
+  if (generationIds.length > 12) throw new Error("Select at most 12 poses to regenerate at once.");
+  const { data: poseRows, error: poseError } = await service.from("session_generations").select("*").in("generation_id", generationIds);
   if (poseError) throw new Error(poseError.message);
-  if (!pose) throw new Error("Pose not found.");
-  const job = await jobForPose(pose as JsonRecord, workspace.organization.id);
+  const poses = (poseRows || []) as JsonRecord[];
+  if (poses.length !== generationIds.length) throw new Error("Pose not found.");
+  const pose = poses[0];
+  if (poses.some((entry) => entry.session_id !== pose.session_id)) throw new Error("Regenerate poses from one photoshoot at a time.");
+  const job = await jobForPose(pose, workspace.organization.id);
   if (!job) throw new Error("Generation job not found.");
+  // A session can hold rows from several runs; every pose must belong to the job checked and billed here.
+  if (scopePoseRowsToJob(poses as PoseRowLike[], String(job.job_id)).length !== poses.length) {
+    throw new Error("Regenerate poses from one photoshoot run at a time.");
+  }
   const { data: activeJobs, error: activeJobsError } = await service.from("generation_jobs").select("job_id")
     .eq("session_id", pose.session_id).eq("org_id", workspace.organization.id).in("status", ["queued", "processing", "cancelling"]).limit(1);
   if (activeJobsError) throw new Error(activeJobsError.message);
@@ -5174,38 +5204,40 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
   if (!workspace.isAdmin && job.user_id !== workspace.user.firebaseUid && !options.allowManagedCatalog) throw new Error("You can regenerate only your own generation jobs.");
   const extraInstructions = String(args.extraInstructions || "").trim();
   if (extraInstructions.length > 1000) throw new Error("Regeneration instructions must be 1,000 characters or fewer.");
-  const history = Array.isArray(pose.regeneration_history) ? pose.regeneration_history as JsonRecord[] : [];
-  const previousOutputRetained = Boolean(pose.output_url || pose.storage_path);
-  const poseGenerationData = (pose.generation_data || {}) as JsonRecord;
   const regenerationRequestedAt = new Date().toISOString();
-  await recordShowcaseFeatureOutcome(service, {
+  await Promise.all(poses.map((entry) => recordShowcaseFeatureOutcome(service, {
     organizationId: workspace.organization.id,
-    sessionId: String(pose.session_id || ""),
-    poseIndex: Number(pose.pose_index),
-    poseType: String(pose.pose_type || ""),
+    sessionId: String(entry.session_id || ""),
+    poseIndex: Number(entry.pose_index),
+    poseType: String(entry.pose_type || ""),
     outcome: "regenerated",
-  });
-  const regenerationResults = await Promise.all([
-    service.from("session_generations").update({
+  })));
+  const queuePose = (entry: JsonRecord) => {
+    const history = Array.isArray(entry.regeneration_history) ? entry.regeneration_history as JsonRecord[] : [];
+    const previousOutputRetained = Boolean(entry.output_url || entry.storage_path);
+    return service.from("session_generations").update({
       status: "queued", attempt_count: 0, qa_status: "pending", error: "",
       // Never clear paid output before the replacement has actually been
       // generated and stored. A failed preflight must leave the prior version
       // visible and downloadable for human review.
-      generation_epoch: Math.max(1, Number(pose.generation_epoch || 1)) + 1,
+      generation_epoch: Math.max(1, Number(entry.generation_epoch || 1)) + 1,
       regeneration_instructions: extraInstructions,
       regeneration_history: [...history, {
         instructions: extraInstructions,
-        previousOutputUrl: pose.output_url || "",
-        previousStoragePath: pose.storage_path || "",
-        previousStorageBackend: pose.storage_backend || "firebase",
+        previousOutputUrl: entry.output_url || "",
+        previousStoragePath: entry.storage_path || "",
+        previousStorageBackend: entry.storage_backend || "firebase",
         requestedAt: regenerationRequestedAt,
         requestedByMemberId: workspace.member.id,
         previousOutputRetained,
-        previousApprovalStatus: String(pose.approval_status || "pending"),
-        previousGenerationEpoch: Math.max(1, Number(pose.generation_epoch || 1)),
+        previousApprovalStatus: String(entry.approval_status || "pending"),
+        previousGenerationEpoch: Math.max(1, Number(entry.generation_epoch || 1)),
+        // Restored if this run is skipped because Pose 1 could not be produced.
+        previousStatus: String(entry.status || ""),
+        previousQaStatus: String(entry.qa_status || ""),
       }],
       generation_data: {
-        ...poseGenerationData,
+        ...((entry.generation_data || {}) as JsonRecord),
         previousOutputRetained,
         regenerationQueuedAt: regenerationRequestedAt,
         // The dialog's "Run Gemini consistency QA" checkbox. It checks this
@@ -5213,24 +5245,28 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
         poseQaRequested: args.poseQa === true,
       },
       updated_at: regenerationRequestedAt,
-    }).eq("generation_id", generationId),
+    }).eq("generation_id", String(entry.generation_id));
+  };
+  const countStatus = (status: string) => poses.filter((entry) => entry.status === status).length;
+  const regenerationResults = await Promise.all([
+    ...poses.map(queuePose),
     service.from("generation_jobs").update({
       status: "queued", readiness_status: "ready", readiness_reasons: [], attempt_count: 0,
-      completed_poses: Math.max(0, Number(job.completed_poses || 0) - (pose.status === "completed" ? 1 : 0)),
-      failed_poses: Math.max(0, Number(job.failed_poses || 0) - (pose.status === "failed" ? 1 : 0)),
+      completed_poses: Math.max(0, Number(job.completed_poses || 0) - countStatus("completed")),
+      failed_poses: Math.max(0, Number(job.failed_poses || 0) - countStatus("failed")),
       current_pose: null, available_at: regenerationRequestedAt, error_code: "", error_message: "", completed_at: null,
       lock_expires_at: null, locked_at: null, updated_at: regenerationRequestedAt,
     }).eq("job_id", job.job_id),
     service.from("catalog_sessions").update({ status: "generating", updated_at: regenerationRequestedAt }).eq("session_id", pose.session_id),
-    service.from("audit_logs").insert({
+    service.from("audit_logs").insert(poses.map((entry) => ({
       organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
-      action: "generation.pose.regenerated", resource_type: "session_generation", resource_id: generationId,
-      metadata: { jobId: job.job_id, poseIndex: pose.pose_index, extraInstructions },
-    }),
+      action: "generation.pose.regenerated", resource_type: "session_generation", resource_id: String(entry.generation_id),
+      metadata: { jobId: job.job_id, poseIndex: entry.pose_index, extraInstructions, ...(poses.length > 1 ? { batchSize: poses.length } : {}) },
+    }))),
   ]);
   assertSupabaseResults(regenerationResults, "Could not queue the pose re-generation");
   scheduleBackground(kickWorker());
-  return { success: true };
+  return { success: true, queued: poses.length };
 }
 
 async function syncCatalogAnchorQa(

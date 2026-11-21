@@ -188,6 +188,8 @@ export function buildPoseVersions(
 ): PoseVersion[] {
   const requests = (Array.isArray(regenerationHistory) ? regenerationHistory : [])
     .map((entry) => record(entry))
+    // A run skipped because Pose 1 could not be produced never answered with a version.
+    .filter((entry) => entry.skipped !== true)
     .map((entry) => ({ requestedAt: isoOrEmpty(entry.requestedAt), instructions: String(entry.instructions || "") }))
     .filter((entry) => entry.requestedAt)
     .sort((left, right) => Date.parse(left.requestedAt) - Date.parse(right.requestedAt));

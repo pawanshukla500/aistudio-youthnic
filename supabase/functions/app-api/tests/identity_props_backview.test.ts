@@ -58,8 +58,8 @@ Deno.test("withRequestedPropsAllowed narrows only the fixed ban phrases and neve
   const out = withRequestedPropsAllowed(text, props);
   assertEquals(out, "Never copy unrequested handheld props (any prop the product notes did not request). No flowers on the back panel; no padded cups. Never let the bag strap cross the yoke.");
   assertEquals(withRequestedPropsAllowed(text, { groups: [] }), text);
-  // Styling lists drop only whole entries that exclude a requested prop.
-  assertEquals(withoutNegatedRequestedProps("none - no dupatta, stole, bag included with SKU; no tote, no coffee cup, no sunglasses", props), "none - no dupatta, stole, bag included with SKU; no sunglasses");
+  // Styling lists drop only the entries that exclude a requested prop, including a bare prop inside a negated list.
+  assertEquals(withoutNegatedRequestedProps("none - no dupatta, stole, bag included with SKU; no tote, no coffee cup, no sunglasses", props), "none - no dupatta, stole included with SKU; no sunglasses");
   assertEquals(withoutNegatedRequestedProps("no tote, no coffee cup", { groups: [] }), "no tote, no coffee cup");
 });
 
@@ -293,4 +293,59 @@ Deno.test("the rear checklist keeps high-low hems uneven and takes only real sid
   assert(!checklist.includes("same height as the front hem"));
   assert(!checklist.includes("Side slits"));
   assertEquals(rearViewChecklist({}, false), "");
+});
+
+Deno.test("requested props never push the prompt into the emergency cut that drops ALLOWED DELTA", () => {
+  // The props rewrite changes the SET ONLY line, which compaction must still find.
+  const session = {
+    ...SESSION,
+    creativeDirection: { ...SESSION.creativeDirection, mood: "relaxed cafe date ".repeat(120), composition: "centered full model ".repeat(120) },
+  };
+  const notes = `${"Beige pinstripe kurti, red butti, notch neckline, high side slits. ".repeat(60)}${PROP_NOTE}`;
+  for (const id of ["full_front", "angled", "back", "showcase"]) {
+    const prompt = composeGenerationPrompt({
+      skuName: "BEIGE-KURTI", productDetails: notes, pose: pose(id), session, references: id === "back" ? BACK_REFS : FRONT_REFS, useStyleReferenceAsModelIdentity: true,
+    });
+    assert(prompt.length <= IMAGE_PROMPT_SAFE_CHARS, id);
+    assert(!prompt.includes("[Background and auxiliary sections compacted]"), `${id} hit the emergency cut`);
+    assertStringIncludes(prompt, "ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:");
+    assertStringIncludes(prompt, "PROHIBITED UNRELATED CHANGES:");
+    assertStringIncludes(prompt, "or unrequested handheld props.\n");
+  }
+});
+
+Deno.test("a bare prop in a negated styling list is dropped, keeping the list's trailing words", () => {
+  const props = requestedHandheldProps(PROP_NOTE);
+  assertEquals(
+    withoutNegatedRequestedProps("none - no dupatta, stole, scarf, belt, bag included with SKU; no tote, no coffee cup, no sunglasses", props),
+    "none - no dupatta, stole, scarf, belt included with SKU; no sunglasses",
+  );
+  assertEquals(withoutNegatedRequestedProps("no dupatta, bag, belt", props), "no dupatta, belt");
+  assertEquals(withoutNegatedRequestedProps("no dupatta, bag-style pocket", props), "no dupatta, bag-style pocket");
+  assertEquals(withoutNegatedRequestedProps("silver bangles, tote bag on shoulder", props), "silver bangles, tote bag on shoulder");
+  assertEquals(withoutNegatedRequestedProps("no dupatta, stole; bag on shoulder", props), "no dupatta, stole; bag on shoulder");
+  assertEquals(withoutNegatedRequestedProps("no dupatta, belt, bag included with SKU", { groups: [] }), "no dupatta, belt, bag included with SKU");
+  // A prop with a placement, or after an explicit negation, is a positive entry and stays verbatim.
+  for (const text of [
+    "no dupatta, tote bag on shoulder",
+    "no dupatta, bag and coffee cup in hand",
+    "no dupatta, silver bangles, bag on shoulder",
+    "no dupatta, glass of iced coffee in right hand",
+    "no dupatta, silver bangles on wrist, bag",
+  ]) assertEquals(withoutNegatedRequestedProps(text, props), text);
+  assertEquals(withoutNegatedRequestedProps("no dupatta, no bag, tote included; no sunglasses", props), "no dupatta, tote included; no sunglasses");
+  // A negated garment detail named after a prop is a garment constraint and stays.
+  assertEquals(withoutNegatedRequestedProps("no bag-style pocket; no coffee brown tones", props), "no bag-style pocket; no coffee brown tones");
+  assertEquals(withoutNegatedRequestedProps("no bag of any kind; silver studs", props), "silver studs");
+});
+
+Deno.test("the hand placement line hands the requested props to the props block, except in a tight crop", () => {
+  const hands = (id: string, notes: string) => {
+    const prompt = compose(id, notes);
+    const at = prompt.indexOf("- Hand placement:");
+    return prompt.slice(at, prompt.indexOf("\n", at));
+  };
+  assertStringIncludes(hands("angled", `Beige kurti. ${PROP_NOTE}`), "the hands carry the requested props exactly as the REQUESTED PROPS line directs");
+  assert(!hands("angled", "Beige kurti.").includes("requested props"));
+  assert(!hands("closeup", `Beige kurti. ${PROP_NOTE}`).includes("requested props"));
 });

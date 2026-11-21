@@ -218,3 +218,43 @@ Deno.test("CodeAnt Major: a studio pose review compare-and-sets the status it re
   assertEquals(source.includes(': approvalUpdate.eq("approval_status", ownedPose.approval_status))'), true);
   assertEquals(source.includes('if (!pose) throw new Error("This pose was reviewed by someone else just now. Reload to see the latest decision.");'), true);
 });
+
+Deno.test("batch regeneration queues every selected pose in one request, and History sends them together", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  const start = source.indexOf("async function regeneratePose(");
+  const body = source.slice(start, source.indexOf("async function syncCatalogAnchorQa(", start));
+  assertEquals(body.includes("Array.isArray(args.poseIds)"), true);
+  assertEquals(body.includes('if (poses.some((entry) => entry.session_id !== pose.session_id)) throw new Error("Regenerate poses from one photoshoot at a time.");'), true);
+  assertEquals(body.includes("...poses.map(queuePose),"), true);
+  assertEquals(body.includes('completed_poses: Math.max(0, Number(job.completed_poses || 0) - countStatus("completed")),'), true);
+  // Every pose must belong to the job whose owner is checked and whose counters change.
+  assertEquals(body.includes("if (scopePoseRowsToJob(poses as PoseRowLike[], String(job.job_id)).length !== poses.length) {"), true);
+  assertEquals(body.includes('previousStatus: String(entry.status || ""),'), true);
+  // The worker runs queued poses lowest pose first, so a regenerated Pose 1 anchors the rest.
+  assertEquals(source.includes('.eq("session_id", job.session_id).eq("status", "queued").order("pose_index").limit(1).maybeSingle();'), true);
+  const history = Deno.readTextFileSync(new URL("../../../../src/features/history/History.tsx", import.meta.url)).replace(/\r\n/g, "\n");
+  assertEquals(history.includes("poseIds: eligible.map((pose: any) => pose._id),"), true);
+  assertEquals(history.includes("batchWaitRef"), false);
+  // A request that errors after some poses were queued shows those poses as queued, not failed.
+  assertEquals(history.includes("const batchEntryState = (entry: BatchEntry) =>"), true);
+});
+
+Deno.test("a failed Pose 1 puts skipped regenerations back to their kept version instead of failing them", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  const start = source.indexOf("async function failPoseAndJob(");
+  const body = source.slice(start, source.indexOf("\n}\n", start));
+  assertEquals(body.includes('const restore = Boolean(entry.output_url || entry.storage_path) && ["completed", "requires_human_review"].includes(String(last.previousStatus || ""));'), true);
+  assertEquals(body.includes("{ ...last, skipped: true, skippedReason: skipped }"), true);
+  assertEquals(body.includes('.eq("generation_id", entry.generation_id).eq("status", "queued");'), true);
+  const versions = Deno.readTextFileSync(new URL("../../../../src/lib/poseVersions.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  assertEquals(versions.includes(".filter((entry) => entry.skipped !== true)"), true);
+});
+
+Deno.test("a finished job names cancelled poses as cancelled, not as exhausted retries", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  const start = source.indexOf("async function finalizeJob(");
+  const body = source.slice(start, source.indexOf("\n}\n", start));
+  assertEquals(body.includes('String(pose.error || "") === "Generation cancelled by the user."'), true);
+  assertEquals(body.includes("pose(s) were cancelled before they finished"), true);
+  assertEquals(source.includes('async function finalizeCancelledJob(job: JsonRecord, message = "Generation cancelled by the user.")'), true);
+});
