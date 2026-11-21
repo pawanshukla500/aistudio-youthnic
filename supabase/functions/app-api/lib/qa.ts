@@ -9,6 +9,8 @@ import {
   sanitizePoseDirectionForAspectRatio,
   stripGroundedFeetForCroppedFrame,
   type JsonRecord,
+  type RequestedHandheldProps,
+  withRequestedPropsAllowed,
 } from "./profiles.ts";
 import { ADOPTABLE_SLOTS, isLowPosture, normalizeReferencePosture } from "./posePlanning.ts";
 import { referencePoseDirectiveText, styleIdentityQuarantineText } from "./generationPrompt.ts";
@@ -195,6 +197,8 @@ export function buildPoseQaPrompt(args: {
    * prompt's. Omitted, Farshi is detected from productIdentity and the manifest alone.
    */
   farshi?: boolean;
+  /** Props the product notes ask for (requestedHandheldProps); they must appear, not fail. */
+  requestedProps?: RequestedHandheldProps;
 }) {
   // QA must judge the shoot as it was configured. A top-only shoot has no
   // coordinated bottom to match, so bottom-wear fidelity is not a gate there.
@@ -274,7 +278,14 @@ export function buildPoseQaPrompt(args: {
       return next;
     })()
     : qaPoseDirection;
-  return `You are a strict fashion e-commerce consistency validator.
+  const requestedProps = args.requestedProps;
+  const hasStyleReferenceLabel = args.referenceManifest.some((line) => /STYLE REFERENCE/i.test(line));
+  const requestedPropsRule = requestedProps?.groups.length
+    ? args.poseType === "closeup"
+      ? `REQUESTED PROPS: the product notes ask for ${requestedProps.labels.join(" and ")} ("${requestedProps.note}"), but this Pose 5 craft crop keeps props out of frame. Fail pose_requirement only when a prop hides the craft detail.`
+      : `REQUESTED PROPS: the product notes ask for ${requestedProps.labels.join(" and ")} ("${requestedProps.note}")${hasStyleReferenceLabel ? ", carried over from the STYLE REFERENCE" : ""}. Fail pose_requirement when a requested prop is missing${args.poseType === "back" ? " (in this back view a prop the body hides from behind is acceptable)" : args.poseType === "showcase" ? " (a tight detail crop that leaves the props out of frame is acceptable)" : ""}, ${hasStyleReferenceLabel ? "does not match the STYLE REFERENCE object" : "does not match what the notes describe"}, is held by a hand not joined to a visible forearm, or covers the neckline, embroidery or print, side slits, hem or bottom-wear construction. Do not fail it for carrying the requested props.`
+    : "";
+  const prompt = `You are a strict fashion e-commerce consistency validator.
 
 Review IMAGE A (the newly generated pose) against every labeled source image that follows it.
 SOURCE PRIORITY: original region-labeled product references are authoritative for the garment and always outrank APPROVED POSE 1. For a saree, compare body/weave only with BODY/WEAVE and full-drape references, pallu only with FULLY SPREAD PALLU, borders/tassels only with BORDER/TASSELS, and blouse construction only with the matching BLOUSE reference. Never use APPROVED POSE 1 as saree product evidence. Legacy FRONT/BACK/FABRIC/ADDITIONAL product references remain valid for their proven regions. A MANNEQUIN or DRESS-FORM shot (if present) is authoritative for worn shape, fit, proportion, drape and how the garment falls on a body - validate silhouette and drape against it. A FLAT-LAY is authoritative only for outline, construction, panel layout and garment length. MODEL FACE REFERENCE outranks every other face source, including the STYLE REFERENCE face and any face in a product photo. APPROVED POSE 1 controls only model/styling/scene continuity and never garment identity. STYLE REFERENCE is the backdrop, wall, floor, set dressing, and lighting for every pose, including a back view. ${referenceMatch ? "The clothing and handheld props in the STYLE REFERENCE must be ignored; this frame intentionally matches its posture (see REFERENCE POSE MATCH below)." : "The clothing, posture, and handheld props in the STYLE REFERENCE must be ignored."} When a MODEL FACE REFERENCE is present, its face outranks the style-reference face: fail model_face if the generated face matches the style-reference person or a product-photo face instead. ${useStyleFaceIdentity ? "Because the user uploaded the same photo as both MODEL FACE REFERENCE and STYLE REFERENCE, the STYLE REFERENCE face is the model identity, including if the eyes are hidden: fail model_face if the generated person is different." : "When no MODEL FACE REFERENCE was uploaded, STYLE REFERENCE supplies ONLY the room, architecture, floor, and light — NEVER the person's face. Pose 1 establishes the fresh model face matching Model Identity Lock, and APPROVED POSE 1 locks that face across Poses 2-6. Never fail Pose 1 model_face because its face differs from the STYLE REFERENCE."} Fail styling_continuity when the visible backdrop matches a product-photo background instead of the STYLE REFERENCE.
@@ -346,12 +357,15 @@ Fail pose_requirement when the body is frozen in a walking stride, one foot is l
 ${referenceMatch
     ? `REFERENCE POSE MATCH: this frame intentionally matches the STYLE REFERENCE person's ${referenceMatch.posture} posture (${useStyleFaceIdentity ? styleIdentityQuarantineText(referenceMatch.directive) : referenceMatch.directive}). Do not fail pose_requirement for matching that posture, its support, or its signature styling.${referenceMatch.low ? ` LOW-POSTURE EXEMPTION: folds and compression of the garment and bottom wear caused by the ${referenceMatch.posture} posture are expected. Judge the bottom wear's cut, print and colour, not its drape length, and do not fail bottom_wear or fit_silhouette for that posture-driven compression.` : ""} Still fail garment_identity when the reference clothing is copied, ${useStyleFaceIdentity ? "" : "model_face when the reference face is copied, "}and pose_requirement when handheld objects (coffee cups, mugs, bottles, tote bags, handbags, sunglasses, phones) are copied from the STYLE REFERENCE, the MODEL FACE photo, or APPROVED POSE 1. Fail pose_requirement when this frame repeats Pose 1's static flat-frontal standing stance and framing.`
     : "Fail pose_requirement when the stance, foreground pillar-leaning placement, or handheld objects (coffee cups, mugs, bottles, tote bags, handbags, sunglasses, phones) are copied from the STYLE REFERENCE, the MODEL FACE photo, or APPROVED POSE 1. Those images supply the room and/or face, not a pose to repeat and not handheld props. Fail pose_requirement when Pose 2, Pose 4, or Pose 6 repeats Pose 1's static flat-frontal standing stance and framing without clear physical pose divergence."}
+${requestedPropsRule}
 ANATOMICAL REALISM - apply to every pose and every crop, including true back views and faceless macro/detail frames. Inspect every visible arm, forearm, wrist, hand, finger, and other limb. Fail pose_requirement for THREE HANDS, EXTRA HANDS, EXTRA ARMS, DUPLICATE OR PHANTOM LIMBS, duplicate wrists, malformed or extra fingers, hands poking impossibly through phantom slits in solid saree pallus/pleats/dupattas/kurta panels, floating hands resting on waist/hip/drape without a continuous anatomical forearm connection, awkward unnatural forearm clawing/pinching, fingers covering chest/yoke embroidery in closeup/hero shots, or stiff splayed mannequin-like plastic arms/fingers. Do not fail merely because a limb is naturally occluded or outside the crop. This anatomy veto is independent of face visibility and still applies when model_face and face_realism pass automatically.
 
 Face quality bar - apply only when a recognizable face is in frame. For a true back pose or a product-detail-first close-up with no recognizable face, pass face_realism and model_face; do not fail for a missing face. When a face is visible (including a clearly readable partial face or a back-pose over-shoulder glance), fail face_realism for any of these even if everything else matches: plastic, waxy, airbrushed, or over-smoothed "beauty filter" skin instead of natural texture with visible pores; crossed, misaligned, asymmetric, glassy, or otherwise distorted/malformed eyes; unnaturally uniform, fused, extra, missing, or warped teeth; any blurring, warping, melting, or duplicated/misplaced facial features; or a mirror-symmetric "AI face" that does not read as a real photographed person. Also fail face_realism when the frame as a whole reads as generated rather than photographed: a glossy CGI or 3D-render finish, HDR glow, or a pasted-on subject with halo edges. Give a specific, actionable correction for any face_realism or model_face failure (name the exact feature that is wrong).
 
 Return STRICT JSON only:
 ${JSON.stringify({ pass: true, score: 100, checks: exampleChecks, scores: exampleScores, failed: [], reason: "short evidence-based verdict", correction: "specific correction for every failed field" })}`;
+  // A craft crop keeps props out of frame, so its QA keeps the general no-props rules.
+  return requestedProps && args.poseType !== "closeup" ? withRequestedPropsAllowed(prompt, requestedProps) : prompt;
 }
 
 const SALVAGE_TOLERABLE_BORDERLINE_CHECKS = new Set([

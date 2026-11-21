@@ -10,6 +10,9 @@ import {
   resolveAspectRatioLabel,
   resolveAspectRatioOrientation,
   resolveCloseupMode,
+  requestedHandheldProps,
+  requestedPropWords,
+  type RequestedHandheldProps,
   type JsonRecord,
   type ShowcaseIntent,
   type StudioPose,
@@ -17,6 +20,8 @@ import {
   sanitizeHeldObjectText,
   sanitizePoseDirectionForAspectRatio,
   stripGroundedFeetForCroppedFrame,
+  withoutNegatedRequestedProps,
+  withRequestedPropsAllowed,
 } from "./profiles.ts";
 import {
   effectiveShowcaseShot,
@@ -254,6 +259,26 @@ function compactPromptBlock(prompt: string, startMarker: string, endMarkers: str
 }
 
 /**
+ * The manifest names every attached image. Cutting it from the end left later images
+ * (the Pose 1 anchor, fabric detail) unlabelled, so each line keeps an equal share instead;
+ * every label leads with its role, so the share always keeps what the image is.
+ */
+export function compactManifestBlock(prompt: string, maxChars: number) {
+  const startMarker = "\nREFERENCE MANIFEST IN UPLOAD ORDER:\n";
+  const start = prompt.indexOf(startMarker);
+  if (start < 0) return prompt;
+  const contentStart = start + startMarker.length;
+  const ends = ["\nGENERATION MEMORY", "\n\nEDIT GOAL:"]
+    .map((marker) => prompt.indexOf(marker, contentStart))
+    .filter((index) => index >= 0);
+  const contentEnd = ends.length ? Math.min(...ends) : prompt.length;
+  const lines = prompt.slice(contentStart, contentEnd).split("\n");
+  if (lines.join("\n").length <= maxChars) return prompt;
+  const share = Math.max(120, Math.floor(maxChars / Math.max(1, lines.length)) - 1);
+  return `${prompt.slice(0, contentStart)}${lines.map((line) => boundedText(line, share)).join("\n")}${prompt.slice(contentEnd)}`;
+}
+
+/**
  * Provider prompts have a hard 32k limit. Keep all product-truth blocks
  * intact, then compact only advisory/user/styling prose in a fixed order. This
  * avoids a paid generation failing just above the former 30k local guard while
@@ -401,12 +426,7 @@ export function compactFullPromptSafely(prompt: string): string {
   if (compacted.length <= IMAGE_PROMPT_SAFE_CHARS) return compacted;
 
   // Tier 4: Further trim evidence, manifest, product JSON, and geometry blocks before touching any pose/bottom-wear locks
-  compacted = compactPromptBlock(
-    compacted,
-    "\nREFERENCE MANIFEST IN UPLOAD ORDER:\n",
-    ["\nGENERATION MEMORY", "\n\nEDIT GOAL:"],
-    1_200,
-  );
+  compacted = compactManifestBlock(compacted, 1_200);
   compacted = compactPromptBlock(
     compacted,
     "\nLOCKED PRODUCT - MUST NOT CHANGE:\n",
@@ -953,6 +973,65 @@ function referenceImageScopeDirective(hasModelReference: boolean, useStyleAsMode
   ].join("\n");
 }
 
+/**
+ * Uncompacted tail block for props the product notes ask for (requestedHandheldProps).
+ * Empty when nothing is requested, so every other shoot keeps its no-props rules.
+ */
+export function requestedPropsBlock(props: RequestedHandheldProps, poseId: string, tightCrop = poseId === "closeup", hasStyleReference = true): string {
+  if (!props.groups.length) return "";
+  if (tightCrop) {
+    return `REQUESTED PROPS (FROM THE PRODUCT NOTES): "${props.note}". This tight detail crop keeps every prop out of frame so the garment detail stays clear.`;
+  }
+  const back = poseId === "back";
+  const holds = [
+    props.groups.includes("drink") ? "one hand holds the drink" : "",
+    props.groups.includes("bag")
+      ? back ? "the bag hangs from one shoulder or forearm at the side" : `the bag hangs from the opposite shoulder or forearm${hasStyleReference ? ", as the STYLE REFERENCE carries it" : ""}`
+      : "",
+    props.groups.some((group) => group !== "drink" && group !== "bag")
+      ? "any other requested prop is worn or carried with these (sunglasses on the head or eyes, others in the same hand or hung with the bag) - never a third hand"
+      : "",
+  ].filter(Boolean).join("; ");
+  return `REQUESTED PROPS (FROM THE PRODUCT NOTES - CARRY THEM OVER): "${props.note}". ${hasStyleReference
+    ? `Carry over ${props.labels.join(" and ")} exactly as the STYLE REFERENCE shows them (same object, shape, colour, material and size; a prop that is part of the product follows the product photos)`
+    : `Include ${props.labels.join(" and ")} as the notes describe them (no style reference is attached; a prop that is part of the product follows the product photos), kept simple and neutral`}, identical in every frame: ${holds}. ${back
+    ? "From behind they stay at the sides and must not cover the back neckline, the stripes or print, the side slits or the hem."
+    : "They must not cover the neckline, the embroidery or print, the side slits, the hem or the bottom-wear construction."} Each prop is held by a visible hand joined to its forearm or hangs from a shoulder or forearm - exactly two arms and two hands. This request overrides the general no-props rules for these props only; every other handheld object stays excluded.`;
+}
+
+/** Uncompacted identity reminder naming the exact manifest image that carries the face. */
+export function identityCheckLine(imageNumber: number, label: string, backView: boolean): string {
+  return backView
+    ? `IDENTITY CHECK: the face is turned away, but the skin tone, hair colour, length and texture, and body proportions must match IMAGE ${imageNumber} (${label}).`
+    : `IDENTITY CHECK: the face, skin tone and hair must match IMAGE ${imageNumber} (${label}) exactly - the same face shape, eyes, brows, nose, lips and jaw; the same skin tone; the same hair colour, length, texture and parting. Do not beautify, slim, lighten or swap the face.`;
+}
+
+/**
+ * Recorded rear facts for a non-saree true back view. Evidence without a direct back-image
+ * source is filtered out of the back prompt, which also dropped the garment length, rear
+ * panel and slits; these fields describe the rear (or the whole garment) and are safe there.
+ */
+export function rearViewChecklist(productIdentity: unknown, includesBottomWear: boolean): string {
+  const product = objectValue(productIdentity);
+  const fact = (value: unknown, max = 220) => boundedText(String(value ?? "").replace(/\s+/g, " "), max);
+  const orientation = objectValue(product.patternGeometry).orientation;
+  // Only real side-slit entries: a front placket slit is front-only and "no side slits" is not a slit.
+  const slits = (Array.isArray(product.detailPlacementMap) ? product.detailPlacementMap : [])
+    .map((entry) => String(entry ?? ""))
+    .filter((entry) => /\bside[- ]slits?\b/i.test(entry) && !/\b(?:no|without|not|none)\b/i.test(entry))
+    .slice(0, 2);
+  // A high-low or asymmetric hem must not be told to sit level with the front.
+  const unevenHem = /\bhigh[- ]low\b|\basymmetr|\blonger\b|\bshorter\b|\bdip(?:ped)?\b|\btrail/i.test(String(product.length ?? ""));
+  const lines = [
+    product.length ? `- Length and hem: ${fact(product.length)}${unevenHem ? "." : "; the back hem sits at the same height as the front hem."}` : "",
+    product.backConstruction ? `- Back panel: ${fact(product.backConstruction)}.` : "",
+    orientation ? `- Print or stripe direction: ${fact(orientation, 160)}, running the same way as in the BACK PRODUCT image.` : "",
+    slits.length ? `- Side slits: ${slits.map((entry) => fact(entry, 160)).join("; ")}. Seen from behind at both side seams, at the same height as the front.` : "",
+    includesBottomWear ? "- Bottom wear from behind: the same cut, volume, fall and hem panel as the BOTTOM WEAR reference, both legs visible." : "",
+  ].filter(Boolean);
+  return lines.length ? `REAR VIEW CHECKLIST (RECORDED PRODUCT FACTS - CHECK EACH AGAINST THE BACK PRODUCT IMAGE):\n${lines.join("\n")}` : "";
+}
+
 function anatomicalIntegrityDirective(): string {
   return [
     "STRICT HUMAN ANATOMY & NATURAL LIMB INTEGRITY (ZERO TOLERANCE FOR EXTRA LIMBS):",
@@ -1088,6 +1167,19 @@ function withoutPoseOrHeldClauses(value: string, emptyFallback: string, dropSitt
 
 function poseInstructionText(value: unknown, sitting: PoseScrub, emptyFallback: string): string {
   return withoutPoseOrHeldClauses(String(value ?? ""), emptyFallback, !sitting);
+}
+
+/**
+ * poseInstructionText that lets requested props through: their words are masked from the
+ * held-object scrub (unrequested props and stride/pose clauses are still dropped), then
+ * "no <requested prop>" entries are removed.
+ */
+function propsAwareInstructionText(value: unknown, sitting: PoseScrub, props: RequestedHandheldProps): string {
+  const words = new RegExp(`\\b(?:${requestedPropWords(props.groups)})\\b`, "gi");
+  const masked: string[] = [];
+  const text = String(value ?? "").replace(words, (match) => `PROPTOKEN${masked.push(match) - 1}X`);
+  const scrubbed = poseInstructionText(text, sitting, "").replace(/PROPTOKEN(\d+)X/g, (_, index) => masked[Number(index)] ?? "");
+  return withoutNegatedRequestedProps(scrubbed, props).replace(/[\s,;]+$/, "");
 }
 
 function poseTitleText(value: unknown, sitting: PoseScrub): string {
@@ -1338,6 +1430,11 @@ export function composeGenerationPrompt(args: {
   const useStyleModelIdentity = !hasModelReference && hasStyleReference && Boolean(args.useStyleReferenceAsModelIdentity);
   const referencePoseNumbers = [adoptedSlots.creative ? 4 : 0, adoptedSlots.showcase ? 6 : 0].filter(Boolean);
   const manifest = promptReferences.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role, { useStyleAsModelFace: useStyleModelIdentity, hasModelReference, hasApprovedAnchor, referencePoseNumbers })}`).join("\n");
+  const requestedProps = requestedHandheldProps(args.productDetails);
+  const identityImageNumber = promptReferences.findIndex((reference) => reference.role === (hasModelReference ? "model_identity" : "style_reference")) + 1;
+  const identityLine = (hasModelReference || useStyleModelIdentity) && identityImageNumber > 0
+    ? identityCheckLine(identityImageNumber, hasModelReference ? "MODEL FACE REFERENCE" : "the photo uploaded as both MODEL FACE REFERENCE and STYLE REFERENCE", isTrueBack)
+    : "";
   const bottomRefIndex = promptReferences.findIndex((ref) => ref.role === "bottom");
   const bottomImageTag = bottomRefIndex >= 0 ? `IMAGE ${bottomRefIndex + 1}` : null;
   const isCloseup = args.pose.id === "closeup";
@@ -1360,6 +1457,8 @@ export function composeGenerationPrompt(args: {
   // row all describe the same frame.
   const sceneLock = sceneLockBlock({ creativeDirection: directedCreative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference });
   const isMacroShowcase = isShowcase && showcaseShot?.shotType === "macro_detail";
+  // A tight crop keeps every prop out of frame, so its prompt keeps the general no-props rules.
+  const promptProps: RequestedHandheldProps = isCloseup || isMacroShowcase ? { groups: [], labels: [], note: "" } : requestedProps;
   const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL) && !isMacroShowcase;
   const faceQualityInstruction = faceRequired
     ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, eyes kept as the identity photo shows them, including a cover that hides them, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
@@ -1575,7 +1674,7 @@ FACE & IDENTITY LOCK - HIGHEST PRIORITY:
 ${hasModelReference
     ? `The image labeled MODEL FACE REFERENCE in the reference manifest above is the exact, non-negotiable face and identity for this model in EVERY pose, including this one. Reproduce it as close to pixel-identical as photographically possible: identical facial bone structure, eyes (shape, color, spacing), eyebrows, nose, lips, jawline, skin tone and texture, and hairstyle. Do not idealize, beautify, average, restyle, or blend it with any other face - this must read as the same real person from that reference photo, not merely a similar-looking model. If the eyes are hidden, keep that cover and the visible face. Do not invent a different person.${hasApprovedAnchor ? " APPROVED POSE 1 is that same person already photographed in this shoot. Match its realized face, hair, and skin as well as the MODEL FACE REFERENCE. Do not copy Pose 1's pose, garment, or objects in the hands, and do not invent a third face." : ""}`
     : useStyleModelIdentity
-      ? `The STYLE REFERENCE image is the face for every pose, because the user attached the same photo in both Model Face and Style Ref. Match the visible jaw, nose, lips, skin, and hair. If the eyes are hidden, keep that cover and the visible face. Do not invent a different person. ${referenceSlot ? `Discard that image's clothing and handheld objects; ${REFERENCE_POSTURE_ONLY}.` : "Discard that image's clothing, pose, pillar-leaning stance, and handheld objects."}${hasApprovedAnchor ? " APPROVED POSE 1 must show that same face, hair, and skin. Use it for the realized identity and the room. Do not copy its pose or objects in the hands." : ""}`
+      ? `The STYLE REFERENCE image${identityImageNumber > 0 ? ` (IMAGE ${identityImageNumber})` : ""} is the face for every pose, because the user attached the same photo in both Model Face and Style Ref. Match its face, skin tone and hair exactly: the same jaw, nose, eyes, brows and lips, the same skin tone, and the same hair colour, length, texture and parting. If the eyes are hidden, keep that cover and the visible face. Do not invent a different person. ${referenceSlot ? `Discard that image's clothing and handheld objects; ${REFERENCE_POSTURE_ONLY}.` : "Discard that image's clothing, pose, pillar-leaning stance, and handheld objects."}${hasApprovedAnchor ? " APPROVED POSE 1 must show that same face, hair, and skin. Use it for the realized identity and the room. Do not copy its pose or objects in the hands." : ""}`
       : hasApprovedAnchor
         ? "The image labeled APPROVED POSE 1 in the reference manifest above is the exact, non-negotiable ground truth for this model's identity. Reproduce the identical facial bone structure, eye shape and color, eyebrow shape, nose, lips, jawline, skin tone and texture, and hairstyle seen in that image - do not idealize, beautify, average, or drift toward a different face. Ignore any person visible in the STYLE REFERENCE."
         : `This is the hero pose and establishes the model identity anchor for the whole shoot. Commit to one specific, photorealistic, naturally attractive adult face with real individual character (not an idealized, airbrushed, symmetric stock face) exactly as described in modelIdentity above — ${referenceSlot ? `completely discarding the person's face and props in the STYLE REFERENCE (${REFERENCE_POSTURE_ONLY})` : "completely discarding the person's face, pose, and props in the STYLE REFERENCE"} — every later pose in this set must reproduce this same Pose 1 face.`}
@@ -1660,7 +1759,7 @@ ${creativeJson}
 ${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in every frame:
 - Footwear: ${boundedText(poseInstructionText(styling.footwear, poseScrub, ""), 360)}
 - Jewellery: ${boundedText(poseInstructionText(styling.jewellery, poseScrub, ""), 360)}
-- Ornaments and accessories: ${boundedText(poseInstructionText(styling.ornaments, poseScrub, ""), 360)}
+- Ornaments and accessories: ${boundedText(promptProps.groups.length ? (propsAwareInstructionText(styling.ornaments, poseScrub, promptProps) || "none besides the requested props") : poseInstructionText(styling.ornaments, poseScrub, ""), 360)}
 - Makeup: ${boundedText(poseInstructionText(styling.makeup, poseScrub, ""), 360)}
 - Hair: ${boundedText(poseInstructionText(styling.hair, poseScrub, ""), 360)}
 ${stylingNotes ? `- Stylist notes: ${boundedText(stylingNotes, 600)}` : ""}
@@ -1758,9 +1857,16 @@ Product accuracy is more important than style matching.${
     expressionAttitude ? `\nEXPRESSION & ATTITUDE (PLANNED FOR THE WHOLE SHOOT, WHENEVER THE FACE IS VISIBLE): ${expressionAttitude}` : ""}
 ${isCloseup ? `${pose5HardRule({ closeupMode, heroDetail: closeupHeroDetail, expression: plannedExpression })}
 ` : ""}${isShowcase ? `${pose6HardRule({ showcaseShot, showcaseIntent, poseFamily, closeupHeroDetail: recordedCloseupHeroDetail, expression: plannedExpression, referencePosture: referenceSlot?.posture })}
-` : ""}Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
+` : ""}${[
+    // A faceless crop gets no face reminder: it must not pull a face into the craft detail.
+    faceRequired || isTrueBack ? identityLine : "",
+    isTrueBack && !isSaree ? rearViewChecklist(product, bottomWear.includesBottomWear) : "",
+    requestedPropsBlock(requestedProps, args.pose.id, isCloseup || isMacroShowcase, hasStyleReference),
+  ].filter(Boolean).map((block) => `${block}\n`).join("")}Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
 
+  // Props the notes ask for narrow every generic no-props line before compaction measures the prompt.
+  const finalPrompt = withRequestedPropsAllowed(prompt, promptProps);
   return assertGenerationPromptWithinLimit(
-    prompt.length > IMAGE_PROMPT_SAFE_CHARS ? compactFullPromptSafely(prompt) : prompt,
+    finalPrompt.length > IMAGE_PROMPT_SAFE_CHARS ? compactFullPromptSafely(finalPrompt) : finalPrompt,
   );
 }
