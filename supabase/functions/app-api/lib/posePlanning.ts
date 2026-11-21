@@ -51,6 +51,11 @@ export type ReferencePose = {
   signatureDescription: string;
   /** The reference person's attitude as a style cue (never their face). */
   attitude: string;
+  /** v37: how the reference is shot, and the person's expression, gaze and hand gesture (never their face or objects). "" when not recorded. */
+  cameraAngle?: string;
+  expression?: string;
+  gaze?: string;
+  hands?: string;
   suitableForProduct: "yes" | "no" | "unknown";
   suitabilityReason: string;
 };
@@ -147,7 +152,10 @@ export function isLowPosture(posture: ReferencePosture): boolean {
 }
 
 /** `scrub` removes handheld-prop clauses (profiles.ts sanitizeHeldObjectText). */
-export function normalizeReferencePose(rawValue: unknown, scrub: (value: string) => string = (value) => value): ReferencePose {
+export function normalizeReferencePose(
+  rawValue: unknown,
+  scrub: (value: string) => string = (value) => value,
+): ReferencePose & Required<Pick<ReferencePose, "cameraAngle" | "expression" | "gaze" | "hands">> {
   const raw = record(rawValue);
   const posture = normalizeReferencePosture(pick(raw, "posture"));
   const signatureDescription = scrub(text(pick(raw, "signatureDescription", "signature_description")));
@@ -163,6 +171,10 @@ export function normalizeReferencePose(rawValue: unknown, scrub: (value: string)
     distinctiveness: distinctiveness === "signature" && signatureDescription ? "signature" : "generic",
     signatureDescription: distinctiveness === "signature" ? signatureDescription : "",
     attitude: text(pick(raw, "attitude"), 200),
+    cameraAngle: posture === "none" ? "" : text(pick(raw, "cameraAngle", "camera_angle"), 160),
+    expression: posture === "none" ? "" : scrub(text(pick(raw, "expression"), 160)),
+    gaze: posture === "none" ? "" : scrub(text(pick(raw, "gaze"), 160)),
+    hands: posture === "none" ? "" : scrub(text(pick(raw, "hands", "handGesture", "hand_gesture"), 160)),
     suitableForProduct: suitable === "yes" || suitable === "true" ? "yes" : suitable === "no" || suitable === "false" ? "no" : "unknown",
     suitabilityReason: text(pick(raw, "suitabilityReason", "suitability_reason"), 240),
   };
@@ -196,7 +208,8 @@ const SMILE_TEXT: Record<SmileLevel, string> = {
 
 /** One prompt line describing the planned expression and attitude. */
 export function expressionAttitudeLine(plan: ExpressionPlan): string {
-  return `Attitude: ${plan.attitude}. Energy: ${plan.energy}. Gaze: ${plan.gaze}. Mouth: ${SMILE_TEXT[plan.smile]}, never a forced or toothy grin.`;
+  // No gaze: one gaze for the whole shoot made every frame look into the lens the same way.
+  return `Attitude: ${plan.attitude}. Energy: ${plan.energy}. Mouth: ${SMILE_TEXT[plan.smile]} at most, never a forced or toothy grin.`;
 }
 
 /**

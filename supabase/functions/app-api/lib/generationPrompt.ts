@@ -44,6 +44,7 @@ import {
   resolveBottomWearPresentation,
   withoutFarshiStructureContradictions,
 } from "./garmentPoses.ts";
+import { frameExpressionDirection, identityWithoutExpression } from "./expressionDirection.ts";
 import { isDirectBackProductRole, isNonProductEvidenceRole, roleLabel } from "./referencePolicy.ts";
 import { sceneLockBlock } from "./sceneLock.ts";
 import {
@@ -491,10 +492,14 @@ export function compactFullPromptSafely(prompt: string): string {
   if (closingIndex > 0) {
     const closingText = compacted.slice(closingIndex);
     if (poseIndex > 0 && realIndex > poseIndex && realIndex <= closingIndex) {
-      const preservedTail = `${compacted.slice(poseIndex, realIndex).trimEnd()}\n${closingText}`;
+      // ALLOWED DELTA (only pose, angle, framing and expression change) sits just before POSE
+      // REQUIREMENT, where the prefix slice used to cut it first; it is kept with the tail.
+      const deltaIndex = compacted.lastIndexOf("\nALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:", poseIndex);
+      const keepFrom = deltaIndex > 0 ? deltaIndex : poseIndex;
+      const preservedTail = `${compacted.slice(keepFrom, realIndex).trimEnd()}\n${closingText}`;
       const prefixAnchor = "Create ONE real-camera fashion e-commerce photograph";
       const anchorPos = compacted.indexOf(prefixAnchor);
-      const rawPrefix = anchorPos > 200 ? compacted.slice(anchorPos, poseIndex) : compacted.slice(0, poseIndex);
+      const rawPrefix = anchorPos > 200 ? compacted.slice(anchorPos, keepFrom) : compacted.slice(0, keepFrom);
       const budgetForPrefix = IMAGE_PROMPT_SAFE_CHARS - preservedTail.length - 80;
       if (budgetForPrefix > 1_500) {
         const slicedPrefix = rawPrefix.length > budgetForPrefix
@@ -1402,7 +1407,8 @@ export function composeGenerationPrompt(args: {
       : productCore(productForPrompt, bottomWear.includesBottomWear),
     { maxString: 360, maxItems: 16, maxKeys: 32 },
   );
-  const modelJson = compactJson(sanitizeIdentityText(model, poseScrub), { maxString: 500, maxItems: 16, maxKeys: 32 });
+  // The face lock describes features; gaze and smile change per frame (expressionDirection.ts).
+  const modelJson = compactJson(sanitizeIdentityText(identityWithoutExpression(model), poseScrub), { maxString: 500, maxItems: 16, maxKeys: 32 });
   const showcaseIntent = effectiveShowcaseIntent({ creative: directedCreative, family: poseFamily, includesBottomWear: bottomWear.includesBottomWear });
   const showcaseShot = effectiveShowcaseShot(directedCreative, { includesBottomWear: bottomWear.includesBottomWear });
   const creativeForPrompt: JsonRecord = { ...directedCreative, showcaseIntent };
@@ -1501,8 +1507,37 @@ export function composeGenerationPrompt(args: {
   const withoutReferencePosture = (text: string) => referenceSlot
     ? text
     : text.split(/(?<=[.!;])\s+/).filter((part) => !REFERENCE_POSTURE_WORD_PATTERN.test(part)).join(" ").replace(/;\s*$/, ".");
+  // Each face-visible frame gets its own gaze, head angle, mouth and gesture. Only Pose 4 takes the
+  // STYLE REFERENCE person's look (whatever its posture); an adopted Pose 6 copies the posture through
+  // its REFERENCE POSE MATCH block but keeps its own showcase look, so the two never repeat one look.
+  // The planner mood and the reference look get the same scrub as every other expression line: a
+  // stride, a held object or (outside an adopted posture) a posture word drops that text.
+  const frameText = (value: unknown) => value ? withoutReferencePosture(catalogPoseText(value, "", poseScrub)).trim() : "";
+  const referencePose = posePlanning?.referencePose;
+  const referenceLook = args.pose.id === "creative" && referencePose && referencePose.posture !== "none"
+    ? {
+      expression: frameText(referencePose.expression),
+      gaze: frameText(referencePose.gaze),
+      // Hands from a folded posture do not transfer to a standing frame.
+      hands: referenceSlot || !isLowPosture(referencePose.posture) ? frameText(referencePose.hands) : "",
+      cameraAngle: referenceSlot ? frameText(referencePose.cameraAngle) : "",
+    }
+    : null;
+  const frameDirection = faceRequired
+    ? frameExpressionDirection({
+      poseId: args.pose.id,
+      energy: posePlanning?.expressionPlan.energy,
+      smile: posePlanning?.expressionPlan.smile,
+      propsInHands: promptProps.groups.length > 0,
+      reference: referenceLook,
+      plannedMood: frameText(plannedPoseExpression(args.session, args.pose.id)),
+    })
+    : null;
   // Planner-owned expression for this frame; "" keeps every legacy expression line.
-  const rawPlannedExpression = plannedPoseExpression(args.session, args.pose.id);
+  // The full direction is stated once, in the uncompacted closing tail; every other line points at it.
+  const rawPlannedExpression = frameDirection
+    ? "as the THIS FRAME'S EXPRESSION line states"
+    : plannedPoseExpression(args.session, args.pose.id);
   const plannedExpressionText = rawPlannedExpression
     ? withoutReferencePosture(catalogPoseText(rawPlannedExpression, CALM_EXPRESSION, poseScrub)) || CALM_EXPRESSION
     : "";
@@ -1865,12 +1900,13 @@ ${rules.map((rule) => `- ${rule}`).join("\n")}
 
 Product accuracy is more important than style matching.${
     // The closing tail is never compacted (compactFullPromptSafely Tier 5 keeps it whole).
-    expressionAttitude ? `\nEXPRESSION & ATTITUDE (PLANNED FOR THE WHOLE SHOOT, WHENEVER THE FACE IS VISIBLE): ${expressionAttitude}` : ""}
+    expressionAttitude ? `\nEXPRESSION & ATTITUDE (THE SHOOT'S MOOD WHENEVER THE FACE IS VISIBLE; EACH FRAME KEEPS ITS OWN GAZE): ${expressionAttitude}` : ""}
 ${isCloseup ? `${pose5HardRule({ closeupMode, heroDetail: closeupHeroDetail, expression: plannedExpression })}
 ` : ""}${isShowcase ? `${pose6HardRule({ showcaseShot, showcaseIntent, poseFamily, closeupHeroDetail: recordedCloseupHeroDetail, expression: plannedExpression, referencePosture: referenceSlot?.posture })}
 ` : ""}${[
     // A faceless crop gets no face reminder: it must not pull a face into the craft detail.
     faceRequired || isTrueBack ? identityLine : "",
+    frameDirection?.block ?? "",
     isTrueBack && !isSaree ? rearViewChecklist(product, bottomWear.includesBottomWear) : "",
     requestedPropsBlock(requestedProps, args.pose.id, isCloseup || isMacroShowcase, hasStyleReference, hasApprovedAnchor),
   ].filter(Boolean).map((block) => `${block}\n`).join("")}Output only the finished photograph: no captions, labels, collage, borders or watermark.`;

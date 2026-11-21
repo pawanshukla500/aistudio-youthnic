@@ -171,6 +171,11 @@ def normalize_reference_pose(raw_value: Any) -> Dict[str, str]:
         "distinctiveness": "signature" if distinctiveness == "signature" and signature_description else "generic",
         "signatureDescription": signature_description if distinctiveness == "signature" else "",
         "attitude": _text(_pick(raw, "attitude"), 200),
+        # v37: how the reference is shot and the person's look (never their face or objects).
+        "cameraAngle": "" if posture == "none" else _text(_pick(raw, "cameraAngle", "camera_angle"), 160),
+        "expression": "" if posture == "none" else _text(_pick(raw, "expression"), 160),
+        "gaze": "" if posture == "none" else _text(_pick(raw, "gaze"), 160),
+        "hands": "" if posture == "none" else _text(_pick(raw, "hands", "handGesture", "hand_gesture"), 160),
         "suitableForProduct": "yes" if suitable in ("yes", "true") else "no" if suitable in ("no", "false") else "unknown",
         "suitabilityReason": _text(_pick(raw, "suitabilityReason", "suitability_reason"), 240),
     }
@@ -339,8 +344,9 @@ def build_expressions(state: PosePlanningState, slots: Dict[str, Dict[str, Any]]
     llm = state.get("pose_expressions") or {}
     # Analysis text can itself carry forced-smile words; never let it into a planner-owned line.
     attitude = _valid_expression(plan["attitude"]) or DEFAULT_EXPRESSION_PLAN["attitude"]
-    gaze = _valid_expression(plan["gaze"]) or DEFAULT_EXPRESSION_PLAN["gaze"]
-    base = f"{attitude}; {SMILE_TEXT[plan['smile']]}; {gaze}"
+    # No shared gaze: one gaze on every frame made all five face-visible poses look into the lens
+    # the same way. Each frame's gaze comes from the Edge per-frame direction (expressionDirection.ts).
+    base = f"{attitude}; {SMILE_TEXT[plan['smile']]}"
 
     def led(pose_id: str) -> str:
         return _valid_expression(llm.get(pose_id)) or base

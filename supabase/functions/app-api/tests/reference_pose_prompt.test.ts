@@ -3,6 +3,7 @@ import { composeGenerationPrompt, IMAGE_PROMPT_SAFE_CHARS, isFarshiGeneration, p
 import { buildPoseQaPrompt } from "../lib/qa.ts";
 import { roleLabel } from "../lib/referencePolicy.ts";
 import { buildGenerationMemory, formatGenerationMemoryBrief } from "../lib/generationMemory.ts";
+import { withoutExpressionWords } from "../lib/expressionDirection.ts";
 import {
   localPosePlanningDecision,
   normalizeExpressionPlan,
@@ -80,6 +81,15 @@ function compose(id: string, session: Record<string, unknown>, extra: Record<str
   });
 }
 
+// Face-visible frames point every expression line at their own closing-tail direction block.
+const FRAME_POINTER = "as the THIS FRAME'S EXPRESSION line states";
+const frameBlock = (prompt: string) => prompt.match(/\nTHIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: [^\n]*/)?.[0] ?? "";
+// A plan's serene energy caps Pose 4's smile at soft; a legacy (calm) shoot lets it warm one level.
+const SERENE_CREATIVE_MOUTH = "head tilted a few degrees; a soft closed-lip smile that reaches the eyes.";
+const CALM_CREATIVE_MOUTH = "head tilted a few degrees; a warm, genuine smile with a natural softening around the eyes.";
+/** A planned prompt with the plan's mood (shoot-wide attitude line, Pose 4 smile cap) put back to the legacy defaults. */
+const withLegacyMood = (prompt: string) => prompt.replace(/\nEXPRESSION & ATTITUDE [^\n]*/, "").replace(SERENE_CREATIVE_MOUTH, CALM_CREATIVE_MOUTH);
+
 Deno.test("adopted seated creative frame sits, leads with REFERENCE POSE MATCH and drops the no-copy block", () => {
   const session = baseSession({ posePlanning: plan(SEATED) });
   const prompt = compose("creative", session, {
@@ -132,14 +142,17 @@ Deno.test("an adopted frame never carries a frozen stride from the planned expre
   seated.slots.creative = { ...seated.slots.creative, directive: "Sit on the stool as if walking past it. Rest on the low wooden stool, which must already belong to the locked set." };
   const prompt = compose("creative", baseSession({ posePlanning: seated }));
   assertStringIncludes(prompt, "REFERENCE POSE MATCH (POSE 4):\n- Match the STYLE REFERENCE person's seated posture. Rest on the low wooden stool");
-  assertStringIncludes(prompt, "- expression: Calm natural expression.");
-  assertEquals(/mid-stride|walking past/i.test(prompt), false);
+  assertStringIncludes(prompt, `\n- expression: ${FRAME_POINTER}\n`);
+  assertStringIncludes(frameBlock(prompt), "THIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: gaze drifts away from the camera into the set");
 
   // A stored walking adoption (never written by the planner) is ignored like a missing one.
   const walking = plan(SEATED);
   walking.referencePose = { ...walking.referencePose, posture: "walking" };
   const legacy = compose("creative", baseSession());
-  assertEquals(compose("creative", baseSession({ posePlanning: walking })).replace(/\nEXPRESSION & ATTITUDE [^\n]*/, ""), legacy);
+  assertEquals(withLegacyMood(compose("creative", baseSession({ posePlanning: walking }))), legacy);
+
+  // The planned mood ("Playful half-smile, mid-stride") reaches the frame direction block, so it is checked last.
+  assertEquals(/mid-stride|walking past/i.test(prompt), false);
 });
 
 Deno.test("Farshi reference frame keeps planted-stance scrubbing and adds the joined-hem guard", () => {
@@ -172,8 +185,8 @@ Deno.test("a stale stored plan never seats a Farshi frame, in the prompt or in Q
   for (const id of ["creative", "showcase", "full_front"]) {
     const extra = { pose: { prompt: "Seated on the low wooden stool, knees together." } };
     const prompt = compose(id, stale, { ...extra, generationMemory: memoryFor(stalePlan) });
-    // Identical to the unplanned Farshi frame apart from the shoot-wide attitude line, memory included.
-    assertEquals(prompt.replace(/\nEXPRESSION & ATTITUDE [^\n]*/, ""), compose(id, legacy, { ...extra, generationMemory: memoryFor() }), id);
+    // Identical to the unplanned Farshi frame apart from the plan's mood (attitude line, Pose 4 smile cap), memory included.
+    assertEquals(withLegacyMood(prompt), compose(id, legacy, { ...extra, generationMemory: memoryFor() }), id);
     for (const marker of ["REFERENCE POSE MATCH", "POSE CATEGORY RULES (SITTING)", "as the pose plan adopted", "pose plan matched", "Seated on the low wooden stool", "posture in Pose"]) {
       assertEquals(prompt.includes(marker), false, `${id}: ${marker}`);
     }
@@ -310,33 +323,72 @@ Deno.test("frames 1, 2, 3 and 5 of an adopted shoot keep the no-pose-copy wordin
   }
 });
 
-Deno.test("legacy sessions without a stored plan keep today's prompt text", () => {
+Deno.test("legacy sessions without a stored plan keep today's prompt text apart from the per-frame expression direction", () => {
   const legacy = baseSession();
   for (const id of POSE_IDS) {
     const prompt = compose(id, legacy);
     // A stale or malformed plan is ignored exactly like a missing one.
     assertEquals(compose(id, { ...legacy, posePlanning: { version: 0, slots: { creative: { source: "reference" } } } }), prompt, id);
     assertEquals(compose(id, { ...legacy, posePlanning: { version: 1, slots: {} } }), prompt, id);
-    for (const marker of ["REFERENCE POSE MATCH", "EXPRESSION & ATTITUDE", "Model expression in this frame", "as the pose plan adopted", "pose plan matched", "(REFERENCE)"]) {
+    for (const marker of ["REFERENCE POSE MATCH", "EXPRESSION & ATTITUDE", "as the pose plan adopted", "pose plan matched", "(REFERENCE)"]) {
       assertEquals(prompt.includes(marker), false, `${id}: ${marker}`);
     }
     assertStringIncludes(prompt, "Copy the room only: do not copy the pose or objects in the hands (ignore the person's face, leaning/sitting posture, cups, totes, and sunglasses).");
-    assertStringIncludes(prompt, "- Model expressions: authentic, relaxed warmth and natural composure; never a stiff, forced, or frozen smile.");
+    // Face-visible frames point at their own direction block; the back view keeps today's line.
+    assertStringIncludes(
+      prompt,
+      id === "back"
+        ? "- Model expressions: authentic, relaxed warmth and natural composure; never a stiff, forced, or frozen smile."
+        : `- Model expression in this frame: ${FRAME_POINTER}; never a stiff, forced, or frozen smile.`,
+      id,
+    );
+    assertEquals(prompt.includes("Model expression in this frame"), id !== "back", id);
+    assertStringIncludes(prompt, "Never render artificial, forced, stiff, or frozen stock catalog smiles", id);
     assertStringIncludes(prompt, "Never copy the style photo's pose.");
   }
-  assertStringIncludes(compose("full_front", legacy), "A calm expression or a small genuine smile.");
-  assertStringIncludes(compose("closeup", legacy), "- Expression should be warm, joyful, or confident.");
+  assertStringIncludes(compose("full_front", legacy), `and the full outfit reads from head to hem. Expression: ${FRAME_POINTER}. Never a rigid mannequin stance`);
+  assertStringIncludes(compose("closeup", legacy), `- Expression: ${FRAME_POINTER}.`);
+  assertStringIncludes(compose("closeup", legacy), `Any visible face is the locked identity with the planned expression (${FRAME_POINTER}), AND`);
   assertStringIncludes(compose("creative", legacy), "DO NOT COPY THE STYLE POSE (POSE 4):");
+  assertStringIncludes(compose("back", legacy), "\n- expression: soft smile\n");
 });
 
-Deno.test("a stored plan with no adopted slot changes only the expression line", () => {
+Deno.test("each face-visible frame of a legacy shoot gets its own gaze, and the back view none", () => {
+  const legacy = baseSession();
+  const gazes: Record<string, string> = {};
+  for (const id of POSE_IDS) {
+    const prompt = compose(id, legacy);
+    const block = frameBlock(prompt);
+    if (id === "back") {
+      assertEquals(prompt.includes("THIS FRAME'S EXPRESSION"), false);
+      continue;
+    }
+    gazes[id] = block.split("THIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: ")[1].split(";")[0];
+    // The identity image and APPROVED POSE 1 give the face only, never their look; the floor against frozen frames stays.
+    assertStringIncludes(block, "Copy only the face itself from the identity image and APPROVED POSE 1, never their expression, gaze or head tilt.", id);
+    assertStringIncludes(block, "A candid moment, never a frozen stare, a fixed stock smile or both arms hanging straight.", id);
+    assertStringIncludes(block, "Hands never cover the neckline, embroidery, print, slits or hem.", id);
+  }
+  assertEquals(gazes, {
+    full_front: "eyes meet the lens directly, with warmth",
+    angled: "eyes look just past the lens, toward the side the body turns to",
+    creative: "gaze drifts away from the camera into the set, toward the light or a point beyond the frame, as if caught between moments",
+    closeup: "eyes come back to the lens over a quarter head turn, quieter and closer than Pose 1",
+    showcase: "eyes glance down toward the featured garment area or over the shoulder, never straight into the lens",
+  });
+  assertEquals(new Set(Object.values(gazes)).size, 5);
+});
+
+Deno.test("a stored plan with no adopted slot changes only the expression mood", () => {
   const legacy = baseSession();
   const productLed = baseSession({ posePlanning: plan({ posture: "standing" }) });
   for (const id of POSE_IDS) {
     const prompt = compose(id, productLed);
-    const withoutExpression = prompt.replace(/\nEXPRESSION & ATTITUDE [^\n]*/, "");
-    assertEquals(withoutExpression, compose(id, legacy), id);
+    assertEquals(withLegacyMood(prompt), compose(id, legacy), id);
   }
+  // The plan's serene energy keeps Pose 4 at a soft smile where a calm legacy shoot warms it.
+  assertStringIncludes(frameBlock(compose("creative", productLed)), SERENE_CREATIVE_MOUTH);
+  assertStringIncludes(frameBlock(compose("creative", legacy)), CALM_CREATIVE_MOUTH);
 });
 
 Deno.test("planned expressions drive the expression lines and keep the calm fallback", () => {
@@ -350,22 +402,43 @@ Deno.test("planned expressions drive the expression lines and keep the calm fall
     }),
   });
   const hero = compose("full_front", session);
-  assertStringIncludes(hero, "EXPRESSION & ATTITUDE (PLANNED FOR THE WHOLE SHOOT, WHENEVER THE FACE IS VISIBLE): Attitude: Serene, regal poise. Energy: serene. Gaze: soft gaze past the lens. Mouth: soft closed-lip smile, never a forced or toothy grin.");
-  assertStringIncludes(hero, "head to hem. Expression: Serene, closed-lip smile with a soft gaze. Never a rigid mannequin stance");
-  assertStringIncludes(hero, "- expression: Serene, closed-lip smile with a soft gaze.");
-  assertStringIncludes(hero, "- Model expression in this frame: Serene, closed-lip smile with a soft gaze; never a stiff, forced, or frozen smile.");
+  assertStringIncludes(hero, "EXPRESSION & ATTITUDE (THE SHOOT'S MOOD WHENEVER THE FACE IS VISIBLE; EACH FRAME KEEPS ITS OWN GAZE): Attitude: Serene, regal poise. Energy: serene. Mouth: soft closed-lip smile at most, never a forced or toothy grin.");
+  assertStringIncludes(hero, `head to hem. Expression: ${FRAME_POINTER}. Never a rigid mannequin stance`);
+  assertStringIncludes(hero, `\n- expression: ${FRAME_POINTER}\n`);
+  assertStringIncludes(hero, `- Model expression in this frame: ${FRAME_POINTER}; never a stiff, forced, or frozen smile.`);
+  // The planned mood replaces the default mouth; the slot keeps its own gaze.
+  assertStringIncludes(frameBlock(hero), "THIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: eyes meet the lens directly, with warmth; head straight, chin level, the smallest natural tilt; Serene, closed-lip smile.");
   // The anti-forced-smile floor stays.
   assertStringIncludes(hero, "Never render artificial, forced, stiff, or frozen stock catalog smiles");
+  assertStringIncludes(frameBlock(hero), "never a frozen stare, a fixed stock smile or both arms hanging straight.");
 
   const closeup = compose("closeup", session);
   assertStringIncludes(closeup, "POSE CATEGORY RULES (PLAYFUL):");
-  assertStringIncludes(closeup, "- Expression: quiet, warm half-smile.");
-  assertStringIncludes(closeup, "Any visible face is the locked identity with the planned expression (quiet, warm half-smile), AND");
+  assertStringIncludes(closeup, `- Expression: ${FRAME_POINTER}.`);
+  assertStringIncludes(closeup, `Any visible face is the locked identity with the planned expression (${FRAME_POINTER}), AND`);
+  assertStringIncludes(frameBlock(closeup), "head turned a quarter away from the camera, chin slightly down; quiet, warm half-smile.");
   assertEquals(closeup.includes("Expression should be warm, joyful, or confident."), false);
 
   const angled = compose("angled", session);
-  assertStringIncludes(angled, "- Model expression in this frame: Calm natural expression; never a stiff, forced, or frozen smile.");
+  assertStringIncludes(angled, `- Model expression in this frame: ${FRAME_POINTER}; never a stiff, forced, or frozen smile.`);
   assertEquals(/coffee/i.test(angled.split("LOCKED SUBJECT - MUST NOT CHANGE:")[1].split("FACE & IDENTITY LOCK")[0]), false);
+  // A planned mood that holds an object never reaches the frame's own direction either.
+  assertEquals(/coffee/i.test(frameBlock(angled)), false);
+});
+
+Deno.test("a planner mood keeps its mouth and mood but leaves the gaze to the slot", () => {
+  const session = baseSession({
+    posePlanning: plan({ posture: "standing" }, {}, {
+      expressions: { full_front: "Serene, closed-lip smile with a soft gaze.", showcase: "Quiet pride, eyes to camera" },
+    }),
+  });
+  const hero = frameBlock(compose("full_front", session));
+  assertStringIncludes(hero, "eyes meet the lens directly, with warmth; head straight, chin level, the smallest natural tilt; Serene, closed-lip smile.");
+  assertEquals(hero.includes("soft gaze"), false);
+  // Pose 6 never looks into the lens, whatever the mood says.
+  const showcase = frameBlock(compose("showcase", session));
+  assertStringIncludes(showcase, "eyes glance down toward the featured garment area or over the shoulder, never straight into the lens; head inclined toward the featured area; Quiet pride.");
+  assertEquals(showcase.includes("eyes to camera"), false);
 });
 
 const attitudeLine = (prompt: string) => prompt.match(/\nEXPRESSION & ATTITUDE [^\n]*/)?.[0] ?? "";
@@ -380,8 +453,10 @@ Deno.test("the shoot-wide attitude line drops posture words in every frame that 
   const seated = baseSession({ posePlanning: plan(SEATED, {}, { expressionPlan }) });
   for (const id of ["full_front", "angled", "back", "closeup"]) {
     const line = attitudeLine(compose(id, seated));
-    assertStringIncludes(line, "Energy: calm. Mouth: soft closed-lip smile, never a forced or toothy grin.", id);
+    assertStringIncludes(line, "Energy: calm. Mouth: soft closed-lip smile at most, never a forced or toothy grin.", id);
     assertEquals(/seated|walking/i.test(line), false, id);
+    // One shoot-wide gaze is never printed: each frame keeps its own.
+    assertEquals(line.includes("Gaze:"), false, id);
   }
   // The adopted seated Pose 4 keeps the seated attitude it copies.
   assertStringIncludes(attitudeLine(compose("creative", seated)), "Attitude: Seated ease.");
@@ -390,7 +465,8 @@ Deno.test("the shoot-wide attitude line drops posture words in every frame that 
   const productLed = baseSession({ posePlanning: plan({ posture: "standing" }, {}, { expressionPlan: leaningAttitude }) });
   for (const id of ["creative", "showcase"]) {
     const line = attitudeLine(compose(id, productLed));
-    assertStringIncludes(line, "Energy: warm. Gaze: Soft, direct gaze to camera.", id);
+    assertStringIncludes(line, "Energy: warm. Mouth: warm natural smile at most, never a forced or toothy grin.", id);
+    assertEquals(line.includes("Gaze:"), false, id);
     assertEquals(/lean|languid/i.test(line), false, id);
   }
   // Nothing left but posture words falls back to the calm line.
@@ -399,7 +475,7 @@ Deno.test("the shoot-wide attitude line drops posture words in every frame that 
   assertEquals(/seated|kneeling/i.test(attitudeLine(compose("full_front", onlyPosture))), false);
 });
 
-Deno.test("a planner plan with six expressions and no adoption scrubs each one exactly like pose.expression", () => {
+Deno.test("a planner plan with six expressions and no adoption drops every planned text that names a posture or stride", () => {
   const expressions: Record<string, string> = {
     full_front: "Serene closed-lip smile",
     angled: "Seated calm with a soft smile",
@@ -412,18 +488,27 @@ Deno.test("a planner plan with six expressions and no adoption scrubs each one e
   const deltaExpression = (prompt: string) => prompt.match(/\n- expression: [^\n]*/)?.[0];
   for (const id of POSE_IDS) {
     const prompt = compose(id, planned);
-    // The same text as a legacy pose.expression gets the same scrub.
-    assertEquals(deltaExpression(prompt), deltaExpression(compose(id, baseSession(), { pose: { expression: expressions[id] } })), id);
-    // A posture or stride word drops the whole planned text, never just the word.
-    assertEquals(prompt.includes(expressions[id]), !/seated|sitting|walking|stride/i.test(expressions[id]), id);
+    if (id === "back") {
+      // No frame direction on the back view: the same text as a legacy pose.expression gets the same scrub.
+      assertEquals(deltaExpression(prompt), deltaExpression(compose(id, baseSession(), { pose: { expression: expressions[id] } })), id);
+    } else {
+      // Face-visible frames point at their own direction block, which carries the planned mood.
+      assertEquals(deltaExpression(prompt), `\n- expression: ${FRAME_POINTER}`, id);
+    }
     for (const marker of ["REFERENCE POSE MATCH", "as the pose plan adopted", "pose plan matched"]) {
       assertEquals(prompt.includes(marker), false, `${id}: ${marker}`);
     }
   }
-  assertStringIncludes(compose("full_front", planned), "- Model expression in this frame: Serene closed-lip smile;");
-  assertStringIncludes(compose("closeup", planned), "the planned expression (Quiet, warm half-smile)");
-  for (const id of ["angled", "back", "creative", "showcase"]) {
-    assertStringIncludes(compose(id, planned), "- Model expression in this frame: Calm natural expression;", id);
+  assertStringIncludes(frameBlock(compose("full_front", planned)), "the smallest natural tilt; Serene closed-lip smile.");
+  assertStringIncludes(frameBlock(compose("closeup", planned)), "chin slightly down; Quiet, warm half-smile.");
+  assertStringIncludes(compose("closeup", planned), `the planned expression (${FRAME_POINTER})`);
+  assertStringIncludes(compose("back", planned), "- Model expression in this frame: Calm natural expression;");
+  for (const id of ["full_front", "angled", "creative", "showcase"]) {
+    assertStringIncludes(compose(id, planned), `- Model expression in this frame: ${FRAME_POINTER};`, id);
+  }
+  // A posture or stride word drops the whole planned text, never just the word (frame direction block included).
+  for (const id of POSE_IDS) {
+    assertEquals(compose(id, planned).includes(expressions[id]), !/seated|sitting|walking|stride/i.test(expressions[id]), id);
   }
 });
 
@@ -463,11 +548,14 @@ Deno.test("REFERENCE POSE MATCH and the attitude line survive compaction down to
   // Tier 5 ran: the prefix before POSE REQUIREMENT was sliced.
   assertStringIncludes(prompt, "[Background and auxiliary sections compacted]");
   assertStringIncludes(prompt, "REFERENCE POSE MATCH (POSE 4):\n- Match the STYLE REFERENCE person's seated posture");
-  // The attitude line rides in the never-compacted closing tail.
-  assertStringIncludes(
-    prompt.slice(prompt.lastIndexOf("\nProduct accuracy is more important than style matching.")),
-    "\nEXPRESSION & ATTITUDE (PLANNED FOR THE WHOLE SHOOT, WHENEVER THE FACE IS VISIBLE): Attitude: Serene, regal poise.",
-  );
+  // The attitude line and this frame's direction ride in the never-compacted closing tail.
+  const tail = prompt.slice(prompt.lastIndexOf("\nProduct accuracy is more important than style matching."));
+  assertStringIncludes(tail, "\nEXPRESSION & ATTITUDE (THE SHOOT'S MOOD WHENEVER THE FACE IS VISIBLE; EACH FRAME KEEPS ITS OWN GAZE): Attitude: Serene, regal poise.");
+  assertStringIncludes(tail, "\nTHIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: gaze drifts away from the camera into the set");
+  // Tier 5 keeps ALLOWED DELTA with POSE REQUIREMENT, and its expression line still points at a block that survived.
+  assertStringIncludes(prompt, "ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:");
+  assertStringIncludes(prompt, `\n- expression: ${FRAME_POINTER}\n`);
+  assert(prompt.indexOf("ALLOWED DELTA - THE ONLY THINGS THAT MAY CHANGE:") > prompt.indexOf("[Background and auxiliary sections compacted]"));
 });
 
 Deno.test("pose QA exempts a reference-matched frame from the pose-copy fail but not from props or clothing", () => {
@@ -726,10 +814,85 @@ Deno.test("a planned expression never carries a reference posture word into a fr
   assertEquals(frameExpression(back), "\n- Model expression in this frame: Face turned away from the lens, chin softly lowered; never a stiff, forced, or frozen smile.");
   assertEquals(/leaning|languid/i.test(deltaExpression(back) + frameExpression(back)), false);
 
-  // Nothing left but a posture sentence falls back to the calm line.
+  // Face-visible Pose 4 points at its own direction block.
   const productLed = compose("creative", baseSession({ posePlanning: plan({ posture: "standing" }, {}, { expressions }) }));
-  assertEquals(deltaExpression(productLed), "\n- expression: Calm natural expression.");
-  // The adopted leaning Pose 4 keeps the posture it copies.
+  assertEquals(deltaExpression(productLed), `\n- expression: ${FRAME_POINTER}`);
+  assertEquals(frameExpression(productLed), `\n- Model expression in this frame: ${FRAME_POINTER}; never a stiff, forced, or frozen smile.`);
+  assertStringIncludes(frameBlock(productLed), "THIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: gaze drifts away from the camera into the set");
+  // The adopted leaning Pose 4 keeps the posture it copies (its gaze clause goes to the slot).
   const adopted = compose("creative", baseSession({ posePlanning: plan(LEANING, {}, { expressions }) }));
-  assertEquals(deltaExpression(adopted), "\n- expression: Leaning, languid poise with a soft gaze.");
+  assertEquals(deltaExpression(adopted), `\n- expression: ${FRAME_POINTER}`);
+  assertStringIncludes(frameBlock(adopted), "chin lifted slightly, head tilted a few degrees; Leaning, languid poise.");
+  assertEquals(frameBlock(adopted).includes("soft gaze"), false);
+  // Nothing left but a posture sentence: the product-led Pose 4 direction carries no posture word.
+  assertEquals(/leaning|languid/i.test(frameBlock(productLed)), false);
+});
+
+const REFERENCE_LOOK = {
+  expression: "dreamy half-smile",
+  gaze: "eyes lowered to the left",
+  hands: "hands loosely clasped at the waist",
+  cameraAngle: "eye-level, knees-up",
+};
+
+Deno.test("Pose 4 takes the STYLE REFERENCE person's v37 look, Pose 6 only with the posture, the camera only with the posture", () => {
+  const standing = baseSession({ posePlanning: plan({ posture: "standing", distinctiveness: "generic", ...REFERENCE_LOOK }) });
+  const creative = compose("creative", standing);
+  assertEquals(creative.includes("REFERENCE POSE MATCH"), false);
+  const block = frameBlock(creative);
+  assertStringIncludes(block, "THIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: eyes lowered to the left, as the STYLE REFERENCE person looks; the head angle the STYLE REFERENCE person holds; dreamy half-smile, as on the STYLE REFERENCE person.");
+  assertStringIncludes(block, "Body: hands loosely clasped at the waist, as the STYLE REFERENCE person does");
+  assertStringIncludes(block, "Copy only the face itself from the identity image, never APPROVED POSE 1's expression, gaze or head tilt.");
+  // The posture is not adopted, so the reference camera is not either.
+  assertEquals(block.includes("Camera:"), false);
+  // The look is copied, never the reference face, stance or props.
+  assertStringIncludes(creative, "never copy the STYLE REFERENCE person's face, body stance, or props");
+  assertStringIncludes(creative, "DO NOT COPY THE STYLE POSE (POSE 4):");
+
+  // A product-led Pose 6 keeps its slot default.
+  const showcase = frameBlock(compose("showcase", standing));
+  assertStringIncludes(showcase, "THIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: eyes glance down toward the featured garment area or over the shoulder, never straight into the lens; head inclined toward the featured area;");
+  assertEquals(/STYLE REFERENCE|dreamy|lowered to the left|clasped|Camera:/.test(showcase), false);
+
+  // An adopted seated reference also gives Pose 4 the reference camera.
+  const seated = compose("creative", baseSession({ posePlanning: plan({ ...SEATED, ...REFERENCE_LOOK }) }));
+  assertStringIncludes(seated, "REFERENCE POSE MATCH (POSE 4):");
+  assertStringIncludes(frameBlock(seated), "eyes lowered to the left, as the STYLE REFERENCE person looks");
+  assertStringIncludes(frameBlock(seated), "Camera: eye-level, knees-up, as the STYLE REFERENCE is shot.");
+});
+
+Deno.test("a reference look never carries a posture, stride or held object into a Pose 4 that does not adopt the posture", () => {
+  // Farshi blocks the seated adoption, but Pose 4 still takes the reference look.
+  const farshi = baseSession({
+    productIdentity: { garmentFamily: "kurta_or_kurti_set", mainColor: "teal", bottomWearDetails: "farshi pajama" },
+    posePlanning: plan({
+      ...SEATED,
+      expression: "relaxed seated smile",
+      gaze: "looking back while walking",
+      hands: "hands resting on the knees, holding a coffee cup",
+    }),
+  });
+  const prompt = compose("creative", farshi);
+  assertEquals(prompt.includes("REFERENCE POSE MATCH"), false);
+  assertEquals(/\b(?:seated|sitting|walking|coffee)\b/i.test(frameBlock(prompt)), false);
+});
+
+Deno.test("withoutExpressionWords keeps face features and drops gaze, smile and angle phrases", () => {
+  assertEquals(
+    withoutExpressionWords("oval face with warm medium-olive skin tone, full arched dark eyebrows, almond dark brown eyes glancing sideways, straight nose with soft tip, full natural lips in soft closed-mouth smile, gently defined jawline"),
+    "oval face with warm medium-olive skin tone, full arched dark eyebrows, almond dark brown eyes, straight nose with soft tip, full natural lips, gently defined jawline",
+  );
+  assertEquals(
+    withoutExpressionWords("oval face with smooth warm medium skin, full natural lips, straight nose, dark arched eyebrows, almond eyes with soft eyeliner, calm composed gaze; exact identity from model face reference to be preserved"),
+    "oval face with smooth warm medium skin, full natural lips, straight nose, dark arched eyebrows, almond eyes with soft eyeliner, exact identity from model face reference to be preserved",
+  );
+  const angled = withoutExpressionWords("Soft oval face, gently arched dark eyebrows. Her face is shown at a slight angle in the reference; preserve the reference rather than inventing finer details.");
+  assertStringIncludes(angled, "Soft oval face, gently arched dark eyebrows.");
+  assertStringIncludes(angled, "preserve the reference rather than inventing finer details.");
+  assertEquals(/shown at a slight angle|Her face is/.test(angled), false);
+
+  // The face lock in the prompt carries the features without the gaze or smile.
+  const prompt = compose("full_front", baseSession({ modelIdentity: { face: "almond dark brown eyes glancing sideways, full natural lips in soft closed-mouth smile" } }));
+  assertStringIncludes(prompt, "almond dark brown eyes, full natural lips");
+  assertEquals(/glancing sideways|closed-mouth smile/.test(prompt), false);
 });

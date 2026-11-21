@@ -61,7 +61,7 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v36-reference-pose-expression");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v37-reference-look-per-frame-expression");
 });
 
 Deno.test("analysis prompt distinguishes farshi from palazzo and does not take bottom print from upper fabric close-ups", () => {

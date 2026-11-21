@@ -50,6 +50,16 @@ Six-pose fashion catalog photoshoots generated from product references.
      Adoption is always read from the stored plan, never from pose fields the client sends. Poses 1, 2, 3 and 5 stay
      catalog frames. Analyses without `posePlanning` (before v36) keep today's pose behaviour: no posture copying, no
      planned expressions or attitude line.
+   - **Per-frame expression, gaze and body language (`lib/expressionDirection.ts`):** every face-visible frame has its
+     own gaze target, head angle, mouth and one natural gesture (Pose 1 eye contact; Pose 2 past the lens; Pose 4 into
+     the set; Pose 5 a quarter turn back to the lens; Pose 6 toward the featured garment), stated once in the
+     uncompacted closing tail; this applies to legacy sessions too. The shoot's `expressionPlan` sets only the mood
+     (attitude, energy, smile level) and the planner's per-frame `expressions` only the frame's mood (gaze words are
+     dropped). Identity locks (`modelIdentity.face`, the face lock, APPROVED POSE 1) carry facial features only, never
+     an expression, gaze or head tilt. From analysis v37, Pose 4 also takes the style-reference person's expression,
+     gaze and hand gesture (`referencePose.expression|gaze|hands`, scrubbed of posture, stride and held-object words)
+     whatever its posture; `referencePose.cameraAngle` applies only to an adopted posture. An adopted Pose 6 copies the
+     posture but keeps its own showcase look. Never their face or anything in the hands.
 5. **One set per shoot.** Every pose prompt carries the same SCENE LOCK
    (`lib/sceneLock.ts`); only pose, camera angle and framing change between frames.
 6. **Never delete paid output.** Each delivered image is an immutable
