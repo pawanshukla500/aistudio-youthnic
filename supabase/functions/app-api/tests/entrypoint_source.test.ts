@@ -281,7 +281,22 @@ Deno.test("Clone Session opens in the Studio with its references and analysis in
   assert(body.includes("analysisFingerprint: String(session.analysis_fingerprint || \"\"),"));
   // A clone's skuId is its planning request id, never shown as a SKU code.
   assert(body.includes('.select("session_id,planning_request_id,analysis_fingerprint,product_hash,reference_hash,session_data")'));
-  assert(body.includes('skuId: String(data.skuId || "") === String(session.planning_request_id || "") ? "" : String(data.skuId || ""),'));
+  // A clone shows the SKU code its source had (kept as sourceSkuId), never its planning request id.
+  assert(body.includes("skuId: sessionSkuCode(data, session.planning_request_id),"));
+  const cloneStart = source.indexOf("async function cloneJob(");
+  const clone = source.slice(cloneStart, source.indexOf("\n}\n", cloneStart));
+  assert(clone.includes("const sourceSkuId = sessionSkuCode(sourceData, sourceSession.planning_request_id);"));
+  assert(clone.includes("...(sourceSkuId ? { sourceSkuId } : {}),"));
+  assert(source.includes("skuId: String(args.skuId || sessionSkuCode(sessionData, session.planning_request_id) || session.planning_request_id),"));
+  const helperStart = source.indexOf("function sessionSkuCode(");
+  const helper = source.slice(helperStart, source.indexOf("\n}\n", helperStart) + 2)
+    .replace("data: JsonRecord, planningRequestId: unknown): string", "data, planningRequestId)");
+  const sessionSkuCode = new Function(`${helper}; return sessionSkuCode;`)() as (data: Record<string, unknown>, planningRequestId: unknown) => string;
+  assertEquals(sessionSkuCode({ skuId: "BT218-Cat-Rama" }, "pr-1"), "BT218-Cat-Rama");
+  assertEquals(sessionSkuCode({ skuId: "pr-2", sourceSkuId: "BT218-Cat-Rama" }, "pr-2"), "BT218-Cat-Rama");
+  // A code typed in the Studio after cloning is saved as skuId and wins over the source code.
+  assertEquals(sessionSkuCode({ skuId: "BT218-v2", sourceSkuId: "BT218-Cat-Rama" }, "pr-2"), "BT218-v2");
+  assertEquals(sessionSkuCode({ skuId: "pr-3" }, "pr-3"), "");
   const studio = Deno.readTextFileSync(new URL("../../../../src/features/studio/Studio.tsx", import.meta.url)).replace(/\r\n/g, "\n");
   assert(studio.includes('const sessionParam = searchParams.get("session") || "";'));
   assert(studio.includes('invokeAppApi<LoadedStudioSession>("studio.loadSession", { sessionId: sessionParam })'));

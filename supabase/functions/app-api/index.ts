@@ -3177,7 +3177,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     const jobId = `job_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const jobData = {
-      skuId: String(args.skuId || sessionData.skuId || session.planning_request_id),
+      skuId: String(args.skuId || sessionSkuCode(sessionData, session.planning_request_id) || session.planning_request_id),
       skuName: String(args.skuName || sessionData.skuName || "Untitled studio product"),
       productDetails: String(args.productDetails || sessionData.productDetails || ""), category: String(args.category || sessionData.category || "ethnic/fusion"),
       backgroundStyle: String(args.backgroundStyle || ""), modelIdentityDirection: String(args.modelIdentity || ""),
@@ -4943,6 +4943,13 @@ async function processWorker(request: Request, args: JsonRecord) {
  * analysis. `analysisCurrent` is false for an analysis made by an older ANALYSIS_VERSION; it can
  * still be queued (queueing checks the stored fingerprint), and Re-analyze refreshes it.
  */
+// cloneJob stores its new planning request id as skuId (an internal id, not a SKU code) and keeps the
+// source shoot's real code as sourceSkuId. A real skuId wins, so a code typed after cloning sticks.
+function sessionSkuCode(data: JsonRecord, planningRequestId: unknown): string {
+  const skuId = String(data.skuId || "");
+  return skuId && skuId !== String(planningRequestId || "") ? skuId : String(data.sourceSkuId || "");
+}
+
 async function loadStudioSession(request: Request, args: JsonRecord) {
   const { workspace } = await workspaceFor(request, "studio.generate");
   const sessionId = String(args.sessionId || "").trim();
@@ -4961,8 +4968,7 @@ async function loadStudioSession(request: Request, args: JsonRecord) {
   const analysisVersion = String(data.analysisVersion || "");
   return {
     sessionId: session.session_id,
-    // cloneJob stores its new planning request id as skuId; that internal id is not a SKU code to show.
-    skuId: String(data.skuId || "") === String(session.planning_request_id || "") ? "" : String(data.skuId || ""),
+    skuId: sessionSkuCode(data, session.planning_request_id),
     skuName: String(data.skuName || ""),
     productDetails: String(data.productDetails || ""),
     category: String(data.category || "ethnic/fusion"),
@@ -5025,9 +5031,14 @@ async function cloneJob(request: Request, args: JsonRecord) {
   
   if (planningError || !planningRequest) throw new Error("Could not create planning request for cloned session.");
   
+  const sourceData = (sourceSession.session_data || {}) as JsonRecord;
+  // skuId becomes the new planning request id; the source shoot's real SKU code is kept (through clones
+  // of clones) so the Studio shows it and approved Product DNA still locks the shoot.
+  const sourceSkuId = sessionSkuCode(sourceData, sourceSession.planning_request_id);
   const newSessionData = {
-    ...(sourceSession.session_data as JsonRecord),
+    ...sourceData,
     skuId: planningRequest.id,
+    ...(sourceSkuId ? { sourceSkuId } : {}),
     generatedAssets: [],
     approvedAssets: [],
     generationMemory: resetGenerationMemoryForClone((sourceSession.session_data as JsonRecord)?.generationMemory),
