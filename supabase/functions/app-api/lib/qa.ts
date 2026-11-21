@@ -276,7 +276,7 @@ export function buildPoseQaPrompt(args: {
   // pose_requirement at 40% three times, because the plan says "swept forward over one shoulder".
   // The requirement is a readable garment back, however the hair achieves it.
   const backHairRule = args.poseType === "back"
-    ? "For pose 3 (back view), judge hair placement by its purpose: pass it when the back neckline and the upper back panel are clearly visible, whether the hair is swept forward over a shoulder, up in a bun or ponytail, or ends above the neckline. Fail pose_requirement for hair only when it covers the back neckline, the upper back or a rear detail."
+    ? "For pose 3 (back view), judge hair placement by its purpose: pass it when the back neckline and the upper back panel are clearly visible, whether the hair is swept forward over a shoulder, up in a bun or ponytail, or ends above the neckline. Fail pose_requirement for hair only when it lies over the back neckline, the upper back or a rear detail. This overrides any hairstyle wording in the pose or styling plan (such as \"swept forward over one shoulder\"): a different way of keeping the back visible is not a failure. In this back view, never fail model_face because the hair was moved forward, tied or put up to clear the garment back: judge the hair there by colour and texture only."
     : "";
   const resolvedAspectRatio = resolveAspectRatioLabel(args.aspectRatio);
   const resolvedOrientation = resolveAspectRatioOrientation(resolvedAspectRatio);

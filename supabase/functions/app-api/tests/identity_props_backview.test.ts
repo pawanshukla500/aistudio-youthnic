@@ -108,7 +108,7 @@ Deno.test("the identity check names the identity image and the face lock asks fo
   const back = compose("back", "Beige kurti", BACK_REFS);
   assertStringIncludes(back, "IDENTITY CHECK: the face is turned away, but the skin tone, hair colour and texture, and body proportions must match IMAGE 3");
   // The last line the model reads must not ask for the hair length, which kept the hair down the back.
-  assertStringIncludes(back, "The hair stays swept forward over the front shoulders or up in a bun, so the back neckline and upper back are fully visible.");
+  assertStringIncludes(back, "Bring all the hair forward over one shoulder (a loose side ponytail or braid resting on the front of that shoulder is fine), so the back neckline and the whole upper back are bare to the camera: no hair hangs down the centre of the back.");
   assert(!back.includes("hair colour, length and texture, and body proportions"));
   assert(!back.includes("Keep hair color/style"));
 });
@@ -453,5 +453,9 @@ Deno.test("back-view QA judges hair by a visible garment back, not by one hairst
     referenceManifest: ["IMAGE 1: BACK PRODUCT", "IMAGE 2: STYLE REFERENCE"],
   });
   assertStringIncludes(qa("back"), "pass it when the back neckline and the upper back panel are clearly visible, whether the hair is swept forward over a shoulder, up in a bun or ponytail, or ends above the neckline.");
+  // The plan's literal hairstyle ("swept forward over one shoulder") must not fail a back that shows.
+  assertStringIncludes(qa("back"), "This overrides any hairstyle wording in the pose or styling plan");
+  // The hairstyle the prompt allows (forward, side ponytail, braid) never fails the face check either.
+  assertStringIncludes(qa("back"), "never fail model_face because the hair was moved forward, tied or put up to clear the garment back: judge the hair there by colour and texture only.");
   assert(!qa("angled").includes("judge hair placement by its purpose"));
 });
