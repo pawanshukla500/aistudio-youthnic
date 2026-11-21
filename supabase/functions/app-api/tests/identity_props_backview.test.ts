@@ -104,7 +104,28 @@ Deno.test("the identity check names the identity image and the face lock asks fo
   assertStringIncludes(front, "IDENTITY CHECK: the face, skin tone and hair must match IMAGE 1 (the photo uploaded as both MODEL FACE REFERENCE and STYLE REFERENCE) exactly");
   assertStringIncludes(front, "The STYLE REFERENCE image (IMAGE 1) is the face for every pose");
   assertStringIncludes(front, "IMAGE 1: MODEL FACE REFERENCE + STYLE REFERENCE (the same photo was uploaded as both)");
-  assertStringIncludes(compose("back", "Beige kurti", BACK_REFS), "IDENTITY CHECK: the face is turned away, but the skin tone, hair colour, length and texture, and body proportions must match IMAGE 3");
+  const back = compose("back", "Beige kurti", BACK_REFS);
+  assertStringIncludes(back, "IDENTITY CHECK: the face is turned away, but the skin tone, hair colour and texture, and body proportions must match IMAGE 3");
+  // The last line the model reads must not ask for the hair length, which kept the hair down the back.
+  assertStringIncludes(back, "The hair stays swept forward over the front shoulders or up in a bun, so the back neckline and upper back are fully visible.");
+  assert(!back.includes("hair colour, length and texture, and body proportions"));
+  assert(!back.includes("Keep hair color/style"));
+});
+
+Deno.test("requested props match the props Pose 1 carries and never come from a product photo", () => {
+  const props = requestedHandheldProps(PROP_NOTE);
+  const anchored = requestedPropsBlock(props, "showcase", false, true, true);
+  assertStringIncludes(anchored, "exactly as the STYLE REFERENCE shows them (same object, shape, colour, material and size) - where APPROVED POSE 1 already shows them, the very same objects it carries, identical in every frame");
+  assertStringIncludes(anchored, "A bag, drink or other object a product photo shows is that photo's own styling, not part of this product");
+  assert(!anchored.includes("a prop that is part of the product follows the product photos"));
+  assert(!requestedPropsBlock(props, "full_front").includes("APPROVED POSE 1"));
+  const qa = buildPoseQaPrompt({
+    poseNumber: 6, poseType: "showcase", poseTitle: "Pose", poseDirection: pose("showcase"),
+    productIdentity: SESSION.productIdentity, creativeDirection: SESSION.creativeDirection, modelIdentity: SESSION.modelIdentity,
+    garmentFamily: "kurta_or_kurti_set", consistencyRules: [], hasApprovedAnchor: true, hasModelReference: false,
+    referenceManifest: ["IMAGE 1: STYLE REFERENCE", "IMAGE 2: FRONT PRODUCT", "IMAGE 3: APPROVED POSE 1"], requestedProps: props,
+  });
+  assertStringIncludes(qa, "does not match the STYLE REFERENCE object or differs from the one APPROVED POSE 1 carries (when it shows one) (a bag or drink taken from a product photo fails unless the product notes say it is sold with the product)");
 });
 
 Deno.test("the back view gets the recorded rear facts the evidence filter drops", () => {
