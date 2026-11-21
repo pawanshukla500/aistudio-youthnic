@@ -364,7 +364,8 @@ Face quality bar - apply only when a recognizable face is in frame. For a true b
 
 Return STRICT JSON only:
 ${JSON.stringify({ pass: true, score: 100, checks: exampleChecks, scores: exampleScores, failed: [], reason: "short evidence-based verdict", correction: "specific correction for every failed field" })}`;
-  return requestedProps ? withRequestedPropsAllowed(prompt, requestedProps) : prompt;
+  // A craft crop keeps props out of frame, so its QA keeps the general no-props rules.
+  return requestedProps && args.poseType !== "closeup" ? withRequestedPropsAllowed(prompt, requestedProps) : prompt;
 }
 
 const SALVAGE_TOLERABLE_BORDERLINE_CHECKS = new Set([

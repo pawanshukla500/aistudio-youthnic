@@ -11,6 +11,7 @@ import {
   resolveAspectRatioOrientation,
   resolveCloseupMode,
   requestedHandheldProps,
+  requestedPropWords,
   type RequestedHandheldProps,
   type JsonRecord,
   type ShowcaseIntent,
@@ -1168,6 +1169,19 @@ function poseInstructionText(value: unknown, sitting: PoseScrub, emptyFallback: 
   return withoutPoseOrHeldClauses(String(value ?? ""), emptyFallback, !sitting);
 }
 
+/**
+ * poseInstructionText that lets requested props through: their words are masked from the
+ * held-object scrub (unrequested props and stride/pose clauses are still dropped), then
+ * "no <requested prop>" entries are removed.
+ */
+function propsAwareInstructionText(value: unknown, sitting: PoseScrub, props: RequestedHandheldProps): string {
+  const words = new RegExp(`\\b(?:${requestedPropWords(props.groups)})\\b`, "gi");
+  const masked: string[] = [];
+  const text = String(value ?? "").replace(words, (match) => `PROPTOKEN${masked.push(match) - 1}X`);
+  const scrubbed = poseInstructionText(text, sitting, "").replace(/PROPTOKEN(\d+)X/g, (_, index) => masked[Number(index)] ?? "");
+  return withoutNegatedRequestedProps(scrubbed, props);
+}
+
 function poseTitleText(value: unknown, sitting: PoseScrub): string {
   const text = String(value ?? "");
   const copiedPose = UNPLANTED_POSE_PATTERN.test(text)
@@ -1443,6 +1457,8 @@ export function composeGenerationPrompt(args: {
   // row all describe the same frame.
   const sceneLock = sceneLockBlock({ creativeDirection: directedCreative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference });
   const isMacroShowcase = isShowcase && showcaseShot?.shotType === "macro_detail";
+  // A tight crop keeps every prop out of frame, so its prompt keeps the general no-props rules.
+  const promptProps: RequestedHandheldProps = isCloseup || isMacroShowcase ? { groups: [], labels: [], note: "" } : requestedProps;
   const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL) && !isMacroShowcase;
   const faceQualityInstruction = faceRequired
     ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, eyes kept as the identity photo shows them, including a cover that hides them, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
@@ -1743,7 +1759,7 @@ ${creativeJson}
 ${styling ? `APPROVED STYLING PLAN - the stylist's decisions for this shoot, identical in every frame:
 - Footwear: ${boundedText(poseInstructionText(styling.footwear, poseScrub, ""), 360)}
 - Jewellery: ${boundedText(poseInstructionText(styling.jewellery, poseScrub, ""), 360)}
-- Ornaments and accessories: ${boundedText(requestedProps.groups.length ? (withoutNegatedRequestedProps(styling.ornaments, requestedProps) || "none besides the requested props") : poseInstructionText(styling.ornaments, poseScrub, ""), 360)}
+- Ornaments and accessories: ${boundedText(promptProps.groups.length ? (propsAwareInstructionText(styling.ornaments, poseScrub, promptProps) || "none besides the requested props") : poseInstructionText(styling.ornaments, poseScrub, ""), 360)}
 - Makeup: ${boundedText(poseInstructionText(styling.makeup, poseScrub, ""), 360)}
 - Hair: ${boundedText(poseInstructionText(styling.hair, poseScrub, ""), 360)}
 ${stylingNotes ? `- Stylist notes: ${boundedText(stylingNotes, 600)}` : ""}
@@ -1849,7 +1865,7 @@ ${isCloseup ? `${pose5HardRule({ closeupMode, heroDetail: closeupHeroDetail, exp
   ].filter(Boolean).map((block) => `${block}\n`).join("")}Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
 
   // Props the notes ask for narrow every generic no-props line before compaction measures the prompt.
-  const finalPrompt = withRequestedPropsAllowed(prompt, requestedProps);
+  const finalPrompt = withRequestedPropsAllowed(prompt, promptProps);
   return assertGenerationPromptWithinLimit(
     finalPrompt.length > IMAGE_PROMPT_SAFE_CHARS ? compactFullPromptSafely(finalPrompt) : finalPrompt,
   );

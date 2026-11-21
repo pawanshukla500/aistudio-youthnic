@@ -1674,18 +1674,22 @@ export const FORBIDDEN_HELD_OBJECT_PATTERN = new RegExp(`\\b(?:${FORBIDDEN_HELD_
 const REQUESTABLE_PROP_GROUPS: ReadonlyArray<{ id: string; label: string; words: string }> = [
   { id: "drink", label: "the drink (cup or glass)", words: String.raw`iced[-\s]?coffee|coffee|latte|matcha|boba|espresso|drinks?|beverages?|cups?|mugs?|(?:coffee|drinking|water|juice|iced)\s+glass(?:es)?|glass(?:es)?\s+of` },
   { id: "bag", label: "the bag", words: String.raw`hand[-\s]?bags?|bags?|totes?|purses?|clutch(?:es)?|backpacks?` },
-  { id: "sunglasses", label: "the sunglasses", words: String.raw`sun[-\s]?glass(?:es)?|shades|eyewear` },
+  { id: "sunglasses", label: "the sunglasses", words: String.raw`sun[-\s]?glass(?:es)?|eyewear` },
   { id: "phone", label: "the phone", words: String.raw`(?:smart|cell\s+)?phones?` },
   { id: "flowers", label: "the flowers", words: String.raw`flowers?|bouquets?` },
   { id: "umbrella", label: "the umbrella", words: String.raw`umbrellas?` },
 ];
 const PROP_HOLD_VERB = /\b(?:hold|holds|holding|held|carry|carries|carrying|carried|sip|sips|sipping)\b/i;
-// Hinglish puts the object before the verb: "haath mein coffee pakde hue", "bag hold karo".
-const PROP_HINDI_HOLD = /\b(?:hold|pakad\w*|pakd\w*)\s+(?:karo|kare|karen|karein|kiya|kiye|karna|karke|kar|hue|huye|rakho|rakhe|rakhi)\b/i;
-const PROP_IN_HAND = /\bin\s+(?:her|his|their|one|the|a)\s+hands?\b|\bin\s+hand\b|\bon\s+(?:her|his|their|the|one)\s+shoulders?\b/i;
-const PROP_NEGATION_PATTERN = /\b(?:no|not|never|without|avoid|remove|exclude|don'?t|do\s+not|nahi|nahin|nhi|mat)\b/i;
-// A prop word used as a colour, sleeve or garment name: "coffee brown", "cup sleeves", "shades of blue".
-const PROP_AS_DESCRIPTOR = /^[\s-]*(?:brown|green|beige|black|white|red|blue|pink|gold|cream|grey|gray|colou?r(?:ed)?|shades?|tones?|hued?|sleeves?|cut|flare|hem|prints?|motifs?|embroider\w*|butti|work|dupatta|kurta|kurti|stole|saree|lehenga|of)\b/i;
+// Hinglish: "haath mein coffee pakde hue", "coffee glass hold kare aur hand bag liye".
+const PROP_HINDI_HOLD = /\b(?:hold|pakad\w*|pakd\w*)\s+(?:karo|kare|karen|karein|kiya|kiye|karna|karke|kar|hue|huye|rakho|rakhe|rakhi)\b|\b(?:liye|liya)\b|\bhaath\s+(?:mein|me|main)\b/i;
+const PROP_IN_HAND = /\bin\s+(?:(?:her|his|their|one|the|a)\s+)?(?:(?:right|left)\s+)?hands?\b|\bon\s+(?:(?:her|his|their|the|one)\s+)?(?:(?:right|left)\s+)?shoulders?\b/i;
+const PROP_ENGLISH_NEGATION = /\b(?:no|not|never|without|avoid|remove|exclude|don'?t|do\s+not)\b/i;
+// Hindi negations only count in a Hinglish clause ("mat" is also an English word).
+const PROP_HINDI_NEGATION = /\b(?:nahi|nahin|nhi|mat|na)\b/i;
+const PROP_HINDI_MARKER = /\b(?:mein|aur|ke|ki|ka|hai|ho|bhi|sirf|karo|kare|karna|pakd\w*|liye|rakho|haath)\b/i;
+// A prop word used as a colour, sleeve, shape or garment detail: "coffee brown", "cup sleeves",
+// "umbrella shape", "bag-style pocket", "coffee table", "flowers printed on the border".
+const PROP_AS_DESCRIPTOR = /^[\s-]*(?:brown|green|beige|black|white|red|blue|pink|gold|cream|grey|gray|colou?r(?:ed)?|shades?|tones?|hued?|sleeves?|cut|flare|hem|prints?|printed|motifs?|embroider\w*|butti|work|shape[sd]?|style[sd]?|pattern(?:ed)?|pockets?|table|stand|dupatta|kurta|kurti|stole|saree|lehenga|of)\b/i;
 const PROP_WINDOW_WORDS = 10;
 const PROP_LIST_ITEM = /^(?:(?:and|or|plus|&)\s+)?(?:a|an|the|her|his|their|some|one)\b/i;
 
@@ -1697,23 +1701,31 @@ export type RequestedHandheldProps = {
   note: string;
 };
 
-/** The text after a holding verb (or before a Hinglish one) where its object sits, or "". */
-function propWindow(clause: string): string {
-  const hindi = clause.match(PROP_HINDI_HOLD);
-  if (hindi && hindi.index !== undefined) return clause.slice(0, hindi.index);
+/**
+ * Where a clause's held object sits: the words after an English holding verb, the whole clause
+ * for Hinglish (object before and after the verb), or the clause around "in her hand". Empty
+ * when the clause holds nothing. `start` is the window's offset in the clause.
+ */
+function propWindow(clause: string): { text: string; start: number; hindi: boolean } | null {
+  if (PROP_HINDI_HOLD.test(clause)) return { text: clause, start: 0, hindi: true };
   const verb = clause.match(PROP_HOLD_VERB);
   if (verb && verb.index !== undefined) {
-    return clause.slice(verb.index + verb[0].length).trim().split(/\s+/).slice(0, PROP_WINDOW_WORDS).join(" ");
+    const rest = clause.slice(verb.index + verb[0].length);
+    const start = verb.index + verb[0].length + (rest.length - rest.trimStart().length);
+    // One word past the window lets a trailing descriptor ("phone pocket") be seen.
+    return { text: rest.trimStart().split(/\s+/).slice(0, PROP_WINDOW_WORDS + 1).join(" "), start, hindi: false };
   }
-  return PROP_IN_HAND.test(clause) ? clause : "";
+  return PROP_IN_HAND.test(clause) ? { text: clause, start: 0, hindi: false } : null;
 }
 
 /**
  * Props the product notes explicitly ask the model to hold or carry ("she holds a coffee
  * glass and a hand bag as in the reference image"). Each clause is read on its own: the prop
- * must follow a holding/carrying verb (or sit "in her hand"), a negated clause never counts,
- * and a prop word used as a colour, sleeve or garment name is not a prop. Requested props
- * carry over from the STYLE REFERENCE; every other handheld object stays excluded.
+ * must follow a holding/carrying verb (or sit "in her hand"/"on her shoulder", or appear in a
+ * Hinglish holding clause), an English negation before the prop or a Hindi negation in a
+ * Hinglish clause cancels it, and a prop word used as a colour, sleeve, shape or garment
+ * detail is not a prop. Requested props carry over from the STYLE REFERENCE; every other
+ * handheld object stays excluded.
  */
 export function requestedHandheldProps(notes: unknown): RequestedHandheldProps {
   const groups = new Set<string>();
@@ -1722,24 +1734,28 @@ export function requestedHandheldProps(notes: unknown): RequestedHandheldProps {
   // a clause right after a holding clause continues it when it starts like a list item.
   let continuesHold = false;
   for (const rawClause of String(notes ?? "").split(/([.;!?\n]+|,|\bbut\b)/i)) {
-    if (/^(?:[.;!?\n]+|but)$/i.test(rawClause.trim())) {
-      continuesHold = false;
-      continue;
-    }
-    if (rawClause === ",") continue;
     const clause = rawClause.trim();
-    if (!clause || PROP_NEGATION_PATTERN.test(clause)) {
+    if (rawClause === ",") continue;
+    if (!clause || /^(?:[.;!?]+|but)$/i.test(clause)) {
       continuesHold = false;
       continue;
     }
-    const ownWindow = propWindow(clause);
-    const propText: string = ownWindow || (continuesHold && PROP_LIST_ITEM.test(clause) ? clause : "");
-    continuesHold = Boolean(ownWindow) || Boolean(propText);
-    if (!propText) continue;
+    const hinglish = PROP_HINDI_MARKER.test(clause);
+    if (hinglish && PROP_HINDI_NEGATION.test(clause)) {
+      continuesHold = false;
+      continue;
+    }
+    const own = propWindow(clause);
+    const held: { text: string; start: number; hindi: boolean } | null = own ?? (continuesHold && PROP_LIST_ITEM.test(clause) ? { text: clause, start: 0, hindi: false } : null);
+    continuesHold = Boolean(held);
+    if (!held) continue;
     let matched = false;
     for (const group of REQUESTABLE_PROP_GROUPS) {
-      for (const match of propText.matchAll(new RegExp(`\\b(?:${group.words})\\b`, "gi"))) {
-        if (PROP_AS_DESCRIPTOR.test(propText.slice((match.index ?? 0) + match[0].length))) continue;
+      for (const match of held.text.matchAll(new RegExp(`\\b(?:${group.words})\\b`, "gi"))) {
+        const at = match.index ?? 0;
+        if (PROP_AS_DESCRIPTOR.test(held.text.slice(at + match[0].length))) continue;
+        // "no sunglasses", "do not hold a bag": an English negation before this prop cancels it.
+        if (PROP_ENGLISH_NEGATION.test(clause.slice(0, held.start + at))) continue;
         groups.add(group.id);
         matched = true;
         break;
@@ -1823,7 +1839,8 @@ export function withoutNegatedRequestedProps(text: unknown, requested: Pick<Requ
     pendingSeparator = undefined;
     leadIn = "";
   }
-  return (kept.join("") || leadIn).trim();
+  // A lead-in with nothing left after it ("none - ") is dropped, so callers can fall back.
+  return kept.join("").trim();
 }
 
 export function sanitizeHeldObjectText(value: unknown, replacement: string, allowNotes = ""): string {

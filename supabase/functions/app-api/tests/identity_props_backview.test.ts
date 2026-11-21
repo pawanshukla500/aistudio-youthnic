@@ -204,6 +204,53 @@ Deno.test("without a style reference the props come from the notes, in the promp
   assertEquals(requestedHandheldProps("She holds the kurti with flower embroidery").groups, []);
 });
 
+Deno.test("prop requests skip shape, pocket and table uses and read right/left hands and Hinglish holds", () => {
+  for (const note of [
+    "Model holding dupatta in hand and the kurta has an umbrella shape",
+    "Model holding the dupatta, the kurta has a bag-style pocket",
+    "Model holding the pallu, the coffee table stays out of frame",
+    "She holds the dupatta over her shoulder with flowers printed on the border",
+    "She is carrying the dupatta and the kurta has bell sleeves with phone pocket",
+    "Model holding the dupatta in maroon shades",
+  ]) assertEquals(requestedHandheldProps(note).groups, [], note);
+  assertEquals(requestedHandheldProps("Holding a handbag that does not cover the print").groups, ["bag"]);
+  assertEquals(requestedHandheldProps("She carries a tote bag which should not hide the embroidery").groups, ["bag"]);
+  assertEquals(requestedHandheldProps("Model holding coffee glass and hand bag like reference no sunglasses").groups, ["drink", "bag"]);
+  assertEquals(requestedHandheldProps("she has a coffee glass in her right hand and a handbag on her left shoulder").groups, ["drink", "bag"]);
+  assertEquals(requestedHandheldProps("Coffee glass in right hand and bag on shoulder").groups, ["drink", "bag"]);
+  assertEquals(requestedHandheldProps("model ke haath mein coffee aur bag ho").groups, ["drink", "bag"]);
+  assertEquals(requestedHandheldProps("coffee glass hold kare aur hand bag liye").groups, ["drink", "bag"]);
+  assertEquals(requestedHandheldProps("holding a coffee cup on a mat finish tray").groups, ["drink"]);
+});
+
+Deno.test("the ornaments line keeps requested props but still drops unrequested props and stride text", () => {
+  const session = {
+    ...SESSION,
+    stylingPlan: { ...SESSION.stylingPlan, ornaments: "beige woven tote and iced coffee from the style reference; black sunglasses held in the left hand; walking stride with the bag swinging; no coffee cup" },
+  };
+  const prompt = composeGenerationPrompt({
+    skuName: "BEIGE-KURTI", productDetails: `Beige kurti. ${PROP_NOTE}`, pose: pose("full_front"), session, references: FRONT_REFS, useStyleReferenceAsModelIdentity: true,
+  });
+  const line = prompt.slice(prompt.indexOf("- Ornaments and accessories:"), prompt.indexOf("\n", prompt.indexOf("- Ornaments and accessories:")));
+  assertStringIncludes(line, "beige woven tote and iced coffee from the style reference");
+  assert(!line.includes("sunglasses"), line);
+  assert(!line.includes("walking stride"), line);
+  assert(!line.includes("no coffee cup"), line);
+});
+
+Deno.test("a tight crop keeps the no-props rules and lists no props; an emptied list falls back", () => {
+  const closeup = compose("closeup", `Beige kurti. ${PROP_NOTE}`);
+  assertStringIncludes(closeup, "This tight detail crop keeps every prop out of frame");
+  assert(!closeup.includes("holding only the requested props"));
+  assertEquals(withoutNegatedRequestedProps("none - no tote, no coffee cup", requestedHandheldProps(PROP_NOTE)), "");
+  const emptied = composeGenerationPrompt({
+    skuName: "BEIGE-KURTI", productDetails: `Beige kurti. ${PROP_NOTE}`, pose: pose("full_front"),
+    session: { ...SESSION, stylingPlan: { ...SESSION.stylingPlan, ornaments: "none - no tote, no coffee cup" } },
+    references: FRONT_REFS, useStyleReferenceAsModelIdentity: true,
+  });
+  assertStringIncludes(emptied, "- Ornaments and accessories: none besides the requested props");
+});
+
 Deno.test("tight crops keep props out of frame and extra props never need a third hand", () => {
   const props = requestedHandheldProps("She is holding a coffee cup, a tote bag and a phone as in the reference image.");
   assertEquals(props.groups, ["drink", "bag", "phone"]);
