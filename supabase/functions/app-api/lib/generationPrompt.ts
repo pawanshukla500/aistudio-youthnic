@@ -985,7 +985,7 @@ function referenceImageScopeDirective(hasModelReference: boolean, useStyleAsMode
  * Uncompacted tail block for props the product notes ask for (requestedHandheldProps).
  * Empty when nothing is requested, so every other shoot keeps its no-props rules.
  */
-export function requestedPropsBlock(props: RequestedHandheldProps, poseId: string, tightCrop = poseId === "closeup", hasStyleReference = true): string {
+export function requestedPropsBlock(props: RequestedHandheldProps, poseId: string, tightCrop = poseId === "closeup", hasStyleReference = true, hasApprovedAnchor = false): string {
   if (!props.groups.length) return "";
   if (tightCrop) {
     return `REQUESTED PROPS (FROM THE PRODUCT NOTES): "${props.note}". This tight detail crop keeps every prop out of frame so the garment detail stays clear.`;
@@ -1001,8 +1001,10 @@ export function requestedPropsBlock(props: RequestedHandheldProps, poseId: strin
       : "",
   ].filter(Boolean).join("; ");
   return `REQUESTED PROPS (FROM THE PRODUCT NOTES - CARRY THEM OVER): "${props.note}". ${hasStyleReference
-    ? `Carry over ${props.labels.join(" and ")} exactly as the STYLE REFERENCE shows them (same object, shape, colour, material and size; a prop that is part of the product follows the product photos)`
-    : `Include ${props.labels.join(" and ")} as the notes describe them (no style reference is attached; a prop that is part of the product follows the product photos), kept simple and neutral`}, identical in every frame: ${holds}. ${back
+    ? `Carry over ${props.labels.join(" and ")} exactly as the STYLE REFERENCE shows them (same object, shape, colour, material and size)`
+    : `Include ${props.labels.join(" and ")} as the notes describe them (no style reference is attached), kept simple and neutral`}${hasApprovedAnchor
+    ? ", the very same objects APPROVED POSE 1 already carries"
+    : ""}, identical in every frame: ${holds}. A bag, drink or other object a product photo shows is that photo's own styling, not part of this product: never use it unless the product notes say it is sold with the product. ${back
     ? "From behind they stay at the sides and must not cover the back neckline, the stripes or print, the side slits or the hem."
     : "They must not cover the neckline, the embroidery or print, the side slits, the hem or the bottom-wear construction."} Each prop is held by a visible hand joined to its forearm or hangs from a shoulder or forearm - exactly two arms and two hands. This request overrides the general no-props rules for these props only; every other handheld object stays excluded.`;
 }
@@ -1010,7 +1012,8 @@ export function requestedPropsBlock(props: RequestedHandheldProps, poseId: strin
 /** Uncompacted identity reminder naming the exact manifest image that carries the face. */
 export function identityCheckLine(imageNumber: number, label: string, backView: boolean): string {
   return backView
-    ? `IDENTITY CHECK: the face is turned away, but the skin tone, hair colour, length and texture, and body proportions must match IMAGE ${imageNumber} (${label}).`
+    // Asking for the hair length here kept the hair down the back, over the back neckline, in every attempt.
+    ? `IDENTITY CHECK: the face is turned away, but the skin tone, hair colour and texture, and body proportions must match IMAGE ${imageNumber} (${label}). The hair stays swept forward over the front shoulders or up in a bun, so the back neckline and upper back are fully visible.`
     : `IDENTITY CHECK: the face, skin tone and hair must match IMAGE ${imageNumber} (${label}) exactly - the same face shape, eyes, brows, nose, lips and jaw; the same skin tone; the same hair colour, length, texture and parting. Do not beautify, slim, lighten or swap the face.`;
 }
 
@@ -1471,7 +1474,7 @@ export function composeGenerationPrompt(args: {
   const faceQualityInstruction = faceRequired
     ? "The face must read as a real photographed person: natural skin texture with visible pores and subtle micro-imperfections, gentle natural asymmetry, eyes kept as the identity photo shows them, including a cover that hides them, and naturally aligned teeth (not uniformly perfect, no extra or missing teeth). Never render a plastic, waxy, over-smoothed, mirror-symmetric, or otherwise synthetic \"AI face\". Never distort, warp, blur, or misalign eyes, eyebrows, nose, lips, ears, or teeth."
     : isTrueBack
-      ? `The model is photographed from behind. Keep hair color/style, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor. If the model glances back over her shoulder showing her profile or any part of her face, that face MUST match ${hasModelReference ? "the MODEL FACE REFERENCE" : useStyleModelIdentity ? "the STYLE REFERENCE face identity (duplicated upload)" : "APPROVED POSE 1 (never copy the STYLE REFERENCE person's face)"}. APPROVED POSE 1 is the room and the identity anchor: do not copy its pose or objects in the hands. Never substitute a different person or face.`
+      ? `The model is photographed from behind. Keep hair colour and texture, skin tone, ear jewelry, and body proportions strictly consistent with the identity anchor, with the hair swept forward off the back. If the model glances back over her shoulder showing her profile or any part of her face, that face MUST match ${hasModelReference ? "the MODEL FACE REFERENCE" : useStyleModelIdentity ? "the STYLE REFERENCE face identity (duplicated upload)" : "APPROVED POSE 1 (never copy the STYLE REFERENCE person's face)"}. APPROVED POSE 1 is the room and the identity anchor: do not copy its pose or objects in the hands. Never substitute a different person or face.`
       : "This frame is a PRODUCT-DETAIL close-up. Do not force a full beauty-face crop. If any portion of the face appears it MUST match the identity lock - same jawline, eyes, skin texture with visible pores, and makeup. Prefer filling the frame with the named product selling detail; omit or crop the face when a full face would make that detail too small to read.";
   const plantedStance = poseScrub === "reference"
     ? REFERENCE_STANCE
@@ -1869,7 +1872,7 @@ ${isCloseup ? `${pose5HardRule({ closeupMode, heroDetail: closeupHeroDetail, exp
     // A faceless crop gets no face reminder: it must not pull a face into the craft detail.
     faceRequired || isTrueBack ? identityLine : "",
     isTrueBack && !isSaree ? rearViewChecklist(product, bottomWear.includesBottomWear) : "",
-    requestedPropsBlock(requestedProps, args.pose.id, isCloseup || isMacroShowcase, hasStyleReference),
+    requestedPropsBlock(requestedProps, args.pose.id, isCloseup || isMacroShowcase, hasStyleReference, hasApprovedAnchor),
   ].filter(Boolean).map((block) => `${block}\n`).join("")}Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
 
   // Props the notes ask for narrow every generic no-props line before compaction measures the prompt.
