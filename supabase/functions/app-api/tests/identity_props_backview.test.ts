@@ -125,7 +125,7 @@ Deno.test("requested props match the props Pose 1 carries and never come from a 
     garmentFamily: "kurta_or_kurti_set", consistencyRules: [], hasApprovedAnchor: true, hasModelReference: false,
     referenceManifest: ["IMAGE 1: STYLE REFERENCE", "IMAGE 2: FRONT PRODUCT", "IMAGE 3: APPROVED POSE 1"], requestedProps: props,
   });
-  assertStringIncludes(qa, "does not match the STYLE REFERENCE object or differs from the one APPROVED POSE 1 carries (when it shows one) (a bag or drink taken from a product photo fails)");
+  assertStringIncludes(qa, "does not match the STYLE REFERENCE object or differs from the one APPROVED POSE 1 carries (when it shows one) (a bag or drink taken from a product photo fails unless the product notes say it is sold with the product)");
 });
 
 Deno.test("the back view gets the recorded rear facts the evidence filter drops", () => {
