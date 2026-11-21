@@ -2367,24 +2367,10 @@ async function analyze(request: Request, args: JsonRecord) {
   assertRequiredProductReferences(references, String(args.category || ""));
   const pHash = productHash(args);
   const rHash = referenceHash(references);
-  // House preference is an analysis input, so it belongs in the cache identity:
-  // otherwise a cached plan keeps proposing the styling a stylist corrected, for
-  // up to the cache's thirty days. It stays out of the fingerprint on purpose -
-  // that is queue-time validation of the references, and saving a plan writes a
-  // decision, which would change the fingerprint and reject its own session.
-  const explicitCutHint = explicitBottomCutHint(args.bottomWear, args.productDetails, args.skuName);
-  const [housePreferences, fashionKnowledge, analysisLearning, showcaseFeedback, policy] = await Promise.all([
-    withDeadline(stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion")), ANALYSIS_PREP_QUERY_MS, ""),
-    withDeadline(fashionKnowledgeBrief(orgId, String(args.category || ""), "", explicitCutHint), ANALYSIS_PREP_QUERY_MS, ""),
-    withDeadline(analysisLearningBrief(orgId, String(args.category || "ethnic/fusion")), ANALYSIS_PREP_QUERY_MS, ""),
-    withDeadline(showcaseFeedbackBrief(orgId, String(args.category || "ethnic/fusion")), ANALYSIS_PREP_QUERY_MS, ""),
-    resolveVisionPolicy(orgId, { purpose: "product_truth", garmentFamily: String(args.category || "") }),
-  ]);
-  let usedPolicy = policy;
-  const policyFingerprint = visionPolicyFingerprint(policy);
-  const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}|${policyFingerprint}`);
-  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${policyFingerprint}:${smallHash(housePreferences)}:${smallHash(fashionKnowledge)}:${smallHash(analysisLearning)}:${smallHash(showcaseFeedback)}`;
-  const flightKey = `${orgId}:${cacheKey}`;
+  // One analysis per organization and input set, registered before the up-to-8s prep queries:
+  // a duplicate (auto-analysis plus a click, or a retry after a gateway cut) that arrived during
+  // prep, or whose prep briefs timed out differently, used to start a second paid analysis.
+  const flightKey = `${orgId}:${pHash}:${rHash}:${ANALYSIS_VERSION}`;
   const existingFlight = studioAnalysisFlights.get(flightKey);
   if (existingFlight) {
     existingFlight.clientSignals.add(request.signal);
@@ -2424,6 +2410,23 @@ async function analyze(request: Request, args: JsonRecord) {
     return payload;
   };
   try {
+  // House preference is an analysis input, so it belongs in the cache identity:
+  // otherwise a cached plan keeps proposing the styling a stylist corrected, for
+  // up to the cache's thirty days. It stays out of the fingerprint on purpose -
+  // that is queue-time validation of the references, and saving a plan writes a
+  // decision, which would change the fingerprint and reject its own session.
+  const explicitCutHint = explicitBottomCutHint(args.bottomWear, args.productDetails, args.skuName);
+  const [housePreferences, fashionKnowledge, analysisLearning, showcaseFeedback, policy] = await Promise.all([
+    withDeadline(stylingPreferenceBrief(orgId, String(args.category || "ethnic/fusion")), ANALYSIS_PREP_QUERY_MS, ""),
+    withDeadline(fashionKnowledgeBrief(orgId, String(args.category || ""), "", explicitCutHint), ANALYSIS_PREP_QUERY_MS, ""),
+    withDeadline(analysisLearningBrief(orgId, String(args.category || "ethnic/fusion")), ANALYSIS_PREP_QUERY_MS, ""),
+    withDeadline(showcaseFeedbackBrief(orgId, String(args.category || "ethnic/fusion")), ANALYSIS_PREP_QUERY_MS, ""),
+    resolveVisionPolicy(orgId, { purpose: "product_truth", garmentFamily: String(args.category || "") }),
+  ]);
+  let usedPolicy = policy;
+  const policyFingerprint = visionPolicyFingerprint(policy);
+  const fingerprint = smallHash(`${ANALYSIS_VERSION}|${pHash}|${rHash}|${policyFingerprint}`);
+  const cacheKey = `${pHash}:${rHash}:${ANALYSIS_VERSION}:${policyFingerprint}:${smallHash(housePreferences)}:${smallHash(fashionKnowledge)}:${smallHash(analysisLearning)}:${smallHash(showcaseFeedback)}`;
   let cacheHit = false;
   let normalized: ReturnType<typeof normalizeAnalysis> | null = null;
   const forceRefresh = args.forceRefresh === true;
@@ -4932,6 +4935,66 @@ async function processWorker(request: Request, args: JsonRecord) {
   }
   await failPoseAndJob({ ...job, actual_cost_usd: Number(job.actual_cost_usd || 0) + attemptCost + qaAttemptCost }, session, pose, lastError, terminalFailureCode);
   return { processed: true, jobId: job.job_id, pose: pose.pose_index, status: "failed", error: lastError };
+}
+
+/**
+ * A stored session (a Clone Session copy) in the shape `analyze` returns, so the Studio can open
+ * it with its references, analysis and pose plan instead of asking for new uploads and a new
+ * analysis. `analysisCurrent` is false for an analysis made by an older ANALYSIS_VERSION; it can
+ * still be queued (queueing checks the stored fingerprint), and Re-analyze refreshes it.
+ */
+async function loadStudioSession(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "studio.generate");
+  const sessionId = String(args.sessionId || "").trim();
+  if (!sessionId) throw new Error("Session not found.");
+  const { data: session, error } = await service.from("catalog_sessions")
+    .select("session_id,analysis_fingerprint,product_hash,reference_hash,session_data")
+    .eq("session_id", sessionId).eq("organization_id", workspace.organization.id).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!session) throw new Error("Session not found or belongs to another organization.");
+  const data = (session.session_data || {}) as JsonRecord;
+  const references = (Array.isArray(data.references) ? data.references as JsonRecord[] : [])
+    .filter((reference) => String(reference.role || "") && String(reference.downloadUrl || reference.storagePath || ""));
+  if (!references.length || !Array.isArray(data.posePlan) || !data.productIdentity) {
+    throw new Error("This session has no stored references or analysis to open. Upload the references in the Studio instead.");
+  }
+  const analysisVersion = String(data.analysisVersion || "");
+  return {
+    sessionId: session.session_id,
+    skuId: String(data.skuId || ""),
+    skuName: String(data.skuName || ""),
+    productDetails: String(data.productDetails || ""),
+    category: String(data.category || "ethnic/fusion"),
+    references: references.map((reference) => ({
+      id: String(reference.id || ""),
+      role: String(reference.role),
+      downloadUrl: String(reference.downloadUrl || ""),
+      storagePath: String(reference.storagePath || ""),
+      storageBackend: String(reference.storageBackend || "firebase"),
+      hash: String(reference.hash || ""),
+      filename: String(reference.filename || `${reference.role}.jpg`),
+      mimeType: String(reference.mimeType || "image/jpeg"),
+      size: Number(reference.size || 0),
+    })),
+    analysisVersion,
+    analysisCurrent: analysisVersion === ANALYSIS_VERSION,
+    analysis: {
+      sessionId: session.session_id,
+      referenceIds: Array.isArray(data.referenceIds) ? data.referenceIds : [],
+      analysisFingerprint: String(session.analysis_fingerprint || ""),
+      productHash: String(session.product_hash || ""),
+      referenceHash: String(session.reference_hash || ""),
+      productIdentity: data.productIdentity,
+      creativeDirection: data.creativeDirection || {},
+      modelIdentity: data.modelIdentity || {},
+      stylingPlan: data.stylingPlan,
+      posePlan: data.posePlan,
+      posePlanning: data.posePlanning,
+      cacheHit: true,
+      analysisProvider: String(data.analysisProvider || ""),
+      analysisModel: String(data.analysisModel || ""),
+    },
+  };
 }
 
 async function cloneJob(request: Request, args: JsonRecord) {
@@ -10116,6 +10179,7 @@ const appRequestHandler = async (request: Request) => {
       "workflows.overview": () => workflowsOverviewOperation(request),
       "workflows.checkpoints": () => workflowCheckpointsOperation(request, args),
       "studio.analyze": () => analyze(request, args),
+      "studio.loadSession": () => loadStudioSession(request, args),
       "studio.queue": () => queueGeneration(request, args),
       "jobs.clone": () => cloneJob(request, args),
       "jobs.approve": () => approvePose(request, args),

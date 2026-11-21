@@ -14,7 +14,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { neighborIds, photosForPose, poseIsWorking, promptExcerpt, referenceLane, type FlowPose, type FlowReference } from "./flowLinks";
+import { neighborIds, photosForPose, poseIsWorking, promptExcerpt, referenceLane, versionStatusLabel, type FlowPose, type FlowReference } from "./flowLinks";
 
 export type { FlowPose, FlowReference };
 
@@ -302,7 +302,7 @@ function ShotNode({ id, data, selected }: NodeProps<Node<ShotData>>) {
           {(data.versions || []).slice(0, 4).map((version) => {
             const when = version.at ? new Date(version.at) : null;
             const stamp = when && Number.isFinite(when.getTime()) ? when.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "";
-            const label = `v${version.version} ${(version.status || "").replaceAll("_", " ")}${stamp ? ` · ${stamp}` : ""}`;
+            const label = `v${version.version} ${versionStatusLabel(version.status)}${stamp ? ` · ${stamp}` : ""}`;
             return version.imageUrl
               ? <button key={version.version} type="button" className="block w-full truncate text-left text-[10px] font-semibold text-[#1d4ed8]" onClick={() => actions.onPreview(version.imageUrl || "", `Version ${version.version}`)}>{label}</button>
               : <p key={version.version} className="truncate text-[10px] text-[#6b7280]">{label}</p>;
@@ -311,14 +311,14 @@ function ShotNode({ id, data, selected }: NodeProps<Node<ShotData>>) {
             const next = event.target.value;
             setNote(next);
             if (data.poseIndex) actions.saveNote(data.poseIndex, next);
-          }} placeholder="Change for the next version only" className="h-12 w-full resize-none rounded-md border border-[#e6e8ee] p-1.5 text-[10px] leading-4 text-[#1f2430] outline-none" />
+          }} placeholder="What to change in the next version (required to re-generate)" className="h-12 w-full resize-none rounded-md border border-[#e6e8ee] p-1.5 text-[10px] leading-4 text-[#1f2430] outline-none" />
           <p className="text-right text-[10px] text-[#9aa0ab]">{note.length}/1000</p>
           <p className="text-[10px] text-[#6b7280]">Queues this pose only. The current image stays until the new one is saved.</p>
           {data.error && <p className="text-[10px] text-red-700">{data.error}</p>}
           <div className="flex flex-wrap gap-1">
             <button type="button" disabled={!data.imageUrl} onClick={() => data.imageUrl && actions.onCopy(data.imageUrl)} className="rounded-md border border-[#e6e8ee] px-2 py-1 text-[10px] font-semibold text-[#1f2430] disabled:opacity-40">Copy link</button>
             <button type="button" disabled={!actions.onDownload || actions.busyPose !== undefined} onClick={() => data.poseIndex && actions.onDownload?.(data.poseIndex)} className="rounded-md border border-[#e6e8ee] px-2 py-1 text-[10px] font-semibold text-[#1f2430] disabled:opacity-40">{actions.busyPose === data.poseIndex ? "Downloading" : "Download"}</button>
-            <button type="button" title={data.canRegenerate ? "Queue a new version of this pose only" : "Re-generation is closed for this shoot"} disabled={!data.canRegenerate || !actions.onRegenerate || !note.trim() || actions.busyPose !== undefined} onClick={() => data.poseIndex && actions.onRegenerate?.(data.poseIndex, note.trim())} className="rounded-md bg-[#182033] px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-40">{actions.busyPose === data.poseIndex ? "Queueing..." : "Re-generate"}</button>
+            <button type="button" title={!data.canRegenerate ? "Re-generation is closed for this shoot" : actions.busyPose !== undefined ? "Another pose is being queued" : !note.trim() ? "Type what to change first: each version is a paid generation" : "Queue a new version of this pose only"} disabled={!data.canRegenerate || !actions.onRegenerate || !note.trim() || actions.busyPose !== undefined} onClick={() => data.poseIndex && actions.onRegenerate?.(data.poseIndex, note.trim())} className="rounded-md bg-[#182033] px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-40">{actions.busyPose === data.poseIndex ? "Queueing..." : "Re-generate"}</button>
           </div>
         </div>
       ) : data.kind === "reference" ? <p className="px-2.5 pb-1.5 text-[10px] text-[#9aa0ab]">{data.caption}</p> : null}
