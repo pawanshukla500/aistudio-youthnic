@@ -25,10 +25,17 @@ export type FrameDirectionInput = {
   reference?: ReferenceLook | null;
   /** The planner's expression for this frame (posePlanning.expressions); its gaze words are dropped, the slot owns the gaze. */
   plannedMood?: string;
+  /** Who sets the body: the slot's standing cue, a seated frame, or the REFERENCE POSE MATCH block. */
+  bodyOwner?: "slot" | "seated" | "reference";
+  /** The face source the prompt actually attaches, e.g. "the MODEL FACE REFERENCE" or "the modelIdentity description". */
+  faceSource?: string;
+  hasApprovedAnchor?: boolean;
+  /** The STYLE REFERENCE person is not the identity, so their face must never be copied. */
+  styleFaceForbidden?: boolean;
 };
 
 export type FrameDirection = {
-  /** Short "gaze; head; mouth" text for ALLOWED DELTA and the frame lines. */
+  /** Short "gaze; head; mouth" text. */
   summary: string;
   /** Uncompacted closing-tail block. */
   block: string;
@@ -71,6 +78,9 @@ const SLOT_LOOKS: Record<string, SlotLook> = {
   },
 };
 
+const SEATED_BODY = "an easy seated gesture: one hand rests lightly on the knee or the seat edge while the other touches the hair or an earring, shoulders relaxed";
+const REFERENCE_BODY = "the body exactly as the REFERENCE POSE MATCH block sets it";
+
 const SMILE_ORDER: SmileLevel[] = ["none", "soft", "warm", "open"];
 
 const MOUTH: Record<SmileLevel, string> = {
@@ -92,6 +102,9 @@ const MAX_SMILE: Record<ExpressionEnergy, SmileLevel> = {
 
 const GARMENT_SAFE_HANDS = "Hands never cover the neckline, embroidery, print, slits or hem";
 
+// A reference crop ("knees-up") must not override this frame's framing.
+const CROP_WORDS = /\b(?:knees?-up|waist-up|chest-up|thigh-up|hip-up|close[- ]?up|crop(?:ped)?|tight|half[- ]body|bust|head[- ]and[- ]shoulders)\b,?/gi;
+
 function shiftedSmile(base: SmileLevel, shift: number, energy: ExpressionEnergy): SmileLevel {
   const cap = SMILE_ORDER.indexOf(MAX_SMILE[energy]);
   const index = Math.max(0, Math.min(cap, SMILE_ORDER.indexOf(base) + shift));
@@ -99,10 +112,21 @@ function shiftedSmile(base: SmileLevel, shift: number, energy: ExpressionEnergy)
 }
 
 function clean(value: string, max = 200) {
-  return value.replace(/\s+/g, " ").trim().replace(/[.;,\s]+$/, "").slice(0, max);
+  return value.replace(/\s+/g, " ").trim().replace(/^[,;\s]+|[.;,\s]+$/g, "").slice(0, max);
 }
 
-/** "" for the back view and any slot without a face direction. */
+function identitySentence(input: FrameDirectionInput, reference: boolean): string {
+  const source = input.faceSource || "the identity image";
+  const anchor = input.hasApprovedAnchor && source !== "APPROVED POSE 1";
+  const from = `Copy only the face itself from ${source}${anchor ? " and APPROVED POSE 1" : ""}`;
+  const never = reference
+    ? input.hasApprovedAnchor ? ", never APPROVED POSE 1's expression, gaze or head tilt" : ""
+    : ", never their expression, gaze or head tilt";
+  const style = reference && input.styleFaceForbidden ? " Take only the look from the STYLE REFERENCE person, never their face." : "";
+  return `${from}${never}.${style}`;
+}
+
+/** null for the back view and any slot without a face direction. */
 export function frameExpressionDirection(input: FrameDirectionInput): FrameDirection | null {
   const look = SLOT_LOOKS[input.poseId];
   if (!look) return null;
@@ -113,42 +137,62 @@ export function frameExpressionDirection(input: FrameDirectionInput): FrameDirec
   const mood = clean(withoutGazeWords(input.plannedMood ?? ""));
   const expression = reference?.expression ? `${clean(reference.expression)}, as on the STYLE REFERENCE person` : mood || mouth;
   const head = reference ? "the head angle the STYLE REFERENCE person holds" : look.head;
-  const gesture = reference?.hands ? `${clean(reference.hands)}, as the STYLE REFERENCE person does` : look.body;
+  const owner = input.bodyOwner ?? "slot";
+  const gesture = input.reference?.hands
+    ? `${clean(input.reference.hands)}, as the STYLE REFERENCE person does`
+    : owner === "reference" ? REFERENCE_BODY : owner === "seated" ? SEATED_BODY : look.body;
   const body = input.propsInHands
-    ? "shoulders relaxed and slightly uneven, weight on one hip; the props stay as the REQUESTED PROPS line places them"
+    ? `shoulders relaxed and slightly uneven${owner === "slot" ? ", weight on one hip" : ""}; the props stay as the REQUESTED PROPS line places them`
     : `${gesture} (a hand given a task in the hand placement line keeps it)`;
+  const camera = clean((input.reference?.cameraAngle ?? "").replace(CROP_WORDS, ""), 120);
   const summary = `${gaze}; ${head}; ${expression}`;
   // Kept short: it rides in the uncompacted closing tail.
   const block = [
     `THIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: ${summary}. Body: ${body}. ${GARMENT_SAFE_HANDS}.`,
-    reference
-      ? "Copy only the face itself from the identity image, never APPROVED POSE 1's expression, gaze or head tilt."
-      : "Copy only the face itself from the identity image and APPROVED POSE 1, never their expression, gaze or head tilt.",
+    identitySentence(input, Boolean(reference)),
     "A candid moment, never a frozen stare, a fixed stock smile or both arms hanging straight.",
-    reference?.cameraAngle ? `Camera: ${clean(reference.cameraAngle, 120)}, as the STYLE REFERENCE is shot.` : "",
+    camera ? `Camera: ${camera}, as the STYLE REFERENCE is shot, within this frame's ALLOWED DELTA framing.` : "",
   ].filter(Boolean).join(" ");
   return { summary, block };
 }
 
-const GAZE_CLAUSE = /\s*(?:,|;|\bwith\b|\band\b)?\s*(?:an?\s+)?(?:[\w-]+\s+){0,3}?(?:gaze|eyes?|eye contact|glance|look(?:ing)?)\b(?:\s+[\w-]+){0,5}/gi;
+const GAZE_WORD = /\b(?:gaz\w*|eyes?|eye contact|glanc\w*|look\w*|stare\w*|staring|facing)\b/i;
+const LENS_TAIL = /\s*\b(?:toward(?:s)?|into|at|to|facing)\s+(?:the\s+)?(?:lens|camera|viewer)\b.*$/i;
 
-/** Expression text without its gaze clause ("soft smile, eyes to camera" -> "soft smile"). */
+/** Expression text without its gaze clauses ("soft smile, eyes to camera" -> "soft smile"); the mouth is kept. */
 export function withoutGazeWords(value: string): string {
-  return value.replace(GAZE_CLAUSE, "").replace(/\s{2,}/g, " ").replace(/^[\s,;]+|[\s,;]+$/g, "").trim();
+  return value
+    .split(/[,;]/)
+    .map((clause) =>
+      clause
+        .split(/\s+(?:with|and)\s+/i)
+        .map((part) => part.replace(LENS_TAIL, ""))
+        .filter((part) => part.trim() && !GAZE_WORD.test(part))
+        .join(" and ")
+        .trim()
+    )
+    .filter(Boolean)
+    .join(", ")
+    .replace(/[.\s]+$/, "")
+    .trim();
 }
 
-// Gaze, smile and mood words written into the face lock as if they were features.
+// Gaze and smile phrases written into the face lock as if they were features. Only the
+// phrase goes; a fragment is dropped whole only when it names no facial feature.
 const GAZE_TAIL = /\s*,?\s*\b(?:glancing|looking|gazing|staring)\b(?:\s+[\w-]+){0,4}?\s+(?:sideways|away|aside|down(?:ward)?|up(?:ward)?|off[- ]camera|to(?:ward)?\s+(?:the\s+)?(?:camera|lens|side|viewer)|at\s+(?:the\s+)?(?:camera|lens|viewer))\b/gi;
-const SMILE_TAIL = /\s+(?:in|with)\s+(?:an?\s+)?(?:[\w-]+\s+){0,3}?(?:smile|grin|pout|laugh)\b/gi;
-const EXPRESSION_FRAGMENT = /\b(?:gaz\w*|glanc\w*|smil\w*|grin\w*|laugh\w*|expression\w*|pout\w*|shown at (?:a |an )?(?:slight )?angle)\b/i;
+const PHRASE_TAIL = /\s+(?:(?:that\s+)?curv(?:e|es|ing)\s+into|in|with|and)\s+(?:an?\s+)?(?:[\w-]+\s+){0,3}?(?:smile|grin|gaze|glance|expression)\b/gi;
+const EXPRESSION_ONLY = /\b(?:gaz\w*|glanc\w*|smil\w*|grin\w*|expression\w*)\b/i;
+const FACE_FEATURE = /\b(?:eyes?|eyebrows?|brows?|nose|lips?|mouth|jaw\w*|cheeks?|cheekbones?|chin|lashes|teeth|forehead)\b/i;
+const ALWAYS_DROP = /\bshown at (?:a |an )?(?:slight )?angle\b/i;
 
-/** Face-lock text without gaze, smile or expression phrases; features are kept. */
+/** Face-lock text without gaze, smile or expression phrases; features are kept. Unchanged when nothing would be left. */
 export function withoutExpressionWords(value: string): string {
-  const stripped = value.replace(GAZE_TAIL, "").replace(SMILE_TAIL, "");
+  const stripped = value.replace(GAZE_TAIL, "").replace(PHRASE_TAIL, "");
   const kept = stripped
     .split(/(?<=[,;.])\s+/)
-    .filter((part) => !EXPRESSION_FRAGMENT.test(part));
-  return kept.join(" ").replace(/[,;]\s*([.;]|$)/g, "$1").replace(/\s{2,}/g, " ").trim();
+    .filter((part) => !ALWAYS_DROP.test(part) && !(EXPRESSION_ONLY.test(part) && !FACE_FEATURE.test(part)));
+  const result = kept.join(" ").replace(/[,;]\s*([.;]|$)/g, "$1").replace(/\s{2,}/g, " ").trim();
+  return result || value;
 }
 
 /** modelIdentity with the expression words removed from its face description (faceRealism keeps its teeth/smile realism rules). */

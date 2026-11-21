@@ -365,7 +365,11 @@ Deno.test("each face-visible frame of a legacy shoot gets its own gaze, and the 
     }
     gazes[id] = block.split("THIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: ")[1].split(";")[0];
     // The identity image and APPROVED POSE 1 give the face only, never their look; the floor against frozen frames stays.
-    assertStringIncludes(block, "Copy only the face itself from the identity image and APPROVED POSE 1, never their expression, gaze or head tilt.", id);
+    // The sentence names the face source the prompt actually attaches (expressionDirection.ts identitySentence).
+    assertStringIncludes(block, "Copy only the face itself from ", id);
+    assertStringIncludes(block, ", never their expression, gaze or head tilt.", id);
+    // Pose 1 has no anchor, so it never points at one.
+    if (id === "full_front") assertEquals(block.includes("APPROVED POSE 1"), false, id);
     assertStringIncludes(block, "A candid moment, never a frozen stare, a fixed stock smile or both arms hanging straight.", id);
     assertStringIncludes(block, "Hands never cover the neckline, embroidery, print, slits or hem.", id);
   }
@@ -842,7 +846,9 @@ Deno.test("Pose 4 takes the STYLE REFERENCE person's v37 look, Pose 6 only with 
   const block = frameBlock(creative);
   assertStringIncludes(block, "THIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: eyes lowered to the left, as the STYLE REFERENCE person looks; the head angle the STYLE REFERENCE person holds; dreamy half-smile, as on the STYLE REFERENCE person.");
   assertStringIncludes(block, "Body: hands loosely clasped at the waist, as the STYLE REFERENCE person does");
-  assertStringIncludes(block, "Copy only the face itself from the identity image, never APPROVED POSE 1's expression, gaze or head tilt.");
+  assertStringIncludes(block, "Copy only the face itself from ");
+  // No anchor or face photo here: the face comes from modelIdentity and the STYLE REFERENCE face stays out.
+  assertStringIncludes(block, "Copy only the face itself from the modelIdentity description. Take only the look from the STYLE REFERENCE person, never their face.");
   // The posture is not adopted, so the reference camera is not either.
   assertEquals(block.includes("Camera:"), false);
   // The look is copied, never the reference face, stance or props.
@@ -858,7 +864,9 @@ Deno.test("Pose 4 takes the STYLE REFERENCE person's v37 look, Pose 6 only with 
   const seated = compose("creative", baseSession({ posePlanning: plan({ ...SEATED, ...REFERENCE_LOOK }) }));
   assertStringIncludes(seated, "REFERENCE POSE MATCH (POSE 4):");
   assertStringIncludes(frameBlock(seated), "eyes lowered to the left, as the STYLE REFERENCE person looks");
-  assertStringIncludes(frameBlock(seated), "Camera: eye-level, knees-up, as the STYLE REFERENCE is shot.");
+  // The reference crop never overrides this frame's framing (a knees-up crop would cut the bottom wear).
+  assertStringIncludes(frameBlock(seated), "Camera: eye-level, as the STYLE REFERENCE is shot, within this frame's ALLOWED DELTA framing.");
+  assertEquals(frameBlock(seated).includes("knees-up"), false);
 });
 
 Deno.test("a reference look never carries a posture, stride or held object into a Pose 4 that does not adopt the posture", () => {

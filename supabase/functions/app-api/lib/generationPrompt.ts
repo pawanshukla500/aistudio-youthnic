@@ -1518,8 +1518,11 @@ export function composeGenerationPrompt(args: {
     ? {
       expression: frameText(referencePose.expression),
       gaze: frameText(referencePose.gaze),
-      // Hands from a folded posture do not transfer to a standing frame.
-      hands: referenceSlot || !isLowPosture(referencePose.posture) ? frameText(referencePose.hands) : "",
+      // Hands transfer only between matching postures: folded-posture hands never reach a standing
+      // frame, and a standing gesture never reaches a Pose 4 seated by the product notes.
+      hands: referenceSlot || (!isLowPosture(referencePose.posture) && !(isPose4 && isSittingDemanded))
+        ? frameText(referencePose.hands)
+        : "",
       cameraAngle: referenceSlot ? frameText(referencePose.cameraAngle) : "",
     }
     : null;
@@ -1531,6 +1534,16 @@ export function composeGenerationPrompt(args: {
       propsInHands: promptProps.groups.length > 0,
       reference: referenceLook,
       plannedMood: frameText(plannedPoseExpression(args.session, args.pose.id)),
+      bodyOwner: referenceSlot ? "reference" : isPose4 && isSittingDemanded ? "seated" : "slot",
+      faceSource: hasModelReference
+        ? "the MODEL FACE REFERENCE"
+        : useStyleModelIdentity
+        ? "the photo uploaded as both MODEL FACE REFERENCE and STYLE REFERENCE"
+        : hasApprovedAnchor
+        ? "APPROVED POSE 1"
+        : "the modelIdentity description",
+      hasApprovedAnchor,
+      styleFaceForbidden: hasStyleReference && !useStyleModelIdentity,
     })
     : null;
   // Planner-owned expression for this frame; "" keeps every legacy expression line.

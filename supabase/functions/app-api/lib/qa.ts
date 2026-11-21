@@ -12,6 +12,7 @@ import {
   type RequestedHandheldProps,
   withRequestedPropsAllowed,
 } from "./profiles.ts";
+import { identityWithoutExpression } from "./expressionDirection.ts";
 import { ADOPTABLE_SLOTS, isLowPosture, normalizeReferencePosture } from "./posePlanning.ts";
 import { referencePoseDirectiveText, styleIdentityQuarantineText } from "./generationPrompt.ts";
 import { effectiveBottomCutClass, FARSHI_SILHOUETTE_STRUCTURE, resolveBottomWearPresentation } from "./garmentPoses.ts";
@@ -189,7 +190,8 @@ function qaReferencePoseMatch(match: { posture: string; directive: string } | un
 // QA corrections, rejected attempts with their verdicts, reference manifests - and QA that
 // read it repeated its previous verdict on every retry ("sixth consecutive failure").
 const QA_POSE_PLAN_FIELDS = [
-  "id", "title", "description", "cameraAngle", "framing", "bodyPosition", "handPlacement", "expression",
+  // No "expression": each frame's expression and gaze are planned per frame (expressionDirection.ts), not by the stored pose.
+  "id", "title", "description", "cameraAngle", "framing", "bodyPosition", "handPlacement",
   "highlightedDetails", "productVisibilityRules", "primaryReference", "purpose", "consistencyNotes", "prompt",
   "enabled", "referencePosture", "attitude", "poseNumber",
 ] as const;
@@ -312,7 +314,7 @@ Requested Output Aspect Ratio: ${resolvedAspectRatio} (${orientationDescriptor} 
 Approved pose requirement: ${JSON.stringify(sanitizedQaPoseDirection)}
 Product Identity Profile: ${JSON.stringify(qaProductIdentity)}
 Creative Direction Profile: ${JSON.stringify(args.creativeDirection)}
-Model Identity Lock: ${JSON.stringify(args.modelIdentity)}
+Model Identity Lock: ${JSON.stringify(identityWithoutExpression(args.modelIdentity))}
 Session rules:
 ${args.consistencyRules.map((rule) => `- ${rule}`).join("\n")}
 Reference manifest:
