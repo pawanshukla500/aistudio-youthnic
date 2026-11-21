@@ -455,5 +455,7 @@ Deno.test("back-view QA judges hair by a visible garment back, not by one hairst
   assertStringIncludes(qa("back"), "pass it when the back neckline and the upper back panel are clearly visible, whether the hair is swept forward over a shoulder, up in a bun or ponytail, or ends above the neckline.");
   // The plan's literal hairstyle ("swept forward over one shoulder") must not fail a back that shows.
   assertStringIncludes(qa("back"), "This overrides any hairstyle wording in the pose or styling plan");
+  // The hairstyle the prompt allows (forward, side ponytail, braid) never fails the face check either.
+  assertStringIncludes(qa("back"), "never fail model_face because the hair was moved forward, tied or put up to clear the garment back: judge the hair there by colour and texture only.");
   assert(!qa("angled").includes("judge hair placement by its purpose"));
 });
