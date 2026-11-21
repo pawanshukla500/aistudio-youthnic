@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { compactManifestBlock, composeGenerationPrompt, IMAGE_PROMPT_SAFE_CHARS, rearViewChecklist, requestedPropsBlock } from "../lib/generationPrompt.ts";
 import { buildPoseQaPrompt } from "../lib/qa.ts";
+import { frameExpressionDirection, withoutExpressionWords, withoutGazeWords } from "../lib/expressionDirection.ts";
 import { requestedHandheldProps, withoutNegatedRequestedProps, withRequestedPropsAllowed } from "../lib/profiles.ts";
 import { collapseDuplicateUploads, selectReferences } from "../lib/referencePolicy.ts";
 
@@ -392,4 +393,54 @@ Deno.test("QA reads only the pose plan, never earlier verdicts stored on the pos
   assert(!qa.includes("lastDnaFailed"));
   assertStringIncludes(qa, `"poseNumber":6`);
   assertStringIncludes(qa, JSON.stringify(pose("showcase").title));
+});
+
+Deno.test("the identity cleaner drops only expression phrases and keeps every facial feature", () => {
+  assertEquals(withoutExpressionWords("almond-shaped dark brown eyes with a soft gaze, straight nose"), "almond-shaped dark brown eyes, straight nose");
+  assertEquals(withoutExpressionWords("oval face, almond dark brown eyes and a gentle smile, straight nose"), "oval face, almond dark brown eyes, straight nose");
+  assertEquals(withoutExpressionWords("full slightly pouty lips"), "full slightly pouty lips");
+  assertEquals(withoutExpressionWords("Oval face with almond eyes and full lips that curve into a soft smile"), "Oval face with almond eyes and full lips");
+  // Nothing left would be worse than the original.
+  assertEquals(withoutExpressionWords("calm composed gaze"), "calm composed gaze");
+});
+
+Deno.test("a planner mood loses its gaze clause but keeps its mouth", () => {
+  assertEquals(withoutGazeWords("calm soft smile with relaxed eyes"), "calm soft smile");
+  assertEquals(withoutGazeWords("warm open smile and bright eyes"), "warm open smile");
+  assertEquals(withoutGazeWords("soft smile, facing the camera directly"), "soft smile");
+  assertEquals(withoutGazeWords("soft smile toward the lens"), "soft smile");
+  assertEquals(withoutGazeWords("quiet, warm half-smile"), "quiet, warm half-smile");
+});
+
+Deno.test("the frame direction respects seated and adopted bodies, the real face source and the frame's framing", () => {
+  const seated = frameExpressionDirection({ poseId: "creative", bodyOwner: "seated", faceSource: "APPROVED POSE 1", hasApprovedAnchor: true })!;
+  assert(!seated.block.includes("weight on the back leg"));
+  assertStringIncludes(seated.block, "an easy seated gesture");
+  const adopted = frameExpressionDirection({ poseId: "showcase", bodyOwner: "reference", faceSource: "APPROVED POSE 1", hasApprovedAnchor: true })!;
+  assertStringIncludes(adopted.block, "the body exactly as the REFERENCE POSE MATCH block sets it");
+  assert(!adopted.block.includes("weight rests on one leg"));
+  const look = { expression: "dreamy half-smile", gaze: "eyes lowered to the left", hands: "", cameraAngle: "eye-level three-quarter, knees-up" };
+  const camera = frameExpressionDirection({ poseId: "creative", bodyOwner: "reference", reference: look, faceSource: "APPROVED POSE 1", hasApprovedAnchor: true, styleFaceForbidden: true })!;
+  assertStringIncludes(camera.block, "Camera: eye-level three-quarter, as the STYLE REFERENCE is shot, within this frame's ALLOWED DELTA framing.");
+  assert(!camera.block.includes("knees-up"));
+  assertStringIncludes(camera.block, "Copy only the face itself from APPROVED POSE 1, never APPROVED POSE 1's expression, gaze or head tilt. Take only the look from the STYLE REFERENCE person, never their face.");
+  // A fresh-cast Pose 1 names the description it actually has, not images that are not attached.
+  const fresh = frameExpressionDirection({ poseId: "full_front", faceSource: "the modelIdentity description" })!;
+  assertStringIncludes(fresh.block, "Copy only the face itself from the modelIdentity description, never their expression, gaze or head tilt.");
+  assert(!fresh.block.includes("APPROVED POSE 1"));
+  const face = frameExpressionDirection({ poseId: "angled", faceSource: "the MODEL FACE REFERENCE", hasApprovedAnchor: true })!;
+  assertStringIncludes(face.block, "Copy only the face itself from the MODEL FACE REFERENCE and APPROVED POSE 1, never their expression, gaze or head tilt.");
+});
+
+Deno.test("QA reads the face lock without expression words and no stale per-pose expression", () => {
+  const qa = buildPoseQaPrompt({
+    poseNumber: 2, poseType: "angled", poseTitle: "Pose", poseDirection: { ...pose("angled"), expression: "STALE soft smile, eyes to camera" },
+    productIdentity: SESSION.productIdentity, creativeDirection: SESSION.creativeDirection,
+    modelIdentity: { face: "almond dark brown eyes glancing sideways, full natural lips in soft closed-mouth smile" },
+    garmentFamily: "kurta_or_kurti_set", consistencyRules: [], hasApprovedAnchor: true, hasModelReference: false,
+    referenceManifest: ["IMAGE 1: STYLE REFERENCE", "IMAGE 2: FRONT PRODUCT"],
+  });
+  assert(!qa.includes("STALE soft smile"));
+  assert(!qa.includes("glancing sideways"));
+  assertStringIncludes(qa, "almond dark brown eyes, full natural lips");
 });

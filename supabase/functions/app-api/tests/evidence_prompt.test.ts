@@ -1395,7 +1395,9 @@ Deno.test("composeGenerationPrompt enforces 6-pose variation, reference image sc
   });
   assertEquals(propPose.includes("sparkler"), false);
   assertStringIncludes(propPose, "holding nothing copied from the style or model photo");
-  assertStringIncludes(propPose, "Calm natural expression.");
+  // The prop-laden pose.expression is replaced by Pose 1's own frame direction.
+  assertStringIncludes(propPose, "\n- expression: as the THIS FRAME'S EXPRESSION line states\n");
+  assertStringIncludes(propPose, "THIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: eyes meet the lens directly, with warmth; head straight, chin level, the smallest natural tilt; a soft closed-lip smile that reaches the eyes.");
 
   const creativeLeak = composeGenerationPrompt({
     skuName: "MANGO-MEHENDI",

@@ -20,7 +20,7 @@ SEATED = {
 PLANNED_STEPS = ["analyze_references", "recall_outcomes", "plan_poses", "plan_expression", "validate_plan"]
 POSE_IDS = {"full_front", "angled", "back", "creative", "closeup", "showcase"}
 QUARANTINE = "never the reference clothing, face, hair or anything in the hands (jewellery follows the styling plan)"
-BASE_EXPRESSION = "Calm editorial poise; soft closed-lip smile; Soft gaze to camera"
+BASE_EXPRESSION = "Calm editorial poise; soft closed-lip smile"
 FACE_OUT = "Face mostly outside the crop; if visible, relaxed natural jaw and lips."
 
 
@@ -89,7 +89,7 @@ def test_farshi_low_posture_stays_product_led():
         }
     # Expression planning applies to every plan, adopted or not.
     assert set(result["expressions"]) == POSE_IDS
-    assert result["expressions"]["creative"] == "Calm editorial poise; soft closed-lip smile; Soft gaze to camera"
+    assert result["expressions"]["creative"] == "Calm editorial poise; soft closed-lip smile"
     assert result["status"] == "planned" and result["validation"] == {"attempts": 1, "errors": []}
 
 
@@ -240,7 +240,7 @@ def test_db_failure_plans_without_signals(monkeypatch):
 
 def test_forced_smile_llm_expression_is_replaced():
     result = plan(pose_expressions={"full_front": "Big toothy grin at camera", "angled": "Quiet glance past the lens"})
-    assert result["expressions"]["full_front"] == "Calm editorial poise; soft closed-lip smile; Soft gaze to camera"
+    assert result["expressions"]["full_front"] == "Calm editorial poise; soft closed-lip smile"
     assert result["expressions"]["angled"] == "Quiet glance past the lens"
     assert result["expressions"]["back"].startswith("Face turned away from camera")
     # The default face_and_detail close-up keeps a sharp face: the base expression, not the face-out line.

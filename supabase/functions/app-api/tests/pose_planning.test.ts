@@ -260,8 +260,20 @@ Deno.test("analysis prompt asks for referencePose, expressionPlan and the frame 
   assertStringIncludes(prompt, '"expressionPlan":{"attitude":"...","energy":"serene|calm|warm|playful|confident|dramatic"');
   assertStringIncludes(prompt, "POSE 4 AND POSE 6 MATCH THE REFERENCE POSTURE");
   assertStringIncludes(prompt, "Poses 1, 2, 3, and 5 never copy the reference posture");
-  assertStringIncludes(prompt, "never the clothing, face, hair, jewellery, or anything in the hands");
-  assertStringIncludes(prompt, "Every pose's expression follows expressionPlan");
+  assertStringIncludes(prompt, "Record body position and look only: never the clothing, face identity, hair, jewellery, or anything in the hands.");
+  // v37: the reference look (camera, expression, gaze, hands) is recorded; objects in the hands never are.
+  assertStringIncludes(prompt, '"cameraAngle":"height, angle and distance of the shot","expression":"mouth and mood","gaze":"eye direction and head angle","hands":"hand gesture, never objects"');
+  assertStringIncludes(prompt, "expressionPlan sets the shoot's mood (attitude, energy, smile level).");
+  assertStringIncludes(prompt, "Each face-visible pose then gets its OWN expression: a different gaze target, head angle and mouth");
+  assertStringIncludes(prompt, "Never write the same 'soft smile, eyes to camera' for every frame");
+  // With a model face attached, modelIdentity.face records features only.
+  assertStringIncludes(
+    buildCombinedAnalysisPrompt({ ...promptArgs, hasModelReference: true }),
+    "features only, never a gaze direction, smile, expression or head angle (those change per frame).",
+  );
+  // The anti-forced-smile floor stays.
+  assertStringIncludes(prompt, "NEVER artificial, forced, stiff, wide, or frozen stock catalog smiles, and never a toothy grin.");
+  assertEquals(prompt.includes("Every pose's expression follows expressionPlan"), false);
   assertEquals(prompt.includes("CACHED STYLE PROFILE"), false);
 });
 
