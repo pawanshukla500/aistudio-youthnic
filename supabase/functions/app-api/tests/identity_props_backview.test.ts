@@ -459,3 +459,23 @@ Deno.test("back-view QA judges hair by a visible garment back, not by one hairst
   assertStringIncludes(qa("back"), "never fail model_face because the hair was moved forward, tied or put up to clear the garment back: judge the hair there by colour and texture only.");
   assert(!qa("angled").includes("judge hair placement by its purpose"));
 });
+
+Deno.test("back-view QA never reads the plan's literal hair clauses; other poses keep them", () => {
+  const plan = {
+    ...pose("back"),
+    bodyPosition: "standing with back fully to camera, shoulders square away, hair swept forward over front to keep back neckline clear, feet close",
+    productVisibilityRules: ["full rear neckline visible", "hair forward to clear back"],
+  };
+  const qa = (poseType: string) => buildPoseQaPrompt({
+    poseNumber: poseType === "back" ? 3 : 2, poseType, poseTitle: "Pose", poseDirection: { ...plan, id: poseType },
+    productIdentity: SESSION.productIdentity, creativeDirection: SESSION.creativeDirection, modelIdentity: SESSION.modelIdentity,
+    garmentFamily: "kurta_or_kurti_set", consistencyRules: [], hasApprovedAnchor: true, hasModelReference: false,
+    referenceManifest: ["IMAGE 1: BACK PRODUCT", "IMAGE 2: STYLE REFERENCE"],
+  });
+  const back = qa("back");
+  assert(!back.includes("hair forward to clear back"));
+  assert(!back.includes("hair swept forward over front"));
+  assertStringIncludes(back, "full rear neckline visible");
+  assertStringIncludes(back, "standing with back fully to camera, shoulders square away, feet close");
+  assertStringIncludes(qa("angled"), "hair forward to clear back");
+});
