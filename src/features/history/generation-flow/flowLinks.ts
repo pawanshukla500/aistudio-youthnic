@@ -152,3 +152,12 @@ export function photosForPose<T extends FlowShot>(
     return matched.some((item) => item.id === photo.id);
   });
 }
+
+/** A version's review status in words: "pending" alone read as if the image were still generating. */
+export function versionStatusLabel(status?: string) {
+  const value = (status || "").toLowerCase();
+  if (value === "pending" || value === "review_pending") return "awaiting review";
+  if (value === "approved") return "approved";
+  if (value === "rejected") return "rejected";
+  return value.replaceAll("_", " ");
+}

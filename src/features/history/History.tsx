@@ -99,9 +99,22 @@ function qaStatusLabel(status: string) {
 
 // "unverified" covers both a validator that was switched off for the job and
 // one that could not return a verdict. Only the second is "unavailable".
-function visibleQaLabel(status: string, poseQaEnabled: boolean) {
-  if (status === "unverified" && !poseQaEnabled) return "Not QA-checked · QA off";
+function visibleQaLabel(status: string, poseQaEnabled: boolean, dna?: DnaConsistencySummary | null) {
+  if (status === "unverified" && !poseQaEnabled) {
+    // Full QA was off, but the always-on product DNA check still judged the frame.
+    if (dna?.pass === true && !dna.unavailable) {
+      return `Product DNA check passed${typeof dna.score === "number" ? ` · ${Math.round(dna.score)}%` : ""}`;
+    }
+    return "Not QA-checked · QA off";
+  }
   return qaStatusLabel(status);
+}
+
+/** The bottom banner colour: a passed DNA check on a QA-off frame reads as verified, not as a warning. */
+function qaBannerClass(status: string, poseQaEnabled: boolean, dna?: DnaConsistencySummary | null) {
+  return status === "unverified" && !poseQaEnabled && dna?.pass === true && !dna.unavailable
+    ? "bg-emerald-600/90 text-white backdrop-blur-md"
+    : qaStatusBanner(status);
 }
 
 function formatModelName(model?: string | null): string {
@@ -1039,13 +1052,13 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 {/* QA VERDICT BANNER (Bottom) */}
                 {retainedPrevious ? (
                   <span className="absolute inset-x-0 bottom-0 bg-slate-900/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white backdrop-blur-xs">
-                    Prior version retained · {visibleQaLabel(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)))}
+                    Prior version retained · {visibleQaLabel(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)), pose.dnaConsistency)}
                   </span>
                 ) : (
                   ["unverified", "requires_human_review", "rejected_by_qa", "human_approved", "human_rejected"].includes(qaStatus) &&
                   outputUrl && (
-                    <span className={`absolute inset-x-0 bottom-0 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider ${qaStatusBanner(qaStatus)}`}>
-                      {visibleQaLabel(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)))}
+                    <span className={`absolute inset-x-0 bottom-0 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider ${qaBannerClass(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)), pose.dnaConsistency)}`}>
+                      {visibleQaLabel(qaStatus, shownQaEnabled(pose, Boolean(job.poseQa)), pose.dnaConsistency)}
                     </span>
                   )
                 )}

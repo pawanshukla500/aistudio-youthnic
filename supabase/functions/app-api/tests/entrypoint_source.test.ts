@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert@1";
+import { assert, assertEquals } from "jsr:@std/assert@1";
 
 Deno.test("app-api entrypoint is repo source, not a GitHub raw import stub", () => {
   const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url));
@@ -257,4 +257,49 @@ Deno.test("a finished job names cancelled poses as cancelled, not as exhausted r
   assertEquals(body.includes('String(pose.error || "") === "Generation cancelled by the user."'), true);
   assertEquals(body.includes("pose(s) were cancelled before they finished"), true);
   assertEquals(source.includes('async function finalizeCancelledJob(job: JsonRecord, message = "Generation cancelled by the user.")'), true);
+});
+
+Deno.test("a duplicate analysis joins the one in flight, registered before the slow prep queries", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  const start = source.indexOf("async function analyze(request: Request, args: JsonRecord)");
+  const body = source.slice(start, source.indexOf("\nfunction normalizeImageSize(", start));
+  const flightAt = body.indexOf("const flightKey = `${orgId}:${pHash}:${rHash}:${ANALYSIS_VERSION}`;");
+  const registerAt = body.indexOf("studioAnalysisFlights.set(flightKey, flight);");
+  const prepAt = body.indexOf('resolveVisionPolicy(orgId, { purpose: "product_truth"');
+  assert(flightAt > 0 && registerAt > flightAt, "the flight key is fixed by the inputs");
+  // Prep briefs (house preferences, learning) can time out differently, so they stay out of the key.
+  assert(prepAt > registerAt, "the flight is registered before the up-to-8s prep queries");
+});
+
+Deno.test("Clone Session opens in the Studio with its references and analysis instead of an empty Studio", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  assert(source.includes('"studio.loadSession": () => loadStudioSession(request, args),'));
+  const start = source.indexOf("async function loadStudioSession(");
+  const body = source.slice(start, source.indexOf("\nasync function cloneJob(", start));
+  assert(body.includes('.eq("session_id", sessionId).eq("organization_id", workspace.organization.id).maybeSingle();'));
+  assert(body.includes("analysisCurrent: analysisVersion === ANALYSIS_VERSION,"));
+  assert(body.includes("analysisFingerprint: String(session.analysis_fingerprint || \"\"),"));
+  const studio = Deno.readTextFileSync(new URL("../../../../src/features/studio/Studio.tsx", import.meta.url)).replace(/\r\n/g, "\n");
+  assert(studio.includes('const sessionParam = searchParams.get("session") || "";'));
+  assert(studio.includes('invokeAppApi<LoadedStudioSession>("studio.loadSession", { sessionId: sessionParam })'));
+  // Loaded references are never uploaded again, keep their stored hashes, and the loaded analysis is current.
+  assert(studio.includes("uploadedId: id as Id<\"productReferences\">,"));
+  assert(studio.includes("setReferenceHashes((current) => ({ ...current, ...Object.fromEntries(references.map((reference) => [reference.id, reference.hash || reference.id])) }));"));
+  assert(studio.includes("setAnalysisSourceKey(analysisInputKey);"));
+  const history = Deno.readTextFileSync(new URL("../../../../src/features/history/History.tsx", import.meta.url)).replace(/\r\n/g, "\n");
+  assert(history.includes("navigate(`/studio?session=${result.sessionId}`);"));
+});
+
+Deno.test("History shows the passed product DNA check on QA-off frames, and flow re-generation says why it waits for a note", async () => {
+  const history = Deno.readTextFileSync(new URL("../../../../src/features/history/History.tsx", import.meta.url)).replace(/\r\n/g, "\n");
+  assert(history.includes("return `Product DNA check passed${typeof dna.score === \"number\" ? ` · ${Math.round(dna.score)}%` : \"\"}`;"));
+  assert(history.includes('return "Not QA-checked · QA off";'));
+  const flow = Deno.readTextFileSync(new URL("../../../../src/features/history/generation-flow/CatalogPoseFlow.tsx", import.meta.url)).replace(/\r\n/g, "\n");
+  // The note stays required (no confirmation dialog guards this paid click); the button says so.
+  assert(flow.includes('!note.trim() ? "Type what to change first: each version is a paid generation"'));
+  assert(flow.includes('placeholder="What to change in the next version (required to re-generate)"'));
+  const { versionStatusLabel } = await import("../../../../src/features/history/generation-flow/flowLinks.ts");
+  assertEquals(versionStatusLabel("pending"), "awaiting review");
+  assertEquals(versionStatusLabel("approved"), "approved");
+  assertEquals(versionStatusLabel("requires_human_review"), "requires human review");
 });

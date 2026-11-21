@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { AlertTriangle, Ban, Check, CheckCircle2, ChevronRight, History as HistoryIcon, Images, Loader2, Sparkles, Store, Wand2, X } from "lucide-react";
-import { api, useAction, useMutation, useQuery, type Id, type ProductDnaExtractResult, type ProductDnaSummary } from "../../lib/backend";
+import { api, invokeAppApi, useAction, useMutation, useQuery, type Id, type ProductDnaExtractResult, type ProductDnaSummary } from "../../lib/backend";
 import { Button } from "@/components/ui/button";
 import { ActionDialog } from "../../components/ui/ActionDialog";
 import { useWorkspace } from "../../lib/WorkspaceContext";
@@ -24,6 +24,36 @@ import type {
   StudioPose,
   StudioReference,
 } from "./types";
+
+/** studio.loadSession: a stored (cloned) session in the shape studio.analyze returns. */
+type LoadedStudioSession = {
+  sessionId: string;
+  skuId: string;
+  skuName: string;
+  productDetails: string;
+  category: string;
+  references: Array<{ id: string; role: string; downloadUrl: string; storagePath: string; storageBackend: string; hash: string; filename: string; mimeType: string; size: number }>;
+  analysisVersion: string;
+  analysisCurrent: boolean;
+  analysis: StudioAnalysis;
+};
+
+/** A stored reference as an already-uploaded Studio reference: it is never uploaded or hashed again. */
+function loadedStudioReference(reference: LoadedStudioSession["references"][number]): StudioReference {
+  const id = reference.id || `${reference.role}-${reference.hash || reference.storagePath}`;
+  return {
+    id,
+    role: reference.role as ReferenceRole,
+    // A placeholder: the image already lives in storage, and analysis and generation read it by URL.
+    file: new File([], reference.filename || `${reference.role}.jpg`, { type: reference.mimeType || "image/jpeg" }),
+    previewUrl: reference.downloadUrl,
+    uploadedId: id as Id<"productReferences">,
+    storageBackend: (reference.storageBackend || "firebase") as StudioReference["storageBackend"],
+    storagePath: reference.storagePath,
+    downloadUrl: reference.downloadUrl,
+    hash: reference.hash,
+  };
+}
 
 const basePoses: StudioPose[] = [
   { id: "full_front", title: "Full Front Product View", description: "Straight-on full-body primary listing image.", cameraAngle: "Eye-level front view", highlightedDetails: ["front construction", "complete silhouette"], primaryReference: "front", purpose: "Primary e-commerce listing image", prompt: "Straight-on full-body front view showing the complete product head to hem.", enabled: true },
@@ -919,6 +949,64 @@ export function Studio() {
       }
     };
   }, [allReferencesUploaded, analysisInputKey, analysisSourceKey, analyzing, failedAnalysisKey, requiredReady]);
+
+  // Clone Session opens /studio?session=<id>. The Studio never read that parameter, so a clone
+  // opened empty and the photos had to be uploaded and analysed again. Load the session's
+  // references, analysis and pose plan instead; Generate then works without a new analysis.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sessionParam = searchParams.get("session") || "";
+  const loadedSessionPendingRef = useRef(false);
+  useEffect(() => {
+    if (!sessionParam) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const loaded = await invokeAppApi<LoadedStudioSession>("studio.loadSession", { sessionId: sessionParam });
+        if (cancelled) return;
+        const references = loaded.references.map(loadedStudioReference);
+        const product = references.filter((reference) => reference.role !== "style_reference" && reference.role !== "model_identity");
+        // Stored hashes stand in for the placeholder files, so the duplicate-slot check stays correct.
+        setReferenceHashes((current) => ({ ...current, ...Object.fromEntries(references.map((reference) => [reference.id, reference.hash || reference.id])) }));
+        setSkuId(loaded.skuId);
+        setSkuName(loaded.skuName);
+        setProductDetails(loaded.productDetails);
+        setCategory(loaded.category);
+        setProductReferences(Object.fromEntries(product.map((reference) => [reference.role, reference])) as Partial<Record<ProductReferenceRole, StudioReference>>);
+        setStyleReferences(references.filter((reference) => reference.role === "style_reference"));
+        setModelReference(references.find((reference) => reference.role === "model_identity") || null);
+        setAnalysis(loaded.analysis);
+        setPoses(loaded.analysis.posePlan);
+        loadedSessionPendingRef.current = true;
+        setNotice({
+          tone: "success",
+          text: loaded.analysisCurrent
+            ? "Opened the cloned shoot with its references, analysis and pose plan. Generate when ready."
+            : "Opened the cloned shoot with its references and pose plan. Its analysis is from an older version: Generate works as it is, or click Re-analyze Ground Truth for the reference look and per-frame expressions.",
+        });
+      } catch (error) {
+        if (!cancelled) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not open the cloned session." });
+      } finally {
+        if (!cancelled) {
+          setSearchParams((params) => {
+            const next = new URLSearchParams(params);
+            next.delete("session");
+            return next;
+          }, { replace: true });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per session id in the URL
+  }, [sessionParam]);
+  // Mark the loaded analysis current once the loaded inputs are in state, so the auto-analysis
+  // effect does not start a paid analysis of a session that already has one.
+  useEffect(() => {
+    if (!loadedSessionPendingRef.current) return;
+    loadedSessionPendingRef.current = false;
+    setAnalysisSourceKey(analysisInputKey);
+  }, [analysisInputKey]);
 
   const handleGenerate = async () => {
     setNotice(null);
