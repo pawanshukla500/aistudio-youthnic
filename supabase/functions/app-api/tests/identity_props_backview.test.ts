@@ -370,3 +370,26 @@ Deno.test("the hand placement line hands the requested props to the props block,
   assert(!hands("angled", "Beige kurti.").includes("requested props"));
   assert(!hands("closeup", `Beige kurti. ${PROP_NOTE}`).includes("requested props"));
 });
+
+Deno.test("QA reads only the pose plan, never earlier verdicts stored on the pose row", () => {
+  const stored = {
+    ...pose("showcase"),
+    poseNumber: 6,
+    correction: "EARLIER VERDICT: the black trousers read as a harem salwar",
+    corrections: ["EARLIER VERDICT: the black trousers read as a harem salwar"],
+    rejectedAttempts: [{ attempt: 1, reason: "EARLIER VERDICT: Critical attributes far below the product references" }],
+    referenceManifests: [{ manifest: ["EARLIER MANIFEST LINE"] }],
+    lastDnaFailed: { failed: ["shape"] },
+  };
+  const qa = buildPoseQaPrompt({
+    poseNumber: 6, poseType: "showcase", poseTitle: "Pose", poseDirection: stored,
+    productIdentity: SESSION.productIdentity, creativeDirection: SESSION.creativeDirection, modelIdentity: SESSION.modelIdentity,
+    garmentFamily: "kurta_or_kurti_set", consistencyRules: [], hasApprovedAnchor: true, hasModelReference: false,
+    referenceManifest: ["IMAGE 1: STYLE REFERENCE", "IMAGE 2: FRONT PRODUCT"],
+  });
+  assert(!qa.includes("EARLIER VERDICT"));
+  assert(!qa.includes("EARLIER MANIFEST LINE"));
+  assert(!qa.includes("lastDnaFailed"));
+  assertStringIncludes(qa, `"poseNumber":6`);
+  assertStringIncludes(qa, JSON.stringify(pose("showcase").title));
+});
