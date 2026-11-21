@@ -203,6 +203,23 @@ export function posePlanFieldsForQa(pose: unknown): unknown {
   return Object.fromEntries(QA_POSE_PLAN_FIELDS.filter((key) => key in source).map((key) => [key, source[key]]));
 }
 
+const HAIR_CLAUSE = /\bhair\b/i;
+
+/**
+ * A back view's pose plan without its hair clauses ("hair forward to clear back", "hair swept
+ * forward over one shoulder"). Hair there is judged only by the back-view rule - is the garment
+ * back visible? - because QA kept failing visible backs against the literal clause (BT218-Cat-Rama).
+ */
+export function withoutHairClauses(pose: unknown): unknown {
+  if (!pose || typeof pose !== "object" || Array.isArray(pose)) return pose;
+  return Object.fromEntries(Object.entries(pose as Record<string, unknown>).map(([key, value]) => {
+    if (Array.isArray(value)) return [key, value.filter((item) => !(typeof item === "string" && HAIR_CLAUSE.test(item)))];
+    if (typeof value !== "string" || !HAIR_CLAUSE.test(value)) return [key, value];
+    const kept = value.split(/(?<=[,;.])\s+/).filter((part) => !HAIR_CLAUSE.test(part));
+    return [key, kept.join(" ").replace(/[,;]\s*$/, "").trim()];
+  }));
+}
+
 export function buildPoseQaPrompt(args: {
   poseNumber: number; poseType: string; poseTitle: string; poseDirection: unknown;
   productIdentity: unknown; creativeDirection: unknown; modelIdentity: unknown;
@@ -218,7 +235,8 @@ export function buildPoseQaPrompt(args: {
   /** Props the product notes ask for (requestedHandheldProps); they must appear, not fail. */
   requestedProps?: RequestedHandheldProps;
 }) {
-  const poseDirection = posePlanFieldsForQa(args.poseDirection);
+  const planFields = posePlanFieldsForQa(args.poseDirection);
+  const poseDirection = args.poseType === "back" ? withoutHairClauses(planFields) : planFields;
   // QA must judge the shoot as it was configured. A top-only shoot has no
   // coordinated bottom to match, so bottom-wear fidelity is not a gate there.
   const productRecord = record(args.productIdentity);
