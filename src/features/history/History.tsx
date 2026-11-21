@@ -562,6 +562,12 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   }, [previewOpen]);
 
   const batchRunning = batchEntries.some((entry) => entry.state === "submitting");
+  // A request that errored after the server had already queued some poses still shows those as queued.
+  const batchEntryState = (entry: BatchEntry) =>
+    entry.state === "failed"
+      && ["queued", "processing"].includes(String(job?.poses?.find((pose: any) => pose._id === entry.poseId)?.status || ""))
+      ? "submitted"
+      : entry.state;
 
   const startBatchRegeneration = async () => {
     if (!job) return;
@@ -915,9 +921,9 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
               )}
               <span>Batch Queue {batchRunning ? "In Progress" : "Complete"}</span>
               <span className="font-normal text-secondary">
-                · {batchEntries.filter((entry) => entry.state === "submitted").length} queued
-                {batchEntries.some((entry) => entry.state === "failed") &&
-                  ` · ${batchEntries.filter((entry) => entry.state === "failed").length} failed`}
+                · {batchEntries.filter((entry) => batchEntryState(entry) === "submitted").length} queued
+                {batchEntries.some((entry) => batchEntryState(entry) === "failed") &&
+                  ` · ${batchEntries.filter((entry) => batchEntryState(entry) === "failed").length} failed`}
               </span>
             </div>
             {batchRunning ? null : (
@@ -933,17 +939,18 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           <ul className="mt-3 divide-y divide-outline-variant/20 rounded-xl border border-outline-variant/30 bg-surface-container-lowest/50">
             {batchEntries.map((entry) => {
               const livePose = job.poses.find((pose: any) => pose._id === entry.poseId);
+              const state = batchEntryState(entry);
               const label =
-                entry.state === "submitting"
+                state === "submitting"
                   ? "Submitting to worker…"
-                  : entry.state === "failed"
+                  : state === "failed"
                   ? `Failed: ${entry.error || "Could not queue"}`
                   : `Queued · worker status: ${livePose?.status || "unknown"}`;
               return (
                 <li
                   key={entry.poseId}
                   className={`flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 text-xs ${
-                    entry.state === "failed" ? "bg-red-50 text-red-800" : "text-secondary"
+                    state === "failed" ? "bg-red-50 text-red-800" : "text-secondary"
                   }`}
                 >
                   <span className="font-bold text-on-surface">

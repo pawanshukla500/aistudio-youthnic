@@ -334,6 +334,9 @@ Deno.test("a bare prop in a negated styling list is dropped, keeping the list's 
     "no dupatta, silver bangles on wrist, bag",
   ]) assertEquals(withoutNegatedRequestedProps(text, props), text);
   assertEquals(withoutNegatedRequestedProps("no dupatta, no bag, tote included; no sunglasses", props), "no dupatta, tote included; no sunglasses");
+  // A negated garment detail named after a prop is a garment constraint and stays.
+  assertEquals(withoutNegatedRequestedProps("no bag-style pocket; no coffee brown tones", props), "no bag-style pocket; no coffee brown tones");
+  assertEquals(withoutNegatedRequestedProps("no bag of any kind; silver studs", props), "silver studs");
 });
 
 Deno.test("the hand placement line hands the requested props to the props block, except in a tight crop", () => {

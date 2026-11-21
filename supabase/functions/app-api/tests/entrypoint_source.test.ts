@@ -235,6 +235,8 @@ Deno.test("batch regeneration queues every selected pose in one request, and His
   const history = Deno.readTextFileSync(new URL("../../../../src/features/history/History.tsx", import.meta.url)).replace(/\r\n/g, "\n");
   assertEquals(history.includes("poseIds: eligible.map((pose: any) => pose._id),"), true);
   assertEquals(history.includes("batchWaitRef"), false);
+  // A request that errors after some poses were queued shows those poses as queued, not failed.
+  assertEquals(history.includes("const batchEntryState = (entry: BatchEntry) =>"), true);
 });
 
 Deno.test("a failed Pose 1 puts skipped regenerations back to their kept version instead of failing them", () => {

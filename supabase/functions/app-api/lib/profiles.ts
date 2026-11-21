@@ -1853,7 +1853,10 @@ export function withoutNegatedRequestedProps(text: unknown, requested: Pick<Requ
   for (let index = 0; index < parts.length; index += 2) {
     const separator = parts[index - 1];
     if (separator === ";") negatedList = false;
-    const dropped = parts[index].match(negated);
+    const negation = parts[index].match(negated);
+    // "no bag-style pocket" or "no coffee brown tones" constrains the garment, not the prop ("no bag of any kind" stays a prop).
+    const tail = negation ? parts[index].slice(negation[0].length) : "";
+    const dropped = negation && !(PROP_AS_DESCRIPTOR.test(tail) && !/^\s*of\b/i.test(tail)) ? negation : null;
     if (dropped) {
       pendingSeparator = pendingSeparator === ";" || separator === ";" ? ";" : pendingSeparator ?? separator;
       leadIn ||= dropped[1].trim() ? `${dropped[1].trim()} ` : "";
