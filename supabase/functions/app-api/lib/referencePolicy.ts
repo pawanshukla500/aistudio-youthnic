@@ -210,8 +210,9 @@ export function roleLabel(
     approved_pose: useStyleAsModelFace
       ? "APPROVED POSE 1 - scene, lighting, styling, and shoot-continuity anchor only. Copy the room, not its pose or objects in the hands. Original product references always outrank its garment. The face comes from the MODEL FACE / STYLE IDENTITY reference; never a different person"
       : "APPROVED POSE 1 - authoritative model-identity, hair, styling, footwear, lighting, and room continuity anchor for poses 2-6. Copy the room, not its pose or objects in the hands. Keep that model's exact face and styling without repeating a stiff pose. Original product references always outrank its garment",
+    // Identity leads: a long manifest label is cut from the end, and the face is what this image must never lose.
     style_reference: useStyleAsModelFace
-      ? `STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, mood, and lighting on every pose, including the back view. ${styleCopyRule} The clothing in this image must be 100% DISCARDED; dress the model ONLY in the uploaded product. Because this same photo was also uploaded as MODEL FACE REFERENCE, this image's face, hair, skin tone, and body proportions are the model identity for all six poses`
+      ? `MODEL FACE REFERENCE + STYLE REFERENCE (the same photo was uploaded as both) - this person's exact face, skin tone, hair and body proportions are the model identity for all six poses. It is also the SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, mood, and lighting on every pose, including the back view. ${styleCopyRule} The clothing in this image must be 100% DISCARDED; dress the model ONLY in the uploaded product`
       : `STYLE REFERENCE - SOLE AUTHORITY for photoshoot backdrop, room architecture, wall color/texture, flooring, mood, and lighting on every pose, including the back view. ${styleCopyRule} The clothing in this image must be 100% DISCARDED; dress the model ONLY in the uploaded product${castFreshModelNote}`,
   };
   return labels[role] || role.toUpperCase();
@@ -371,7 +372,9 @@ export function selectReferences<T extends ReferenceLike>(
  * Keep the style copy, which still supplies the face when no separate model
  * photo remains, and drop any later image of the same stored file. A content
  * hash, storage path, or download URL is enough; a missing hash must not let
- * the duplicate through.
+ * the duplicate through. The kept copy takes the model photo's place (the
+ * identity slot, first for front poses) rather than the style slot after the
+ * product photos, or the face loses its priority.
  */
 export function collapseDuplicateUploads<T extends ReferenceLike>(selected: T[]): T[] {
   const model = selected.find((reference) => reference.role === "model_identity");
@@ -381,8 +384,8 @@ export function collapseDuplicateUploads<T extends ReferenceLike>(selected: T[])
   const seenStyle = new Set<string>();
   const seenModel = new Set<string>();
   const unique: T[] = [];
-  for (const reference of selected) {
-    if (modelMatchesStyle && reference.role === "model_identity") continue;
+  for (const candidate of selected) {
+    const reference = modelMatchesStyle && candidate.role === "model_identity" ? style! : candidate;
     const keys = uploadIdentityKeys(reference);
     if (keys.length > 0) {
       if (reference.role === "style_reference") {

@@ -1670,6 +1670,84 @@ const FORBIDDEN_HELD_OBJECT_CORE = String.raw`iced[-\s]?coffee|coffee|latte|matc
 export const FORBIDDEN_NON_EYEWEAR_HELD_OBJECT_PATTERN = new RegExp(`\\b(?:${FORBIDDEN_HELD_OBJECT_CORE})\\b`, "i");
 export const FORBIDDEN_HELD_OBJECT_PATTERN = new RegExp(`\\b(?:${FORBIDDEN_HELD_OBJECT_CORE}|sunglass(?:es)?|eyewear|shades)\\b`, "i");
 
+/** Handheld props a user can ask for in the product notes, grouped by what they are. */
+const REQUESTABLE_PROP_GROUPS: ReadonlyArray<{ id: string; label: string; words: string }> = [
+  { id: "drink", label: "the drink (cup or glass)", words: String.raw`iced[-\s]?coffee|coffee|latte|matcha|boba|espresso|drinks?|beverages?|cups?|mugs?|(?:coffee|drinking|water|juice|iced)\s+glass(?:es)?|glass(?:es)?\s+of` },
+  { id: "bag", label: "the bag", words: String.raw`hand[-\s]?bags?|bags?|totes?|purses?|clutch(?:es)?|backpacks?` },
+  { id: "sunglasses", label: "the sunglasses", words: String.raw`sun[-\s]?glass(?:es)?|shades|eyewear` },
+  { id: "phone", label: "the phone", words: String.raw`(?:smart|cell\s+)?phones?` },
+  { id: "flowers", label: "the flowers", words: String.raw`flowers?|bouquets?` },
+  { id: "umbrella", label: "the umbrella", words: String.raw`umbrellas?` },
+];
+// A prop counts as requested only when the sentence holds or carries it, so material
+// words ("glass beads", "hand embroidery", "cup sleeves") never turn into props.
+const PROP_HOLD_PATTERN = /\b(?:hold|holds|holding|held|carry|carries|carrying|carried|sip|sips|sipping|in\s+(?:her|his|their|one|the|a)\s+hands?)\b/i;
+const PROP_NEGATION_PATTERN = /\b(?:no|not|never|without|avoid|remove|exclude|don'?t|do\s+not)\b/i;
+
+export type RequestedHandheldProps = {
+  /** REQUESTABLE_PROP_GROUPS ids, e.g. ["drink", "bag"]. Empty when nothing is requested. */
+  groups: string[];
+  labels: string[];
+  /** The requesting sentences from the notes, bounded. */
+  note: string;
+};
+
+/**
+ * Props the product notes explicitly ask the model to hold or carry ("she holds a coffee
+ * glass and a hand bag as in the reference image"). Negated sentences never count.
+ * Requested props carry over from the STYLE REFERENCE; every other handheld object stays
+ * excluded.
+ */
+export function requestedHandheldProps(notes: unknown): RequestedHandheldProps {
+  const sentences = String(notes ?? "").split(/(?<=[.!?;])\s+|\n+/).map((sentence) => sentence.trim()).filter(Boolean);
+  const groups = new Set<string>();
+  const kept: string[] = [];
+  for (const sentence of sentences) {
+    if (!PROP_HOLD_PATTERN.test(sentence) || PROP_NEGATION_PATTERN.test(sentence)) continue;
+    const hits = REQUESTABLE_PROP_GROUPS.filter((group) => new RegExp(`\\b(?:${group.words})\\b`, "i").test(sentence));
+    if (!hits.length) continue;
+    for (const group of hits) groups.add(group.id);
+    kept.push(sentence);
+  }
+  const ordered = REQUESTABLE_PROP_GROUPS.filter((group) => groups.has(group.id));
+  return {
+    groups: ordered.map((group) => group.id),
+    labels: ordered.map((group) => group.label),
+    note: kept.join(" ").replace(/\s+/g, " ").slice(0, 300),
+  };
+}
+
+/** The words naming a requested group (requestedHandheldProps ids), for prompt rewrites. */
+export function requestedPropWords(groups: readonly string[]): string {
+  return REQUESTABLE_PROP_GROUPS.filter((group) => groups.includes(group.id)).map((group) => group.words).join("|");
+}
+
+// The fixed "never copy handheld props" phrasings used across the prompt, QA and
+// reference labels, rewritten to exclude only the props the notes did not request.
+const GENERIC_PROP_BANS: ReadonlyArray<[RegExp, string]> = [
+  [/handheld coffee cups\/totes\/bags/g, "unrequested handheld props"],
+  [/\(coffee cups, mugs, bottles, tote bags, handbags, sunglasses, phones\)/g, "(any prop the product notes did not request)"],
+  [/a coffee cup, tote bag, sunglass case, or leaning stance/g, "an unrequested prop or a leaning stance"],
+  [/a coffee cup, tote bag, or sunglass case/g, "an unrequested prop"],
+  [/\(no leaning posture, cups, totes, or sunglasses\)/g, "(no leaning posture or unrequested props)"],
+  [/leaning\/sitting posture, cups, totes, and sunglasses/g, "leaning/sitting posture and unrequested props"],
+  [/\((?:cups, totes, sunglasses|cups, totes, phones, sunglasses)\)/g, "(unrequested props)"],
+  [/(?<!unrequested )\b([Oo])bjects (in the hands|held in the style or model photo)\b/g, "$1bjects $2 other than the requested props"],
+  [/(?<!unrequested )\bhandheld (props|objects)\b/g, "unrequested handheld $1"],
+];
+
+/**
+ * Prompt text with the generic prop bans narrowed to unrequested props and every
+ * "no <requested prop>" clause removed. Unchanged when nothing is requested.
+ */
+export function withRequestedPropsAllowed(text: string, requested: Pick<RequestedHandheldProps, "groups">): string {
+  if (!requested.groups.length) return text;
+  let out = text;
+  for (const [pattern, replacement] of GENERIC_PROP_BANS) out = out.replace(pattern, replacement);
+  const words = requestedPropWords(requested.groups);
+  return out.replace(new RegExp(`\\b(?:no|never|without)\\s+(?:[a-z-]+\\s+){0,2}(?:${words})\\b[^,;.\\n]*[,;]?\\s*`, "gi"), "");
+}
+
 export function sanitizeHeldObjectText(value: unknown, replacement: string, allowNotes = ""): string {
   const raw = String(value ?? "");
   if (!raw || !FORBIDDEN_HELD_OBJECT_PATTERN.test(raw)) return raw;
@@ -2005,7 +2083,13 @@ First, determine the garmentFamily from the references: "kurta_or_kurti_set", "s
 
 SKU: ${args.skuName}
 Declared category: ${args.category}
-User product notes: ${args.productDetails}
+User product notes: ${args.productDetails}${(() => {
+  const props = requestedHandheldProps(`${args.skuName} ${args.productDetails}`);
+  return props.groups.length
+    ? `
+PROPS REQUESTED IN THE PRODUCT NOTES: "${props.note}". The user wants ${props.labels.join(" and ")} carried over from the STYLE REFERENCE. Name them in stylingPlan.ornaments as that image shows them, plan handPlacement so a visible hand holds or carries them in every frame except the Pose 5 craft crop, and never write "no ${props.groups[0]}" or exclude them. All other handheld objects stay excluded.`
+    : "";
+})()}
 Requested model direction: ${args.modelDirection || "one consistent professional adult fashion model"}
 Requested scene direction: ${args.sceneDirection || "derive one consistent commercial scene from style references"}
 

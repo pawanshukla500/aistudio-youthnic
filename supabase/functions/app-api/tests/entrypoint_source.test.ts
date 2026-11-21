@@ -129,7 +129,7 @@ Deno.test("reference pose planning: worker DNA gate, QA posture match, finalize 
   // Farshi seat is never excused; the DNA check reads the honoured Pose 4 / Pose 6 posture.
   assertEquals(source.includes("const farshi = isFarshiGeneration({"), true);
   assertEquals(source.includes("return { farshi, slots: promptReferenceSlots(session, farshi) };"), true);
-  assertEquals(source.includes("    farshi,\n  });\n  const baseParts"), true);
+  assertEquals(source.includes("    farshi,\n    requestedProps: requestedHandheldProps(`${args.skuName ?? \"\"} ${args.productDetails ?? \"\"}`),\n  });\n  const baseParts"), true);
   assertEquals(source.includes("      referencePosture: args.referencePosture,\n    });"), true);
   assertEquals(worker.includes("? adoptedReferenceSlots(sessionData, selected, skuText).slots[poseData.id]?.posture"), true);
   assertEquals(source.includes("referencePoseMatch: (args.pose.id === \"creative\" || args.pose.id === \"showcase\" ? adopted[args.pose.id] : null) ?? undefined,"), true);

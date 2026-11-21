@@ -29,7 +29,10 @@ Six-pose fashion catalog photoshoots generated from product references.
    from uploaded product references. The outfit/clothing shown in the STYLE REFERENCE image is 100% DISCARDED and QUARANTINED.
    Style reference is the authority for backdrop, room architecture, flooring, and lighting, and for the body posture of
    Pose 4/6 only when the stored pose plan adopts it (rule 4). Its outfit, face, hair, and objects in the hands are
-   quarantined in every frame; jewellery follows `stylingPlan`.
+   quarantined in every frame; jewellery follows `stylingPlan`. Exception: props the product notes ask the model to
+   hold or carry (`requestedHandheldProps`, e.g. "holds a coffee glass and a hand bag as in the reference") carry over
+   from the style reference in every frame except the Pose 5 crop, never covering the garment; other props stay out.
+   When the same photo is uploaded as model face and style reference, it is sent once, in the identity slot.
    Never compromise product fidelity or generation quality for style matching.
 3. **Natural Human Anatomy (PR 131).** Every generated image must have strictly exactly two arms and two hands.
    Zero third hands, phantom limbs, or floating hands resting on waist/pleats without clear forearm connection.

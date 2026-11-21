@@ -59,10 +59,11 @@ Deno.test("analysis sees one copy when the model photo and the style photo are t
     { role: "mannequin", hash: "flat-row", storagePath: "organizations/org/references/flat.jpg" },
     { role: "style_reference", hash: "row-style", storagePath: "organizations/org/references/whatsapp.jpg" },
   ]);
-  assertEquals(collapsed.map((reference) => reference.role), ["front", "fabric_pattern", "style_reference"]);
+  // The kept style copy takes the model photo's identity slot.
+  assertEquals(collapsed.map((reference) => reference.role), ["style_reference", "front", "fabric_pattern"]);
 });
 
-Deno.test("an identical model-face and style upload is sent once, as the style reference", () => {
+Deno.test("an identical model-face and style upload is sent once, as the style reference in the identity slot", () => {
   const selected = selectReferences(
     [
       { role: "model_identity", hash: "same-photo" },
@@ -75,7 +76,7 @@ Deno.test("an identical model-face and style upload is sent once, as the style r
     "full_front",
     "kurta_or_kurti_set",
   );
-  assertEquals(selected.map((reference) => reference.role), ["front", "mannequin", "style_reference"]);
+  assertEquals(selected.map((reference) => reference.role), ["style_reference", "front", "mannequin"]);
   const back = selectReferences(
     [
       { role: "model_identity", hash: "same-photo" },
@@ -99,7 +100,7 @@ Deno.test("an identical model-face and style upload is sent once, as the style r
     "full_front",
     "kurta_or_kurti_set",
   );
-  assertEquals(sameObject.map((reference) => reference.role), ["front", "style_reference"]);
+  assertEquals(sameObject.map((reference) => reference.role), ["style_reference", "front"]);
 });
 
 Deno.test("legacy saree aliases remain valid and pallu has a distinct authority label", () => {
@@ -396,7 +397,8 @@ Deno.test("model identity helpers distinguish empty Face Lock from collapsed dup
   ];
   assertEquals(hasExplicitModelIdentity(duplicateUpload), true);
   assertEquals(hasCollapsedModelIdentity(duplicateUpload), true);
-  assertStringIncludes(roleLabel("style_reference", { useStyleAsModelFace: true }), "also uploaded as MODEL FACE REFERENCE");
+  // Identity leads the label, so a manifest cut from the end never loses the face.
+  assert(roleLabel("style_reference", { useStyleAsModelFace: true }).startsWith("MODEL FACE REFERENCE + STYLE REFERENCE (the same photo was uploaded as both) - this person's exact face, skin tone, hair"));
 
   const distinctUploads = [
     { role: "model_identity", hash: "face-hash" },

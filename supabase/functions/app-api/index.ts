@@ -21,6 +21,7 @@ import {
   normalizeStylingPlan,
   recordedSeatedPoseDemand,
   parseJsonResponse,
+  requestedHandheldProps,
   ACTIVE_GENERATION_JOB_STATUSES,
   REQUIRED_POSE_IDS,
   sareeAnalysisIssues,
@@ -2869,6 +2870,7 @@ async function validatePose(args: {
     referenceManifest: qaRefs.map((reference, index) => `IMAGE ${index + 1}: ${qaLabel(reference.role)}`),
     referencePoseMatch: (args.pose.id === "creative" || args.pose.id === "showcase" ? adopted[args.pose.id] : null) ?? undefined,
     farshi,
+    requestedProps: requestedHandheldProps(`${args.skuName ?? ""} ${args.productDetails ?? ""}`),
   });
   const baseParts: JsonRecord[] = [
     { text: prompt },
