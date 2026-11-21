@@ -886,7 +886,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
               <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                 <p className="text-[11px] text-secondary">
                   The selected poses are queued on the server together and run in pose order, so a regenerated Pose 1 finishes
-                  first and anchors the rest. You can close this window.
+                  first and anchors the rest. If Pose 1 cannot be produced, the other poses keep their current images. You can
+                  close this window.
                 </p>
                 <button
                   type="button"

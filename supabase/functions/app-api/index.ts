@@ -3678,7 +3678,19 @@ async function failPoseAndJob(job: JsonRecord, session: JsonRecord, pose: JsonRe
     return;
   }
   if (remaining.length) {
-    await service.from("session_generations").update({ status: "failed", qa_status: "failed", error: "Skipped because pose 1 is the identity anchor for the set and could not be produced.", updated_at: now }).eq("session_id", job.session_id).eq("status", "queued");
+    const skipped = "Skipped because pose 1 is the identity anchor for the set and could not be produced.";
+    await Promise.all(remaining.map((entry) => {
+      const history = Array.isArray(entry.regeneration_history) ? entry.regeneration_history as JsonRecord[] : [];
+      const last = (history[history.length - 1] || {}) as JsonRecord;
+      // A regeneration that never ran goes back to the version it would have replaced, in its earlier state.
+      const restore = Boolean(entry.output_url || entry.storage_path) && ["completed", "requires_human_review"].includes(String(last.previousStatus || ""));
+      return service.from("session_generations").update(restore
+        ? {
+          status: String(last.previousStatus), qa_status: String(last.previousQaStatus || "pending"), error: "",
+          regeneration_history: [...history.slice(0, -1), { ...last, skipped: true, skippedReason: skipped }], updated_at: now,
+        }
+        : { status: "failed", qa_status: "failed", error: skipped, updated_at: now }).eq("generation_id", entry.generation_id).eq("status", "queued");
+    }));
   }
   const { data: finalPoses, error: finalPosesError } = await service.from("session_generations").select("*").eq("session_id", job.session_id).order("pose_index");
   if (finalPosesError) console.error(finalPosesError.message);
@@ -5181,6 +5193,10 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
   if (poses.some((entry) => entry.session_id !== pose.session_id)) throw new Error("Regenerate poses from one photoshoot at a time.");
   const job = await jobForPose(pose, workspace.organization.id);
   if (!job) throw new Error("Generation job not found.");
+  // A session can hold rows from several runs; every pose must belong to the job checked and billed here.
+  if (scopePoseRowsToJob(poses as PoseRowLike[], String(job.job_id)).length !== poses.length) {
+    throw new Error("Regenerate poses from one photoshoot run at a time.");
+  }
   const { data: activeJobs, error: activeJobsError } = await service.from("generation_jobs").select("job_id")
     .eq("session_id", pose.session_id).eq("org_id", workspace.organization.id).in("status", ["queued", "processing", "cancelling"]).limit(1);
   if (activeJobsError) throw new Error(activeJobsError.message);
@@ -5216,6 +5232,9 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
         previousOutputRetained,
         previousApprovalStatus: String(entry.approval_status || "pending"),
         previousGenerationEpoch: Math.max(1, Number(entry.generation_epoch || 1)),
+        // Restored if this run is skipped because Pose 1 could not be produced.
+        previousStatus: String(entry.status || ""),
+        previousQaStatus: String(entry.qa_status || ""),
       }],
       generation_data: {
         ...((entry.generation_data || {}) as JsonRecord),

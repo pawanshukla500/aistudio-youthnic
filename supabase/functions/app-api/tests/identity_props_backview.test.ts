@@ -325,6 +325,15 @@ Deno.test("a bare prop in a negated styling list is dropped, keeping the list's 
   assertEquals(withoutNegatedRequestedProps("silver bangles, tote bag on shoulder", props), "silver bangles, tote bag on shoulder");
   assertEquals(withoutNegatedRequestedProps("no dupatta, stole; bag on shoulder", props), "no dupatta, stole; bag on shoulder");
   assertEquals(withoutNegatedRequestedProps("no dupatta, belt, bag included with SKU", { groups: [] }), "no dupatta, belt, bag included with SKU");
+  // A prop with a placement, or after an explicit negation, is a positive entry and stays verbatim.
+  for (const text of [
+    "no dupatta, tote bag on shoulder",
+    "no dupatta, bag and coffee cup in hand",
+    "no dupatta, silver bangles, bag on shoulder",
+    "no dupatta, glass of iced coffee in right hand",
+    "no dupatta, silver bangles on wrist, bag",
+  ]) assertEquals(withoutNegatedRequestedProps(text, props), text);
+  assertEquals(withoutNegatedRequestedProps("no dupatta, no bag, tote included; no sunglasses", props), "no dupatta, tote included; no sunglasses");
 });
 
 Deno.test("the hand placement line hands the requested props to the props block, except in a tight crop", () => {
