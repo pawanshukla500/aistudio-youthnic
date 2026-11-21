@@ -1018,7 +1018,7 @@ export function requestedPropsBlock(props: RequestedHandheldProps, poseId: strin
 export function identityCheckLine(imageNumber: number, label: string, backView: boolean): string {
   return backView
     // Asking for the hair length here kept the hair down the back, over the back neckline, in every attempt.
-    ? `IDENTITY CHECK: the face is turned away, but the skin tone, hair colour and texture, and body proportions must match IMAGE ${imageNumber} (${label}). The hair stays swept forward over the front shoulders or up in a bun, so the back neckline and upper back are fully visible.`
+    ? `IDENTITY CHECK: the face is turned away, but the skin tone, hair colour and texture, and body proportions must match IMAGE ${imageNumber} (${label}). Bring all the hair forward over one shoulder (a loose side ponytail or braid resting on the front of that shoulder is fine), so the back neckline and the whole upper back are bare to the camera: no hair hangs down the centre of the back.`
     : `IDENTITY CHECK: the face, skin tone and hair must match IMAGE ${imageNumber} (${label}) exactly - the same face shape, eyes, brows, nose, lips and jaw; the same skin tone; the same hair colour, length, texture and parting. Do not beautify, slim, lighten or swap the face.`;
 }
 
