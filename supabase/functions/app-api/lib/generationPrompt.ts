@@ -1179,7 +1179,7 @@ function propsAwareInstructionText(value: unknown, sitting: PoseScrub, props: Re
   const masked: string[] = [];
   const text = String(value ?? "").replace(words, (match) => `PROPTOKEN${masked.push(match) - 1}X`);
   const scrubbed = poseInstructionText(text, sitting, "").replace(/PROPTOKEN(\d+)X/g, (_, index) => masked[Number(index)] ?? "");
-  return withoutNegatedRequestedProps(scrubbed, props);
+  return withoutNegatedRequestedProps(scrubbed, props).replace(/[\s,;]+$/, "");
 }
 
 function poseTitleText(value: unknown, sitting: PoseScrub): string {

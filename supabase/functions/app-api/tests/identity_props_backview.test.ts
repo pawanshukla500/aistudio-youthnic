@@ -223,6 +223,21 @@ Deno.test("prop requests skip shape, pocket and table uses and read right/left h
   assertEquals(requestedHandheldProps("holding a coffee cup on a mat finish tray").groups, ["drink"]);
 });
 
+Deno.test("'ke liye' is not a hold, and a negation before the verb's own clause does not cancel a later prop", () => {
+  for (const note of [
+    "Office ke liye flowers wali kurti",
+    "Shaadi ke liye umbrella frock",
+    "Party ke liye phone cover jaisa print",
+    "Umbrella frock with dupatta in one hand",
+    "haath mein dupatta aur kurta pe flowers ka print",
+  ]) assertEquals(requestedHandheldProps(note).groups, [], note);
+  assertEquals(requestedHandheldProps("coffee glass hath me aur bag kandhe pe").groups, ["drink", "bag"]);
+  assertEquals(requestedHandheldProps("bag liye hue model").groups, ["bag"]);
+  assertEquals(requestedHandheldProps("Without dupatta she holds a coffee glass and a bag").groups, ["drink", "bag"]);
+  assertEquals(requestedHandheldProps("she does not wear a dupatta and holds a coffee glass").groups, ["drink"]);
+  assertEquals(requestedHandheldProps("Do not hold a bag").groups, []);
+});
+
 Deno.test("the ornaments line keeps requested props but still drops unrequested props and stride text", () => {
   const session = {
     ...SESSION,

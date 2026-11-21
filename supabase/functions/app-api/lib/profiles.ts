@@ -1681,7 +1681,8 @@ const REQUESTABLE_PROP_GROUPS: ReadonlyArray<{ id: string; label: string; words:
 ];
 const PROP_HOLD_VERB = /\b(?:hold|holds|holding|held|carry|carries|carrying|carried|sip|sips|sipping)\b/i;
 // Hinglish: "haath mein coffee pakde hue", "coffee glass hold kare aur hand bag liye".
-const PROP_HINDI_HOLD = /\b(?:hold|pakad\w*|pakd\w*)\s+(?:karo|kare|karen|karein|kiya|kiye|karna|karke|kar|hue|huye|rakho|rakhe|rakhi)\b|\b(?:liye|liya)\b|\bhaath\s+(?:mein|me|main)\b/i;
+// "liye" holds only as "liye hue/ho/hai" ("ke liye" means "for"); "haath"/"hath mein" is "in hand".
+const PROP_HINDI_HOLD = /\b(?:hold|pakad\w*|pakd\w*)\s+(?:karo|kare|karen|karein|kiya|kiye|karna|karke|kar|hue|huye|rakho|rakhe|rakhi)\b|(?<!\bk[eia]\s)\b(?:liye|liya)\s+(?:hue|huye|ho|hai|hain)\b|\bha+th\s+(?:mein|me|main)\b/i;
 const PROP_IN_HAND = /\bin\s+(?:(?:her|his|their|one|the|a)\s+)?(?:(?:right|left)\s+)?hands?\b|\bon\s+(?:(?:her|his|their|the|one)\s+)?(?:(?:right|left)\s+)?shoulders?\b/i;
 const PROP_ENGLISH_NEGATION = /\b(?:no|not|never|without|avoid|remove|exclude|don'?t|do\s+not)\b/i;
 // Hindi negations only count in a Hinglish clause ("mat" is also an English word).
@@ -1689,7 +1690,7 @@ const PROP_HINDI_NEGATION = /\b(?:nahi|nahin|nhi|mat|na)\b/i;
 const PROP_HINDI_MARKER = /\b(?:mein|aur|ke|ki|ka|hai|ho|bhi|sirf|karo|kare|karna|pakd\w*|liye|rakho|haath)\b/i;
 // A prop word used as a colour, sleeve, shape or garment detail: "coffee brown", "cup sleeves",
 // "umbrella shape", "bag-style pocket", "coffee table", "flowers printed on the border".
-const PROP_AS_DESCRIPTOR = /^[\s-]*(?:brown|green|beige|black|white|red|blue|pink|gold|cream|grey|gray|colou?r(?:ed)?|shades?|tones?|hued?|sleeves?|cut|flare|hem|prints?|printed|motifs?|embroider\w*|butti|work|shape[sd]?|style[sd]?|pattern(?:ed)?|pockets?|table|stand|dupatta|kurta|kurti|stole|saree|lehenga|of)\b/i;
+const PROP_AS_DESCRIPTOR = /^[\s-]*(?:brown|green|beige|black|white|red|blue|pink|gold|cream|grey|gray|colou?r(?:ed)?|shades?|tones?|hued?|sleeves?|cut|flare|hem|prints?|printed|motifs?|embroider\w*|butti|work|shape[sd]?|style[sd]?|pattern(?:ed)?|pockets?|table|stand|cover|frock|wal[ia]|ka|ki|dupatta|kurta|kurti|stole|saree|lehenga|of)\b/i;
 const PROP_WINDOW_WORDS = 10;
 const PROP_LIST_ITEM = /^(?:(?:and|or|plus|&)\s+)?(?:a|an|the|her|his|their|some|one)\b/i;
 
@@ -1706,16 +1707,27 @@ export type RequestedHandheldProps = {
  * for Hinglish (object before and after the verb), or the clause around "in her hand". Empty
  * when the clause holds nothing. `start` is the window's offset in the clause.
  */
-function propWindow(clause: string): { text: string; start: number; hindi: boolean } | null {
-  if (PROP_HINDI_HOLD.test(clause)) return { text: clause, start: 0, hindi: true };
+function propWindow(clause: string): { text: string; start: number; hindi: boolean; verbAt: number } | null {
+  if (PROP_HINDI_HOLD.test(clause)) return { text: clause, start: 0, hindi: true, verbAt: -1 };
   const verb = clause.match(PROP_HOLD_VERB);
   if (verb && verb.index !== undefined) {
     const rest = clause.slice(verb.index + verb[0].length);
     const start = verb.index + verb[0].length + (rest.length - rest.trimStart().length);
     // One word past the window lets a trailing descriptor ("phone pocket") be seen.
-    return { text: rest.trimStart().split(/\s+/).slice(0, PROP_WINDOW_WORDS + 1).join(" "), start, hindi: false };
+    return { text: rest.trimStart().split(/\s+/).slice(0, PROP_WINDOW_WORDS + 1).join(" "), start, hindi: false, verbAt: verb.index };
   }
-  return PROP_IN_HAND.test(clause) ? { text: clause, start: 0, hindi: false } : null;
+  return PROP_IN_HAND.test(clause) ? { text: clause, start: 0, hindi: false, verbAt: -1 } : null;
+}
+
+/**
+ * Whether an English negation governs this prop: before the holding verb (within two words,
+ * "do not hold a bag") or between the verb and the prop. "Without dupatta she holds a coffee
+ * glass" still requests the drink. Clauses without a verb check everything before the prop.
+ */
+function propNegated(clause: string, held: { start: number; verbAt: number }, at: number): boolean {
+  if (held.verbAt < 0) return PROP_ENGLISH_NEGATION.test(clause.slice(0, held.start + at));
+  const beforeVerb = clause.slice(0, held.verbAt).trim().split(/\s+/).slice(-2).join(" ");
+  return PROP_ENGLISH_NEGATION.test(beforeVerb) || PROP_ENGLISH_NEGATION.test(clause.slice(held.start, held.start + at));
 }
 
 /**
@@ -1746,7 +1758,7 @@ export function requestedHandheldProps(notes: unknown): RequestedHandheldProps {
       continue;
     }
     const own = propWindow(clause);
-    const held: { text: string; start: number; hindi: boolean } | null = own ?? (continuesHold && PROP_LIST_ITEM.test(clause) ? { text: clause, start: 0, hindi: false } : null);
+    const held: { text: string; start: number; hindi: boolean; verbAt: number } | null = own ?? (continuesHold && PROP_LIST_ITEM.test(clause) ? { text: clause, start: 0, hindi: false, verbAt: -1 } : null);
     continuesHold = Boolean(held);
     if (!held) continue;
     let matched = false;
@@ -1755,7 +1767,7 @@ export function requestedHandheldProps(notes: unknown): RequestedHandheldProps {
         const at = match.index ?? 0;
         if (PROP_AS_DESCRIPTOR.test(held.text.slice(at + match[0].length))) continue;
         // "no sunglasses", "do not hold a bag": an English negation before this prop cancels it.
-        if (PROP_ENGLISH_NEGATION.test(clause.slice(0, held.start + at))) continue;
+        if (propNegated(clause, held, at)) continue;
         groups.add(group.id);
         matched = true;
         break;
