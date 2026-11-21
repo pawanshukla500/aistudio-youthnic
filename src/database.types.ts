@@ -2625,6 +2625,8 @@ export type Database = {
           model: string;
           organization_id: string | null;
           pose_count: number;
+          pose_planning: NonNullable<Json>;
+          pose_scores: NonNullable<Json>;
           pose_titles: string[];
           processing_time_ms: number;
           product_category: string;
@@ -2658,6 +2660,8 @@ export type Database = {
           model?: string;
           organization_id?: string | null;
           pose_count?: number;
+          pose_planning?: NonNullable<Json>;
+          pose_scores?: NonNullable<Json>;
           pose_titles?: string[];
           processing_time_ms?: number;
           product_category?: string;
@@ -2690,6 +2694,8 @@ export type Database = {
           model?: string;
           organization_id?: string | null;
           pose_count?: number;
+          pose_planning?: NonNullable<Json>;
+          pose_scores?: NonNullable<Json>;
           pose_titles?: string[];
           processing_time_ms?: number;
           product_category?: string;
@@ -4154,6 +4160,84 @@ export type Database = {
           },
           {
             foreignKeyName: "planning_requests_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      pose_plan_outcomes: {
+        Row: {
+          best_plan: NonNullable<Json>;
+          bottom_cut_class: string;
+          created_at: string;
+          distinctiveness: string;
+          dna_fail_count: number;
+          dna_pass_count: number;
+          dna_score_avg: number | null;
+          human_approved_count: number;
+          human_rejected_count: number;
+          id: string;
+          last_session_id: string | null;
+          last_used_at: string;
+          organization_id: string;
+          outcome_key: string;
+          pose_family: string;
+          posture: string;
+          slot_id: string;
+          source: string;
+          updated_at: string;
+          use_count: number;
+        };
+        ComputedFields: never;
+        Insert: {
+          best_plan?: NonNullable<Json>;
+          bottom_cut_class?: string;
+          created_at?: string;
+          distinctiveness?: string;
+          dna_fail_count?: number;
+          dna_pass_count?: number;
+          dna_score_avg?: number | null;
+          human_approved_count?: number;
+          human_rejected_count?: number;
+          id?: string;
+          last_session_id?: string | null;
+          last_used_at?: string;
+          organization_id: string;
+          outcome_key: string;
+          pose_family?: string;
+          posture?: string;
+          slot_id: string;
+          source: string;
+          updated_at?: string;
+          use_count?: number;
+        };
+        Update: {
+          best_plan?: NonNullable<Json>;
+          bottom_cut_class?: string;
+          created_at?: string;
+          distinctiveness?: string;
+          dna_fail_count?: number;
+          dna_pass_count?: number;
+          dna_score_avg?: number | null;
+          human_approved_count?: number;
+          human_rejected_count?: number;
+          id?: string;
+          last_session_id?: string | null;
+          last_used_at?: string;
+          organization_id?: string;
+          outcome_key?: string;
+          pose_family?: string;
+          posture?: string;
+          slot_id?: string;
+          source?: string;
+          updated_at?: string;
+          use_count?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "pose_plan_outcomes_organization_id_fkey";
             columns: ["organization_id"];
             isOneToOne: false;
             referencedRelation: "organizations";

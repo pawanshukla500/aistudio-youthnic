@@ -50,6 +50,45 @@ export type StudioPose = {
   consistencyNotes?: string;
   prompt: string;
   enabled: boolean;
+  /** Pose 4/6 only: the style-reference posture this pose copies (e.g. "seated"). */
+  referencePosture?: string;
+  /** The planned attitude (posePlanning.expressionPlan.attitude). */
+  attitude?: string;
+};
+
+// Mirrors PosePlanning in supabase/functions/app-api/lib/posePlanning.ts. Every
+// field is optional: analyses from before v36 carry no posePlanning at all.
+export type PosePlanSlotProfile = {
+  source: "reference" | "product";
+  posture?: string;
+  directive?: string;
+  rationale?: string;
+};
+
+export type PosePlanningProfile = {
+  version?: number;
+  referencePose?: {
+    posture?: string;
+    description?: string;
+    seatOrSupport?: string;
+    distinctiveness?: "generic" | "signature";
+    signatureDescription?: string;
+    attitude?: string;
+    suitableForProduct?: string;
+    suitabilityReason?: string;
+  };
+  expressionPlan?: {
+    attitude?: string;
+    energy?: string;
+    gaze?: string;
+    smile?: string;
+    rationale?: string;
+  };
+  slots?: Partial<Record<"creative" | "showcase", PosePlanSlotProfile>>;
+  expressions?: Record<string, string>;
+  planner?: "langgraph" | "local";
+  planKey?: string;
+  threadId?: string;
 };
 
 // Mirrors the geometry profiles the analysis stage now produces. Optional so a
@@ -276,6 +315,7 @@ export type StudioAnalysis = {
   modelIdentity: Record<string, string>;
   stylingPlan?: StylingPlanProfile;
   posePlan: StudioPose[];
+  posePlanning?: PosePlanningProfile;
   cacheHit: boolean;
   analysisProvider?: string;
   analysisModel?: string;

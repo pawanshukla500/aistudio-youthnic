@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AlertTriangle, Aperture, CheckCircle2, ChevronDown, ChevronUp, Loader2, Palette, RefreshCcw, Shirt, Sparkles } from "lucide-react";
 import type { ProductDnaSummary } from "../../../lib/backend";
-import type { StudioAnalysis } from "../types";
+import type { PosePlanningProfile, StudioAnalysis } from "../types";
 import { sareeProfilePresentation } from "../sareeProfilePresentation";
 
 const productFields: Array<[keyof StudioAnalysis["productIdentity"], string]> = [
@@ -34,7 +34,7 @@ const creativeFields: Array<[keyof StudioAnalysis["creativeDirection"], string]>
   ["colorTreatment", "Color treatment"],
   ["modelStyling", "Model styling"],
   ["suggestedAccessories", "Suggested accessories"],
-  ["seatedPoseRequired", "Seated pose 4"],
+  ["seatedPoseRequired", "Seated pose 4 (requested in notes)"],
   ["seatedPoseReason", "Seated pose evidence"],
   ["closeupMode", "Pose 5 close-up mode"],
   ["closeupHeroDetail", "Pose 5 product detail"],
@@ -59,6 +59,22 @@ function analysisRouteLabel(analysis: StudioAnalysis | null) {
   const cache = analysis.cacheHit ? " · Cache Hit" : "";
   const thinking = analysis.analysisThinking ? ` · ${analysis.analysisThinking}` : "";
   return `${provider} ${analysis.analysisModel}${thinking}${cache}`;
+}
+
+function posePlanningItems(planning: PosePlanningProfile): Array<[string, unknown]> {
+  const pose = planning.referencePose;
+  const slot = (id: "creative" | "showcase", label: string) => {
+    const plan = planning.slots?.[id];
+    return plan?.source === "reference" ? `${label} matches the reference${plan.posture ? ` (${plan.posture})` : ""}` : `${label} product-led`;
+  };
+  return [
+    [
+      "Style reference posture",
+      pose?.posture === "none" ? "No person shown" : [pose?.posture, pose?.distinctiveness, pose?.signatureDescription].filter(Boolean).join(" · "),
+    ],
+    ["Pose 4 & 6 posture", `${slot("creative", "Pose 4")} · ${slot("showcase", "Pose 6")}`],
+    ["Expression plan", [planning.expressionPlan?.attitude, planning.expressionPlan?.energy].filter(Boolean).join(" · ")],
+  ];
 }
 
 function ProfileGrid({ items }: { items: Array<[string, unknown]> }) {
@@ -400,6 +416,7 @@ export function AnalysisProfile({
                               : []),
                           ] as Array<[string, unknown]>)
                           : []),
+                        ...(analysis.posePlanning ? posePlanningItems(analysis.posePlanning) : []),
                       ]}
                     />
                   </div>

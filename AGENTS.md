@@ -9,7 +9,7 @@ This document establishes operational requirements, architectural constraints, a
 1. **Adhere to `MEMORY.md`:** `MEMORY.md` is the canonical source of truth for architectural contracts, model routing, and generation quality standards. Never violate any contract defined in `MEMORY.md`.
 2. **Product Truth is Absolute:**
    - Generated outfits must be derived **EXCLUSIVELY** from uploaded product images (FRONT, BACK, BOTTOM, FABRIC, MANNEQUIN).
-   - Style reference images provide ONLY the studio backdrop, architecture, flooring, set dressing, lighting, and camera mood. Copy the room only: do not copy the pose, the outfit, or objects in the hands.
+   - Style reference images provide the studio backdrop, architecture, flooring, set dressing, lighting, and camera mood, and the body posture of Pose 4/6 only when the stored pose plan adopts it (directive 4). Never copy their outfit, face, hair, or objects in the hands; jewellery follows the styling plan (`stylingPlan`).
    - **Quarantine the Style Reference Outfit:** Clothing worn by models in style reference images must be 100% ignored and discarded. Never borrow, blend, or transfer style reference clothing onto the model.
    - **Never Compromise Quality for Reference Matching:** The uploaded product's design, cut, prints, butti work, embroidery, and colors must remain identical to the uploaded references.
 3. **Strict Anatomical Realism:**
@@ -20,6 +20,7 @@ This document establishes operational requirements, architectural constraints, a
 4. **Pose Planning Integrity:**
    - **Pose 5 (Detail Shot):** Must highlight the signature craftsmanship of the PRIMARY uploaded garment (e.g. kurti butti work, yoke embroidery, neckline craft). Never hijack Pose 5 by focusing on secondary accessories like dupattas or stoles when the primary garment has craftsmanship to showcase.
    - **Pose 6 (Showcase Frame):** Must complement frames 1–5 while showing a distinct diverging pose, preserving 100% consistency in model identity, product truth, backdrop set, and styling.
+   - **Pose 4 / Pose 6 Reference Matching:** Only Pose 4 (`creative`) and Pose 6 (`showcase`) may copy the style reference person's posture or signature pose, and only when `catalog_sessions.session_data.posePlanning` adopts it. The LangGraph planner (`POST /api/v1/plan`) chooses after the hard guards in `lib/posePlanning.ts` (`referenceAdoptionBlockReason`, mirrored exactly in `backend/agents/pose_plan_agents.py`). An explicit sit request in the product notes takes precedence for Pose 4: Pose 4 then adopts a reference posture only when that posture is seated. Read adoption from the stored plan (`slotReferencePlan`), never from client-sent pose fields. Poses 1, 2, 3 and 5 stay catalog frames; analyses without `posePlanning` (before v36) keep today's pose behaviour: no posture copying, no planned expressions or attitude line.
 
 ---
 
@@ -62,7 +63,7 @@ Every AI agent accessing or modifying this repository **MUST** follow `MEMORY.md
 
 1. **Dual-Service Backend Architecture (`Railway` project `AI Studio App`):**
    - **Edge Gateway (`supabase/functions/app-api/`):** `functions` service handling auth, `organization_ai_model_policies`, image generation jobs, Firebase Storage proxying, and orchestration delegation. Keep `supabase/functions/app-api/lib/aiModelPolicy.ts` pure (no DB queries, network fetches, or env reads).
-   - **LangGraph Agentic Service (`backend/`):** `FastAPI` + `celery-worker` services backed by Supabase Postgres (`PostgresSaver` checkpoints, Product DNA V2 immutable versions) and `Valkey` (cache + Celery broker), providing `/api/v1/dna/extract`, `/api/v1/studio/generate`, `/api/v1/qa/evaluate`, and `/health`.
+   - **LangGraph Agentic Service (`backend/`):** `FastAPI` + `celery-worker` services backed by Supabase Postgres (`PostgresSaver` checkpoints, Product DNA V2 immutable versions) and `Valkey` (cache + Celery broker), providing `/api/v1/dna/extract`, `/api/v1/studio/generate`, `/api/v1/qa/evaluate`, `/api/v1/plan` (pose & expression planning graph), and `/health`.
 2. **Atomic Commits & Verification:**
    - Deno checks & tests: `node $npxCli deno check --frozen supabase/functions/app-api/index.ts` and `node $npxCli deno test -A supabase/functions/app-api/tests/` (using full `test:catalog-workflow` list before push).
    - Python backend tests: `$env:PYTHONPATH = "backend"; python -m pytest backend/tests/ -q`.

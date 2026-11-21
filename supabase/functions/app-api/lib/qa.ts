@@ -10,6 +10,8 @@ import {
   stripGroundedFeetForCroppedFrame,
   type JsonRecord,
 } from "./profiles.ts";
+import { ADOPTABLE_SLOTS, isLowPosture, normalizeReferencePosture } from "./posePlanning.ts";
+import { referencePoseDirectiveText, styleIdentityQuarantineText } from "./generationPrompt.ts";
 import { effectiveBottomCutClass, FARSHI_SILHOUETTE_STRUCTURE, resolveBottomWearPresentation } from "./garmentPoses.ts";
 import { isDirectBackProductRole } from "./referencePolicy.ts";
 import { effectiveShowcaseShot } from "./showcaseFeature.ts";
@@ -160,16 +162,44 @@ export function appendRejectedAttemptHistory<T>(existing: T[], next: T, limit = 
   return [...existing, next].slice(-Math.max(1, limit));
 }
 
+/**
+ * A BOTTOM WEAR label, bare or after "IMAGE n:", like composeGenerationPrompt's role check.
+ * The fabric label's "not bottom-wear print" is not a bottom photo.
+ */
+function hasBottomReferenceLabel(labels: string[]): boolean {
+  return labels.some((label) => /(?:^|:\s*)bottom\b/i.test(label));
+}
+
+/**
+ * The posture match QA may honour. Like promptReferenceSlots (generationPrompt.ts),
+ * a Farshi shoot never honours a low posture and no shoot honours walking, so a stale
+ * plan cannot excuse a seated Farshi frame or a frozen stride. The directive is caller
+ * text, reduced exactly as the prompt's REFERENCE POSE MATCH block states it.
+ */
+function qaReferencePoseMatch(match: { posture: string; directive: string } | undefined, farshiBottom: boolean) {
+  if (!match) return null;
+  const posture = normalizeReferencePosture(match.posture);
+  if (posture === "none" || posture === "walking" || (farshiBottom && isLowPosture(posture))) return null;
+  return { posture, directive: referencePoseDirectiveText(posture, match.directive), low: isLowPosture(posture) };
+}
+
 export function buildPoseQaPrompt(args: {
   poseNumber: number; poseType: string; poseTitle: string; poseDirection: unknown;
   productIdentity: unknown; creativeDirection: unknown; modelIdentity: unknown;
   garmentFamily: string; consistencyRules: string[]; hasApprovedAnchor: boolean; hasModelReference: boolean; referenceManifest: string[];
   bottomWearMode?: unknown; aspectRatio?: string; useStyleAsModelFace?: boolean;
+  /** Set only for a Pose 4 / Pose 6 whose stored pose plan copies the STYLE REFERENCE posture. */
+  referencePoseMatch?: { posture: string; directive: string };
+  /**
+   * isFarshiGeneration for the job (generationPrompt.ts), so QA's Farshi rules match the
+   * prompt's. Omitted, Farshi is detected from productIdentity and the manifest alone.
+   */
+  farshi?: boolean;
 }) {
   // QA must judge the shoot as it was configured. A top-only shoot has no
   // coordinated bottom to match, so bottom-wear fidelity is not a gate there.
   const productRecord = record(args.productIdentity);
-  const hasBottomReference = args.referenceManifest.some((line) => /\bbottom\b/i.test(line));
+  const hasBottomReference = hasBottomReferenceLabel(args.referenceManifest);
   const bottomWear = resolveBottomWearPresentation({
     mode: args.bottomWearMode,
     productIdentity: args.productIdentity,
@@ -178,12 +208,13 @@ export function buildPoseQaPrompt(args: {
     hasBottomReference,
   });
   const hasBottomWear = bottomWear.includesBottomWear;
-  const farshiBottom = hasBottomWear &&
+  const farshiBottom = args.farshi ?? (hasBottomWear &&
     effectiveBottomCutClass(bottomWear.cutClass, hasBottomReference, {
       skuName: String(productRecord.skuName ?? productRecord.sku_name ?? ""),
       productDetails: String(productRecord.productDetails ?? productRecord.product_details ?? ""),
       details: bottomWear.details,
-    }) === "farshi";
+    }) === "farshi");
+  const referenceMatch = qaReferencePoseMatch(args.referencePoseMatch, farshiBottom);
   const farshiStructureCheck = farshiBottom
     ? ` When the bottom is Farshi/Farsi/Fasi, also fail bottom_wear unless the worn trousers match this structure: ${FARSHI_SILHOUETTE_STRUCTURE} Fail a wide-open palazzo hem and fail a gathered salwar poncha. Do not fail the joined 6-inch hem panel itself.`
     : "";
@@ -246,7 +277,7 @@ export function buildPoseQaPrompt(args: {
   return `You are a strict fashion e-commerce consistency validator.
 
 Review IMAGE A (the newly generated pose) against every labeled source image that follows it.
-SOURCE PRIORITY: original region-labeled product references are authoritative for the garment and always outrank APPROVED POSE 1. For a saree, compare body/weave only with BODY/WEAVE and full-drape references, pallu only with FULLY SPREAD PALLU, borders/tassels only with BORDER/TASSELS, and blouse construction only with the matching BLOUSE reference. Never use APPROVED POSE 1 as saree product evidence. Legacy FRONT/BACK/FABRIC/ADDITIONAL product references remain valid for their proven regions. A MANNEQUIN or DRESS-FORM shot (if present) is authoritative for worn shape, fit, proportion, drape and how the garment falls on a body - validate silhouette and drape against it. A FLAT-LAY is authoritative only for outline, construction, panel layout and garment length. MODEL FACE REFERENCE outranks every other face source, including the STYLE REFERENCE face and any face in a product photo. APPROVED POSE 1 controls only model/styling/scene continuity and never garment identity. STYLE REFERENCE is the backdrop, wall, floor, set dressing, and lighting for every pose, including a back view. The clothing, posture, and handheld props in the STYLE REFERENCE must be ignored. When a MODEL FACE REFERENCE is present, its face outranks the style-reference face: fail model_face if the generated face matches the style-reference person or a product-photo face instead. ${useStyleFaceIdentity ? "Because the user uploaded the same photo as both MODEL FACE REFERENCE and STYLE REFERENCE, the STYLE REFERENCE face is the model identity, including if the eyes are hidden: fail model_face if the generated person is different." : "When no MODEL FACE REFERENCE was uploaded, STYLE REFERENCE supplies ONLY the room, architecture, floor, and light — NEVER the person's face. Pose 1 establishes the fresh model face matching Model Identity Lock, and APPROVED POSE 1 locks that face across Poses 2-6. Never fail Pose 1 model_face because its face differs from the STYLE REFERENCE."} Fail styling_continuity when the visible backdrop matches a product-photo background instead of the STYLE REFERENCE.
+SOURCE PRIORITY: original region-labeled product references are authoritative for the garment and always outrank APPROVED POSE 1. For a saree, compare body/weave only with BODY/WEAVE and full-drape references, pallu only with FULLY SPREAD PALLU, borders/tassels only with BORDER/TASSELS, and blouse construction only with the matching BLOUSE reference. Never use APPROVED POSE 1 as saree product evidence. Legacy FRONT/BACK/FABRIC/ADDITIONAL product references remain valid for their proven regions. A MANNEQUIN or DRESS-FORM shot (if present) is authoritative for worn shape, fit, proportion, drape and how the garment falls on a body - validate silhouette and drape against it. A FLAT-LAY is authoritative only for outline, construction, panel layout and garment length. MODEL FACE REFERENCE outranks every other face source, including the STYLE REFERENCE face and any face in a product photo. APPROVED POSE 1 controls only model/styling/scene continuity and never garment identity. STYLE REFERENCE is the backdrop, wall, floor, set dressing, and lighting for every pose, including a back view. ${referenceMatch ? "The clothing and handheld props in the STYLE REFERENCE must be ignored; this frame intentionally matches its posture (see REFERENCE POSE MATCH below)." : "The clothing, posture, and handheld props in the STYLE REFERENCE must be ignored."} When a MODEL FACE REFERENCE is present, its face outranks the style-reference face: fail model_face if the generated face matches the style-reference person or a product-photo face instead. ${useStyleFaceIdentity ? "Because the user uploaded the same photo as both MODEL FACE REFERENCE and STYLE REFERENCE, the STYLE REFERENCE face is the model identity, including if the eyes are hidden: fail model_face if the generated person is different." : "When no MODEL FACE REFERENCE was uploaded, STYLE REFERENCE supplies ONLY the room, architecture, floor, and light — NEVER the person's face. Pose 1 establishes the fresh model face matching Model Identity Lock, and APPROVED POSE 1 locks that face across Poses 2-6. Never fail Pose 1 model_face because its face differs from the STYLE REFERENCE."} Fail styling_continuity when the visible backdrop matches a product-photo background instead of the STYLE REFERENCE.
 
 Pose ${args.poseNumber}: ${args.poseTitle} (${args.poseType})
 Requested Output Aspect Ratio: ${resolvedAspectRatio} (${orientationDescriptor} canvas - evaluate full-body framing in ${resolvedAspectRatio} ${resolvedOrientation} orientation; ${resolvedOrientation === "square" ? "evaluate 1:1 square framing directly" : `never fail pose_requirement or fit_silhouette merely because ${resolvedAspectRatio} is ${resolvedOrientation} rather than 1:1 square, or because a directional note used 'square' to mean straight-on to camera`}).
@@ -312,7 +343,9 @@ Only 95-100 is eligible for automatic verification. A critical score of 90-94 re
 Check every field below. Perform localized comparisons of center-front closure, neckline, sleeve edges, front hem, center-back/rear hem, every decoration, bottom wear, and face when a recognizable face is in frame. Fail any invented or moved garment construction/surface detail (button, tassel/latkan, closure, trim, pocket, logo, embroidery, garment-sewn beadwork/jewelry, or hardware) under absence_constraints or details_and_branding. Do NOT fail absence_constraints or details_and_branding for stylist-worn personal accessories (earrings, bangles, bindi, footwear); evaluate wearer accessories strictly under styling_addition and styling_continuity below. For a back pose, fail unless it is a true back view matching the uploaded BACK; face_realism automatically passes for a back pose since the face is not visible. On a true back pose, do NOT fail pose_requirement, styling_addition, or styling_continuity for natural short or nape-length hair sitting cleanly above an unobstructed rear blouse neckline, cutout, tie/dori, back embroidery, and pallu—only fail back hair placement when hair actually drapes across and conceals rear construction details. ${pose5Rule}${pose6Rule ? `${pose5Rule ? " " : ""}${pose6Rule}` : ""} Judge styling_addition against the approved styling plan in the session rules above: fail it when a listed primary piece is missing, when a prominent unapproved accessory appears that the plan does not list and the STYLE REFERENCE does not show (such as an invented heavy necklace, belt, bag, nose ring, maang tikka or statement hair ornament), when the footwear category/heel height or metal family clearly contradicts the plan (sneaker or tall heel where flat jutti is specified, or oxidised silver where gold is specified), when accessories or footwear change noticeably between poses, or when it hides or replaces a garment detail, bottom wear or footwear from the product references. ${hasStyleReference ? "When a STYLE REFERENCE is present and the model wears subtle personal accents consistent with the STYLE REFERENCE (such as small stud/minimal earrings, a small forehead bindi, or slight bangle count variation within the approved colour/metal family) that do not obscure any garment neckline/embroidery/border, do NOT fail styling_addition, absence_constraints, details_and_branding, or unexpected_changes merely for those subtle style-reference accents. " : ""}When footwear is a stylist addition rather than an uploaded product photo, do NOT fail styling_addition or unexpected_changes merely for minor embroidery density variations within the approved footwear family, colour, and silhouette. Do NOT fail styling_addition, styling_continuity, unexpected_changes, or pose_requirement merely because approved footwear is naturally hidden underneath a floor-length saree, lehenga, gown, or anarkali hem, or lies outside an approved knees-up/half-body/detail crop—only fail footwear when visible footwear contradicts the approved plan or changes noticeably where shoes are shown. Pass it when the frame aligns with the plan at category, colour/metal, and silhouette level, or when no plan and no suggestion were provided and nothing was invented.
 
 Fail pose_requirement when the body is frozen in a walking stride, one foot is lifted mid-step, or the legs are split wide enough to open a joined hem. A planted three-quarter turn is valid.${isCroppedAboveAnklesPose ? " ABOVE-ANKLE CROP EXEMPTION: Because the planned framing or category intentionally crops above the ankles (e.g., knees-up, three-quarter, waist-up, or detail crop), do NOT fail pose_requirement, bottom_wear, styling_addition, or unexpected_changes merely because feet, lower pleats, or footwear lie below the crop edge." : ""}
-Fail pose_requirement when the stance, foreground pillar-leaning placement, or handheld objects (coffee cups, mugs, bottles, tote bags, handbags, sunglasses, phones) are copied from the STYLE REFERENCE, the MODEL FACE photo, or APPROVED POSE 1. Those images supply the room and/or face, not a pose to repeat and not handheld props. Fail pose_requirement when Pose 2, Pose 4, or Pose 6 repeats Pose 1's static flat-frontal standing stance and framing without clear physical pose divergence.
+${referenceMatch
+    ? `REFERENCE POSE MATCH: this frame intentionally matches the STYLE REFERENCE person's ${referenceMatch.posture} posture (${useStyleFaceIdentity ? styleIdentityQuarantineText(referenceMatch.directive) : referenceMatch.directive}). Do not fail pose_requirement for matching that posture, its support, or its signature styling.${referenceMatch.low ? ` LOW-POSTURE EXEMPTION: folds and compression of the garment and bottom wear caused by the ${referenceMatch.posture} posture are expected. Judge the bottom wear's cut, print and colour, not its drape length, and do not fail bottom_wear or fit_silhouette for that posture-driven compression.` : ""} Still fail garment_identity when the reference clothing is copied, ${useStyleFaceIdentity ? "" : "model_face when the reference face is copied, "}and pose_requirement when handheld objects (coffee cups, mugs, bottles, tote bags, handbags, sunglasses, phones) are copied from the STYLE REFERENCE, the MODEL FACE photo, or APPROVED POSE 1. Fail pose_requirement when this frame repeats Pose 1's static flat-frontal standing stance and framing.`
+    : "Fail pose_requirement when the stance, foreground pillar-leaning placement, or handheld objects (coffee cups, mugs, bottles, tote bags, handbags, sunglasses, phones) are copied from the STYLE REFERENCE, the MODEL FACE photo, or APPROVED POSE 1. Those images supply the room and/or face, not a pose to repeat and not handheld props. Fail pose_requirement when Pose 2, Pose 4, or Pose 6 repeats Pose 1's static flat-frontal standing stance and framing without clear physical pose divergence."}
 ANATOMICAL REALISM - apply to every pose and every crop, including true back views and faceless macro/detail frames. Inspect every visible arm, forearm, wrist, hand, finger, and other limb. Fail pose_requirement for THREE HANDS, EXTRA HANDS, EXTRA ARMS, DUPLICATE OR PHANTOM LIMBS, duplicate wrists, malformed or extra fingers, hands poking impossibly through phantom slits in solid saree pallus/pleats/dupattas/kurta panels, floating hands resting on waist/hip/drape without a continuous anatomical forearm connection, awkward unnatural forearm clawing/pinching, fingers covering chest/yoke embroidery in closeup/hero shots, or stiff splayed mannequin-like plastic arms/fingers. Do not fail merely because a limb is naturally occluded or outside the crop. This anatomy veto is independent of face visibility and still applies when model_face and face_realism pass automatically.
 
 Face quality bar - apply only when a recognizable face is in frame. For a true back pose or a product-detail-first close-up with no recognizable face, pass face_realism and model_face; do not fail for a missing face. When a face is visible (including a clearly readable partial face or a back-pose over-shoulder glance), fail face_realism for any of these even if everything else matches: plastic, waxy, airbrushed, or over-smoothed "beauty filter" skin instead of natural texture with visible pores; crossed, misaligned, asymmetric, glassy, or otherwise distorted/malformed eyes; unnaturally uniform, fused, extra, missing, or warped teeth; any blurring, warping, melting, or duplicated/misplaced facial features; or a mirror-symmetric "AI face" that does not read as a real photographed person. Also fail face_realism when the frame as a whole reads as generated rather than photographed: a glossy CGI or 3D-render finish, HDR glow, or a pasted-on subject with halo edges. Give a specific, actionable correction for any face_realism or model_face failure (name the exact feature that is wrong).
@@ -565,5 +598,250 @@ export function normalizePoseQaResult(raw: JsonRecord, options: { garmentFamily?
 
 export function parseQaResponse(text: string, options: { garmentFamily?: string; poseType?: string; hasBottomWear?: boolean; productIdentity?: unknown; bottomWearMode?: unknown; creativeDirection?: unknown; hasBottomReference?: boolean } = {}) {
   return normalizePoseQaResult(parseJsonResponse(text), options);
+}
+
+// Product DNA consistency: a short, always-on garment check run on every pose
+// before it is accepted. Full pose QA (opt-in) scores the same attributes, so
+// its verdict is derived from those scores instead of a second call.
+export const DNA_CONSISTENCY_VERSION = "dna-consistency-v1";
+export const DNA_ATTRIBUTES = ["shape", "color", "material", "logo", "details"] as const;
+export type DnaAttribute = typeof DNA_ATTRIBUTES[number];
+export const DNA_ATTRIBUTE_PASS_FLOOR = 85;
+
+export type DnaConsistencyResult = {
+  version: typeof DNA_CONSISTENCY_VERSION;
+  pass: boolean;
+  unavailable: boolean;
+  scores: Record<DnaAttribute, number | null>;
+  failed: DnaAttribute[];
+  /** Mean of the applicable (non-null) attribute scores. */
+  score: number | null;
+  correction: string;
+  source: "dna_check" | "pose_qa" | "unavailable";
+  reason: string;
+};
+
+const DNA_ATTRIBUTE_LABELS: Record<DnaAttribute, string> = {
+  shape: "shape/silhouette",
+  color: "colour",
+  material: "material/fabric texture",
+  logo: "logo/branding/labels",
+  details: "details (embroidery, print, trims, placement)",
+};
+
+const DNA_PRODUCT_FACT_KEYS = [
+  "garmentFamily", "category", "mainColor", "secondaryColors", "fabric", "texture", "pattern", "print",
+  "embroidery", "logos", "silhouette", "fit", "length", "neckline", "sleeveType", "bottomWearDetails", "invariantDetails",
+];
+
+// Pose 3 is checked against rearOnlyQaProductIdentity, as full QA is: front-only facts would fail a correct back.
+const DNA_REAR_FACT_KEYS = ["garmentFamily", "category", "garmentEvidence", "unprovenRearRule"];
+
+/** Compact fact text: arrays joined, objects as "key: value" pairs with empty fields dropped. */
+function dnaFactText(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map(dnaFactText).filter(Boolean).join(value.some((entry) => entry && typeof entry === "object") ? " | " : ", ");
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value).map(([key, entry]) => [key, dnaFactText(entry)])
+      .filter(([, text]) => text).map(([key, text]) => `${key}: ${text}`).join("; ");
+  }
+  return String(value ?? "");
+}
+
+export function buildDnaConsistencyPrompt(args: {
+  productIdentity: unknown;
+  skuName: string;
+  pose: { id: string; title: string };
+  /** Labels of the images sent after IMAGE A, in order (IMAGE 1, IMAGE 2, ...). */
+  referenceLabels: string[];
+  /** The job's bottom-wear mode, resolved exactly as buildPoseQaPrompt does. */
+  bottomWearMode?: unknown;
+  /** The honoured adopted STYLE REFERENCE posture of a Pose 4 / Pose 6, passed by the worker. */
+  referencePosture?: string;
+}): string {
+  const product = record(args.productIdentity);
+  const back = args.pose.id === "back";
+  const posture = (ADOPTABLE_SLOTS as readonly string[]).includes(args.pose.id) ? normalizeReferencePosture(args.referencePosture) : "none";
+  // A top-only shoot renders plain neutral bottoms, so bottom wear is not product DNA there.
+  const hasBottomWear = resolveBottomWearPresentation({
+    mode: args.bottomWearMode,
+    productIdentity: product,
+    skuName: args.skuName,
+    productDetails: String(product.productDetails ?? product.product_details ?? ""),
+    hasBottomReference: hasBottomReferenceLabel(args.referenceLabels),
+  }).includesBottomWear;
+  const topOnly = !hasBottomWear && !isSareeGarmentFamily(String(product.garmentFamily ?? ""));
+  const factSource: JsonRecord = back ? rearOnlyQaProductIdentity(product) : product;
+  const facts = Object.fromEntries((back ? DNA_REAR_FACT_KEYS : DNA_PRODUCT_FACT_KEYS).flatMap((key) => {
+    if (key === "bottomWearDetails" && !hasBottomWear) return [];
+    const text = dnaFactText(factSource[key]).replace(/\s+/g, " ").trim().slice(0, key === "garmentEvidence" ? 500 : 160);
+    return text ? [[key, text]] : [];
+  }));
+  const rearView = back
+    ? " This is a BACK view: judge only what a rear view can show. Front-only details (front embroidery or print, neckline, front placket or opening, front logos) are not expected and are not failures; a rear detail counts only when a BACK product image proves it. Set logoApplicable false when the product shows no logo on its back."
+    : "";
+  // Mirrors buildPoseQaPrompt's LOW-POSTURE EXEMPTION.
+  const lowPosture = isLowPosture(posture)
+    ? ` LOW-POSTURE EXEMPTION: this frame intentionally uses a ${posture} posture, so folds and compression of the garment${hasBottomWear ? " and bottom wear" : ""} caused by it are expected. Score shape on the cut and silhouette of the visible garment${hasBottomWear ? ", and the bottom wear on its cut, print and colour, not its drape length" : ""}; do not fail shape for that posture-driven compression.`
+    : "";
+  return `You are a strict product-DNA checker for a fashion catalog (${String(args.skuName || "this SKU").slice(0, 120)}).
+IMAGE A is the generated image (${String(args.pose.title || args.pose.id).slice(0, 120)} [${args.pose.id}]). The labeled images after it:
+${args.referenceLabels.map((label, index) => `IMAGE ${index + 1}: ${label}`).join("\n")}
+Compare ONLY the garment worn in IMAGE A with the PRODUCT references. The STYLE REFERENCE, MODEL FACE REFERENCE and APPROVED POSE 1 are not product evidence: ignore their clothing. Ignore pose, face, background and lighting. A part hidden by the pose or crop is not a failure.${topOnly ? " This shoot is top-only: ignore the bottom garment." : ""}${rearView}${lowPosture}
+Product facts (the product images win on any conflict): ${JSON.stringify(facts)}
+Score each attribute 0-100 (100 identical, 85 lowest acceptable, below 85 fails):
+- shape: silhouette, cut, length, fit, neckline, sleeves${hasBottomWear ? ", bottom-wear structure" : ""}.
+- color: base and accent colours.
+- material: fabric type, texture, sheen, transparency.
+- logo: logos, branding, labels. Set logoApplicable false when the product references show none.
+- details: embroidery, print/motif geometry and scale, trims, borders, closures and their placement.
+Return STRICT JSON only: {"scores":{"shape":<0-100>,"color":<0-100>,"material":<0-100>,"logo":<0-100>,"details":<0-100>},"logoApplicable":true|false,"failed":["<attribute>"],"verdict":"pass"|"fail","correction":"one specific fix per failed attribute"}`;
+}
+
+function dnaNumber(value: unknown): number | null {
+  // "92%" and "92" are both 92.
+  const text = typeof value === "string" ? value.trim().replace(/\s*%$/, "") : value;
+  if (typeof text !== "number" && !(typeof text === "string" && text !== "")) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function dnaScore(value: unknown): number | null {
+  const parsed = dnaNumber(value);
+  return parsed === null ? null : Math.max(0, Math.min(100, Math.round(parsed)));
+}
+
+function finishDnaResult(
+  scores: Record<DnaAttribute, number | null>,
+  flagged: Iterable<DnaAttribute>,
+  source: DnaConsistencyResult["source"],
+  correction: string,
+): DnaConsistencyResult {
+  const failed = new Set<DnaAttribute>(flagged);
+  for (const attribute of DNA_ATTRIBUTES) {
+    const score = scores[attribute];
+    if (score !== null && score < DNA_ATTRIBUTE_PASS_FLOOR) failed.add(attribute);
+  }
+  const applicable = DNA_ATTRIBUTES.map((attribute) => scores[attribute]).filter((score): score is number => score !== null);
+  const score = applicable.length ? Math.round(applicable.reduce((sum, value) => sum + value, 0) / applicable.length) : null;
+  const ordered = DNA_ATTRIBUTES.filter((attribute) => failed.has(attribute));
+  return {
+    version: DNA_CONSISTENCY_VERSION,
+    pass: ordered.length === 0,
+    unavailable: false,
+    scores,
+    failed: ordered,
+    score,
+    correction: correction.slice(0, 600),
+    source,
+    reason: ordered.length
+      ? `Product DNA mismatch: ${ordered.map((attribute) => `${attribute} ${scores[attribute] ?? "flagged"}`).join(", ")}.`
+      : `Product DNA consistent${score === null ? "" : ` (${score}%)`}.`,
+  };
+}
+
+/**
+ * Throws on a response with neither a numeric attribute score nor a valid failed attribute
+ * so the caller can mark the check unavailable. A failed list without scores is a FAIL.
+ */
+export function normalizeDnaConsistencyResult(raw: unknown): DnaConsistencyResult {
+  const data = record(raw);
+  // Some models put the attribute scores at the top level instead of under "scores".
+  const rawScores = Object.keys(record(data.scores)).length ? record(data.scores) : data;
+  const logoFlag = data.logoApplicable ?? data.logo_applicable;
+  const logoApplicable = logoFlag !== false &&
+    !["false", "no", "0"].includes(String(logoFlag ?? "").trim().toLowerCase());
+  const numbers = DNA_ATTRIBUTES.map((attribute) => attribute === "logo" && !logoApplicable ? null : dnaNumber(rawScores[attribute]));
+  const provided = numbers.filter((value): value is number => value !== null);
+  // A 0-1 answer (every provided score <= 1) is rescaled to 0-100.
+  const scale = provided.length && provided.every((value) => value <= 1) ? 100 : 1;
+  const scores = Object.fromEntries(DNA_ATTRIBUTES.map((attribute, index) => {
+    const value = numbers[index];
+    return [attribute, value === null ? null : dnaScore(value * scale)];
+  })) as Record<DnaAttribute, number | null>;
+  // Accept "color, details" strings and the British "colour" the prompt itself uses.
+  const flagged = (Array.isArray(data.failed) ? data.failed : typeof data.failed === "string" ? data.failed.split(",") : [])
+    .map((value) => String(value ?? "").trim().toLowerCase().replace(/^colour$/, "color"))
+    .filter((value): value is DnaAttribute => (DNA_ATTRIBUTES as readonly string[]).includes(value))
+    .filter((attribute) => attribute !== "logo" || logoApplicable);
+  if (!flagged.length && DNA_ATTRIBUTES.every((attribute) => scores[attribute] === null)) {
+    throw new Error("DNA consistency check returned no attribute scores.");
+  }
+  return finishDnaResult(scores, flagged, "dna_check", String(data.correction ?? ""));
+}
+
+const DNA_QA_CHECKS: Record<DnaAttribute, readonly string[]> = {
+  shape: ["fit_silhouette", "garment_identity", "saree_blouse_construction"],
+  color: ["colors", "saree_body_color"],
+  material: ["fabric_texture", "saree_transparency_shine"],
+  logo: ["details_and_branding"],
+  details: [
+    "embroidery_geometry", "print_pattern", "pattern_geometry", "detail_placement", "trim_location",
+    "saree_weave_geometry", "saree_motif_inventory", "saree_motif_scale", "saree_motif_placement",
+    "saree_pallu_artwork", "saree_border_geometry", "saree_tassels",
+  ],
+};
+
+/** DNA verdict from full pose-QA check scores (each attribute is the minimum of its present checks). */
+export function dnaConsistencyFromQaScores(scores: Record<string, number>): DnaConsistencyResult {
+  const derived = Object.fromEntries(DNA_ATTRIBUTES.map((attribute) => {
+    const present = DNA_QA_CHECKS[attribute].map((key) => dnaScore(scores?.[key])).filter((score): score is number => score !== null);
+    return [attribute, present.length ? Math.min(...present) : null];
+  })) as Record<DnaAttribute, number | null>;
+  if (DNA_ATTRIBUTES.every((attribute) => derived[attribute] === null)) {
+    return unavailableDnaConsistency("Pose QA returned no product DNA scores.");
+  }
+  return finishDnaResult(derived, [], "pose_qa", "");
+}
+
+/** An infrastructure failure of the check never blocks delivery. */
+export function unavailableDnaConsistency(reason: string): DnaConsistencyResult {
+  return {
+    version: DNA_CONSISTENCY_VERSION,
+    pass: true,
+    unavailable: true,
+    scores: { shape: null, color: null, material: null, logo: null, details: null },
+    failed: [],
+    score: null,
+    correction: "",
+    source: "unavailable",
+    reason: String(reason || "DNA consistency check unavailable.").slice(0, 300),
+  };
+}
+
+/**
+ * A frame the DNA gate kept only for human review (a failed verdict, never an unavailable
+ * one). Until a human approves it, it is not a Pose 1 anchor or an approved memory asset.
+ */
+export function dnaHoldsForReview(qaStatus: unknown, dna: unknown): boolean {
+  if (String(qaStatus || "") === "human_approved") return false;
+  const verdict = record(dna);
+  return verdict.pass === false && verdict.unavailable !== true;
+}
+
+/**
+ * The repeated-defect stop: this attempt's DNA failure names exactly the attribute set the
+ * previous attempt of the same version failed (`previous` = generation_data.lastDnaFailed).
+ */
+export function repeatsLastDnaFailure(
+  previous: unknown,
+  current: { failed: readonly string[] },
+  at: { generationEpoch: number; attempt: number },
+): boolean {
+  const mark = record(previous);
+  const failed = Array.isArray(mark.failed) ? mark.failed.map(String) : [];
+  return current.failed.length > 0 && Number(mark.generationEpoch) === at.generationEpoch &&
+    Number(mark.attempt) === at.attempt - 1 && failed.length === current.failed.length &&
+    current.failed.every((attribute) => failed.includes(attribute));
+}
+
+/** Retry correction for a failed check; "" when nothing failed. */
+export function dnaCorrectionText(result: DnaConsistencyResult): string {
+  if (result.pass || !result.failed.length) return "";
+  const named = result.failed
+    .map((attribute) => `${DNA_ATTRIBUTE_LABELS[attribute]}${result.scores[attribute] === null ? "" : ` (${result.scores[attribute]})`}`)
+    .join(", ");
+  return `PRODUCT DNA CORRECTION: the previous image drifted from the uploaded product on ${named}. Copy ${result.failed.length > 1 ? "these" : "this"} exactly from the product references and keep everything that was correct.${result.correction ? ` ${result.correction}` : ""}`.slice(0, 600);
 }
 

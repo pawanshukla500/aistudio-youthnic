@@ -8,6 +8,17 @@ import {
   type ShowcaseOutcome,
 } from "./lib/showcaseFeature.ts";
 import { buildCatalogStageTimeline } from "./lib/catalogStageTimeline.ts";
+import {
+  humanVerdictTransition,
+  isAdoptableSlot,
+  planPosePlanOutcomeWrite,
+  POSE_PLAN_OUTCOME_COLUMNS,
+  POSE_PLAN_OUTCOME_WRITE_ATTEMPTS,
+  posePlanOutcomeTarget,
+  referenceAdoptionHonoured,
+  type PosePlanObservation,
+} from "./lib/posePlanOutcomes.ts";
+import { isReferenceLowPostureSlot } from "./lib/posePlanning.ts";
 import { PRODUCT_REFERENCE_ROLES, isSareeReferenceSet, missingRequiredReferenceLabels, selectCurrentCatalogProductReferences } from "./lib/referencePolicy.ts";
 
 export type CatalogWorkspace = {
@@ -236,6 +247,98 @@ export async function recordShowcaseFeatureOutcome(
     }
   } catch (error) {
     console.error(`Could not record showcase feedback: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Record one observation of a Pose 4 / Pose 6 plan in pose_plan_outcomes: the
+ * job's final Product DNA verdict (finalizeJob) or a human verdict (pose review).
+ * Legacy sessions without session_data.posePlanning write nothing. Best-effort:
+ * an outage here never fails the job or the review that produced it.
+ */
+export async function recordPosePlanOutcome(
+  service: SupabaseClient,
+  args: {
+    organizationId: string;
+    sessionId: string;
+    slot: string;
+    observation: PosePlanObservation;
+    /** Skips the session read when the caller already holds session_data. */
+    sessionData?: JsonRecord;
+    /** The generation job (sku_name, job_data) whose prompt made the frame, or its id to load it when Farshi matters. */
+    job?: JsonRecord | null;
+    jobId?: string;
+  },
+) {
+  try {
+    const organizationId = text(args.organizationId);
+    const sessionId = text(args.sessionId);
+    const slot = text(args.slot);
+    if (!organizationId || !sessionId || !isAdoptableSlot(slot)) return;
+    let sessionData = args.sessionData;
+    if (!sessionData) {
+      const { data: session, error: sessionError } = await service.from("catalog_sessions")
+        .select("session_data")
+        .eq("organization_id", organizationId)
+        .eq("session_id", sessionId)
+        .maybeSingle();
+      if (sessionError) {
+        console.error(`Could not load the session for pose plan learning: ${sessionError.message}`);
+        return;
+      }
+      sessionData = asRecord(session?.session_data);
+    }
+    // Credit the adoption the prompt honoured. The Farshi test only matters for a stored
+    // low posture, so only then is the job's SKU text loaded.
+    let job = args.job ?? null;
+    if (!job && text(args.jobId) && isReferenceLowPostureSlot(sessionData, slot)) {
+      const { data, error: jobError } = await service.from("generation_jobs").select("sku_name,job_data")
+        .eq("org_id", organizationId).eq("job_id", text(args.jobId)).maybeSingle();
+      if (jobError) console.error(`Could not load the job for pose plan learning: ${jobError.message}`);
+      job = asRecord(data);
+    }
+    const target = posePlanOutcomeTarget(sessionData.posePlanning, slot, referenceAdoptionHonoured(sessionData, slot, job));
+    if (!target) return;
+    for (let attempt = 1; attempt <= POSE_PLAN_OUTCOME_WRITE_ATTEMPTS; attempt += 1) {
+      const { data, error } = await service.from("pose_plan_outcomes")
+        .select(POSE_PLAN_OUTCOME_COLUMNS)
+        .eq("organization_id", organizationId)
+        .eq("outcome_key", target.outcomeKey)
+        .maybeSingle();
+      if (error) {
+        console.error(`Could not load pose plan outcome ${target.outcomeKey}: ${error.message}`);
+        return;
+      }
+      const write = planPosePlanOutcomeWrite(data, target, args.observation, { sessionId, now: new Date().toISOString() });
+      if (write.action === "insert") {
+        const { error: insertError } = await service.from("pose_plan_outcomes").insert({ organization_id: organizationId, ...write.values });
+        if (!insertError) return;
+        // Only a lost unique-key race is worth retrying: the next pass updates the winning row.
+        if (String((insertError as { code?: string }).code || "") !== "23505") {
+          console.error(`Could not record pose plan outcome ${target.outcomeKey}: ${insertError.message}`);
+          return;
+        }
+        continue;
+      }
+      const { data: updated, error: updateError } = await service.from("pose_plan_outcomes").update(write.values)
+        .eq("id", write.id)
+        // Compare-and-set: a concurrent write must not be silently overwritten.
+        .eq("use_count", write.expected.use_count)
+        .eq("dna_pass_count", write.expected.dna_pass_count)
+        .eq("dna_fail_count", write.expected.dna_fail_count)
+        .eq("human_approved_count", write.expected.human_approved_count)
+        .eq("human_rejected_count", write.expected.human_rejected_count)
+        .select("id")
+        .maybeSingle();
+      if (updateError) {
+        console.error(`Could not record pose plan outcome ${target.outcomeKey}: ${updateError.message}`);
+        return;
+      }
+      if (updated?.id) return;
+    }
+    console.error(`Could not record pose plan outcome ${target.outcomeKey} after contended writes.`);
+  } catch (error) {
+    console.error(`Could not record pose plan outcome: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -1041,6 +1144,17 @@ export async function reviewCatalogPose(
     poseIndex: Number(version.pose_index),
     outcome: decision === "approved" ? "selected" : "rejected",
   });
+  // Counted per transition of this version's review status (rejected -> approved moves the counters).
+  const humanObservation = humanVerdictTransition(version.approval_status, decision);
+  if (humanObservation) {
+    await recordPosePlanOutcome(service, {
+      organizationId: workspace.organization.id,
+      sessionId: text(item.catalog_session_id),
+      slot: POSE_IDS[Number(version.pose_index) - 1] ?? "",
+      observation: humanObservation,
+      jobId: text(item.generation_job_id),
+    });
+  }
   if (decision === "rejected") {
     await recordHumanProductLearningRule({
       service,

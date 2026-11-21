@@ -29,7 +29,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, getJobReferenceImages, invokeAppApi, useMutation, useQuery, type Id } from "../../lib/backend";
+import { api, getJobReferenceImages, invokeAppApi, useMutation, useQuery, type DnaConsistencySummary, type Id } from "../../lib/backend";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
@@ -654,6 +654,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const selectedOutputUrl = selectedPose ? visiblePoseOutputUrl(selectedPose) : "";
   const selectedRetainedPrevious = selectedPose ? hasRetainedPreviousVersion(selectedPose) : false;
   const selectedQaStatus = selectedPose ? visibleQaStatus(selectedPose) : "";
+  const selectedDna = (selectedPose?.dnaConsistency ?? null) as DnaConsistencySummary | null;
   const approvedPoseCount = job.poses.filter(
     (pose: any) => pose.approvalStatus === "approved" && Boolean(visiblePoseOutputUrl(pose))
   ).length;
@@ -1390,7 +1391,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 )}
 
                 {/* AI QA & CONSISTENCY ESTIMATE */}
-                {(selectedQaStatus || selectedPose.productFidelity > 0 || Object.keys(selectedPose.fidelityScores || {}).length > 0) && (
+                {(selectedQaStatus || selectedDna || selectedPose.productFidelity > 0 || Object.keys(selectedPose.fidelityScores || {}).length > 0) && (
                   <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4 shadow-xs">
                     <div className="flex items-baseline justify-between">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Gemini Vision QA Score</p>
@@ -1446,6 +1447,30 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                             </div>
                           ))}
                       </dl>
+                    )}
+
+                    {/* ALWAYS-ON PRODUCT DNA CHECK (qa.dna) */}
+                    {selectedDna && (
+                      <div className="mt-3 border-t border-outline-variant/30 pt-3">
+                        <div className="flex items-baseline justify-between">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Product consistency check</p>
+                          <p className={`text-[11px] font-bold ${selectedDna.unavailable ? "text-amber-700" : selectedDna.pass === false ? "text-red-700" : "text-emerald-700"}`}>
+                            {selectedDna.unavailable ? "Unavailable" : selectedDna.pass === false ? "Failed" : "Passed"}
+                          </p>
+                        </div>
+                        {!selectedDna.unavailable && (
+                          <div className="mt-1.5 flex flex-wrap gap-1.5 text-[10px]">
+                            {(["shape", "color", "material", "logo", "details"] as const).map((key) => {
+                              const score = selectedDna.scores?.[key];
+                              return typeof score === "number" ? (
+                                <span key={key} className="rounded-md bg-surface-container-low px-1.5 py-0.5 capitalize text-secondary">
+                                  {key} <b className="font-mono text-on-surface">{score}</b>
+                                </span>
+                              ) : null;
+                            })}
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     {selectedPose.qaReason && (

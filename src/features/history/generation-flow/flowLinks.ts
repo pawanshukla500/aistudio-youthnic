@@ -16,6 +16,8 @@ export type FlowReference = {
   imageUrl: string;
   fileName?: string;
   roomOnly?: boolean;
+  /** Style reference only: pose numbers (4 and/or 6) whose posture the stored pose plan copies from it. */
+  postureFor?: number[];
 };
 
 export type FlowPose = {

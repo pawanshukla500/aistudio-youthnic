@@ -2257,7 +2257,7 @@ Deno.test("omitted Face Lock quarantines style-ref face/props, duplicate upload 
     hasModelReference: false,
     useStyleAsModelFace: false,
   });
-  assertStringIncludes(analysisPrompt, "discard that person's face, hair, pillar-leaning stance, and objects in their hands (coffee cup, tote bag, handbag, sunglasses)");
+  assertStringIncludes(analysisPrompt, "discard that person's face, hair, and objects in their hands (coffee cup, tote bag, handbag, sunglasses)");
 });
 
 

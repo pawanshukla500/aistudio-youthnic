@@ -465,6 +465,26 @@ def save_region_crop(
             return str(row["id"]) if row else ""
 
 
+def fetch_pose_plan_outcomes(organization_id: str, outcome_keys: List[str]) -> List[Dict[str, Any]]:
+    """Learned pose-plan outcome counters for the planner's recall_outcomes node (errors propagate)."""
+    keys = [key for key in outcome_keys if key]
+    if not settings.DATABASE_URL or not organization_id or not keys:
+        return []
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT outcome_key, use_count, dna_pass_count, dna_fail_count,
+                       dna_score_avg::float8 AS dna_score_avg,
+                       human_approved_count, human_rejected_count, best_plan
+                FROM public.pose_plan_outcomes
+                WHERE organization_id = %s AND outcome_key = ANY(%s)
+                """,
+                (organization_id, keys),
+            )
+            return cur.fetchall()
+
+
 def get_checkpointer_metrics() -> Dict[str, Any]:
     """Inspect PostgresSaver checkpoint tables and thread counts."""
     with get_db() as conn:

@@ -190,3 +190,15 @@ test("boardFromGenerationData preserves downloadUrl references, manifest links, 
   assert.equal(board.poses[2].canRegenerate, false);
   assert.equal(board.poses[3].canRegenerate, false);
 });
+
+test("the style card names the Pose 4/6 postures the stored plan copies, and nothing for legacy sessions", () => {
+  const references = [
+    { id: "ref_f", role: "front", downloadUrl: "https://cdn.example.com/front.jpg" },
+    { id: "ref_s", role: "style_reference", downloadUrl: "https://cdn.example.com/room.jpg" },
+  ];
+  const board = (session: Record<string, unknown>) => boardFromGenerationData({ trace: { summary: {}, session: { references, ...session }, poses: [] } });
+  const adopted = board({ posePlanning: { slots: { creative: { source: "reference" }, showcase: { source: "product" } } } });
+  assert.deepEqual(adopted.references[1].postureFor, [4]);
+  assert.equal(adopted.references[0].postureFor, undefined);
+  assert.equal(board({}).references[1].postureFor, undefined);
+});

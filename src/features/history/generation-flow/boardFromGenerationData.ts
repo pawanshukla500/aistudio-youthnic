@@ -89,7 +89,13 @@ export function boardFromGenerationData(data: Loose | null | undefined): { refer
       };
     });
     const sessionRows: Loose[] = Array.isArray(data.trace.session?.references) ? data.trace.session.references : [];
-    const sessionReferences = sessionRows.map((entry, index) => referenceFrom(entry, `trace-${index}`)).filter((entry): entry is FlowReference => Boolean(entry));
+    // The stored plan (session_data.posePlanning) decides adoption; Pose 4 = creative, Pose 6 = showcase.
+    const slots: Loose = data.trace.session?.posePlanning?.slots || {};
+    const postureFor = [slots.creative?.source === "reference" ? 4 : 0, slots.showcase?.source === "reference" ? 6 : 0].filter(Boolean);
+    const sessionReferences = sessionRows
+      .map((entry, index) => referenceFrom(entry, `trace-${index}`))
+      .filter((entry): entry is FlowReference => Boolean(entry))
+      .map((reference) => (reference.roomOnly && postureFor.length ? { ...reference, postureFor } : reference));
     return { references: sessionReferences, poses };
   }
 

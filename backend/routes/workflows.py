@@ -58,7 +58,7 @@ def get_checkpoints_for_thread(
     limit: int = Query(20, ge=1, le=100),
 ) -> Dict[str, Any]:
     """Inspect persistent step-by-step checkpoint history for a LangGraph thread_id."""
-    if organization_id and not thread_id.startswith(f"thread_dna_{organization_id}_"):
+    if organization_id and not thread_id.startswith((f"thread_dna_{organization_id}_", f"thread_plan_{organization_id}_")):
         raise HTTPException(status_code=403, detail="Thread does not belong to the requesting organization")
     try:
         history = get_thread_state_history(thread_id=thread_id, limit=limit)
