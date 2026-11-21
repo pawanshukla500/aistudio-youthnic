@@ -2165,7 +2165,9 @@ User product notes: ${args.productDetails}${(() => {
   const props = requestedHandheldProps(args.productDetails);
   return props.groups.length
     ? `
-PROPS REQUESTED IN THE PRODUCT NOTES: "${props.note}". The user wants ${props.labels.join(" and ")} carried over from the STYLE REFERENCE. Name them in stylingPlan.ornaments as that image shows them, plan handPlacement so a visible hand holds or carries them in every frame except the Pose 5 craft crop, and never exclude them anywhere in the plan. All other handheld objects stay excluded.`
+PROPS REQUESTED IN THE PRODUCT NOTES: "${props.note}". ${args.cachedStyleProfile || args.referenceManifest.some((item) => /STYLE REFERENCE|^style_reference$/i.test(item.role))
+      ? `The user wants ${props.labels.join(" and ")} carried over from the STYLE REFERENCE. Name them in stylingPlan.ornaments as that image shows them`
+      : `The user wants ${props.labels.join(" and ")}; no style reference is attached, so name them in stylingPlan.ornaments as the notes describe them`}, plan handPlacement so a visible hand holds or carries them in every frame except the Pose 5 craft crop, and never exclude them anywhere in the plan. All other handheld objects stay excluded.`
     : "";
 })()}
 Requested model direction: ${args.modelDirection || "one consistent professional adult fashion model"}

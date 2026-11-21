@@ -976,7 +976,7 @@ function referenceImageScopeDirective(hasModelReference: boolean, useStyleAsMode
  * Uncompacted tail block for props the product notes ask for (requestedHandheldProps).
  * Empty when nothing is requested, so every other shoot keeps its no-props rules.
  */
-export function requestedPropsBlock(props: RequestedHandheldProps, poseId: string, tightCrop = poseId === "closeup"): string {
+export function requestedPropsBlock(props: RequestedHandheldProps, poseId: string, tightCrop = poseId === "closeup", hasStyleReference = true): string {
   if (!props.groups.length) return "";
   if (tightCrop) {
     return `REQUESTED PROPS (FROM THE PRODUCT NOTES): "${props.note}". This tight detail crop keeps every prop out of frame so the garment detail stays clear.`;
@@ -985,13 +985,15 @@ export function requestedPropsBlock(props: RequestedHandheldProps, poseId: strin
   const holds = [
     props.groups.includes("drink") ? "one hand holds the drink" : "",
     props.groups.includes("bag")
-      ? back ? "the bag hangs from one shoulder or forearm at the side" : "the bag hangs from the opposite shoulder or forearm, as the STYLE REFERENCE carries it"
+      ? back ? "the bag hangs from one shoulder or forearm at the side" : `the bag hangs from the opposite shoulder or forearm${hasStyleReference ? ", as the STYLE REFERENCE carries it" : ""}`
       : "",
     props.groups.some((group) => group !== "drink" && group !== "bag")
       ? "any other requested prop is worn or carried with these (sunglasses on the head or eyes, others in the same hand or hung with the bag) - never a third hand"
       : "",
   ].filter(Boolean).join("; ");
-  return `REQUESTED PROPS (FROM THE PRODUCT NOTES - CARRY THEM OVER): "${props.note}". Carry over ${props.labels.join(" and ")} exactly as the STYLE REFERENCE shows them (same object, shape, colour, material and size; a prop that is part of the product follows the product photos), identical in every frame: ${holds}. ${back
+  return `REQUESTED PROPS (FROM THE PRODUCT NOTES - CARRY THEM OVER): "${props.note}". ${hasStyleReference
+    ? `Carry over ${props.labels.join(" and ")} exactly as the STYLE REFERENCE shows them (same object, shape, colour, material and size; a prop that is part of the product follows the product photos)`
+    : `Include ${props.labels.join(" and ")} as the notes describe them (no style reference is attached; a prop that is part of the product follows the product photos), kept simple and neutral`}, identical in every frame: ${holds}. ${back
     ? "From behind they stay at the sides and must not cover the back neckline, the stripes or print, the side slits or the hem."
     : "They must not cover the neckline, the embroidery or print, the side slits, the hem or the bottom-wear construction."} Each prop is held by a visible hand joined to its forearm or hangs from a shoulder or forearm - exactly two arms and two hands. This request overrides the general no-props rules for these props only; every other handheld object stays excluded.`;
 }
@@ -1843,7 +1845,7 @@ ${isCloseup ? `${pose5HardRule({ closeupMode, heroDetail: closeupHeroDetail, exp
     // A faceless crop gets no face reminder: it must not pull a face into the craft detail.
     faceRequired || isTrueBack ? identityLine : "",
     isTrueBack && !isSaree ? rearViewChecklist(product, bottomWear.includesBottomWear) : "",
-    requestedPropsBlock(requestedProps, args.pose.id, isCloseup || isMacroShowcase),
+    requestedPropsBlock(requestedProps, args.pose.id, isCloseup || isMacroShowcase, hasStyleReference),
   ].filter(Boolean).map((block) => `${block}\n`).join("")}Output only the finished photograph: no captions, labels, collage, borders or watermark.`;
 
   // Props the notes ask for narrow every generic no-props line before compaction measures the prompt.

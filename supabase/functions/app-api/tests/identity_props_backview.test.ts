@@ -186,6 +186,24 @@ Deno.test("the props prompt keeps its compaction markers and drops the contradic
   assert(!/- Ornaments and accessories: \n/.test(props));
 });
 
+Deno.test("without a style reference the props come from the notes, in the prompt and in QA", () => {
+  const props = requestedHandheldProps(PROP_NOTE);
+  const block = requestedPropsBlock(props, "full_front", false, false);
+  assertStringIncludes(block, "as the notes describe them (no style reference is attached");
+  assert(!block.includes("STYLE REFERENCE"));
+  const qa = buildPoseQaPrompt({
+    poseNumber: 1, poseType: "full_front", poseTitle: "Pose", poseDirection: pose("full_front"),
+    productIdentity: SESSION.productIdentity, creativeDirection: SESSION.creativeDirection, modelIdentity: SESSION.modelIdentity,
+    garmentFamily: "kurta_or_kurti_set", consistencyRules: [], hasApprovedAnchor: false, hasModelReference: false,
+    referenceManifest: ["IMAGE 1: FRONT PRODUCT"], requestedProps: props,
+  });
+  assertStringIncludes(qa, "does not match what the notes describe");
+  assert(!qa.includes("does not match the STYLE REFERENCE object"));
+  // CodeAnt's examples: a negated clause keeps the affirmative one; embroidery is not a prop.
+  assertEquals(requestedHandheldProps("She holds a coffee cup, not a bag").groups, ["drink"]);
+  assertEquals(requestedHandheldProps("She holds the kurti with flower embroidery").groups, []);
+});
+
 Deno.test("tight crops keep props out of frame and extra props never need a third hand", () => {
   const props = requestedHandheldProps("She is holding a coffee cup, a tote bag and a phone as in the reference image.");
   assertEquals(props.groups, ["drink", "bag", "phone"]);
