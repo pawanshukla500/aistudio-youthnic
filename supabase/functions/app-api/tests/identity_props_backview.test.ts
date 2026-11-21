@@ -444,3 +444,14 @@ Deno.test("QA reads the face lock without expression words and no stale per-pose
   assert(!qa.includes("glancing sideways"));
   assertStringIncludes(qa, "almond dark brown eyes, full natural lips");
 });
+
+Deno.test("back-view QA judges hair by a visible garment back, not by one hairstyle", () => {
+  const qa = (poseType: string) => buildPoseQaPrompt({
+    poseNumber: poseType === "back" ? 3 : 2, poseType, poseTitle: "Pose", poseDirection: pose(poseType),
+    productIdentity: SESSION.productIdentity, creativeDirection: SESSION.creativeDirection, modelIdentity: SESSION.modelIdentity,
+    garmentFamily: "kurta_or_kurti_set", consistencyRules: [], hasApprovedAnchor: true, hasModelReference: false,
+    referenceManifest: ["IMAGE 1: BACK PRODUCT", "IMAGE 2: STYLE REFERENCE"],
+  });
+  assertStringIncludes(qa("back"), "pass it when the back neckline and the upper back panel are clearly visible, whether the hair is swept forward over a shoulder, up in a bun or ponytail, or ends above the neckline.");
+  assert(!qa("angled").includes("judge hair placement by its purpose"));
+});
