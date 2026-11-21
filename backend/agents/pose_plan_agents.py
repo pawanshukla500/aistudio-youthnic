@@ -103,8 +103,22 @@ def _js_string(value: Any) -> str:
     return str(value)
 
 
+def _u16len(value: str) -> int:
+    """JS String.length: UTF-16 code units, which Edge's text() and 900-char cut count."""
+    return len(value.encode("utf-16-le", "surrogatepass")) // 2
+
+
+def _u16slice(value: str, end: int) -> str:
+    """JS String.slice(0, end) in UTF-16 units, dropping a split surrogate pair's dangling half."""
+    if end <= 0:
+        return ""
+    if _u16len(value) <= end:
+        return value
+    return value.encode("utf-16-le", "surrogatepass")[: 2 * end].decode("utf-16-le", "ignore")
+
+
 def _text(value: Any, max_len: int = MAX_TEXT) -> str:
-    return _JS_SPACE_RUN.sub(" ", _js_string(value)).strip(" ")[:max_len]
+    return _u16slice(_JS_SPACE_RUN.sub(" ", _js_string(value)).strip(" "), max_len)
 
 
 def _pick(raw: Dict[str, Any], *keys: str) -> Any:
@@ -231,14 +245,14 @@ def _fit_directive(pose: Dict[str, str], compose: Callable[[str, str], str]) -> 
     signature = pose["signatureDescription"] if pose["distinctiveness"] == "signature" else ""
     description = pose["description"]
     directive = compose(description, signature)
-    if len(directive) <= MAX_DIRECTIVE:
+    if _u16len(directive) <= MAX_DIRECTIVE:
         return directive
-    budget = max(0, MAX_DIRECTIVE - (len(directive) - len(description) - len(signature)))
-    signature_len = min(len(signature), max(budget // 2, budget - len(description)))
-    return compose(
-        description[: budget - signature_len].rstrip(_JS_WHITESPACE),
-        signature[:signature_len].rstrip(_JS_WHITESPACE),
-    )[:MAX_DIRECTIVE]
+    budget = max(0, MAX_DIRECTIVE - (_u16len(directive) - _u16len(description) - _u16len(signature)))
+    signature_len = min(_u16len(signature), max(budget // 2, budget - _u16len(description)))
+    return _u16slice(compose(
+        _u16slice(description, budget - signature_len).rstrip(_JS_WHITESPACE),
+        _u16slice(signature, signature_len).rstrip(_JS_WHITESPACE),
+    ), MAX_DIRECTIVE)
 
 
 def reference_slot_directive(slot: str, pose: Dict[str, str]) -> str:

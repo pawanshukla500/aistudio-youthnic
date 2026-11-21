@@ -209,3 +209,9 @@ Deno.test("CodeAnt Major: a rejected attempt's archive upload is retried once be
   assertEquals(body.includes("for (let upload = 1; upload <= 2; upload++) {"), true);
   assertEquals(body.indexOf("return null;") > body.indexOf("for (let upload = 1; upload <= 2; upload++) {"), true);
 });
+
+Deno.test("CodeAnt Major: a studio pose review compare-and-sets the status it read", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  assertEquals(source.includes(': approvalUpdate.eq("approval_status", ownedPose.approval_status))'), true);
+  assertEquals(source.includes('if (!pose) throw new Error("This pose was reviewed by someone else just now. Reload to see the latest decision.");'), true);
+});

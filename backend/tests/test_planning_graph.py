@@ -130,6 +130,28 @@ def test_long_reference_directive_fits_edge_900_char_cut(pose_family):
     assert "Reproduce the signature pose: one elbow propped" in result["slots"]["showcase"]["directive"]
 
 
+def test_astral_text_directive_fits_edge_utf16_cut():
+    # Edge cuts at 900 UTF-16 units; each emoji is two units but one Python code point.
+    emoji = "💃"
+    result = plan({
+        **SEATED,
+        "description": f"seated upright {emoji} " * 60,
+        "distinctiveness": "signature",
+        "signatureDescription": f"chin on knuckles {emoji} " * 40,
+    })
+    for slot in ("creative", "showcase"):
+        directive = result["slots"][slot]["directive"]
+        assert pose_plan_agents._u16len(directive) <= pose_plan_agents.MAX_DIRECTIVE
+        assert QUARANTINE in directive
+        directive.encode("utf-8")  # no dangling surrogate half
+
+
+def test_u16slice_never_splits_a_surrogate_pair():
+    assert pose_plan_agents._u16slice("ab💃c", 3) == "ab"
+    assert pose_plan_agents._u16slice("ab💃c", 4) == "ab💃"
+    assert pose_plan_agents._u16len("ab💃c") == 5
+
+
 @pytest.mark.parametrize("field, text", [
     ("description", "Leaning as she walks past the pillar"),
     ("description", "Leaning out of a WALK"),

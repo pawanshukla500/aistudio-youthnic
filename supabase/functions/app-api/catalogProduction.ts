@@ -294,7 +294,11 @@ export async function recordPosePlanOutcome(
     if (!job && text(args.jobId) && isReferenceLowPostureSlot(sessionData, slot)) {
       const { data, error: jobError } = await service.from("generation_jobs").select("sku_name,job_data")
         .eq("org_id", organizationId).eq("job_id", text(args.jobId)).maybeSingle();
-      if (jobError) console.error(`Could not load the job for pose plan learning: ${jobError.message}`);
+      // Without the SKU text the Farshi test cannot tell whether the adoption was honoured: skip.
+      if (jobError || !data) {
+        console.error(`Could not load the job for pose plan learning: ${jobError?.message || "job not found"}`);
+        return;
+      }
       job = asRecord(data);
     }
     const target = posePlanOutcomeTarget(sessionData.posePlanning, slot, referenceAdoptionHonoured(sessionData, slot, job));
@@ -996,8 +1000,11 @@ export async function reviewCatalogPose(
     reviewer_comments: comments,
     final_asset_url: decision === "approved" ? text(version.original_url || version.preview_url) : "",
     updated_at: now,
-  }).eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).eq("id", assetVersionId);
+  }).eq("organization_id", workspace.organization.id).eq("work_item_id", workItemId).eq("id", assetVersionId)
+    // Compare-and-set on the status read above: a concurrent review cannot be counted twice.
+    .eq("approval_status", version.approval_status).select("id");
   if (versionResult.error) throw new Error(versionResult.error.message);
+  if (!versionResult.data?.length) throw new Error("This pose version was reviewed by someone else just now. Reload to see the latest decision.");
 
   const humanOutcome = decision === "approved" ? "human_approved" : "human_rejected";
   const humanReviewResults = await Promise.all([

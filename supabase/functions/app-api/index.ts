@@ -4967,18 +4967,23 @@ async function approvePose(request: Request, args: JsonRecord) {
     .select("session_id").eq("session_id", ownedPose.session_id).eq("organization_id", workspace.organization.id).maybeSingle();
   if (ownerSessionError || !ownerSession) throw new Error("Could not update approval status or pose not found.");
 
-  const { data: pose, error: poseError } = await service.from("session_generations")
+  // Compare-and-set on the status read above: a concurrent review cannot be counted twice.
+  const approvalUpdate = service.from("session_generations")
     .update({
       approval_status: status,
       approved_by: workspace.member.id,
       approved_at: new Date().toISOString(),
       approval_notes: notes
     })
-    .eq("generation_id", generationId)
+    .eq("generation_id", generationId);
+  const { data: pose, error: poseError } = await (ownedPose.approval_status == null
+    ? approvalUpdate.is("approval_status", null)
+    : approvalUpdate.eq("approval_status", ownedPose.approval_status))
     .select("generation_id,session_id,pose_index,pose_type,output_url,storage_path,qa_status,generation_data")
-    .single();
+    .maybeSingle();
 
-  if (poseError || !pose) throw new Error("Could not update approval status or pose not found.");
+  if (poseError) throw new Error("Could not update approval status or pose not found.");
+  if (!pose) throw new Error("This pose was reviewed by someone else just now. Reload to see the latest decision.");
 
   const { data: session, error: sessionError } = await service.from("catalog_sessions")
     .select("session_id,planning_request_id,reference_hash,session_data")
