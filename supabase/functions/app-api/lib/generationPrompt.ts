@@ -1003,7 +1003,7 @@ export function requestedPropsBlock(props: RequestedHandheldProps, poseId: strin
   return `REQUESTED PROPS (FROM THE PRODUCT NOTES - CARRY THEM OVER): "${props.note}". ${hasStyleReference
     ? `Carry over ${props.labels.join(" and ")} exactly as the STYLE REFERENCE shows them (same object, shape, colour, material and size)`
     : `Include ${props.labels.join(" and ")} as the notes describe them (no style reference is attached), kept simple and neutral`}${hasApprovedAnchor
-    ? ", the very same objects APPROVED POSE 1 already carries"
+    ? " - where APPROVED POSE 1 already shows them, the very same objects it carries"
     : ""}, identical in every frame: ${holds}. A bag, drink or other object a product photo shows is that photo's own styling, not part of this product: never use it unless the product notes say it is sold with the product. ${back
     ? "From behind they stay at the sides and must not cover the back neckline, the stripes or print, the side slits or the hem."
     : "They must not cover the neckline, the embroidery or print, the side slits, the hem or the bottom-wear construction."} Each prop is held by a visible hand joined to its forearm or hangs from a shoulder or forearm - exactly two arms and two hands. This request overrides the general no-props rules for these props only; every other handheld object stays excluded.`;
