@@ -3303,6 +3303,7 @@ async function nextJob(args: JsonRecord) {
 async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonRecord[]) {
   const completed = poses.filter((pose) => pose.status === "completed").length;
   const failed = poses.filter((pose) => pose.status === "failed").length;
+  const cancelledPoses = poses.filter((pose) => pose.status === "failed" && String(pose.error || "") === "Generation cancelled by the user.").length;
   // A complete pose-set delivery is an operational result, not fidelity
   // evidence. In particular, Gemini outages intentionally leave paid images
   // unverified. Keep that distinction in the immutable observation ledger so
@@ -3324,7 +3325,11 @@ async function finalizeJob(job: JsonRecord, session: JsonRecord, poses: JsonReco
   const failureCode = promptBudgetFailure ? "prompt_budget_exceeded" : String(job.error_code || "pose_consistency_failed");
   const failureSummary = promptBudgetFailure
     ? `Pose ${Number(firstFailure?.pose_index || 1)} was blocked before image generation: ${firstFailureMessage}`.slice(0, 1000)
-    : `${failed} of ${poses.length} pose(s) exhausted automatic generation/QA retries${completed ? `; ${completed} pose(s) passed and can be downloaded or regenerated individually` : ""}.`;
+    : `${[
+      // A pose left failed by an earlier cancellation never ran out of retries; say which it was.
+      failed - cancelledPoses ? `${failed - cancelledPoses} of ${poses.length} pose(s) exhausted automatic generation/QA retries` : "",
+      cancelledPoses ? `${cancelledPoses} pose(s) were cancelled before they finished` : "",
+    ].filter(Boolean).join("; ")}${completed ? `; ${completed} pose(s) passed and can be downloaded or regenerated individually` : ""}.`;
   const readinessReason = promptBudgetFailure
     ? "A prompt compilation safeguard blocked the provider request before image generation."
     : `${failed} pose(s) failed consistency validation.`;

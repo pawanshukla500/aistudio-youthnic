@@ -233,3 +233,12 @@ Deno.test("batch regeneration queues every selected pose in one request, and His
   assertEquals(history.includes("poseIds: eligible.map((pose: any) => pose._id),"), true);
   assertEquals(history.includes("batchWaitRef"), false);
 });
+
+Deno.test("a finished job names cancelled poses as cancelled, not as exhausted retries", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  const start = source.indexOf("async function finalizeJob(");
+  const body = source.slice(start, source.indexOf("\n}\n", start));
+  assertEquals(body.includes('String(pose.error || "") === "Generation cancelled by the user."'), true);
+  assertEquals(body.includes("pose(s) were cancelled before they finished"), true);
+  assertEquals(source.includes('async function finalizeCancelledJob(job: JsonRecord, message = "Generation cancelled by the user.")'), true);
+});
