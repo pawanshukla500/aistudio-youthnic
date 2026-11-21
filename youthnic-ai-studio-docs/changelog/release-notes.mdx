@@ -17,6 +17,9 @@ Stay up to date with new features, model upgrades, and workflow improvements int
 - **Cut-Isolated Farshi, Gen-Z Saree & Kurti Set Intelligence**: Isolated Farshi salwar two-leg gathers, waist-side narrowing, and 4-inch upper-hem taper strictly to Farshi SKUs; upgraded Gen-Z saree draping and top-only vs. multi-piece kurti set pose choreography.
 - **LangGraph + FastAPI + Postgres Checkpointing & Valkey Caching**: Deployed Python FastAPI LangGraph multi-agent orchestration with Postgres checkpoints (`PostgresSaver`), immutable SHA-256 Product DNA V2 versions (`dna_versions`), Valkey caching & Celery brokerage, and background workers alongside the Edge API.
 
+### Approved Product DNA Shapes Generation
+- **Approve Once, Applied Every Shoot**: A Product DNA version you approve in Studio now adds its invariants and prohibited changes to the image prompt and the product consistency check of every later shoot of that SKU. Unused background services (a separate task worker and an unused memory search) were removed; generation and checking run in one place.
+
 ### Reference-Led Pose & Expression Planning
 - **Pose 4 and Pose 6 Match the Style Reference Posture**: When the person in the style reference sits, leans, kneels or strikes a signature pose and the posture suits the product, Pose 4 matches it and Pose 6 can use a variation with a different angle and framing. Poses 1, 2, 3 and 5 stay catalog frames. Product guards keep the pose product-led for Farshi bottom wear with a folded posture, reclining sarees, frozen walking strides, tight showcase crops and full-length showcase features, and a sit request in the product notes comes first for Pose 4. The reference outfit, face, hair and handheld objects are never copied.
 - **Expression Planning**: Each shoot gets one planned attitude, energy, gaze and smile level, chosen from the style reference and the product, and every frame adapts it. Forced or toothy grins are never requested.

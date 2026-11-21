@@ -5,7 +5,7 @@ import logging
 import sys
 import threading
 import uuid
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 from contextlib import contextmanager
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
@@ -309,121 +309,9 @@ def update_reference_evidence_dimensions(
         logger.debug(f"Reference dimensions update skipped for {evidence_id}: {exc}")
 
 
-def get_references_for_sku(org_id: str, sku_id: str) -> List[Dict[str, Any]]:
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT * FROM public.product_reference_evidence
-                WHERE organization_id = %s AND sku_id = %s
-                ORDER BY created_at ASC
-                """,
-                (org_id, sku_id),
-            )
-            return cur.fetchall()
-
-
 # -------------------------------------------------------------
-# QA Assessments Queries
+# Region Crops
 # -------------------------------------------------------------
-def save_qa_assessment(
-    org_id: str,
-    job_id: str,
-    generation_id: str,
-    sku_id: str,
-    pose_index: int,
-    pose_type: str,
-    overall_score: float,
-    product_fidelity_score: float,
-    scores: Dict[str, float],
-    checks: Dict[str, str],
-    failed_checks: List[str],
-    anatomical_defect: bool,
-    style_violation: bool,
-    review_recommended: bool,
-    outcome: str,
-    correction_guidance: str = "",
-    attempt_number: int = 1,
-) -> str:
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO public.qa_assessments (
-                    organization_id, job_id, generation_id, sku_id, pose_index, pose_type,
-                    attempt_number, overall_score, product_fidelity_score, scores, checks,
-                    failed_checks, anatomical_defect_detected, style_quarantine_violation,
-                    review_recommended, outcome, correction_guidance
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-                """,
-                (
-                    org_id, job_id, generation_id, sku_id, pose_index, pose_type,
-                    attempt_number, overall_score, product_fidelity_score,
-                    json.dumps(scores), json.dumps(checks), failed_checks,
-                    anatomical_defect, style_violation, review_recommended,
-                    outcome, correction_guidance
-                ),
-            )
-            row = cur.fetchone()
-            return str(row["id"]) if row else ""
-
-
-# -------------------------------------------------------------
-# pgvector Knowledge Retrieval
-# -------------------------------------------------------------
-def search_knowledge_embeddings(
-    category: str,
-    organization_id: Optional[str] = None,
-    query_embedding: Optional[List[float]] = None,
-    limit: int = 5,
-) -> List[Dict[str, Any]]:
-    org_filter = (
-        "(organization_id IS NULL OR organization_id = %s::uuid)"
-        if organization_id
-        else "organization_id IS NULL"
-    )
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            if query_embedding:
-                params: Tuple[Any, ...] = (
-                    (query_embedding, organization_id, category, category, query_embedding, limit)
-                    if organization_id
-                    else (query_embedding, category, category, query_embedding, limit)
-                )
-                cur.execute(
-                    f"""
-                    SELECT id, category, sub_category, content, metadata,
-                           1 - (embedding <=> %s::vector) AS similarity
-                    FROM public.knowledge_embeddings
-                    WHERE is_active = true
-                      AND {org_filter}
-                      AND (category = %s OR %s = '')
-                    ORDER BY embedding <=> %s::vector ASC
-                    LIMIT %s
-                    """,
-                    params,
-                )
-            else:
-                params = (
-                    (organization_id, category, category, limit)
-                    if organization_id
-                    else (category, category, limit)
-                )
-                cur.execute(
-                    f"""
-                    SELECT id, category, sub_category, content, metadata, 1.0 AS similarity
-                    FROM public.knowledge_embeddings
-                    WHERE is_active = true
-                      AND {org_filter}
-                      AND (category = %s OR %s = '')
-                    LIMIT %s
-                    """,
-                    params,
-                )
-            return cur.fetchall()
-
-
 def save_region_crop(
     org_id: str,
     evidence_id: str,

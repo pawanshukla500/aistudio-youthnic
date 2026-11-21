@@ -98,6 +98,7 @@ import {
 import { classifyBottomCut, coarseGarmentFamilyForCategory, effectiveBottomCutClass, normalizeBottomWearMode, resolveBottomWearPresentation } from "./lib/garmentPoses.ts";
 import { selectApprovedLearningOutcomes, selectReusableLearningRules } from "./lib/learningRules.ts";
 import { selectFashionKnowledgeGuidance } from "./lib/fashionKnowledge.ts";
+import { productDnaLock, type ApprovedProductDnaRow } from "./lib/productDnaLock.ts";
 import { selectPromptPatterns } from "./lib/promptPatterns.ts";
 import { effectiveShowcaseShot, selectShowcaseFeedbackGuidance } from "./lib/showcaseFeature.ts";
 import {
@@ -4482,10 +4483,12 @@ async function processWorker(request: Request, args: JsonRecord) {
   // never leave a job looking like it is spending time or provider credits.
   let resolvedPoseReferences: Awaited<ReturnType<typeof resolvePoseReferences>>;
   let budgetBlock = "";
+  let approvedDnaRow: ApprovedProductDnaRow | null = null;
   try {
-    [resolvedPoseReferences, budgetBlock] = await Promise.all([
+    [resolvedPoseReferences, budgetBlock, approvedDnaRow] = await Promise.all([
       resolvePoseReferences(job, sessionData, pose),
       budgetCheck,
+      approvedProductDnaRow(String(job.org_id), String((job.job_data as JsonRecord | undefined)?.skuId || "")),
     ]);
   } catch (error) {
     const message = errorMessage(error);
@@ -4505,6 +4508,20 @@ async function processWorker(request: Request, args: JsonRecord) {
     productDetails: String((job.job_data as JsonRecord | undefined)?.productDetails || ""),
     bottomWearMode: sessionData.bottomWearMode ?? (job.job_data as JsonRecord | undefined)?.bottomWearMode,
   };
+  // A person-approved Product DNA V2 version of this SKU joins this attempt's product
+  // truth for the prompt, QA and the DNA check (lib/productDnaLock.ts). productSession
+  // is a copy: sessionData is what gets saved back to the session row.
+  const dnaLock = productDnaLock(approvedDnaRow, sessionData.productIdentity, {
+    farshi: isFarshiGeneration({ session: sessionData, ...skuText, references: selected }),
+  });
+  const productSession: JsonRecord = dnaLock.applied ? { ...sessionData, productIdentity: dnaLock.productIdentity } : sessionData;
+  if (dnaLock.applied) {
+    storedPoseData.appliedProductDna = { version: dnaLock.version, invariants: dnaLock.invariants, prohibitions: dnaLock.prohibitions };
+  } else {
+    // Pose data persists across attempts: never leave an earlier attempt's lock on record.
+    delete storedPoseData.appliedProductDna;
+    if (approvedDnaRow) console.info(`Approved Product DNA not applied to job ${job.job_id}: ${dnaLock.reason}`);
+  }
   const attempt = Number(pose.attempt_count || 0) + 1;
   if (attempt > MAX_GENERATION_ATTEMPTS) {
     await failPoseAndJob(job, session, pose, `Pose ${pose.pose_index} exhausted ${MAX_GENERATION_ATTEMPTS} generation attempts.`);
@@ -4539,7 +4556,7 @@ async function processWorker(request: Request, args: JsonRecord) {
   let providerRequestId = "";
   const stopLeaseHeartbeat = startLeaseHeartbeat(job.job_id);
   try {
-    const compiled = await compilePosePrompt(job, session, sessionData, pose, poseData, selected, storedPoseData);
+    const compiled = await compilePosePrompt(job, session, productSession, pose, poseData, selected, storedPoseData);
     const prompt = compiled.prompt;
     qaCorrections = compiled.qaCorrections;
     learningRuleIds = compiled.learningRuleIds;
@@ -4588,7 +4605,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     if (poseQaEnabled) {
       try {
         qaStarted = Date.now();
-        qa = await validatePose({ generated, references: loadedReferences, approved, session: sessionData, pose: poseData, organizationId: String(job.org_id), aspectRatio: String(job.aspect_ratio || "3:4"), ...skuText });
+        qa = await validatePose({ generated, references: loadedReferences, approved, session: productSession, pose: poseData, organizationId: String(job.org_id), aspectRatio: String(job.aspect_ratio || "3:4"), ...skuText });
         qaLatencyMs = Date.now() - qaStarted;
       } catch (error) {
         qaUnavailable = errorMessage(error);
@@ -4668,7 +4685,7 @@ async function processWorker(request: Request, args: JsonRecord) {
     // outage is an unavailable verdict, and the paid image must not be dropped for it.
     const dnaGate = await productDnaGate({
       qa, qaRan: poseQaEnabled && !qaUnavailable, generated, references: loadedReferences,
-      job, pose, poseData, session: sessionData, attempt, generationEpoch, skuName: skuText.skuName, prompt,
+      job, pose, poseData, session: productSession, attempt, generationEpoch, skuName: skuText.skuName, prompt,
       // The posture the prompt honoured for Pose 4 / Pose 6 (same selection compilePosePrompt used).
       referencePosture: poseData.id === "creative" || poseData.id === "showcase"
         ? adoptedReferenceSlots(sessionData, selected, skuText).slots[poseData.id]?.posture
@@ -9841,6 +9858,31 @@ function optionalFastApiTarget(): FastApiTarget | null {
   return secret ? { baseUrl: fastApiBaseUrl(), secret } : null;
 }
 
+/**
+ * Latest person-approved Product DNA V2 version of a SKU (approved_by holds the
+ * approver's email; workflow approvals do not). Advisory: a read outage never
+ * blocks a paid job, it only generates without the DNA lock.
+ */
+async function approvedProductDnaRow(orgId: string, skuId: string): Promise<ApprovedProductDnaRow | null> {
+  if (!orgId || !skuId) return null;
+  try {
+    const { data, error } = await service.from("product_dna_versions")
+      .select("version,approved_by,dna_payload")
+      .eq("organization_id", orgId)
+      .eq("sku_id", skuId)
+      .eq("approved", true)
+      .like("approved_by", "%@%")
+      .order("version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data as ApprovedProductDnaRow | null;
+  } catch (error) {
+    console.error(`Could not load approved Product DNA for SKU ${skuId}: ${errorMessage(error)}`);
+    return null;
+  }
+}
+
 async function warmFastApiProductDna(input: {
   organizationId: string;
   skuId: string;
@@ -9925,8 +9967,6 @@ async function dnaExtractOperation(request: Request, args: JsonRecord) {
   if (typeof args.category === "string" && args.category.trim()) payload.category = args.category.trim();
   if (typeof args.garment_family === "string" && args.garment_family.trim()) payload.garment_family = args.garment_family.trim();
   if (typeof args.main_color === "string" && args.main_color.trim()) payload.main_color = args.main_color.trim();
-  const modelIdentity = String(args.model_identity || args.modelIdentity || "").trim();
-  if (modelIdentity) payload.model_identity = modelIdentity;
   if (args.seed_analysis && typeof args.seed_analysis === "object" && !Array.isArray(args.seed_analysis)) {
     payload.seed_analysis = args.seed_analysis;
   }

@@ -46,15 +46,8 @@ def extract_product_dna(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         "main_color": payload.get("main_color", "unknown"),
         "force_refresh": bool(payload.get("force_refresh", False)),
         "auto_approve": bool(payload.get("auto_approve", False)),
-        "model_identity": str(payload.get("model_identity") or "").strip(),
         "seed_analysis": payload.get("seed_analysis") if isinstance(payload.get("seed_analysis"), dict) else None,
         "vision_timeout_seconds": caller_timeout,
-        "poses_to_generate": [1, 2, 3, 4, 5, 6],
-        # Reset QA/generation fields so prior checkpoint values on thread_id never bleed into DNA extraction
-        "qa_target_image_url": "",
-        "ai_raw_evaluation": None,
-        "correction_decision": "",
-        "requires_human_review": False,
         "status": "extracting_dna",
     }
 
@@ -70,7 +63,6 @@ def extract_product_dna(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         "dna_approved": bool(final_state.get("dna_approved", False)),
         "dna_persisted": bool(final_state.get("dna_persisted", True)),
         "persisted": bool(final_state.get("dna_persisted", True)),
-        "pose_plans_count": len(final_state.get("pose_plans", [])),
     }
 
 

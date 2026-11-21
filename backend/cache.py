@@ -2,9 +2,7 @@ import json
 import logging
 import threading
 import time
-import uuid
 from typing import Optional, Any, Dict, Tuple, Set
-from contextlib import contextmanager
 import redis
 
 from config import settings
@@ -51,41 +49,6 @@ def reset_valkey() -> None:
             _valkey_client = None
 
 
-def get_memory_rules_cache(org_id: str, cache_key: str) -> Optional[list[str]]:
-    return cache_manager.get_memory_rules(org_id, cache_key)
-
-
-def set_memory_rules_cache(org_id: str, cache_key: str, rules: list[str], ttl: int = 1800) -> None:
-    cache_manager.set_memory_rules(org_id, cache_key, rules, ttl=ttl)
-
-
-def invalidate_memory_rules_cache(org_id: str) -> None:
-    cache_manager.invalidate_memory_rules(org_id)
-
-
-def get_celery_queue_depth(queue_name: str = "celery") -> int:
-    client = None
-    try:
-        client = redis.from_url(
-            settings.VALKEY_URL,
-            decode_responses=True,
-            socket_timeout=5,
-            socket_connect_timeout=5,
-            retry_on_timeout=False,
-            socket_keepalive=False,
-            health_check_interval=0,
-        )
-        return int(client.llen(queue_name) or 0)
-    except Exception:
-        return 0
-    finally:
-        if client is not None:
-            try:
-                client.close()
-            except Exception:
-                pass
-
-
 class ValkeyCacheManager:
     def __init__(self):
         self._lock = threading.RLock()
@@ -95,8 +58,6 @@ class ValkeyCacheManager:
         self._pending_deletes: Set[str] = set()
         # value, absolute expiry (time.time()) or None when the write has no TTL
         self._pending_writes: Dict[str, Tuple[str, Optional[float]]] = {}
-        self._pending_increments: Dict[str, int] = {}
-        self._memory_versions: Dict[str, int] = {}
 
     @property
     def r(self):
@@ -154,22 +115,12 @@ class ValkeyCacheManager:
             expires_at = None if ex is None else time.time() + max(0, ex)
             self._pending_writes[key] = (value, expires_at)
             self._pending_deletes.discard(key)
-            self._pending_increments.pop(key, None)
-
-    def _queue_version_bump(self, ver_key: str, local_version: int) -> None:
-        """Advance a shared counter on reconnect instead of SETting a local number."""
-        with self._lock:
-            self._pending_increments[ver_key] = self._pending_increments.get(ver_key, 0) + 1
-            self._pending_writes.pop(ver_key, None)
-            self._local_set(ver_key, str(local_version), ex=604800)
 
     def _reconcile_pending(self):
         """Flush offline writes and invalidations before trusting Redis again.
 
         A write during a Valkey sleep must be replayed. Treating it as a delete
-        dropped Product DNA, scene locks, and pose prompts on the next read.
-        Replay keeps the remaining TTL, and a version counter is incremented
-        rather than replaced with this process's local number.
+        dropped Product DNA on the next read. Replay keeps the remaining TTL.
         """
         with self._lock:
             now = time.time()
@@ -177,11 +128,7 @@ class ValkeyCacheManager:
                 if expires_at is not None and expires_at <= now:
                     self._pending_writes.pop(key, None)
                     self._local_fallback.pop(key, None)
-            for key in list(self._pending_writes):
-                if key.startswith("memory:ver:"):
-                    self._pending_increments[key] = self._pending_increments.get(key, 0) + 1
-                    self._pending_writes.pop(key, None)
-            if not self._pending_deletes and not self._pending_writes and not self._pending_increments:
+            if not self._pending_deletes and not self._pending_writes:
                 return
             writes = []
             for key, (value, expires_at) in self._pending_writes.items():
@@ -189,20 +136,12 @@ class ValkeyCacheManager:
                 writes.append((key, value, expires_at, remaining))
             write_keys = {key for key, _value, _expires_at, _remaining in writes}
             deletes = [key for key in self._pending_deletes if key not in write_keys]
-            increments = list(self._pending_increments.items())
         if deletes:
             self.r.delete(*deletes)
         applied = []
         for key, value, expires_at, remaining in writes:
             self.r.set(key, value, ex=remaining)
             applied.append((key, value, expires_at))
-        for key, amount in increments:
-            if hasattr(self.r, "incrby"):
-                self.r.incrby(key, int(amount))
-            else:
-                for _ in range(int(amount)):
-                    self.r.incr(key)
-            self.r.expire(key, 604800)
         corrective: list[str] = []
         with self._lock:
             self._pending_deletes.difference_update(deletes)
@@ -214,12 +153,6 @@ class ValkeyCacheManager:
                 if self._pending_writes.get(key) != (value, expires_at):
                     continue
                 self._pending_writes.pop(key, None)
-            for key, amount in increments:
-                current = self._pending_increments.get(key, 0)
-                if current == amount:
-                    self._pending_increments.pop(key, None)
-                elif current > amount:
-                    self._pending_increments[key] = current - amount
         if corrective:
             self.r.delete(*corrective)
             with self._lock:
@@ -309,26 +242,7 @@ class ValkeyCacheManager:
         key = f"cache:manifest:{org_id}:{fingerprint}"
         self._safe_set(key, json.dumps(manifest_data), ex=ttl)
 
-    # 3. Scene and Model Continuity Cache (TTL: 12h)
-    def get_scene_lock(self, org_id: str, sku_id: str) -> Optional[Dict[str, Any]]:
-        key = f"cache:scene:{org_id}:{sku_id}"
-        val = self._safe_get(key)
-        return json.loads(val) if val else None
-
-    def set_scene_lock(self, org_id: str, sku_id: str, scene_data: Dict[str, Any], ttl: int = 43200):
-        key = f"cache:scene:{org_id}:{sku_id}"
-        self._safe_set(key, json.dumps(scene_data), ex=ttl)
-
-    # 4. Compiled Prompt Cache (TTL: 4h)
-    def get_compiled_prompt(self, org_id: str, sku_id: str, pose_number: int, prompt_hash: str) -> Optional[str]:
-        key = f"cache:prompt:{org_id}:{sku_id}:{pose_number}:{prompt_hash}"
-        return self._safe_get(key)
-
-    def set_compiled_prompt(self, org_id: str, sku_id: str, pose_number: int, prompt_hash: str, prompt: str, ttl: int = 14400):
-        key = f"cache:prompt:{org_id}:{sku_id}:{pose_number}:{prompt_hash}"
-        self._safe_set(key, prompt, ex=ttl)
-
-    # 5. Provider Health Cache (Circuit breaker status, TTL: 60s)
+    # 3. Provider Health Cache (Circuit breaker status, TTL: 60s)
     def get_provider_health(self, provider: str) -> Dict[str, Any]:
         key = f"health:provider:{provider}"
         val = self._safe_get(key)
@@ -351,157 +265,13 @@ class ValkeyCacheManager:
             current["last_failure"] = time.time()
         self._safe_set(key, json.dumps(current), ex=300)
 
-    # 6. Duplicate-Job Protection & Lock
-    def is_job_active(self, org_id: str, sku_id: str) -> bool:
-        key = f"lock:active_job:{org_id}:{sku_id}"
-        if self._is_offline():
-            return True
-        try:
-            self._reconcile_pending()
-            return bool(self.r.exists(key))
-        except Exception as e:
-            self._mark_offline(e)
-            return True
-
-    def mark_job_active(self, org_id: str, sku_id: str, job_id: str, ttl: int = 1800) -> bool:
-        key = f"lock:active_job:{org_id}:{sku_id}"
-        return self._safe_set(key, job_id, nx=True, ex=ttl)
-
-    def release_job_active(self, org_id: str, sku_id: str, expected_job_id: Optional[str] = None):
-        key = f"lock:active_job:{org_id}:{sku_id}"
-        with self._lock:
-            self._local_fallback.pop(key, None)
-        if self._is_offline():
-            if not expected_job_id:
-                with self._lock:
-                    self._pending_deletes.add(key)
-            return
-        try:
-            if expected_job_id:
-                lua = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
-                self.r.eval(lua, 1, key, expected_job_id)
-            else:
-                self.r.delete(key)
-        except Exception as e:
-            if not expected_job_id:
-                with self._lock:
-                    self._pending_deletes.add(key)
-            self._mark_offline(e)
-
-    # 7. Memory Rules Cache (Versioned per org, shares offline circuit breaker)
-    def _memory_ver(self, org_id: str) -> int:
-        org_ns = org_id or "global"
-        ver_key = f"memory:ver:{org_ns}"
-        val = self._safe_get(ver_key)
-        if val is not None:
-            try:
-                return int(val)
-            except ValueError:
-                pass
-        with self._lock:
-            return self._memory_versions.get(org_ns, 0)
-
-    def get_memory_rules(self, org_id: str, cache_key: str) -> Optional[list[str]]:
-        org_ns = org_id or "global"
-        ver = self._memory_ver(org_ns)
-        raw = self._safe_get(f"memory:rules:{org_ns}:v{ver}:{cache_key}")
-        if raw:
-            try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, list):
-                    return [str(x) for x in parsed]
-            except Exception:
-                pass
-        return None
-
-    def set_memory_rules(self, org_id: str, cache_key: str, rules: list[str], ttl: int = 1800) -> None:
-        org_ns = org_id or "global"
-        ver = self._memory_ver(org_ns)
-        self._safe_set(f"memory:rules:{org_ns}:v{ver}:{cache_key}", json.dumps(rules), ex=ttl)
-
-    def invalidate_memory_rules(self, org_id: str) -> None:
-        org_ns = org_id or "global"
-        ver_key = f"memory:ver:{org_ns}"
-        with self._lock:
-            next_local = self._memory_versions.get(org_ns, 0) + 1
-            self._memory_versions[org_ns] = next_local
-        if self._is_offline():
-            self._queue_version_bump(ver_key, next_local)
-            return
-        try:
-            self._reconcile_pending()
-            new_ver = int(self.r.incr(ver_key))
-            self.r.expire(ver_key, 604800)
-            with self._lock:
-                self._memory_versions[org_ns] = new_ver
-                self._local_set(ver_key, str(new_ver), ex=604800)
-                self._pending_writes.pop(ver_key, None)
-        except Exception as e:
-            self._mark_offline(e)
-            self._queue_version_bump(ver_key, next_local)
-
-    # 8. Invalidation
+    # 4. Invalidation
     def invalidate_sku_cache(self, org_id: str, sku_id: str):
         dna_key = f"cache:dna:v2:{org_id}:{sku_id}"
-        scene_key = f"cache:scene:{org_id}:{sku_id}"
-        prompt_prefix = f"cache:prompt:{org_id}:{sku_id}:"
         with self._lock:
-            queued = [
-                k for k in self._pending_writes
-                if k == dna_key or k == scene_key or k.startswith(prompt_prefix)
-            ]
-            for k in queued:
-                self._pending_writes.pop(k, None)
-            for k in list(self._local_fallback.keys()):
-                if k == dna_key or k == scene_key or k.startswith(prompt_prefix):
-                    self._local_fallback.pop(k, None)
-        keys_to_delete = [dna_key, scene_key, *queued]
-        if not self._is_offline():
-            try:
-                for k in self.r.scan_iter(match=f"{prompt_prefix}*"):
-                    keys_to_delete.append(k)
-            except Exception as e:
-                self._mark_offline(e)
-        self._safe_delete(*keys_to_delete)
-
-
-# Distributed Lock Context Manager
-@contextmanager
-def distributed_lock(lock_key: str, timeout_seconds: int = 60, retry_delay: float = 0.2):
-    r = get_valkey()
-    full_key = f"lock:{lock_key}"
-    end_time = time.time() + timeout_seconds
-    acquired = False
-    token = str(uuid.uuid4())
-
-    try:
-        while time.time() < end_time:
-            try:
-                if r.set(full_key, token, nx=True, ex=timeout_seconds):
-                    acquired = True
-                    break
-            except Exception as e:
-                logger.warning(f"Redis lock acquisition error for {lock_key}: {e}")
-                break
-            time.sleep(retry_delay)
-
-        if not acquired:
-            raise TimeoutError(f"Could not acquire distributed lock for {lock_key} within {timeout_seconds}s")
-        yield
-    finally:
-        if acquired:
-            # Atomic release using Lua script to prevent deleting newer holder
-            lua = """
-            if redis.call('get', KEYS[1]) == ARGV[1] then
-                return redis.call('del', KEYS[1])
-            else
-                return 0
-            end
-            """
-            try:
-                r.eval(lua, 1, full_key, token)
-            except Exception as e:
-                logger.warning(f"Failed releasing distributed lock {full_key}: {e}")
+            self._pending_writes.pop(dna_key, None)
+            self._local_fallback.pop(dna_key, None)
+        self._safe_delete(dna_key)
 
 
 cache_manager = ValkeyCacheManager()

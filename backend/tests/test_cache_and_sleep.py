@@ -1,18 +1,10 @@
-import json
-import threading
 import time
-from http.client import HTTPConnection
-from http.server import ThreadingHTTPServer
-
-import pytest
 
 
 class FakeValkey:
     def __init__(self):
         self.store = {}
         self.expirations = {}
-        self.hashes = {}
-        self.lists = {}
 
     def get(self, key):
         return self.store.get(key)
@@ -23,11 +15,6 @@ class FakeValkey:
         self.store[key] = value
         self.expirations[key] = ex
         return True
-
-    def incrby(self, key, amount):
-        val = int(self.store.get(key) or 0) + int(amount)
-        self.store[key] = str(val)
-        return val
 
     def delete(self, *keys):
         removed = 0
@@ -55,32 +42,8 @@ class FakeValkey:
     def expire(self, key, ttl):
         return True
 
-    def llen(self, key):
-        return len(self.lists.get(key, []))
-
-    def hlen(self, key):
-        return len(self.hashes.get(key, {}))
-
     def close(self):
         return None
-
-
-class FakeProc:
-    def __init__(self, pid: int = 4242):
-        self.pid = pid
-        self._terminated = False
-
-    def poll(self):
-        return 0 if self._terminated else None
-
-    def terminate(self):
-        self._terminated = True
-
-    def wait(self, timeout=None):
-        return 0
-
-    def kill(self):
-        self._terminated = True
 
 
 def test_settings_prefers_postgres_private_url(monkeypatch):
@@ -127,7 +90,6 @@ def test_offline_dna_write_is_flushed_instead_of_deleted(monkeypatch):
     monkeypatch.setattr(manager, "_offline_until", time.time() + 60)
     manager._pending_deletes.clear()
     manager._pending_writes.clear()
-    manager._pending_increments.clear()
     manager._local_fallback.clear()
 
     manager.set_hot_dna("org_offline", "sku_face", {"source_fingerprint": "fp-1", "main_color": "ivory"})
@@ -152,47 +114,24 @@ def test_expired_offline_write_keeps_remaining_ttl_and_drops_when_due(monkeypatc
     monkeypatch.setattr(manager, "_offline_until", time.time() + 60)
     manager._pending_deletes.clear()
     manager._pending_writes.clear()
-    manager._pending_increments.clear()
     manager._local_fallback.clear()
 
-    manager.set_compiled_prompt("org_ttl", "sku_ttl", 1, "sig", "keep-me", ttl=100)
-    key = "cache:prompt:org_ttl:sku_ttl:1:sig"
+    manager.set_hot_dna("org_ttl", "sku_keep", {"main_color": "keep-me"}, ttl=100)
+    key = "cache:dna:v2:org_ttl:sku_keep"
     value, _expires_at = manager._pending_writes[key]
     manager._pending_writes[key] = (value, time.time() + 40)
     monkeypatch.setattr(manager, "_offline_until", 0.0)
-    assert manager.get_compiled_prompt("org_ttl", "sku_ttl", 1, "sig") == "keep-me"
+    assert manager.get_hot_dna("org_ttl", "sku_keep") == {"main_color": "keep-me"}
     assert 1 <= fake_valkey.expirations[key] <= 40
 
     monkeypatch.setattr(manager, "_offline_until", time.time() + 60)
-    manager.set_compiled_prompt("org_ttl", "sku_ttl", 2, "sig", "drop-me", ttl=10)
-    expired_key = "cache:prompt:org_ttl:sku_ttl:2:sig"
+    manager.set_hot_dna("org_ttl", "sku_drop", {"main_color": "drop-me"}, ttl=10)
+    expired_key = "cache:dna:v2:org_ttl:sku_drop"
     expired_value, _expired_at = manager._pending_writes[expired_key]
     manager._pending_writes[expired_key] = (expired_value, time.time() - 5)
     monkeypatch.setattr(manager, "_offline_until", 0.0)
-    assert manager.get_compiled_prompt("org_ttl", "sku_ttl", 2, "sig") is None
+    assert manager.get_hot_dna("org_ttl", "sku_drop") is None
     assert expired_key not in fake_valkey.store
-
-
-def test_offline_memory_version_increments_instead_of_rewinding(monkeypatch):
-    import cache
-
-    fake_valkey = FakeValkey()
-    fake_valkey.store["memory:ver:org_ver"] = "5"
-    monkeypatch.setattr(cache, "get_valkey", lambda: fake_valkey)
-    manager = cache.cache_manager
-    monkeypatch.setattr(manager, "_custom_r", fake_valkey)
-    monkeypatch.setattr(manager, "_offline_until", time.time() + 60)
-    manager._pending_deletes.clear()
-    manager._pending_writes.clear()
-    manager._pending_increments.clear()
-    manager._memory_versions.clear()
-    manager._local_fallback.clear()
-
-    manager.invalidate_memory_rules("org_ver")
-    assert fake_valkey.store["memory:ver:org_ver"] == "5"
-    monkeypatch.setattr(manager, "_offline_until", 0.0)
-    assert manager.get_memory_rules("org_ver", "missing") is None
-    assert fake_valkey.store["memory:ver:org_ver"] == "6"
 
 
 def test_redis_miss_does_not_revive_local_dna(monkeypatch):
@@ -205,7 +144,6 @@ def test_redis_miss_does_not_revive_local_dna(monkeypatch):
     monkeypatch.setattr(manager, "_offline_until", 0.0)
     manager._pending_deletes.clear()
     manager._pending_writes.clear()
-    manager._pending_increments.clear()
     manager._local_fallback.clear()
 
     manager.set_hot_dna("org_miss", "sku_miss", {"main_color": "ivory"})
@@ -213,7 +151,7 @@ def test_redis_miss_does_not_revive_local_dna(monkeypatch):
     assert manager.get_hot_dna("org_miss", "sku_miss") is None
 
 
-def test_sku_invalidation_drops_queued_prompt(monkeypatch):
+def test_sku_invalidation_drops_queued_dna(monkeypatch):
     import cache
 
     fake_valkey = FakeValkey()
@@ -223,14 +161,13 @@ def test_sku_invalidation_drops_queued_prompt(monkeypatch):
     monkeypatch.setattr(manager, "_offline_until", time.time() + 60)
     manager._pending_deletes.clear()
     manager._pending_writes.clear()
-    manager._pending_increments.clear()
     manager._local_fallback.clear()
 
-    manager.set_compiled_prompt("org_drop", "sku_drop", 3, "sig", "queued-prompt")
+    manager.set_hot_dna("org_drop", "sku_drop", {"main_color": "queued"})
     manager.invalidate_sku_cache("org_drop", "sku_drop")
     monkeypatch.setattr(manager, "_offline_until", 0.0)
-    assert manager.get_compiled_prompt("org_drop", "sku_drop", 3, "sig") is None
-    assert "cache:prompt:org_drop:sku_drop:3:sig" not in fake_valkey.store
+    assert manager.get_hot_dna("org_drop", "sku_drop") is None
+    assert "cache:dna:v2:org_drop:sku_drop" not in fake_valkey.store
 
 
 def test_invalidation_during_replay_is_not_restored(monkeypatch):
@@ -252,7 +189,6 @@ def test_invalidation_during_replay_is_not_restored(monkeypatch):
     monkeypatch.setattr(manager, "_offline_until", time.time() + 60)
     manager._pending_deletes.clear()
     manager._pending_writes.clear()
-    manager._pending_increments.clear()
     manager._local_fallback.clear()
 
     manager.set_hot_dna("org_race", "sku_race", {"main_color": "ivory"})
@@ -261,23 +197,9 @@ def test_invalidation_during_replay_is_not_restored(monkeypatch):
     assert "cache:dna:v2:org_race:sku_race" not in fake_valkey.store
 
 
-def test_memory_rules_cache_and_invalidation(monkeypatch):
+def test_evidence_agent_uses_manifest_cache_and_sku_invalidation_is_exact(monkeypatch):
     import cache
-
-    fake_valkey = FakeValkey()
-    monkeypatch.setattr(cache, "get_valkey", lambda: fake_valkey)
-
-    assert cache.get_memory_rules_cache("org_1", "sig_a") is None
-    cache.set_memory_rules_cache("org_1", "sig_a", ["Rule 1", "Rule 2"])
-    assert cache.get_memory_rules_cache("org_1", "sig_a") == ["Rule 1", "Rule 2"]
-
-    cache.invalidate_memory_rules_cache("org_1")
-    assert cache.get_memory_rules_cache("org_1", "sig_a") is None
-
-
-def test_evidence_and_pose_agents_use_valkey_caches(monkeypatch):
-    import cache
-    from agents import evidence_agent, pose_planning_agent
+    from agents import evidence_agent
 
     fake_valkey = FakeValkey()
     monkeypatch.setattr(cache, "get_valkey", lambda: fake_valkey)
@@ -310,171 +232,18 @@ def test_evidence_and_pose_agents_use_valkey_caches(monkeypatch):
     assert len(load_calls) == 2  # Cache hit skipped re-downloading references
     assert second["source_fingerprint"] == first["source_fingerprint"]
 
-    # Pose planning agent caches both scene_lock and compiled prompts in Valkey
-    planner = pose_planning_agent.CreativePosePlanningAgent()
-    dna = {"sku_id": "sku_cache_1", "sku_name": "Violet Farshi", "bottom_wear": {"cut_class": "farshi"}}
-    res = planner.process(
-        {
-            "organization_id": "7d56360f-2c96-4eb2-923e-f22b7fe36605",
-            "sku_id": "sku_cache_1",
-            "source_fingerprint": first["source_fingerprint"],
-            "product_dna": dna,
-        }
-    )
-    assert len(res["pose_plans"]) == 6
-    assert any(k.startswith("cache:scene:") for k in fake_valkey.store)
-    assert sum(1 for k in fake_valkey.store if k.startswith("cache:prompt:")) == 6
-
     # Sibling SKU keys sharing prefix must NOT be evicted by invalidate_sku_cache
     fake_valkey.store["cache:dna:v2:org_a:sku_1"] = "{}"
     fake_valkey.store["cache:dna:v2:org_a:sku_10"] = "{}"
-    fake_valkey.store["cache:prompt:org_a:sku_1:1:abc"] = "p1"
-    fake_valkey.store["cache:prompt:org_a:sku_10:1:abc"] = "p10"
     cache.cache_manager.invalidate_sku_cache("org_a", "sku_1")
     assert "cache:dna:v2:org_a:sku_1" not in fake_valkey.store
-    assert "cache:prompt:org_a:sku_1:1:abc" not in fake_valkey.store
     assert "cache:dna:v2:org_a:sku_10" in fake_valkey.store
-    assert "cache:prompt:org_a:sku_10:1:abc" in fake_valkey.store
 
 
-def test_worker_supervisor_wake_idle_stop_and_http_auth(monkeypatch):
-    import worker_supervisor
-    from config import settings
-
-    procs = []
-    cleanups = []
-    state = {"depth": 1, "active": 0}
-
-    def spawn_fn():
-        p = FakeProc(pid=1000 + len(procs))
-        procs.append(p)
-        return p
-
-    supervisor = worker_supervisor.WorkerSupervisor(
-        idle_timeout_seconds=0,
-        poll_interval_seconds=0.0,
-        queue_depth_fn=lambda: state["depth"],
-        active_jobs_fn=lambda: state["active"],
-        spawn_fn=spawn_fn,
-        cleanup_fn=lambda: cleanups.append(True),
-    )
-
-    monkeypatch.setattr(settings, "INTERNAL_API_SECRET", "wake_secret_123")
-    monkeypatch.setattr(settings, "INTERNAL_API_AUTH_BYPASS", False)
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), worker_supervisor.make_handler(supervisor))
-    port = server.server_address[1]
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-
-    try:
-        conn = HTTPConnection("127.0.0.1", port, timeout=3)
-        conn.request("GET", "/health")
-        r1 = conn.getresponse()
-        body1 = json.loads(r1.read().decode())
-        assert r1.status == 200
-        assert body1["worker_running"] is False
-
-        # GET /wake must be rejected with 405 Method Not Allowed
-        conn.request("GET", "/wake", headers={"x-internal-secret": "wake_secret_123"})
-        r_get_wake = conn.getresponse()
-        r_get_wake.read()
-        assert r_get_wake.status == 405
-
-        # Unauthorized POST /wake must fail with 401
-        conn.request("POST", "/wake")
-        r2 = conn.getresponse()
-        r2.read()
-        assert r2.status == 401
-
-        # Bypass must stay disabled in production even when secret is empty
-        monkeypatch.setattr(settings, "INTERNAL_API_SECRET", "")
-        monkeypatch.setattr(settings, "INTERNAL_API_AUTH_BYPASS", True)
-        monkeypatch.setattr(settings, "ENV", "production")
-        conn.request("POST", "/wake")
-        r_prod = conn.getresponse()
-        r_prod.read()
-        assert r_prod.status == 401
-
-        monkeypatch.setattr(settings, "INTERNAL_API_SECRET", "wake_secret_123")
-        monkeypatch.setattr(settings, "INTERNAL_API_AUTH_BYPASS", False)
-        monkeypatch.setattr(settings, "ENV", "development")
-
-        # Authorized POST /wake spawns worker subprocess once
-        conn.request("POST", "/wake", headers={"x-internal-secret": "wake_secret_123"})
-        r3 = conn.getresponse()
-        body3 = json.loads(r3.read().decode())
-        assert r3.status == 202
-        assert body3["worker_running"] is True
-        assert len(procs) == 1
-
-        # Probe error (None) must conservatively treat worker as busy
-        state["depth"] = None
-        assert supervisor.has_pending_work(unknown_is_busy=True) is True
-        assert supervisor.check_idle_once() is False
-        state["depth"] = 1
-
-        # Worker must NOT stop while queue_depth > 0 or active_jobs > 0
-        assert supervisor.check_idle_once() is False
-        state["depth"] = 0
-        state["active"] = 1
-        assert supervisor.check_idle_once() is False
-
-        # Once queue + active jobs stay 0, two passes cleanly stop Celery + cleanup sockets
-        state["active"] = 0
-        assert supervisor.check_idle_once() is False  # First idle observation
-        time.sleep(0.01)
-        assert supervisor.check_idle_once() is True  # Confirmed idle -> stop subprocess
-        assert supervisor.worker_running is False
-        assert procs[0]._terminated is True
-        assert len(cleanups) >= 1
-    finally:
-        server.shutdown()
-        server.server_close()
-
-
-def test_wake_celery_worker_sends_secret_header(monkeypatch):
-    from routes import generation
-    from config import settings
-
-    seen = {}
-
-    class DummyResp:
-        status_code = 202
-
-    def fake_post(url, headers=None, timeout=None):
-        seen["url"] = url
-        seen["headers"] = headers
-        return DummyResp()
-
-    monkeypatch.setattr(settings, "CELERY_WORKER_WAKE_URL", "http://worker.test:8080/wake")
-    monkeypatch.setattr(settings, "INTERNAL_API_SECRET", "top_secret")
-    monkeypatch.setattr(generation.httpx, "post", fake_post)
-
-    assert generation.wake_celery_worker() is True
-    assert seen["url"] == "http://worker.test:8080/wake"
-    assert seen["headers"]["x-internal-secret"] == "top_secret"
-
-    # Inside Railway environment, default private DNS wake URL activates automatically
-    monkeypatch.setattr(settings, "CELERY_WORKER_WAKE_URL", "")
-    monkeypatch.setenv("RAILWAY_ENVIRONMENT_ID", "env_123")
-    seen.clear()
-    assert generation.wake_celery_worker() is True
-    assert seen["url"] == "http://celery-worker.railway.internal:8080/wake"
-
-
-def test_celery_supervisor_uses_threads_pool_and_bounded_fallback_cache():
+def test_bounded_fallback_cache_and_idle_release():
     import cache
     import database
     import main
-    import worker_supervisor
-
-    cmd = worker_supervisor.build_default_celery_cmd()
-    assert "--pool=threads" in cmd
-    assert "--concurrency=2" in cmd
-    assert "--without-gossip" in cmd
-    assert "--without-mingle" in cmd
-    assert "--without-heartbeat" in cmd
 
     mgr = cache.ValkeyCacheManager()
     for idx in range(cache.MAX_LOCAL_FALLBACK_KEYS + 25):

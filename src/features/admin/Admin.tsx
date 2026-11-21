@@ -1406,7 +1406,7 @@ export function Admin() {
                     LangGraph & LangChain Persistent Checkpointer
                   </h3>
                   <p className="mt-1 text-xs text-secondary">
-                    Runs inside Railway FastAPI &amp; celery-worker with durable PostgreSQL checkpoints across steps.
+                    Runs inside Railway FastAPI (Product DNA and pose planning graphs) with durable PostgreSQL checkpoints across steps.
                   </p>
                 </div>
                 <span

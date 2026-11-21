@@ -1,7 +1,6 @@
 import base64
-from agents.qa_agent import ComputerVisionQAAgent
 from agents.dna_agent import ProductDNAAgent
-from services.ai_clients import invoke_vision_json, generate_catalog_image, normalize_image_size
+from services.ai_clients import invoke_vision_json
 from config import settings
 
 
@@ -207,74 +206,6 @@ def test_invoke_vision_json_falls_back_to_gpt61_terra_medium_for_analysis(monkey
     assert result["model"] == "gpt-6.1-terra"
     assert result["reasoning"] == "medium"
     assert openai_calls == [("gpt-6.1-terra", "medium")]
-
-
-def test_generate_catalog_image_gpt_2_6_multipart_and_size(monkeypatch):
-    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test-key")
-    assert normalize_image_size("3:4", "2K", "gpt-image-2.6-sunburst") == "1536x2048"
-    assert normalize_image_size("3:4", "1K", "gpt-image-2.6-flare") == "768x1024"
-
-    captured = {}
-
-    class FakeResp:
-        status_code = 200
-        headers = {"x-request-id": "req_123"}
-        content = b"{}"
-
-        def json(self):
-            return {
-                "data": [{"b64_json": base64.b64encode(b"\xff\xd8\xff\xe0jpegbytes").decode("ascii")}],
-                "usage": {"input_tokens": 1000, "output_tokens": 2000},
-            }
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def post(self, url, headers=None, data=None, files=None, json=None):
-            captured["url"] = url
-            captured["data"] = data
-            captured["files"] = files
-            return FakeResp()
-
-    monkeypatch.setattr("services.ai_clients.httpx.Client", FakeClient)
-
-    res = generate_catalog_image(
-        prompt="Saree catalog pose 1",
-        model="gpt-image-2.6-sunburst",
-        aspect_ratio="3:4",
-        image_size="2K",
-        quality="high",
-        reference_images=[{"role": "saree_front_drape", "filename": "front.jpg", "bytes": b"img", "mime_type": "image/jpeg"}],
-    )
-    assert captured["url"] == "https://api.openai.com/v1/images/edits"
-    assert captured["data"]["model"] == "gpt-image-2.6-sunburst"
-    assert captured["data"]["size"] == "1536x2048"
-    assert res["mime_type"] == "image/jpeg"
-    assert res["request_id"] == "req_123"
-
-
-def test_qa_never_passes_missing_image_without_raw_eval():
-    agent = ComputerVisionQAAgent()
-    eval_res = agent.evaluate(
-        org_id="org_1",
-        job_id="job_1",
-        generation_id="gen_1",
-        sku_id="sku_1",
-        pose_index=1,
-        pose_type="full_front",
-        image_url="",
-        product_dna={"garment_family": "saree"},
-    )
-    assert eval_res.outcome == "retry"
-    assert eval_res.review_recommended is True
-    assert "missing_generated_image" in eval_res.failed_checks
 
 
 def test_dna_agent_sets_draft_and_quarantines_style(monkeypatch):
@@ -527,60 +458,6 @@ def test_meta_sibling_retry_clamps_medium_to_low_when_budget_drops_below_60s(mon
     assert result["reasoning"] == "low"
 
 
-def test_generate_catalog_image_retries_transient_503_before_succeeding(monkeypatch):
-    from services import ai_clients
-
-    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test-key")
-    monkeypatch.setattr(ai_clients.time, "sleep", lambda *a, **k: None)
-    calls = {"count": 0}
-
-    class FakeResp:
-        def __init__(self, status_code, payload):
-            self.status_code = status_code
-            self._payload = payload
-            self.headers = {"x-request-id": f"req_{calls['count']}"}
-            self.content = b"{}"
-
-        def json(self):
-            return self._payload
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def post(self, url, headers=None, data=None, files=None, json=None):
-            calls["count"] += 1
-            if calls["count"] == 1:
-                return FakeResp(503, {"error": {"message": "Upstream overloaded"}})
-            return FakeResp(
-                200,
-                {
-                    "data": [{"b64_json": base64.b64encode(b"\xff\xd8\xff\xe0jpegok").decode("ascii")}],
-                    "usage": {"input_tokens": 500, "output_tokens": 1000},
-                },
-            )
-
-    monkeypatch.setattr("services.ai_clients.httpx.Client", FakeClient)
-
-    res = ai_clients.generate_catalog_image(
-        prompt="Kurti front catalog pose",
-        model="gpt-image-2.6-sunburst",
-        aspect_ratio="3:4",
-        image_size="2K",
-        quality="medium",
-        reference_images=[{"role": "front", "filename": "front.jpg", "bytes": b"img", "mime_type": "image/jpeg"}],
-    )
-    assert calls["count"] == 2
-    assert res["mime_type"] == "image/jpeg"
-    assert res["image_bytes"].startswith(b"\xff\xd8")
-
-
 def test_gemini_vision_json_retries_transient_503_and_preserves_multihop_budget(monkeypatch):
     from services import ai_clients
 
@@ -652,53 +529,6 @@ def test_gemini_vision_json_retries_transient_503_and_preserves_multihop_budget(
     # gpt-6.1-terra reserved >= 35s for later hops instead of only 15s
     assert 110 <= recorded_timeouts[0][1] <= 116
     assert 110 <= recorded_timeouts[1][1] <= 116
-
-
-def test_generate_catalog_image_skips_doomed_retry_below_min_budget(monkeypatch):
-    import pytest
-    from services import ai_clients
-
-    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test-key")
-    monkeypatch.setattr(settings, "IMAGE_GEN_TIMEOUT_SECONDS", 25)
-    monkeypatch.setattr(ai_clients.time, "sleep", lambda *a, **k: None)
-    calls = {"count": 0}
-
-    class FakeResp:
-        def __init__(self, status_code, payload):
-            self.status_code = status_code
-            self._payload = payload
-            self.headers = {"x-request-id": "req_low_budget"}
-            self.content = b"{}"
-
-        def json(self):
-            return self._payload
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def post(self, url, headers=None, data=None, files=None, json=None):
-            calls["count"] += 1
-            return FakeResp(503, {"error": {"message": "Upstream overloaded"}})
-
-    monkeypatch.setattr("services.ai_clients.httpx.Client", FakeClient)
-
-    with pytest.raises(RuntimeError, match="OpenAI image generation failed \\(503\\)"):
-        ai_clients.generate_catalog_image(
-            prompt="Kurti front catalog pose",
-            model="gpt-image-2.6-sunburst",
-            aspect_ratio="3:4",
-            image_size="2K",
-            quality="medium",
-            reference_images=[{"role": "front", "filename": "front.jpg", "bytes": b"img", "mime_type": "image/jpeg"}],
-        )
-    assert calls["count"] == 1
 
 
 def test_meta_429_tpm_switches_to_sibling_then_falls_back_to_gpt61_terra(monkeypatch):
