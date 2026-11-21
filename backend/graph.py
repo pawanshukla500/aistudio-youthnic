@@ -316,6 +316,11 @@ def run_pose_planning(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _like_prefix(prefix: str) -> str:
+    """LIKE pattern matching ids that start with `prefix` literally (its _ and % are not wildcards)."""
+    return prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
 def list_workflow_threads(limit: int = 30, organization_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Inspect recent LangGraph checkpointed threads stored in PostgreSQL, optionally scoped to an org."""
     with get_db() as conn:
@@ -327,12 +332,16 @@ def list_workflow_threads(limit: int = 30, organization_id: Optional[str] = None
                            COUNT(*)::int AS checkpoint_count,
                            MAX(checkpoint_id) AS latest_checkpoint_id
                     FROM public.checkpoints
-                    WHERE thread_id LIKE %s OR thread_id LIKE %s
+                    WHERE thread_id LIKE %s ESCAPE '\\' OR thread_id LIKE %s ESCAPE '\\'
                     GROUP BY thread_id
                     ORDER BY MAX(checkpoint_id) DESC
                     LIMIT %s
                     """,
-                    (f"thread_dna_{organization_id}_%", f"thread_plan_{organization_id}_%", limit),
+                    (
+                        _like_prefix(f"thread_dna_{organization_id}_"),
+                        _like_prefix(f"thread_plan_{organization_id}_"),
+                        limit,
+                    ),
                 )
             else:
                 cur.execute(

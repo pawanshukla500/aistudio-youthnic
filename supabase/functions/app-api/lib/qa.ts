@@ -754,8 +754,9 @@ export function normalizeDnaConsistencyResult(raw: unknown): DnaConsistencyResul
     !["false", "no", "0"].includes(String(logoFlag ?? "").trim().toLowerCase());
   const numbers = DNA_ATTRIBUTES.map((attribute) => attribute === "logo" && !logoApplicable ? null : dnaNumber(rawScores[attribute]));
   const provided = numbers.filter((value): value is number => value !== null);
-  // A 0-1 answer (every provided score <= 1) is rescaled to 0-100.
-  const scale = provided.length && provided.every((value) => value <= 1) ? 100 : 1;
+  // A 0-1 answer is rescaled to 0-100 only when it has a real fraction: all-1 scores are
+  // 1/100 on the prompt's scale and must fail, not become perfect.
+  const scale = provided.length && provided.every((value) => value <= 1) && provided.some((value) => value > 0 && value < 1) ? 100 : 1;
   const scores = Object.fromEntries(DNA_ATTRIBUTES.map((attribute, index) => {
     const value = numbers[index];
     return [attribute, value === null ? null : dnaScore(value * scale)];
@@ -767,6 +768,13 @@ export function normalizeDnaConsistencyResult(raw: unknown): DnaConsistencyResul
     .filter((attribute) => attribute !== "logo" || logoApplicable);
   if (!flagged.length && DNA_ATTRIBUTES.every((attribute) => scores[attribute] === null)) {
     throw new Error("DNA consistency check returned no attribute scores.");
+  }
+  // A pass needs shape, color, material and details scored (logo is optional: a product
+  // without one may get no logo score); a partial reply is incomplete, so the caller marks
+  // the check unavailable instead of passing it.
+  const unscored = DNA_ATTRIBUTES.filter((attribute) => attribute !== "logo" && scores[attribute] === null);
+  if (!flagged.length && unscored.length) {
+    throw new Error(`DNA consistency check did not score ${unscored.join(", ")}.`);
   }
   return finishDnaResult(scores, flagged, "dna_check", String(data.correction ?? ""));
 }

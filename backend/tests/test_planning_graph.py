@@ -395,3 +395,7 @@ def test_plan_route_requires_internal_secret_and_validates(monkeypatch):
     assert cross.status_code == 403
     own = client.get(f"/api/v1/workflows/checkpoints/thread_plan_{ORG}_fp-route?organization_id={ORG}", headers=headers)
     assert own.status_code == 200
+
+
+def test_thread_listing_like_prefix_escapes_wildcards():
+    assert graph._like_prefix("thread_plan_org%1_") == r"thread\_plan\_org\%1\_%"

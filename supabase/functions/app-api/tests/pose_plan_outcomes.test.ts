@@ -55,6 +55,8 @@ Deno.test("pose plan outcome target: key matches posePlanOutcomeKey; legacy and 
 Deno.test("DNA observation: unavailable or missing verdicts are skipped", () => {
   assertEquals(observationFromDna(undefined), null);
   assertEquals(observationFromDna(unavailableDnaConsistency("provider outage")), null);
+  // A verdict with no score would inflate dna_score_avg's sample size, so it is not counted.
+  assertEquals(observationFromDna({ pass: false, score: null, failed: ["color"] }), null);
   const failed = normalizeDnaConsistencyResult({ scores: { shape: 92, color: 70, material: 90, logo: 95, details: 88 } });
   assertEquals(observationFromDna(failed, "  Calm gaze  "), { kind: "dna", pass: false, score: 87, expression: "Calm gaze" });
   const derived = dnaConsistencyFromQaScores({ colors: 96, fit_silhouette: 94, fabric_texture: 92, details_and_branding: 90, print_pattern: 93 });

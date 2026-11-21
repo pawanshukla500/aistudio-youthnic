@@ -481,13 +481,15 @@ export function poseFamilyFor(input: string | PoseSlotContext): GarmentPoseFamil
 /** Whether the sixth frame's brief shows bottom wear (the same rule getPoseSlots uses). */
 function showcaseIncludesBottomWearFor(
   family: GarmentPoseFamily,
-  args: { bottomWearMode?: unknown; productIdentity?: unknown; skuName?: string; productDetails?: string },
+  args: { bottomWearMode?: unknown; productIdentity?: unknown; skuName?: string; productDetails?: string; hasBottomReference?: boolean },
 ): boolean {
+  // An uploaded bottom photo counts in auto mode, as it does at generation (compilePosePrompt).
   const presentation = resolveBottomWearPresentation({
     mode: args.bottomWearMode,
     productIdentity: args.productIdentity ?? {},
     skuName: args.skuName,
     productDetails: args.productDetails,
+    hasBottomReference: args.hasBottomReference,
   });
   return presentation.includesBottomWear || (
     normalizeBottomWearMode(args.bottomWearMode) !== "top_only" &&
@@ -557,7 +559,7 @@ export function posePlanningContextFor(
 
 /** Reference-posture prose the v36 prompt may still write into a Pose 4/6 that ended product-led. */
 const REFERENCE_POSTURE_PROSE =
-  /\b(?:sit|sits|sitting|seat(?:s|ed|ing)?|perch(?:es|ed|ing)?|lean(?:s|ed|ing|t)?|kneel(?:s|ing)?|knelt|crouch(?:es|ed|ing)?|squat(?:s|ted|ting)?|reclin(?:e|es|ed|ing)|loung(?:e|es|ed|ing))\b|\bstyle[-\s]reference\b[^.]{0,80}?\b(?:pose|posture|stance)\b/i;
+  /\b(?:sit|sits|sitting|seat(?:s|ed|ing)?|perch(?:es|ed|ing)?|lean(?:s|ed|ing|t)?|kneel(?:s|ing)?|knelt|crouch(?:es|ed|ing)?|squat(?:s|ted|ting)?|reclin(?:e|es|ed|ing)|loung(?:e|es|ed|ing)|walk(?:s|ed|ing)?|strid(?:e|es|ing)|mid[-\s]?step)\b|\bstyle[-\s]reference\b[^.]{0,80}?\b(?:pose|posture|stance)\b/i;
 
 function adoptedSlot(planning: PosePlanning | undefined, poseId: string): SlotPlan | null {
   if (poseId !== "creative" && poseId !== "showcase") return null;

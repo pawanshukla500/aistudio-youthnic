@@ -18,6 +18,8 @@ import {
 } from "../lib/providerCost.ts";
 import { roleLabel } from "../lib/referencePolicy.ts";
 
+const CORE = { shape: 95, color: 95, material: 95, details: 95 };
+
 Deno.test("DNA prompt compares IMAGE A with labeled product references and quarantines the style reference", () => {
   const prompt = buildDnaConsistencyPrompt({
     productIdentity: {
@@ -151,11 +153,10 @@ Deno.test("DNA normalizer applies the 85 floor, skips a non-applicable logo and 
   assertStringIncludes(failing.reason, "shape 84");
   assertEquals(failing.correction, "Restore the mirror-work spacing.");
 
-  // A missing attribute is unscored, not failed.
-  const partial = normalizeDnaConsistencyResult({ scores: { color: 97 } });
-  assertEquals(partial.pass, true);
-  assertEquals(partial.scores.shape, null);
-  assertEquals(partial.score, 97);
+  // A reply missing a required attribute is incomplete, never a pass; logo alone may be absent.
+  assertThrows(() => normalizeDnaConsistencyResult({ scores: { color: 97 } }), Error, "did not score shape, material, details");
+  const noLogo = normalizeDnaConsistencyResult({ scores: CORE });
+  assertEquals([noLogo.pass, noLogo.scores.logo], [true, null]);
 });
 
 Deno.test("DNA normalizer reads top-level scores, loose logoApplicable values and a 0-1 scale", () => {
@@ -163,22 +164,25 @@ Deno.test("DNA normalizer reads top-level scores, loose logoApplicable values an
   assertEquals(topLevel.scores, { shape: 91, color: 96, material: 88, logo: null, details: 90 });
   assertEquals(topLevel.pass, true);
   // "scores" wins when it has entries.
-  assertEquals(normalizeDnaConsistencyResult({ scores: { shape: 99 }, shape: 10 }).scores.shape, 99);
+  assertEquals(normalizeDnaConsistencyResult({ scores: { ...CORE, shape: 99 }, shape: 10 }).scores.shape, 99);
 
   for (const logoApplicable of ["no", "No", "false", 0, "0", false]) {
-    const result = normalizeDnaConsistencyResult({ scores: { shape: 95, logo: 20 }, logoApplicable, failed: ["logo"] });
+    const result = normalizeDnaConsistencyResult({ scores: { ...CORE, logo: 20 }, logoApplicable, failed: ["logo"] });
     assertEquals(result.scores.logo, null, String(logoApplicable));
     assertEquals(result.pass, true, String(logoApplicable));
   }
-  assertEquals(normalizeDnaConsistencyResult({ scores: { shape: 95, logo: 20 }, logoApplicable: "yes" }).failed, ["logo"]);
+  assertEquals(normalizeDnaConsistencyResult({ scores: { ...CORE, logo: 20 }, logoApplicable: "yes" }).failed, ["logo"]);
 
   const fractional = normalizeDnaConsistencyResult({ scores: { shape: 0.97, color: "0.9", material: 0.84, logo: 1, details: 0.96 } });
   assertEquals(fractional.scores, { shape: 97, color: 90, material: 84, logo: 100, details: 96 });
   assertEquals(fractional.failed, ["material"]);
   // One score above 1 means the response already uses 0-100.
-  assertEquals(normalizeDnaConsistencyResult({ scores: { shape: 1, color: 92 } }).scores, { shape: 1, color: 92, material: null, logo: null, details: null });
+  assertEquals(normalizeDnaConsistencyResult({ scores: { shape: 1, color: 92, material: 90, details: 90 } }).scores, { shape: 1, color: 92, material: 90, logo: null, details: 90 });
+  // All-1 scores are 1/100 on the prompt's scale: never rescaled into a perfect pass.
+  const allOnes = normalizeDnaConsistencyResult({ scores: { shape: 1, color: 1, material: 1, logo: 1, details: 1 } });
+  assertEquals([allOnes.pass, allOnes.scores.shape], [false, 1]);
   // A non-applicable logo does not decide the scale.
-  assertEquals(normalizeDnaConsistencyResult({ scores: { shape: 0.9, logo: 95 }, logoApplicable: "no" }).scores.shape, 90);
+  assertEquals(normalizeDnaConsistencyResult({ scores: { shape: 0.9, color: 0.9, material: 0.9, details: 0.9, logo: 95 }, logoApplicable: "no" }).scores.shape, 90);
 });
 
 Deno.test("DNA normalizer throws on a response with no numeric scores", () => {
@@ -211,13 +215,13 @@ Deno.test("DNA normalizer reads percent strings and snake_case logo_applicable",
   assertEquals(percent.failed, ["details"]);
 
   for (const logo_applicable of [false, "false", "no"]) {
-    const result = normalizeDnaConsistencyResult({ scores: { shape: 95, logo: 20 }, logo_applicable, failed: ["logo"] });
+    const result = normalizeDnaConsistencyResult({ scores: { ...CORE, logo: 20 }, logo_applicable, failed: ["logo"] });
     assertEquals(result.scores.logo, null, String(logo_applicable));
     assertEquals(result.pass, true, String(logo_applicable));
   }
-  assertEquals(normalizeDnaConsistencyResult({ scores: { shape: 95, logo: 20 }, logo_applicable: true }).failed, ["logo"]);
+  assertEquals(normalizeDnaConsistencyResult({ scores: { ...CORE, logo: 20 }, logo_applicable: true }).failed, ["logo"]);
   // camelCase wins when both are present.
-  assertEquals(normalizeDnaConsistencyResult({ scores: { shape: 95, logo: 20 }, logoApplicable: true, logo_applicable: false }).failed, ["logo"]);
+  assertEquals(normalizeDnaConsistencyResult({ scores: { ...CORE, logo: 20 }, logoApplicable: true, logo_applicable: false }).failed, ["logo"]);
 });
 
 Deno.test("full pose QA scores map onto the DNA attributes", () => {
@@ -267,7 +271,7 @@ Deno.test("DNA correction names each failed attribute with its score", () => {
   assertStringIncludes(text, "PRODUCT DNA CORRECTION: the previous image drifted from the uploaded product on shape/silhouette (70), details (embroidery, print, trims, placement) (60).");
   assertStringIncludes(text, "Re-space the mirror work.");
   assert(text.length <= 600);
-  assertEquals(dnaCorrectionText(normalizeDnaConsistencyResult({ scores: { shape: 99 } })), "");
+  assertEquals(dnaCorrectionText(normalizeDnaConsistencyResult({ scores: { ...CORE, shape: 99 } })), "");
 });
 
 Deno.test("job estimate adds the DNA check only when full pose QA is off", () => {
@@ -291,7 +295,7 @@ Deno.test("a DNA-failed frame kept for review is never an approved Pose 1 anchor
   assertEquals(dnaHoldsForReview("unverified", failed), true);
   assertEquals(dnaHoldsForReview("human_approved", failed), false);
   // A passing, unavailable or missing verdict (legacy rows) never holds a frame.
-  assertEquals(dnaHoldsForReview("requires_human_review", normalizeDnaConsistencyResult({ scores: { shape: 99 } })), false);
+  assertEquals(dnaHoldsForReview("requires_human_review", normalizeDnaConsistencyResult({ scores: { ...CORE, shape: 99 } })), false);
   assertEquals(dnaHoldsForReview("requires_human_review", unavailableDnaConsistency("timeout")), false);
   assertEquals(dnaHoldsForReview("unverified", undefined), false);
 });

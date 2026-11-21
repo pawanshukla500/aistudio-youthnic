@@ -133,11 +133,16 @@ export function humanVerdictTransition(previousStatus: unknown, nextStatus: unkn
   return previous === verdict ? null : { kind: "human", verdict, previous };
 }
 
-/** A DNA verdict worth learning from, or null when the check was unavailable or never ran. */
+/**
+ * A DNA verdict worth learning from, or null when the check was unavailable, never ran or
+ * left no score: pass+fail counts are dna_score_avg's sample size, so every counted
+ * observation must carry a score.
+ */
 export function observationFromDna(dna: unknown, expression = ""): Extract<PosePlanObservation, { kind: "dna" }> | null {
   const raw = record(dna);
-  if (raw.unavailable === true || typeof raw.pass !== "boolean") return null;
-  return { kind: "dna", pass: raw.pass, score: score(raw.score), expression: String(expression || "").trim().slice(0, 300) };
+  const observed = score(raw.score);
+  if (raw.unavailable === true || typeof raw.pass !== "boolean" || observed === null) return null;
+  return { kind: "dna", pass: raw.pass, score: observed, expression: String(expression || "").trim().slice(0, 300) };
 }
 
 export function nextPosePlanOutcomeCounts(existing: PosePlanOutcomeRow | null | undefined, observation: PosePlanObservation) {
