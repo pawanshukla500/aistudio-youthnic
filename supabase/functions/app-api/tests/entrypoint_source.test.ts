@@ -281,7 +281,14 @@ Deno.test("Clone Session opens in the Studio with its references and analysis in
   assert(body.includes("analysisFingerprint: String(session.analysis_fingerprint || \"\"),"));
   // A clone's skuId is its planning request id, never shown as a SKU code.
   assert(body.includes('.select("session_id,planning_request_id,analysis_fingerprint,product_hash,reference_hash,session_data")'));
-  assert(body.includes('skuId: String(data.skuId || "") === String(session.planning_request_id || "") ? "" : String(data.skuId || ""),'));
+  // A clone shows the SKU code its source had (kept as sourceSkuId), never its planning request id.
+  assert(body.includes('skuId: String(data.sourceSkuId || "")'));
+  assert(body.includes('|| (String(data.skuId || "") === String(session.planning_request_id || "") ? "" : String(data.skuId || "")),'));
+  const cloneStart = source.indexOf("async function cloneJob(");
+  const clone = source.slice(cloneStart, source.indexOf("\n}\n", cloneStart));
+  assert(clone.includes("const sourceSkuId = String(sourceData.sourceSkuId || \"\")"));
+  assert(clone.includes("...(sourceSkuId ? { sourceSkuId } : {}),"));
+  assert(source.includes("skuId: String(args.skuId || sessionData.sourceSkuId || sessionData.skuId || session.planning_request_id),"));
   const studio = Deno.readTextFileSync(new URL("../../../../src/features/studio/Studio.tsx", import.meta.url)).replace(/\r\n/g, "\n");
   assert(studio.includes('const sessionParam = searchParams.get("session") || "";'));
   assert(studio.includes('invokeAppApi<LoadedStudioSession>("studio.loadSession", { sessionId: sessionParam })'));

@@ -3177,7 +3177,7 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     const jobId = `job_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const jobData = {
-      skuId: String(args.skuId || sessionData.skuId || session.planning_request_id),
+      skuId: String(args.skuId || sessionData.sourceSkuId || sessionData.skuId || session.planning_request_id),
       skuName: String(args.skuName || sessionData.skuName || "Untitled studio product"),
       productDetails: String(args.productDetails || sessionData.productDetails || ""), category: String(args.category || sessionData.category || "ethnic/fusion"),
       backgroundStyle: String(args.backgroundStyle || ""), modelIdentityDirection: String(args.modelIdentity || ""),
@@ -4962,7 +4962,8 @@ async function loadStudioSession(request: Request, args: JsonRecord) {
   return {
     sessionId: session.session_id,
     // cloneJob stores its new planning request id as skuId; that internal id is not a SKU code to show.
-    skuId: String(data.skuId || "") === String(session.planning_request_id || "") ? "" : String(data.skuId || ""),
+    skuId: String(data.sourceSkuId || "")
+      || (String(data.skuId || "") === String(session.planning_request_id || "") ? "" : String(data.skuId || "")),
     skuName: String(data.skuName || ""),
     productDetails: String(data.productDetails || ""),
     category: String(data.category || "ethnic/fusion"),
@@ -5025,9 +5026,15 @@ async function cloneJob(request: Request, args: JsonRecord) {
   
   if (planningError || !planningRequest) throw new Error("Could not create planning request for cloned session.");
   
+  const sourceData = (sourceSession.session_data || {}) as JsonRecord;
+  // skuId becomes the new planning request id; the SKU code the source shoot really had is kept
+  // (through clones of clones) so the Studio shows it and approved Product DNA still locks the shoot.
+  const sourceSkuId = String(sourceData.sourceSkuId || "")
+    || (String(sourceData.skuId || "") !== String(sourceSession.planning_request_id || "") ? String(sourceData.skuId || "") : "");
   const newSessionData = {
-    ...(sourceSession.session_data as JsonRecord),
+    ...sourceData,
     skuId: planningRequest.id,
+    ...(sourceSkuId ? { sourceSkuId } : {}),
     generatedAssets: [],
     approvedAssets: [],
     generationMemory: resetGenerationMemoryForClone((sourceSession.session_data as JsonRecord)?.generationMemory),
