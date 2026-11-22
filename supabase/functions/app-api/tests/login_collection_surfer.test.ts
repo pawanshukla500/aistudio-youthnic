@@ -6,9 +6,19 @@ import {
   isFirebaseSessionExpired,
   resolveSessionLoginAtMs,
 } from "../../../../src/lib/sessionExpiry.ts";
+import {
+  RETRIED_FRAME,
+  SHOOT_FRAMES,
+  SHOOT_TICKS,
+  shootAt,
+} from "../../../../src/features/auth/shootTimeline.ts";
 
 const loginSource = Deno.readTextFileSync(
   new URL("../../../../src/features/auth/Login.tsx", import.meta.url),
+).replace(/\r\n/g, "\n");
+
+const showcaseSource = Deno.readTextFileSync(
+  new URL("../../../../src/features/auth/LoginShowcase.tsx", import.meta.url),
 ).replace(/\r\n/g, "\n");
 
 const surferSource = Deno.readTextFileSync(
@@ -61,10 +71,11 @@ Deno.test("Option 2 Login integrates CollectionSurfer in Light Atelier Mode with
   );
 });
 
-Deno.test("Option 2 Login isolates the floating glass auth card, remains scrollable on short desktops, and validates internal redirect", () => {
+Deno.test("Option 2 Login isolates the floating glass auth card, scrolls with the document, and validates internal redirect", () => {
   assertEquals(loginSource.includes('data-surfer-ignore="true"'), true);
   assertEquals(loginSource.includes("onWheel={(e) => e.stopPropagation()}"), true);
-  assertEquals(loginSource.includes("overflow-y-auto overscroll-contain"), true);
+  // The page is a long document: no fixed inner scroller that the wheel cannot reach over the runway
+  assertEquals(loginSource.includes("overflow-y-auto"), false);
   assertEquals(loginSource.includes("lg:overflow-hidden"), false);
   assertEquals(loginSource.includes("bg-card/95"), true);
   assertEquals(loginSource.includes("transition-all"), false);
@@ -81,6 +92,41 @@ Deno.test("Option 2 Login preserves all multi-tenant auth, 5-free-shoots RPC enr
   assertEquals(loginSource.includes('id="password-input"'), true);
   assertEquals(loginSource.includes('new Event("workspace-refresh")'), true);
   assertEquals(loginSource.includes("5 Free Shoots on Enrollment"), true);
+});
+
+Deno.test("Login workflow board replays a real shoot: pose 1 alone first, a failed back check retried, six frames delivered", () => {
+  assertEquals([...SHOOT_FRAMES], [
+    "Full Front",
+    "Turning",
+    "Back",
+    "Signature Reference",
+    "Face + Details",
+    "Product Highlight",
+  ]);
+  const run = Array.from({ length: SHOOT_TICKS }, (_, tick) => shootAt(tick));
+  assertEquals(
+    run.map((board) => board.step).filter((step, i, steps) => step !== steps[i - 1]).slice(0, 5),
+    ["upload", "analyse", "plan", "generate", "check"],
+  );
+  // Pose 1 anchors the set: nothing else starts until it is delivered
+  for (const board of run.filter((board) => board.stages[0] !== "delivered")) {
+    assertEquals(board.stages.slice(1).every((stage) => stage === "queued"), true);
+  }
+  // A frame is delivered only straight after a check, and never goes back
+  for (let frame = 0; frame < SHOOT_FRAMES.length; frame++) {
+    const first = run.findIndex((board) => board.stages[frame] === "delivered");
+    assertEquals(run[first - 1].stages[frame], "checking");
+    assertEquals(run.slice(first).every((board) => board.stages[frame] === "delivered"), true);
+  }
+  assertEquals(
+    run.filter((board) => board.stages.includes("retrying")).map((board) => board.stages.indexOf("retrying")),
+    [RETRIED_FRAME],
+  );
+  assertEquals(run.at(-1)!.delivered, SHOOT_FRAMES.length);
+  assertEquals(shootAt(SHOOT_TICKS).step, "upload");
+  assertEquals(loginSource.includes("<LoginShowcase"), true);
+  assertEquals(showcaseSource.includes("useReducedMotion"), true);
+  assertEquals(showcaseSource.includes("transition-all"), false);
 });
 
 Deno.test("CollectionSurfer repeats short collections, decouples embedded scroll, and respects Hallmark rules", () => {

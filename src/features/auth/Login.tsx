@@ -1,6 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type MouseEvent } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { useReducedMotion } from "framer-motion";
 import {
+  ArrowDown,
   ArrowRight,
   BookOpen,
   CheckCircle2,
@@ -17,6 +19,20 @@ import { CollectionSurfer } from "../../components/ui/collection-surfer";
 import { getErrorMessage } from "../../lib/errors";
 import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
 import { supabase } from "../../lib/supabase";
+import { LoginShowcase } from "./LoginShowcase";
+
+const SECTIONS = [
+  ["workflow", "How a shoot runs"],
+  ["frames", "Six frames"],
+  ["rules", "Product rules"],
+  ["pricing", "Pricing"],
+];
+
+const HERO_FACTS = [
+  ["6", "frames in every shoot"],
+  ["3:4", "at 2K, 1536 × 2048"],
+  ["2", "product photos required"],
+];
 
 interface LoginProps {
   redirect?: string;
@@ -25,6 +41,7 @@ interface LoginProps {
 export function Login({ redirect }: LoginProps) {
   const { signIn, signUp } = useFirebaseAuth();
   const navigate = useNavigate();
+  const scrollBehavior = useReducedMotion() ? "auto" : "smooth";
   const [searchParams] = useSearchParams();
   const rawRedirect = redirect || searchParams.get("redirect") || "";
   const targetRedirect =
@@ -87,122 +104,114 @@ export function Login({ redirect }: LoginProps) {
     }
   };
 
+  const jumpTo = (id: string) => (event: MouseEvent) => {
+    event.preventDefault();
+    document.getElementById(id)?.scrollIntoView({ behavior: scrollBehavior });
+  };
+
+  // The page's Sign in and Start free buttons bring the card back and put the cursor in it.
+  const openAuth = (next: "signin" | "signup") => {
+    setMode(next);
+    setError("");
+    document
+      .getElementById("auth-card")
+      ?.scrollIntoView({ behavior: scrollBehavior, block: "center" });
+    requestAnimationFrame(() =>
+      document
+        .getElementById(next === "signup" ? "store-name-input" : "email-input")
+        ?.focus({ preventScroll: true }),
+    );
+  };
+
   return (
     <main className="relative min-h-screen bg-background text-on-background selection:bg-primary/15 selection:text-primary">
-      {/* Layer 0: Full-Viewport 3D Collection Surfer Runway (Default Magnetic + Glide) */}
-      <CollectionSurfer
-        variant="magnetic"
-        autoPlay={true}
-        autoPlaySpeed={46}
-        showOverlays={false}
-        perspectiveOrigin="16% 22%"
-      />
+      {/* Layer 0: 3D Collection Surfer Runway (Default Magnetic + Glide), pinned behind the hero.
+          The zero-height wrapper lets the page scroll over it with the document. */}
+      <div className="h-0" aria-hidden="true">
+        <CollectionSurfer
+          variant="magnetic"
+          autoPlay={true}
+          autoPlaySpeed={46}
+          showOverlays={false}
+          perspectiveOrigin="16% 22%"
+        />
+      </div>
 
       {/* Layer 1: Warm Daylight Atelier Scrims (Preserves Center 3D Runway Clarity & Text Contrast) */}
       <div className="pointer-events-none fixed inset-0 z-10 bg-gradient-to-r from-background/95 via-background/60 to-background/35" />
       <div className="pointer-events-none fixed inset-0 z-10 bg-gradient-to-b from-background/80 via-transparent to-background/85" />
 
-      {/* Layer 2: Floating Light Atelier Interface */}
-      <div className="pointer-events-none fixed inset-0 z-20 overflow-y-auto overscroll-contain">
-        <div className="mx-auto grid min-h-screen max-w-[1560px] items-stretch lg:grid-cols-[1.08fr_0.92fr]">
-          {/* Left Hero Section: Floating Editorial Overlay on top of the 3D Runway */}
-          <section className="hidden flex-col justify-between p-10 lg:flex xl:p-14">
-            {/* Top Bar: Brand Identity */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="pointer-events-auto inline-flex items-center gap-3.5 rounded-2xl border border-outline-variant/60 bg-card/90 px-4 py-2.5 backdrop-blur-xl">
-                <img
-                  src="/logo.png"
-                  alt="Youthnic"
-                  className="h-11 w-11 object-contain"
-                />
-                <div>
-                  <span className="font-syne text-xl font-bold tracking-tight text-on-surface">
-                    Youthnic
-                  </span>
-                  <span className="block text-xs font-semibold text-primary">
-                    AI Studio Atelier
-                  </span>
-                </div>
-              </div>
+      {/* Layer 2: The page, scrolling with the document */}
+      <div className="relative z-20">
+        <header className="sticky top-0 z-30 border-b border-outline-variant/40 bg-background/85 backdrop-blur-xl">
+          <div className="mx-auto flex h-16 max-w-[1560px] items-center justify-between gap-4 px-5 sm:px-8 lg:px-10 xl:px-14">
+            <div className="flex items-center gap-2.5">
+              <img src="/logo.png" alt="" className="h-9 w-9 object-contain" />
+              <span className="whitespace-nowrap font-syne text-lg font-bold tracking-tight text-on-surface">
+                Youthnic{" "}
+                <span className="font-manrope text-sm font-semibold text-primary">
+                  AI Studio
+                </span>
+              </span>
             </div>
+            <nav
+              aria-label="On this page"
+              className="hidden items-center gap-7 text-sm font-semibold text-secondary md:flex"
+            >
+              {SECTIONS.map(([id, label]) => (
+                <a
+                  key={id}
+                  href={`#${id}`}
+                  onClick={jumpTo(id)}
+                  className="transition-colors hover:text-on-surface"
+                >
+                  {label}
+                </a>
+              ))}
+            </nav>
+            <div className="flex items-center gap-4 text-sm font-semibold">
+              <Link
+                to="/docs"
+                className="hidden text-secondary transition-colors hover:text-on-surface sm:inline"
+              >
+                Docs
+              </Link>
+              <button
+                type="button"
+                onClick={() => openAuth("signin")}
+                className="cursor-pointer whitespace-nowrap rounded-full bg-on-surface px-4 py-2 text-inverse-on-surface transition-colors hover:bg-primary"
+              >
+                Sign in
+              </button>
+            </div>
+          </div>
+        </header>
 
-            {/* Center-Left Editorial Headline & Studio Telemetry */}
-            <div className="my-auto max-w-xl py-6">
-              <h1 className="font-syne text-4xl font-extrabold leading-[1.06] tracking-tighter text-on-surface xl:text-[3.4rem]">
-                One product.
+        {/* Hero: the headline and the auth card over the runway */}
+        <section className="pointer-events-none">
+          <div className="mx-auto grid min-h-[calc(100svh-4rem)] max-w-[1560px] gap-x-10 gap-y-8 px-5 pb-10 pt-8 sm:px-8 lg:grid-cols-[1.08fr_0.92fr] lg:grid-rows-[1fr_auto] lg:px-10 lg:pb-12 lg:pt-10 xl:px-14">
+            <div className="pointer-events-auto self-center lg:col-start-1 lg:row-start-1">
+              <h1 className="font-syne text-[clamp(2.6rem,5.6vw,5.5rem)] font-bold leading-[0.98] tracking-tighter text-on-surface">
+                Two photos in.
                 <br />
-                One model.
-                <br />
-                <span className="text-primary">One perfect shoot.</span>
+                Six frames out.
               </h1>
-
-              <p className="mt-4 max-w-lg text-base font-medium leading-relaxed text-secondary">
-                Transform product photos into high-fashion e-commerce catalog
-                shoots. Locked product truth, natural studio lighting, and
-                automated CV QA across every frame.
-              </p>
-
-              {/* Commercial Pricing Transparency */}
-              <div className="mt-6 inline-flex flex-wrap items-center gap-2.5 rounded-2xl border border-outline-variant/60 bg-card/90 px-4 py-3 text-xs text-secondary backdrop-blur-xl">
-                <div className="flex items-center gap-1.5 font-bold text-on-surface">
-                  <CheckCircle2 className="h-4 w-4 text-success" />
-                  <span>5 Free Shoots on Enrollment</span>
-                </div>
-                <span className="text-outline-variant" aria-hidden="true">
-                  /
-                </span>
-                <span>
-                  Commercial rate:{" "}
-                  <b className="font-mono tabular-nums text-on-surface">
-                    $1.00
-                  </b>{" "}
-                  / shoot (High Reasoning) +{" "}
-                  <b className="font-mono tabular-nums text-on-surface">
-                    $0.50
-                  </b>{" "}
-                  with CV QA
-                </span>
-              </div>
-            </div>
-
-            {/* Bottom Status Footer */}
-            <div className="flex items-center justify-between border-t border-outline-variant/50 pt-4 text-xs text-secondary">
-              <p className="font-medium">
-                Youthnic AI Studio, Production Cloud Portal
+              <p className="mt-5 max-w-xl text-base font-medium leading-relaxed text-secondary sm:text-lg">
+                Upload the front and back of a garment. Youthnic AI Studio
+                reads it, plans a six-pose shoot and delivers catalog images
+                that keep the cut, print and colour of the product you
+                uploaded.
               </p>
             </div>
-          </section>
 
-          {/* Right Section: Floating Light Atelier Auth Card */}
-          <section className="grid min-h-screen place-items-center p-4 sm:p-8 lg:p-10">
+            {/* Floating Light Atelier Auth Card */}
             <div
+              id="auth-card"
               data-surfer-ignore="true"
               onWheel={(e) => e.stopPropagation()}
-              className="pointer-events-auto w-full max-w-[485px] rounded-[34px] border border-outline-variant/60 bg-surface-container-low/65 p-1.5 backdrop-blur-2xl"
+              className="pointer-events-auto w-full max-w-[485px] self-center justify-self-center rounded-[34px] border border-outline-variant/60 bg-surface-container-low/65 p-1.5 backdrop-blur-2xl lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:justify-self-end"
             >
               <div className="w-full rounded-[28px] border border-outline-variant/45 bg-card/95 p-7 backdrop-blur-2xl transition-colors sm:p-9">
-                {/* Mobile Header */}
-                <div className="mb-6 flex items-center justify-between gap-2 lg:hidden">
-                  <div className="flex items-center gap-2.5">
-                    <img
-                      src="/logo.png"
-                      alt="Youthnic"
-                      className="h-10 w-10 object-contain"
-                    />
-                    <div>
-                      <span className="font-syne text-lg font-bold text-on-surface">
-                        Youthnic
-                      </span>
-                      <span className="block text-xs font-semibold text-primary">
-                        AI Studio
-                      </span>
-                    </div>
-                  </div>
-                  <span className="rounded-full border border-outline-variant/50 bg-success-surface px-2.5 py-1 text-xs font-semibold text-success">
-                    5 Free Shoots
-                  </span>
-                </div>
-
                 {/* Mode Switcher Tabs */}
                 <div className="grid grid-cols-2 rounded-2xl border border-outline-variant/40 bg-surface-container-low p-1.5">
                   <button
@@ -234,7 +243,7 @@ export function Login({ redirect }: LoginProps) {
                     }`}
                   >
                     <span>Start Free Studio</span>
-                    <span className="ml-1.5 rounded-full bg-success px-1.5 py-0.5 text-[10px] font-semibold text-on-primary">
+                    <span className="ml-1.5 hidden rounded-full bg-success px-1.5 py-0.5 text-[10px] font-semibold text-on-primary sm:inline">
                       5 Free
                     </span>
                   </button>
@@ -424,7 +433,41 @@ export function Login({ redirect }: LoginProps) {
                 </div>
               </div>
             </div>
-          </section>
+
+            <div className="pointer-events-auto lg:col-start-1 lg:row-start-2">
+              <dl className="grid max-w-xl grid-cols-3 gap-6 border-t border-outline-variant/60 pt-5">
+                {HERO_FACTS.map(([value, label]) => (
+                  <div key={label} className="flex flex-col-reverse">
+                    <dt className="mt-1 text-xs font-medium leading-snug text-secondary">
+                      {label}
+                    </dt>
+                    <dd className="font-syne text-3xl font-bold tracking-tighter text-on-surface xl:text-4xl">
+                      {value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+                <span className="inline-flex items-center gap-1.5 font-bold text-on-surface">
+                  <CheckCircle2 className="h-4 w-4 text-success" />
+                  5 Free Shoots on Enrollment
+                </span>
+                <a
+                  href="#workflow"
+                  onClick={jumpTo("workflow")}
+                  className="inline-flex items-center gap-1.5 font-semibold text-primary underline-offset-4 hover:underline"
+                >
+                  See how a shoot runs
+                  <ArrowDown className="h-4 w-4" />
+                </a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Below the fold the runway is covered, so its cursor tracking is parked */}
+        <div data-surfer-ignore="true">
+          <LoginShowcase onStart={openAuth} />
         </div>
       </div>
     </main>
