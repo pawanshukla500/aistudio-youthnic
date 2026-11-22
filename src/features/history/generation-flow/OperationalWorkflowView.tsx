@@ -80,6 +80,8 @@ type PoseGroup = {
   versions: AssetVersion[];
   reviews: any[];
   qa?: { status?: string; dna?: Record<string, unknown> | null } | null;
+  /** queued / processing / cancelling while a (re-)generation of this pose runs. */
+  busy?: string | null;
 };
 type WorkflowData = Record<string, any> & {
   item: Record<string, any> & {
@@ -250,7 +252,8 @@ function posesForBoard(data: { references?: Array<Record<string, unknown>>; sess
         fileName: String(reference.filename || ""),
       })),
       model: String(asset?.model || ""),
-      status: poseStatus(asset, String(asset?.preview_url || asset?.original_url || asset?.final_asset_url || "")),
+      // A running re-generation keeps the prior version as `current`; the card must still show it is working.
+      status: pose.busy || poseStatus(asset, String(asset?.preview_url || asset?.original_url || asset?.final_asset_url || "")),
       error: String(asset?.error || (String(asset?.generation_status || "") === "failed" ? "This pose failed. Re-generate to try again." : "")),
       versionCount: versions.length || (asset ? 1 : 0),
       versions: versions.slice(0, 4).map((version) => ({
