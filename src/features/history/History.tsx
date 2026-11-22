@@ -37,6 +37,7 @@ import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import { ActionDialog } from "../../components/ui/ActionDialog";
 import { generationDeliveryProgress } from "../../lib/generationProgress";
+import { livePoseNumber } from "../../lib/generationStatus";
 import { formatDuration, type PoseVersion } from "../../lib/poseVersions";
 
 type PendingHistoryAction = {
@@ -2424,7 +2425,9 @@ export function History() {
                 <div className="hidden lg:block">
                   <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-secondary">
                     <span>
-                      {job.status === "processing" ? `Pose ${Math.max(1, job.currentPose || delivery.resolvedPoses + 1)} · ` : ""}
+                      {job.status === "processing" && livePoseNumber(job.currentPose, delivery.resolvedPoses, delivery.totalPoses)
+                        ? `Pose ${livePoseNumber(job.currentPose, delivery.resolvedPoses, delivery.totalPoses)} · `
+                        : ""}
                       {delivery.imagesStored} / {delivery.totalPoses} images
                     </span>
                     <span className="font-mono font-bold text-on-surface">{progress}%</span>
