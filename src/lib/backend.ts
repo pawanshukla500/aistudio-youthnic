@@ -9,6 +9,7 @@ import { buildPoseVersions, summarizeRegenerations } from "./poseVersions";
 import { isQueueCompatiblePosePlan } from "./posePlanCompatibility";
 import { ANALYSIS_RUN_KINDS, GENERATION_RUN_KIND, QA_RUN_KIND, attributeJobCostRuns, rollupSessionCost, type CostRun } from "./sessionCost";
 import { captureClientSentryException } from "./sentry";
+import { analyzeUntilSettled } from "./analysisPending";
 
 export type Id<_Table extends string> = string;
 export type BackendEndpoint = string;
@@ -994,7 +995,11 @@ async function mutateBackend(
 ) {
   switch (endpoint) {
     case api.analysis.analyzeReferences:
-      return invokeAppApi("studio.analyze", args, options);
+      return analyzeUntilSettled(
+        (callArgs, signal) => invokeAppApi("studio.analyze", callArgs, signal ? { signal } : options),
+        args,
+        options,
+      );
     case api.dna.extract:
       return invokeAppApi("dna.extract", args, options);
     case api.dna.approve:

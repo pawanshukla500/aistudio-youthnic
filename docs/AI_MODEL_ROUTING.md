@@ -57,7 +57,7 @@ message naming the secret (`META_MODEL_API_KEY`, `ZAI_API_KEY`, `OPENAI_API_KEY`
 
 ## Reasoning effort for product analysis
 
-Product analysis is one large multimodal JSON call that must finish inside Studio's 360s wait (and Railway's 280s gateway budget).
+Product analysis is one large multimodal JSON call. In the Studio it runs in a detached flight with a 600s budget (`STUDIO_ANALYSIS_FLIGHT_BUDGET_MS`), not inside one request.
 - **Meta Muse Spark** (`muse-spark-1.3-contributor` / `1.2-contributor` / `1.3` / `1.2`), **Z.ai GLM 5.3 Flash** (`glm-5.3-flash` / `glm-5.3-flashx`), **OpenAI GPT 6.1 Terra** (`gpt-6.1-terra`), and **OpenAI GPT 5.6 Luna** (`gpt-5.6-luna`) default to **medium** thinking (Meta/Z.ai/Terra) or **low** (Luna) and preserve explicit **high** or **medium** thinking during `product_truth` analysis & pose planning (`clampProductTruthThinking`) for deep chain-of-thought reasoning across garment construction, Farshi/saree drape taxonomy, styling, and 6-pose choreography.
 - **Z.ai GLM 5.3 Flash** uses forced thinking (`thinking: { type: "enabled" }`, `temperature: 1`, `top_p: 0.95`, `response_format: { type: "json_object" }`), mapping internal `low` -> `low`, `medium`/`high` -> `high` ("Enhanced Reasoning"), and `max` -> `max`, with 50 concurrent requests on `glm-5.3-flash` and automatic sibling failover to `glm-5.3-flashx` (20x concurrency, 200 tok/s).
 - Legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, `gemini-*`) run at **low** reasoning (or lowest supported level; explicit `"none"` or `"minimal"` is preserved; Qwen runs with thinking off).
@@ -77,8 +77,9 @@ The pose planning graph (`POST /api/v1/plan`) makes no model call and has no pur
 
 ## Time budget (product analysis)
 
-- Studio's client waits `STUDIO_ANALYZE_TIMEOUT_MS` (360s). The gateway budget is `ANALYZE_PROXY_BUDGET_MS` (280s) inside Railway's 300s proxy ceiling, holding 5s back inside the chain (`VISION_GATEWAY_RESERVE_MS`).
-- While a fallback is still to come, the current hop keeps one `PRODUCT_TRUTH_FALLBACK_RESERVE_MS` (60s) window, guaranteeing Meta or Z.ai timeout still leaves OpenAI GPT 6.1 Terra its 60s medium-thinking window.
+- Studio analysis runs in a flight detached from the HTTP request (`lib/studioAnalysisFlights.ts`). The chain gets `STUDIO_ANALYSIS_FLIGHT_BUDGET_MS` (600s), holding 5s back (`VISION_GATEWAY_RESERVE_MS`). Each request waits until `ANALYZE_PROXY_BUDGET_MS` (280s, inside Railway's 300s proxy cut), then answers `analysisPending`; the Studio asks again with `resumeAnalysis` and joins the same flight. Design and production data: [docs/specs/studio-analysis-fallback-window.md](specs/studio-analysis-fallback-window.md).
+- In that flight the primary may run `PRODUCT_TRUTH_PRIMARY_WINDOW_MS` (240s; Meta's slowest success in 14 days was 224s), so after a Meta timeout Z.ai GLM 5.3 Flash (p50 202s) gets about 285s.
+- While a fallback is still to come, the current hop keeps one `PRODUCT_TRUTH_FALLBACK_RESERVE_MS` (60s) window for the next one. Catalog preflight keeps the 280s request budget (`productTruthRemainingBudgetMs`).
 - A primary that fails fast (a 404, 429 rate-limit, or missing key) hands the next model nearly the whole budget.
 
 ## Errors people see
