@@ -773,13 +773,19 @@ export function CatalogPoseFlow({
   }, []);
   useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
 
+  const copySeq = useRef(0);
   const copyText = useCallback((value: string, done: string, failed: string) => {
+    // Only the latest copy may post a notice: a late result of an earlier copy must not overwrite it.
+    const copyId = ++copySeq.current;
     let settled = false;
     const finish = (copied: boolean) => {
       if (settled) return;
       settled = true;
-      flash(copied ? done : failed);
+      window.clearTimeout(giveUp);
+      if (copyId === copySeq.current) flash(copied ? done : failed);
     };
+    // A clipboard write that never answers after a failed fallback still gets a verdict.
+    const giveUp = window.setTimeout(() => finish(false), 3000);
     const command = () => {
       try {
         const field = document.createElement("textarea");

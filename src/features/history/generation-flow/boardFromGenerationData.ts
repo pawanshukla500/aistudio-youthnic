@@ -80,7 +80,9 @@ export function boardFromGenerationData(data: Loose | null | undefined): { refer
       const completedMs = completedStamp ? Date.parse(String(completedStamp)) : NaN;
       const withinRegenerateWindow = Number.isFinite(completedMs) && Date.now() - completedMs < REGENERATE_WINDOW_MS;
       const poseEligibleStatus = poseStatus === "failed" || (poseStatus === "completed" && Boolean(finalOutputUrl));
-      const verdict = finalOutputUrl ? qaVerdict(String(pose.qa_status || ""), pose.qa_payload?.dna) : null;
+      // Only a completed pose row matches the image shown: after a failed re-generation the row keeps the
+      // earlier image but its QA payload belongs to the failed attempt.
+      const verdict = finalOutputUrl && poseStatus === "completed" ? qaVerdict(String(pose.qa_status || ""), pose.qa_payload?.dna) : null;
       return {
         poseIndex: Number(pose.pose_index),
         title: String(pose.title || planned?.title || `Pose ${pose.pose_index}`),

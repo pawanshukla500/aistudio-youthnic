@@ -337,6 +337,8 @@ Deno.test("the flow board avoids React Flow's built-in node styles, keeps a fit 
   assert(flow.includes("window.clearTimeout(noticeTimer.current);"));
   // A slow clipboard write that later succeeds is not reported as failed by the 400 ms fallback.
   assert(flow.includes("if (command()) finish(true);"));
+  // A late result of an earlier copy cannot overwrite a newer copy's notice.
+  assert(flow.includes("if (copyId === copySeq.current) flash(copied ? done : failed);"));
   // The trace parser keeps the QA payload, so a trace board shows the DNA score instead of "Not checked".
   assert(read("graph/buildGenerationGraph.ts").includes("qa_payload: p.qa_payload ?? null,"));
   // The admin flow view relies on the board header instead of stacking its own.
