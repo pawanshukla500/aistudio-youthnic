@@ -127,7 +127,7 @@ def test_any_reference_person_adopts_pose_4_past_the_suitability_verdict():
 
 
 @pytest.mark.parametrize("pose_family", ["long_kurti", "saree_classic"])
-def test_long_reference_directive_fits_edge_900_char_cut(pose_family):
+def test_long_reference_directive_fits_edge_directive_cut(pose_family):
     result = plan({
         **SEATED,
         "description": "seated upright with the torso turned slightly, " * 12,
@@ -145,7 +145,7 @@ def test_long_reference_directive_fits_edge_900_char_cut(pose_family):
 
 
 def test_astral_text_directive_fits_edge_utf16_cut():
-    # Edge cuts at 900 UTF-16 units; each emoji is two units but one Python code point.
+    # Edge cuts at MAX_DIRECTIVE UTF-16 units; each emoji is two units but one Python code point.
     emoji = "💃"
     result = plan({
         **SEATED,
@@ -333,6 +333,11 @@ def test_held_cup_clause_is_dropped_so_t94_pose_4_adopts_first_time():
     assert result["validation"] == {"attempts": 1, "errors": []} and result["steps"] == PLANNED_STEPS
     assert pose_plan_agents.without_held_objects("Phone raised; hand on hip. Sunglasses up") == "hand on hip"
     assert pose_plan_agents.without_held_objects("leaning on a bottle green pillar") == "leaning on a bottle green pillar"
+    # A drink glass is held; glass furniture and bangles are not, so they never force Pose 4 product-led.
+    assert pose_plan_agents.without_held_objects("one arm raising a glass near the mouth, head in profile") == "head in profile"
+    glass_seat = plan({"posture": "seated", "description": "seated, wrists in glass bangles", "seatOrSupport": "glass-top cafe table"})
+    assert glass_seat["slots"]["creative"]["source"] == "reference"
+    assert "Rest on the glass-top cafe table" in glass_seat["slots"]["creative"]["directive"]
     # A held object and a lifted foot in one clause: dropped, and the step still grounds.
     lifted = plan({"posture": "standing", "description": "weight on one hip, bag in hand with one foot lifted"})["slots"]["creative"]
     assert lifted["source"] == "reference" and "bag" not in lifted["directive"] and "lifted" not in lifted["directive"]

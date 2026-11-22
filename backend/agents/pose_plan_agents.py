@@ -42,14 +42,17 @@ DEFAULT_EXPRESSION_PLAN = {
     "rationale": "",
 }
 MAX_TEXT = 420
-# posePlanning.ts MAX_REFERENCE_DIRECTIVE (normalizeSlotPlan / storedPosePlanning keep text(raw.directive, 900)).
-MAX_DIRECTIVE = 900
+# posePlanning.ts MAX_REFERENCE_DIRECTIVE (normalizeSlotPlan / storedPosePlanning keep text(raw.directive, 1200)).
+MAX_DIRECTIVE = 1200
 MAX_PLAN_ATTEMPTS = 2
 
 FORCED_EXPRESSION = re.compile(r"grin|grinning|toothy|laughing|forced smile|wink|pout|duck face|tongue", re.I)
 # "bottle green" is a colour, not a held bottle (profiles.ts FORBIDDEN_HELD_OBJECT_CORE bottles?(?!\s*green)).
+# A drink glass is held; a glass-top table, glass wall or glass bangle is not (posePlanning.ts HELD_OBJECT).
 HELD_OBJECT = re.compile(
-    r"\b(?:(?:cup|mug|coffee|phone|bag|handbag|purse|sunglasses|umbrella|bouquet|flower)s?|bottles?(?!\s*green))\b", re.I
+    r"\b(?:(?:cup|mug|coffee|phone|bag|handbag|purse|sunglasses|umbrella|bouquet|flower|tumbler|straw|drink)s?"
+    r"|bottles?(?!\s*green)|glass(?:es)?(?![-\s]?(?:top|block|wall|window|door|panel|front|bangle|bead)))\b",
+    re.I,
 )
 # JavaScript's \s / String.prototype.trim() set, so _text() collapses exactly what posePlanning.ts text() does.
 _JS_WHITESPACE = "\t\n\v\f\r \u00a0\u1680" + "".join(map(chr, range(0x2000, 0x200B))) + "\u2028\u2029\u202f\u205f\u3000\ufeff"
@@ -111,7 +114,7 @@ def _js_string(value: Any) -> str:
 
 
 def _u16len(value: str) -> int:
-    """JS String.length: UTF-16 code units, which Edge's text() and 900-char cut count."""
+    """JS String.length: UTF-16 code units, which Edge's text() and directive cut count."""
     return len(value.encode("utf-16-le", "surrogatepass")) // 2
 
 
@@ -277,7 +280,8 @@ def _fit_directive(pose: Dict[str, str], compose: Callable[[str, str], str]) -> 
     """referenceSlotDirective's MAX_REFERENCE_DIRECTIVE budget.
 
     On overflow the free-text body description and signature share what is left, so the fixed
-    seat, showcase, quarantine (and family) sentences survive Edge's 900-char cut.
+    seat, showcase, quarantine (and family) sentences survive Edge's MAX_REFERENCE_DIRECTIVE cut.
+    A cut field ends on a whole word (posePlanning.ts clipWords).
     """
     _, description, signature, _ = _directive_inputs(pose)
     directive = compose(description, signature)
@@ -286,9 +290,18 @@ def _fit_directive(pose: Dict[str, str], compose: Callable[[str, str], str]) -> 
     budget = max(0, MAX_DIRECTIVE - (_u16len(directive) - _u16len(description) - _u16len(signature)))
     signature_len = min(_u16len(signature), max(budget // 2, budget - _u16len(description)))
     return _u16slice(compose(
-        _u16slice(description, budget - signature_len).rstrip(_JS_WHITESPACE),
-        _u16slice(signature, signature_len).rstrip(_JS_WHITESPACE),
+        _clip_words(description, budget - signature_len).rstrip(_JS_WHITESPACE),
+        _clip_words(signature, signature_len).rstrip(_JS_WHITESPACE),
     ), MAX_DIRECTIVE)
+
+
+def _clip_words(value: str, end: int) -> str:
+    """posePlanning.ts clipWords: a cut free-text field ends on a whole word, never mid-word."""
+    if _u16len(value) <= end:
+        return value
+    cut = _u16slice(value, end)
+    space = cut.rfind(" ")
+    return (cut[:space] if space > 0 else cut).rstrip(_JS_WHITESPACE)
 
 
 def reference_slot_directive(slot: str, pose: Dict[str, str]) -> str:

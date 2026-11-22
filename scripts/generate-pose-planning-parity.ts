@@ -144,6 +144,26 @@ const rawPoses: Record<string, unknown> = {
     cameraAngle: "eye-level slightly three-quarter, medium full seated framing",
     suitableForProduct: "yes",
   },
+  // A glass-top table and glass bangles are not held; the tumbler and straw clause is.
+  held_glass_furniture: {
+    posture: "leaning",
+    description: "leaning on a glass-top table, wrists stacked with glass bangles, tumbler with a straw at the lips, chin lifted",
+    seatOrSupport: "glass-top cafe table",
+    suitableForProduct: "yes",
+  },
+  // T94 v39 analysis: with the 1200-character directive the whole body description fits (900 cut it mid-word);
+  // its held glass clause is dropped.
+  t94_v39_ledge: {
+    posture: "seated",
+    description: "Seated on a low wooden ledge with hips angled three-quarter, both legs extended forward and loosely crossed " +
+      "at the ankles, torso relaxed and slightly reclined against nothing, one arm bent raising a glass near the mouth, " +
+      "the other hand resting lightly on the seat beside the hip, head turned in profile",
+    seatOrSupport: "low maroon wooden ledge/bench at the base of the record-shelf wall",
+    distinctiveness: "signature",
+    signatureDescription: "shot like a friend snapped it",
+    cameraAngle: "eye-level, slightly three-quarter, roughly waist-up to knees framing with shallow depth of field",
+    suitableForProduct: "yes",
+  },
   // Every clause held: the posture word stands in; the signature splits on ";" and "." too.
   held_only: {
     posture: "standing",
@@ -203,7 +223,7 @@ const DIRECTIVE_POSE_IDS = [
   // A walk or lifted foot is grounded, never copied; Pose 4 carries the reference camera.
   "walking_yes", "leaning_foot_lifted", "standing_mid_stride", "seated_raised_heels", "t94_seated_unsuitable",
   // Clauses naming a held object never reach the directive.
-  "t94_seated_cup", "held_only", "held_bottle_green_lifted", "held_lifted_same_clause",
+  "t94_seated_cup", "held_only", "held_bottle_green_lifted", "held_lifted_same_clause", "t94_v39_ledge", "held_glass_furniture",
 ];
 
 const contexts: Record<string, PosePlanningContext> = {

@@ -6,6 +6,7 @@ import { buildGenerationMemory, formatGenerationMemoryBrief } from "../lib/gener
 import { withoutExpressionWords } from "../lib/expressionDirection.ts";
 import {
   localPosePlanningDecision,
+  MAX_REFERENCE_DIRECTIVE,
   normalizeExpressionPlan,
   normalizeReferencePose,
   type PosePlanning,
@@ -661,7 +662,8 @@ Deno.test("pose QA sanitizes the caller's directive and exempts low-posture fold
 
   const long = matchLine(buildPoseQaPrompt({ ...qaArgs, referencePoseMatch: { posture: "leaning", directive: `Lean ${"softly ".repeat(400)}` } }));
   const directive = long.split("leaning posture (")[1].split("). Do not fail")[0];
-  assertEquals(directive.length, 900);
+  // Capped at the stored directive limit (a trailing space at the cut is trimmed).
+  assert(directive.length <= MAX_REFERENCE_DIRECTIVE && directive.length >= MAX_REFERENCE_DIRECTIVE - 1, String(directive.length));
 
   // No person to match means no match at all.
   assertEquals(buildPoseQaPrompt({ ...qaArgs, referencePoseMatch: { posture: "none", directive: "Stand." } }), buildPoseQaPrompt(qaArgs));

@@ -115,8 +115,9 @@ const MAX_TEXT = 420;
 const FROZEN_STEP =
   /\bwalk(?:s|ed|ing)?\b|\bstrode\b|\bmid[- ]?(?:stride|step)\b|\bstrid(?:e|es|ing)\b|\b(?:lifted|raised) (?:foot|feet|heels?)\b|\b(?:foot|feet|heels?) (?:lifted|raised)\b/i;
 /** Something held in the reference hands (pose_plan_agents.py HELD_OBJECT); "bottle green" is a colour. */
+// A drink glass is held; a glass-top table, glass wall or glass bangle is not.
 const HELD_OBJECT =
-  /\b(?:(?:cup|mug|coffee|phone|bag|handbag|purse|sunglasses|umbrella|bouquet|flower)s?|bottles?(?!\s*green))\b/i;
+  /\b(?:(?:cup|mug|coffee|phone|bag|handbag|purse|sunglasses|umbrella|bouquet|flower|tumbler|straw|drink)s?|bottles?(?!\s*green)|glass(?:es)?(?![-\s]?(?:top|block|wall|window|door|panel|front|bangle|bead)))\b/i;
 
 /**
  * Anything in the reference hands is never copied, so a clause naming it ("right elbow bent holding cup up
@@ -260,8 +261,19 @@ export function referenceAdoptionBlockReason(slot: AdoptableSlot, pose: Referenc
   return "";
 }
 
-/** Stored and planner directives keep at most this many characters (normalizeSlotPlan, storedPosePlanning). */
-export const MAX_REFERENCE_DIRECTIVE = 900;
+/**
+ * Stored and planner directives keep at most this many characters (normalizeSlotPlan, storedPosePlanning).
+ * The fixed seat, camera, quarantine and family sentences take ~800; 1200 leaves room for a full body description.
+ */
+export const MAX_REFERENCE_DIRECTIVE = 1200;
+
+/** A cut free-text field ends on a whole word ("crossed at the ankles", never "crossed at the a"). */
+function clipWords(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const cut = value.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return (space > 0 ? cut.slice(0, space) : cut).trimEnd();
+}
 
 export function referenceSlotDirective(slot: AdoptableSlot, pose: ReferencePose): string {
   // Held objects are dropped. A walk or lifted foot is never copied as written: that text is dropped and the slot grounds it.
@@ -298,8 +310,8 @@ export function referenceSlotDirective(slot: AdoptableSlot, pose: ReferencePose)
   const budget = Math.max(0, MAX_REFERENCE_DIRECTIVE - (directive.length - description.length - signature.length));
   const signatureLength = Math.min(signature.length, Math.max(Math.floor(budget / 2), budget - description.length));
   return compose(
-    description.slice(0, budget - signatureLength).trimEnd(),
-    signature.slice(0, signatureLength).trimEnd(),
+    clipWords(description, budget - signatureLength).trimEnd(),
+    clipWords(signature, signatureLength).trimEnd(),
   ).slice(0, MAX_REFERENCE_DIRECTIVE);
 }
 

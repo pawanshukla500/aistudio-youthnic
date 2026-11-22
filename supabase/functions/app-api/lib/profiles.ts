@@ -2564,7 +2564,9 @@ export const CONSISTENCY_RULES = [
 // keep a product-led Pose 4 and a full-body Pose 6.
 // v39 drops reference-description clauses that name a held object ("holding cup up near mouth") before
 // the Pose 4 directive is written; cached v38 plans failed validation on them and stayed product-led.
-export const ANALYSIS_VERSION = "generation-session-v39-held-object-clause";
+// v40 raises the stored Pose 4 directive cap from 900 to 1200 characters and cuts on a whole word, so the
+// reference body description is no longer clipped mid-word ("loosely crossed at the a.").
+export const ANALYSIS_VERSION = "generation-session-v40-full-reference-directive";
 
 export function smallHash(value: string) {
   let hash = 2166136261;
