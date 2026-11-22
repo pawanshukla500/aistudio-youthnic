@@ -26,6 +26,7 @@ import {
   normalizeAnalysis,
   posePlanningContextFor,
   sanitizeHeldObjectText,
+  referenceCropsAboveFeet,
   withoutHeldObjectClauses,
   type JsonRecord,
 } from "../lib/profiles.ts";
@@ -303,7 +304,7 @@ Deno.test("analysis prompt asks for referencePose, expressionPlan and the frame 
   assertEquals(prompt.includes("POSE 4 AND POSE 6 MATCH THE REFERENCE POSTURE"), false);
   assertStringIncludes(prompt, "Record body position and look only: never the clothing, face identity, hair, jewellery, or anything in the hands.");
   // v37: the reference look (camera, expression, gaze, hands) is recorded; objects in the hands never are.
-  assertStringIncludes(prompt, '"cameraAngle":"height, angle and distance of the shot","expression":"mouth and mood","gaze":"eye direction and head angle","hands":"hand gesture, never objects"');
+  assertStringIncludes(prompt, '"cameraAngle":"height, angle, distance and where the frame cuts the body (full length, or e.g. cut at mid-shin, feet out of frame)","expression":"mouth and mood","gaze":"eye direction and head angle","hands":"hand gesture, never objects"');
   assertStringIncludes(prompt, "expressionPlan sets the shoot's mood (attitude, energy, smile level).");
   assertStringIncludes(prompt, "Each face-visible pose then gets its OWN expression: a different gaze target, head angle and mouth");
   assertStringIncludes(prompt, "Never write the same 'soft smile, eyes to camera' for every frame");
@@ -842,4 +843,34 @@ Deno.test("the T94 v39 reference description fits whole; an over-long one is cut
   assert(long.length <= MAX_REFERENCE_DIRECTIVE);
   const body = long.split("seated posture: ")[1].split(". Rest on")[0];
   assert(/(?:^|\s)(?:torso|turned,|shoulders|soft)$/.test(body), body.slice(-24));
+});
+
+Deno.test("a STYLE REFERENCE cropped above the feet keeps Pose 4's feet out of frame; a full-length one does not", () => {
+  const pose4Prompt = (cameraAngle: string) => {
+    const normalized = normalizeAnalysis(t94Raw({
+      referencePose: { ...(t94Raw().referencePose as JsonRecord), cameraAngle, suitableForProduct: "yes" },
+    }), "kurti");
+    const pose = { ...normalized.posePlan[3], poseNumber: 4 };
+    const references = selectReferences(T94_REFERENCES, [], pose.id, String(normalized.productIdentity.garmentFamily), MAX_IMAGE_REFERENCES, pose.primaryReference);
+    return composeGenerationPrompt({
+      skuName: "T94-Kitkat-Kattha", productDetails: "Rust kattha cotton short kurti top", pose, references,
+      session: { productIdentity: normalized.productIdentity, creativeDirection: normalized.creativeDirection, modelIdentity: normalized.modelIdentity, posePlanning: normalized.posePlanning },
+      useStyleReferenceAsModelIdentity: true,
+    });
+  };
+  // T94 v40 needed a manual correction for this: the footwear-continuity lines widened Pose 4 to head-to-feet.
+  const cropped = pose4Prompt("eye-level, slightly three-quarter, cut at mid-shin with the feet out of frame");
+  assertStringIncludes(cropped, "the feet and footwear fall outside this frame, cut where the STYLE REFERENCE cuts (this frame only)");
+  // A crop never also asks for the complete posture (CodeAnt on #198); a full-length reference still does.
+  assertStringIncludes(cropped, "with the matched seated posture as far as the reference frame shows it");
+  assertStringIncludes(pose4Prompt("eye-level, slightly three-quarter, full length"), "with the complete matched seated posture");
+  assertEquals(pose4Prompt("eye-level, slightly three-quarter, full length").includes("footwear fall outside this frame"), false);
+  for (const camera of ["waist-up to knees framing", "knees-up, eye level", "cropped at the thighs", "shoes out of frame",
+    "eye level, frame cuts at mid-shin", "mid-thigh crop, shallow depth", "knee-length framing", "feet are out of frame"]) {
+    assert(referenceCropsAboveFeet(camera), camera);
+  }
+  for (const camera of ["eye-level, medium-full, slightly three-quarter distance", "full length head to toe", "low angle, feet planted", "full-length shot, waist height camera", "waist-level shot, full length"]) {
+    assertEquals(referenceCropsAboveFeet(camera), false, camera);
+  }
+  assertStringIncludes(buildCombinedAnalysisPrompt(promptArgs), "where the frame cuts the body");
 });
