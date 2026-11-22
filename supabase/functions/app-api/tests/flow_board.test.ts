@@ -52,6 +52,10 @@ Deno.test("the flow summary falls back to the estimate before a run has a cost, 
   assertEquals(summary.analysis, null);
   assertEquals(summary.run?.costUsd, 0.42);
   assertEquals(summary.run?.total, 6);
+  // A queued job stores actual_cost_usd = 0 until something is billed.
+  assertEquals(flowSummaryFrom({ job: { job_id: "job_3", status: "queued", actual_cost_usd: 0, estimated_cost_usd: 0.9 } }).run?.costUsd, 0.9);
+  assertEquals(flowSummaryFrom({ job: { job_id: "job_4", actual_cost_usd: 0 } }).run?.costUsd, 0);
+  assertEquals(flowSummaryFrom({ job: { job_id: "job_5" } }).run?.costUsd, null);
   assertEquals(flowSummaryFrom({}).run, null);
   assertEquals(settingsLine(null), "");
 });

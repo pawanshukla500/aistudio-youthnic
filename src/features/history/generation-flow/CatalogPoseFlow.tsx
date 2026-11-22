@@ -724,7 +724,8 @@ export function CatalogPoseFlow({
     layout: `grouped-${LAYOUT_VERSION}`,
     references: references.map((item) => [item.id, item.role, item.fileName, item.imageUrl]),
     poses: poses.map((item) => [item.poseIndex, item.title, item.prompt, item.imageUrl, item.referenceRoles, item.sent, item.model, item.status, item.canRegenerate, item.qaLabel, item.versions?.map((version) => [version.version, version.imageUrl, version.status])]),
-    analysis: summary?.analysis ? [summary.analysis.model, summary.analysis.facts.length, summary.analysis.plan.length] : null,
+    // The whole summary: a new analysis version or edited facts with the same counts must redraw the card.
+    analysis: summary?.analysis ?? null,
   });
   const seen = useRef("");
 

@@ -94,6 +94,9 @@ export function flowSummaryFrom(args: { sessionData?: Loose | null; job?: Loose 
     }
     : null;
   const imageModel = String(job.model || "");
+  // A queued job stores actual_cost_usd = 0 until something is billed; show the estimate until then.
+  const actualCost = numberOrNull(job.actual_cost_usd);
+  const estimatedCost = numberOrNull(job.estimated_cost_usd);
   const run = job.job_id || imageModel
     ? {
       model: imageModel,
@@ -101,7 +104,7 @@ export function flowSummaryFrom(args: { sessionData?: Loose | null; job?: Loose 
       aspectRatio: String(job.aspect_ratio || ""),
       imageSize: String(job.image_size || ""),
       quality: String(job.quality || ""),
-      costUsd: numberOrNull(job.actual_cost_usd) ?? numberOrNull(job.estimated_cost_usd),
+      costUsd: actualCost !== null && actualCost > 0 ? actualCost : estimatedCost ?? actualCost,
       done: Number(job.completed_poses || 0),
       total: Number(job.total_poses || plan.length || 0),
       poseQa: job.pose_qa === true,
