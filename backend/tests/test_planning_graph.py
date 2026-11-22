@@ -20,6 +20,8 @@ SEATED = {
 PLANNED_STEPS = ["analyze_references", "recall_outcomes", "plan_poses", "plan_expression", "validate_plan"]
 POSE_IDS = {"full_front", "angled", "back", "creative", "closeup", "showcase"}
 QUARANTINE = "never the reference clothing, face, hair or anything in the hands (jewellery follows the styling plan)"
+HIGHLIGHT = "Pose 6 is the product-highlight close-up, so it never copies the reference posture."
+PRODUCT_HIGHLIGHT_SLOT = {"source": "product", "posture": "standing", "directive": "", "rationale": HIGHLIGHT}
 BASE_EXPRESSION = "Calm editorial poise; soft closed-lip smile"
 FACE_OUT = "Face mostly outside the crop; if visible, relaxed natural jaw and lips."
 
@@ -62,16 +64,15 @@ def test_normalizers_mirror_pose_planning_ts():
     assert pose_plan_agents.normalize_expression_plan({"smile": "WARM"})["smile"] == "warm"
 
 
-def test_seated_suitable_reference_long_kurti_adopts_creative_and_showcase():
+def test_seated_reference_long_kurti_adopts_creative_and_showcase_stays_the_product_highlight():
     result = plan()
     creative, showcase = result["slots"]["creative"], result["slots"]["showcase"]
-    assert creative["source"] == showcase["source"] == "reference"
+    assert creative["source"] == "reference" and showcase == PRODUCT_HIGHLIGHT_SLOT
     assert creative["posture"] == "seated"
     assert "Rest on the low wooden stool" in creative["directive"]
-    assert "complementary variation" in showcase["directive"]
     assert "complementary variation" not in creative["directive"]
-    assert showcase["directive"].endswith("Keep the kurta hem, side slits and front panel readable.")
-    assert QUARANTINE in showcase["directive"]
+    assert creative["directive"].endswith("Keep the kurta hem, side slits and front panel readable.")
+    assert QUARANTINE in creative["directive"]
     assert "reference 60 vs product 50" in creative["rationale"]
     assert result["expressions"]["creative"].endswith("carry the reference attitude: relaxed, self-assured")
     assert result["plan_key"] == "long_kurti|straight"
@@ -82,33 +83,47 @@ def test_seated_suitable_reference_long_kurti_adopts_creative_and_showcase():
 
 def test_farshi_low_posture_stays_product_led():
     result = plan(bottom_cut_class="farshi")
-    for slot in ("creative", "showcase"):
-        assert result["slots"][slot] == {
-            "source": "product", "posture": "standing", "directive": "",
-            "rationale": "Farshi two-leg volume and the 4-inch upper-hem taper need a standing frame.",
-        }
+    assert result["slots"]["creative"] == {
+        "source": "product", "posture": "standing", "directive": "",
+        "rationale": "Farshi two-leg volume and the 4-inch upper-hem taper need a standing frame.",
+    }
+    assert result["slots"]["showcase"] == PRODUCT_HIGHLIGHT_SLOT
     # Expression planning applies to every plan, adopted or not.
     assert set(result["expressions"]) == POSE_IDS
     assert result["expressions"]["creative"] == "Calm editorial poise; soft closed-lip smile"
     assert result["status"] == "planned" and result["validation"] == {"attempts": 1, "errors": []}
 
 
-def test_generic_standing_is_product_and_signature_standing_is_reference():
+def test_any_reference_person_adopts_pose_4_past_the_suitability_verdict():
     generic = plan(
         {"posture": "standing", "description": "standing straight", "distinctiveness": "generic"},
         pose_expressions={"back": "Calm over-shoulder look"},
     )
-    assert {s["source"] for s in generic["slots"].values()} == {"product"}
+    assert generic["slots"]["creative"]["source"] == "reference"
+    assert generic["slots"]["showcase"] == PRODUCT_HIGHLIGHT_SLOT
     assert set(generic["expressions"]) == POSE_IDS and generic["status"] == "planned"
     signature_pose = {
         "posture": "standing", "description": "weight on one hip", "distinctiveness": "signature",
         "signatureDescription": "one hand lifting the hair off the neck",
     }
-    # Adoption needs an explicit "yes" suitability verdict.
-    assert plan(signature_pose)["slots"]["creative"]["source"] == "product"
-    signature = plan({**signature_pose, "suitableForProduct": "yes"})
+    signature = plan(signature_pose)
     assert signature["slots"]["creative"]["source"] == "reference"
     assert "Reproduce the signature pose: one hand lifting the hair off the neck." in signature["slots"]["creative"]["directive"]
+    # T94-Kitkat-Kattha: a seated reference the analysis judged unsuitable now adopts, with its camera and bench.
+    t94 = plan({
+        "posture": "seated",
+        "description": "seated on a low bench, legs crossed, one hand bracing on the bench, head turned sideways",
+        "seatOrSupport": "low reddish-brown wooden bench platform",
+        "distinctiveness": "generic",
+        "cameraAngle": "eye-level slightly low, mid-full framing",
+        "suitableForProduct": "no",
+        "suitabilityReason": "seated crossed legs folds hip hem and hides trouser silhouette and back lace-up",
+    }, pose_family="short_kurti_top")
+    creative = t94["slots"]["creative"]
+    assert creative["source"] == "reference" and creative["posture"] == "seated"
+    assert "Camera and framing as the STYLE REFERENCE is shot: eye-level slightly low, mid-full framing." in creative["directive"]
+    assert "Rest on the low reddish-brown wooden bench platform" in creative["directive"]
+    assert creative["directive"].endswith("Keep the top hem and front panel readable.")
 
 
 @pytest.mark.parametrize("pose_family", ["long_kurti", "saree_classic"])
@@ -121,13 +136,12 @@ def test_long_reference_directive_fits_edge_900_char_cut(pose_family):
         "signatureDescription": "one elbow propped on the knee, chin resting lightly on the knuckles, " * 8,
     }, pose_family=pose_family)
     family = "Keep the kurta hem, side slits" if pose_family == "long_kurti" else "Keep the saree pleats, border and pallu"
-    for slot in ("creative", "showcase"):
-        directive = result["slots"][slot]["directive"]
-        assert len(directive) <= pose_plan_agents.MAX_DIRECTIVE
-        assert QUARANTINE in directive
-        assert family in directive
-    assert "complementary variation" in result["slots"]["showcase"]["directive"]
-    assert "Reproduce the signature pose: one elbow propped" in result["slots"]["showcase"]["directive"]
+    directive = result["slots"]["creative"]["directive"]
+    assert len(directive) <= pose_plan_agents.MAX_DIRECTIVE
+    assert QUARANTINE in directive
+    assert family in directive
+    assert "Reproduce the signature pose: one elbow propped" in directive
+    assert result["slots"]["showcase"] == PRODUCT_HIGHLIGHT_SLOT
 
 
 def test_astral_text_directive_fits_edge_utf16_cut():
@@ -139,11 +153,10 @@ def test_astral_text_directive_fits_edge_utf16_cut():
         "distinctiveness": "signature",
         "signatureDescription": f"chin on knuckles {emoji} " * 40,
     })
-    for slot in ("creative", "showcase"):
-        directive = result["slots"][slot]["directive"]
-        assert pose_plan_agents._u16len(directive) <= pose_plan_agents.MAX_DIRECTIVE
-        assert QUARANTINE in directive
-        directive.encode("utf-8")  # no dangling surrogate half
+    directive = result["slots"]["creative"]["directive"]
+    assert pose_plan_agents._u16len(directive) <= pose_plan_agents.MAX_DIRECTIVE
+    assert QUARANTINE in directive
+    directive.encode("utf-8")  # no dangling surrogate half
 
 
 def test_u16slice_never_splits_a_surrogate_pair():
@@ -157,21 +170,30 @@ def test_u16slice_never_splits_a_surrogate_pair():
     ("description", "Leaning out of a WALK"),
     ("signatureDescription", "turned as if walking past"),
 ])
-def test_walking_wording_in_a_non_walking_posture_stays_product_led(field, text):
+def test_walking_wording_is_grounded_never_copied(field, text):
     reference = {**SEATED, "posture": "leaning", "distinctiveness": "signature", "signatureDescription": "hand on the pillar", field: text}
-    result = plan(reference)
-    for slot in ("creative", "showcase"):
-        assert result["slots"][slot]["source"] == "product"
-        assert "walking stride" in result["slots"][slot]["rationale"]
-    # "walkway" is not a walk.
-    assert plan({**reference, field: "Leaning by the walkway"})["slots"]["creative"]["source"] == "reference"
+    creative = plan(reference)["slots"]["creative"]
+    assert creative["source"] == "reference" and creative["posture"] == "leaning"
+    assert "Ground the reference movement as a natural weight shift: both feet on the floor" in creative["directive"]
+    assert text not in creative["directive"]
+    # "walkway" is not a walk: the description is kept and nothing is grounded.
+    walkway = plan({**reference, field: "Leaning by the walkway"})["slots"]["creative"]["directive"]
+    assert "Leaning by the walkway" in walkway and "Ground the reference movement" not in walkway
 
 
-def test_showcase_macro_detail_keeps_showcase_product():
-    result = plan(showcase_shot_type="macro_detail")
-    assert result["slots"]["creative"]["source"] == "reference"
-    assert result["slots"]["showcase"]["source"] == "product"
-    assert "tight detail crop" in result["slots"]["showcase"]["rationale"]
+def test_walking_reference_becomes_a_grounded_standing_pose_4():
+    creative = plan({"posture": "walking", "description": "walking toward the camera mid-stride"})["slots"]["creative"]
+    assert creative["source"] == "reference" and creative["posture"] == "standing"
+    assert creative["directive"].startswith("Match the STYLE REFERENCE person's direction of movement in a grounded standing pose.")
+    assert "movement as a grounded weight shift" in creative["rationale"]
+    assert "mid-stride" not in creative["directive"]
+
+
+def test_showcase_never_adopts_whatever_its_shot():
+    for shot in ("macro_detail", "full_body_feature", "movement_feature"):
+        result = plan(showcase_shot_type=shot)
+        assert result["slots"]["creative"]["source"] == "reference"
+        assert result["slots"]["showcase"] == PRODUCT_HIGHLIGHT_SLOT
 
 
 def test_penalty_rows_make_reference_lose(monkeypatch):
@@ -191,7 +213,7 @@ def test_penalty_rows_make_reference_lose(monkeypatch):
     assert set(result["learned_signals"][0]) == {"slot", "outcome_key", "effect"}
 
 
-def test_boost_rows_feed_showcase_best_plan_expression(monkeypatch):
+def test_a_boosted_reference_row_never_adopts_pose_6(monkeypatch):
     def fetch(org, keys):
         return [
             outcome_row(k, dna_pass_count=4, dna_score_avg=94.5, human_approved_count=1,
@@ -201,9 +223,9 @@ def test_boost_rows_feed_showcase_best_plan_expression(monkeypatch):
 
     monkeypatch.setattr(database, "fetch_pose_plan_outcomes", fetch)
     result = plan()
-    assert result["slots"]["showcase"]["source"] == "reference"
-    assert "reference 75 vs product 50" in result["slots"]["showcase"]["rationale"]
-    assert result["expressions"]["showcase"] == "Serene half-smile, eyes lowered to the embroidery"
+    assert result["slots"]["showcase"] == PRODUCT_HIGHLIGHT_SLOT
+    # The reference row's best_plan belongs to a frame Pose 6 no longer produces.
+    assert result["expressions"]["showcase"] == BASE_EXPRESSION
     assert result["learned_signals"] == [{
         "slot": "showcase", "outcome_key": "long_kurti|straight|showcase|reference|seated|generic", "effect": "boost",
     }]
@@ -217,14 +239,11 @@ def test_showcase_best_plan_expression_only_from_chosen_source_row(monkeypatch):
         ]
 
     monkeypatch.setattr(database, "fetch_pose_plan_outcomes", fetch)
-    # Signature reference (80) beats the boosted product pose (60): the product row's best_plan must not leak in.
-    result = plan({**SEATED, "distinctiveness": "signature", "signatureDescription": "chin resting on one hand"})
-    assert result["slots"]["showcase"]["source"] == "reference"
-    assert result["expressions"]["showcase"] != "Product-row expression"
-    # A generic reference ties the boosted product pose (60 vs 60), so the product pose and its row win.
-    tied = plan()
-    assert tied["slots"]["showcase"]["source"] == "product"
-    assert tied["expressions"]["showcase"] == "Product-row expression"
+    # Pose 6 is always product-led, so a boosted product row feeds its expression, signature reference or not.
+    for reference in ({**SEATED, "distinctiveness": "signature", "signatureDescription": "chin resting on one hand"}, SEATED):
+        result = plan(reference)
+        assert result["slots"]["showcase"] == PRODUCT_HIGHLIGHT_SLOT
+        assert result["expressions"]["showcase"] == "Product-row expression"
 
 
 def test_db_failure_plans_without_signals(monkeypatch):
@@ -266,7 +285,7 @@ def test_sit_request_keeps_a_non_seated_reference_out_of_pose_4_only():
         "source": "product", "posture": "standing", "directive": "",
         "rationale": "Your notes ask Pose 4 to sit, so it follows that request instead of the reference posture.",
     }
-    assert result["slots"]["showcase"]["source"] == "reference"
+    assert result["slots"]["showcase"] == PRODUCT_HIGHLIGHT_SLOT
     # A seated reference still matches the request.
     assert plan(sit_requested=True)["slots"]["creative"]["source"] == "reference"
 
@@ -285,9 +304,9 @@ def test_held_object_check_ignores_bottle_green():
 def test_held_object_directive_loops_to_forced_product(monkeypatch):
     monkeypatch.setattr(pose_plan_agents, "bounded_reference_directive", lambda slot, pose, family: "Sit holding a coffee cup.")
     result = plan()
-    for slot in ("creative", "showcase"):
-        assert result["slots"][slot]["source"] == "product"
-        assert "held object (coffee)" in result["slots"][slot]["rationale"]
+    assert result["slots"]["creative"]["source"] == "product"
+    assert "held object (coffee)" in result["slots"]["creative"]["rationale"]
+    assert result["slots"]["showcase"] == PRODUCT_HIGHLIGHT_SLOT
     assert result["validation"] == {"attempts": 2, "errors": []}
     assert result["status"] == "planned"
     assert result["steps"] == PLANNED_STEPS + ["plan_poses", "plan_expression", "validate_plan"]
@@ -314,23 +333,25 @@ def test_expression_error_on_creative_never_forces_the_slot_product_led(monkeypa
     monkeypatch.setattr(pose_plan_agents, "plan_errors", first_attempt_expression_error)
     result = plan()
     assert result["validation"] == {"attempts": 2, "errors": []}
-    assert result["slots"]["creative"]["source"] == result["slots"]["showcase"]["source"] == "reference"
+    assert result["slots"]["creative"]["source"] == "reference"
+    assert result["slots"]["showcase"] == PRODUCT_HIGHLIGHT_SLOT
 
 
 def test_slot_errors_are_tagged_apart_from_expression_errors():
     state = {
         "reference_pose": pose_plan_agents.normalize_reference_pose({**SEATED, "suitableForProduct": "unknown"}),
-        "slots": {"creative": {"source": "reference", "directive": "Hold the phone."}},
+        "slots": {
+            "creative": {"source": "reference", "directive": "Hold the phone."},
+            "showcase": {"source": "reference", "directive": "Seated variation."},
+        },
         "expressions": {"creative": "Big grin"},
     }
     errors = pose_plan_agents.plan_errors(state)
-    assert errors[:2] == [
-        "creative slot: Analysis did not confirm that the reference posture suits this product.",
-        "creative slot: directive mentions a held object (phone).",
-    ]
+    # An unconfirmed suitability verdict no longer blocks Pose 4; a held object and a Pose 6 adoption do.
+    assert errors[:2] == ["creative slot: directive mentions a held object (phone).", f"showcase slot: {HIGHLIGHT}"]
     assert "creative expression: asks for a forced smile." in errors and "full_front expression: missing." in errors
     update = pose_plan_agents.validate_plan({**state, "plan_attempts": 1})
-    assert update["forced_product_slots"] == ["creative"] and update["status"] == "replanning"
+    assert update["forced_product_slots"] == ["creative", "showcase"] and update["status"] == "replanning"
 
 
 def test_thread_id_is_sanitized_and_history_is_readable():
@@ -339,7 +360,7 @@ def test_thread_id_is_sanitized_and_history_is_readable():
     assert len(result["thread_id"]) == len(f"thread_plan_{ORG}_") + 80
     history = graph.get_thread_state_history(result["thread_id"], limit=5)
     assert history[0]["status"] == "planned"
-    assert history[0]["slot_sources"] == {"creative": "reference", "showcase": "reference"}
+    assert history[0]["slot_sources"] == {"creative": "reference", "showcase": "product"}
     assert history[0]["plan_attempts"] == 1
     assert "sku_id" not in history[0]
 

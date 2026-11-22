@@ -26,6 +26,9 @@ import {
   sanitizeHeldObjectText,
   type JsonRecord,
 } from "../lib/profiles.ts";
+import { composeGenerationPrompt } from "../lib/generationPrompt.ts";
+import { buildPoseQaPrompt } from "../lib/qa.ts";
+import { MAX_IMAGE_REFERENCES, roleLabel, selectReferences } from "../lib/referencePolicy.ts";
 
 const seated: ReferencePose = normalizeReferencePose({
   posture: "seated",
@@ -79,60 +82,83 @@ Deno.test("reference posture synonyms, empty signatures and suitability normaliz
   assertEquals(normalizeExpressionPlan({ energy: "Playful" }).energy, "playful");
 });
 
-Deno.test("every hard guard keeps the slot product-led", () => {
+Deno.test("Pose 4 adopts any reference person; only the sit request and construction guards block it, and Pose 6 never adopts", () => {
   const none = normalizeReferencePose({ posture: "none" });
   assertStringIncludes(referenceAdoptionBlockReason("creative", none, ctx()), "no person");
+  // A generic stance, an unsuitable verdict and an unconfirmed verdict no longer keep Pose 4 product-led.
   const standing = normalizeReferencePose({ posture: "standing", suitableForProduct: "yes" });
-  assertStringIncludes(referenceAdoptionBlockReason("creative", standing, ctx()), "generic standing");
-  const signatureStanding = normalizeReferencePose({
-    posture: "standing",
-    distinctiveness: "signature",
-    signatureDescription: "crossed ankles with one hand on the doorframe",
-    suitableForProduct: "yes",
-  });
-  assertEquals(referenceAdoptionBlockReason("creative", signatureStanding, ctx()), "");
+  assertEquals(referenceAdoptionBlockReason("creative", standing, ctx()), "");
   const unsuitable = { ...seated, suitableForProduct: "no" as const, suitabilityReason: "hides the hem" };
-  assertStringIncludes(referenceAdoptionBlockReason("creative", unsuitable, ctx()), "hides the hem");
-  // Only an explicit "yes" adopts; a missing verdict stays product-led.
-  const unjudged = { ...seated, suitableForProduct: "unknown" as const };
-  assertStringIncludes(referenceAdoptionBlockReason("creative", unjudged, ctx()), "did not confirm");
-
-  // A walking reference, or a stride / lifted foot in any posture, is never copied.
+  assertEquals(referenceAdoptionBlockReason("creative", unsuitable, ctx()), "");
+  assertEquals(referenceAdoptionBlockReason("creative", { ...seated, suitableForProduct: "unknown" as const }, ctx()), "");
+  // A walk or lifted foot adopts too: the directive grounds it instead of copying the stride.
   const walking = normalizeReferencePose({ posture: "walking", description: "Walking toward camera", suitableForProduct: "yes" });
-  assertStringIncludes(referenceAdoptionBlockReason("creative", walking, ctx()), "walking stride");
-  const liftedHeel = { ...seated, posture: "leaning" as const, description: "Leaning on the pillar, back heel lifted" };
-  assertStringIncludes(referenceAdoptionBlockReason("showcase", liftedHeel, ctx()), "lifted foot");
-  const midStride = { ...seated, posture: "other" as const, description: "Turning mid-stride toward the window" };
-  assertStringIncludes(referenceAdoptionBlockReason("creative", midStride, ctx()), "walking stride");
-  // A non-walking posture described as walking is blocked too; "walkway" is not a walk.
-  for (const description of ["Leaning as she walks past the pillar", "Leaning out of a WALK", "Leaning mid-walking turn"]) {
-    const walkingLean = { ...seated, posture: "leaning" as const, description };
-    assertStringIncludes(referenceAdoptionBlockReason("creative", walkingLean, ctx()), "walking stride", description);
-  }
-  const walkingSignature = { ...seated, distinctiveness: "signature" as const, signatureDescription: "turned as if walking past" };
-  assertStringIncludes(referenceAdoptionBlockReason("showcase", walkingSignature, ctx()), "walking stride");
-  assertEquals(referenceAdoptionBlockReason("creative", { ...seated, description: "Seated by the walkway" }, ctx()), "");
+  assertEquals(referenceAdoptionBlockReason("creative", walking, ctx()), "");
+  assertEquals(referenceAdoptionBlockReason("creative", { ...seated, posture: "leaning" as const, description: "Leaning, back heel lifted" }, ctx()), "");
 
+  // Farshi folds and a reclining saree still protect product truth.
   assertStringIncludes(referenceAdoptionBlockReason("creative", seated, ctx({ bottomCutClass: "farshi" })), "Farshi");
   const leaning = normalizeReferencePose({ posture: "leaning", suitableForProduct: "yes" });
   assertEquals(referenceAdoptionBlockReason("creative", leaning, ctx({ bottomCutClass: "farshi" })), "");
-
-  // An explicit sit request keeps a non-seated reference out of Pose 4; a seated Pose 4 and Pose 6 still adopt.
-  const sit = ctx({ sitRequested: true });
-  assertStringIncludes(referenceAdoptionBlockReason("creative", leaning, sit), "notes ask Pose 4 to sit");
-  assertEquals(referenceAdoptionBlockReason("creative", seated, sit), "");
-  assertEquals(referenceAdoptionBlockReason("showcase", leaning, sit), "");
-
   const reclining = { ...seated, posture: "reclining" as const };
   assertStringIncludes(referenceAdoptionBlockReason("creative", reclining, ctx({ poseFamily: "saree_ethnic" })), "saree");
   assertEquals(referenceAdoptionBlockReason("creative", seated, ctx({ poseFamily: "saree_bengali" })), "");
 
-  const macro = ctx({ showcaseShotType: "macro_detail" });
-  assertStringIncludes(referenceAdoptionBlockReason("showcase", leaning, macro), "tight detail crop");
-  assertEquals(referenceAdoptionBlockReason("creative", seated, macro), "");
-  assertStringIncludes(referenceAdoptionBlockReason("showcase", seated, ctx({ showcaseFeatureRegion: "bottom_wear" })), "full-length");
-  assertEquals(referenceAdoptionBlockReason("showcase", leaning, ctx({ showcaseFeatureRegion: "bottom_wear" })), "");
-  assertStringIncludes(referenceAdoptionBlockReason("showcase", seated, ctx({ showcaseShotType: "movement_feature" })), "movement");
+  // An explicit sit request keeps a non-seated reference out of Pose 4; a seated reference still adopts.
+  const sit = ctx({ sitRequested: true });
+  assertStringIncludes(referenceAdoptionBlockReason("creative", leaning, sit), "notes ask Pose 4 to sit");
+  assertEquals(referenceAdoptionBlockReason("creative", seated, sit), "");
+
+  // Pose 6 is the product-highlight close-up whatever the reference or the context.
+  for (const pose of [seated, leaning, standing, walking]) {
+    for (const context of [ctx(), sit, ctx({ showcaseShotType: "macro_detail" }), ctx({ showcaseFeatureRegion: "bottom_wear" })]) {
+      assertStringIncludes(referenceAdoptionBlockReason("showcase", pose, context), "product-highlight close-up");
+    }
+  }
+  assertStringIncludes(referenceAdoptionBlockReason("showcase", none, ctx()), "no person");
+});
+
+Deno.test("an adopted Pose 4 directive grounds a walk, carries the reference camera and keeps the garment exact", () => {
+  // T94-Kitkat-Kattha: seated on a low bench, judged unsuitable by analysis v37.
+  const t94 = normalizeReferencePose({
+    posture: "seated",
+    description: "seated on a low bench, legs crossed, one hand bracing on the bench, head turned sideways",
+    seatOrSupport: "low reddish-brown wooden bench platform",
+    distinctiveness: "generic",
+    cameraAngle: "eye-level slightly low, mid-full framing",
+    suitableForProduct: "no",
+    suitabilityReason: "seated crossed legs folds hip hem and hides trouser silhouette and back lace-up",
+  });
+  const plan = localPosePlanningDecision(t94, normalizeExpressionPlan({}), ctx({ poseFamily: "short_kurti_top", bottomCutClass: "straight" }));
+  assertEquals([plan.slots.creative.source, plan.slots.creative.posture, plan.slots.showcase.source], ["reference", "seated", "product"]);
+  const directive = plan.slots.creative.directive;
+  assertStringIncludes(directive, "Match the STYLE REFERENCE person's seated posture: seated on a low bench, legs crossed");
+  assertStringIncludes(directive, "Rest on the low reddish-brown wooden bench platform, which must already belong to the locked set.");
+  assertStringIncludes(directive, "Camera and framing as the STYLE REFERENCE is shot: eye-level slightly low, mid-full framing.");
+  assertStringIncludes(directive, "Keep the uploaded garment's front design, print, colours and construction exactly as the product photos show; a folded posture may let the hem rest naturally but never hides the print or changes the garment.");
+
+  const walking = localPosePlanningDecision(
+    normalizeReferencePose({ posture: "walking", description: "walking toward the camera mid-stride", cameraAngle: "low angle, full length" }),
+    normalizeExpressionPlan({}),
+    ctx(),
+  );
+  assertEquals([walking.slots.creative.source, walking.slots.creative.posture], ["reference", "standing"]);
+  assertStringIncludes(walking.slots.creative.rationale, "grounded weight shift");
+  assertStringIncludes(walking.slots.creative.directive, "Match the STYLE REFERENCE person's direction of movement in a grounded standing pose.");
+  assertStringIncludes(walking.slots.creative.directive, "both feet on the floor");
+  assertStringIncludes(walking.slots.creative.directive, "Camera and framing as the STYLE REFERENCE is shot: low angle, full length.");
+  assertEquals(/walk|stride|mid-step/i.test(walking.slots.creative.directive), false);
+  // A lifted foot in another posture keeps the posture and grounds the foot.
+  const lean = localPosePlanningDecision(
+    normalizeReferencePose({ posture: "leaning", description: "leaning on the pillar, one foot lifted against it" }),
+    normalizeExpressionPlan({}),
+    ctx(),
+  ).slots.creative;
+  assertEquals([lean.source, lean.posture], ["reference", "leaning"]);
+  assertStringIncludes(lean.directive, "Match the STYLE REFERENCE person's leaning posture: leaning.");
+  assertEquals(/lifted/i.test(lean.directive), false);
+  // A stored walking adoption reads back as the grounded standing frame.
+  assertEquals(storedPosePlanning({ posePlanning: roundTrip(walking) })?.slots.creative.posture, "standing");
 });
 
 Deno.test("the local decision adopts only guard-clear slots", () => {
@@ -149,8 +175,14 @@ Deno.test("the local decision adopts only guard-clear slots", () => {
 Deno.test("normalizePosePlanning is idempotent and re-checks stored adoptions", () => {
   const first = roundTrip(normalizePosePlanning({ referencePose: seated, expressionPlan: { energy: "warm" } }, ctx()));
   assertEquals(roundTrip(normalizePosePlanning(first, ctx())), first);
-  assertEquals(first.slots.showcase.source, "reference");
-  assertStringIncludes(first.slots.showcase.directive, "different camera angle and framing from Pose 4");
+  assertEquals([first.slots.creative.source, first.slots.showcase.source], ["reference", "product"]);
+
+  // A v37 plan that also adopted Pose 6 is re-checked: Pose 6 becomes the product highlight.
+  const v37 = { ...first, slots: { ...first.slots, showcase: { source: "reference", directive: "Use a complementary variation." } } };
+  const rechecked = roundTrip(normalizePosePlanning(v37, ctx()));
+  assertEquals(rechecked.slots.showcase.source, "product");
+  assertStringIncludes(rechecked.slots.showcase.rationale, "product-highlight close-up");
+  assertEquals(rechecked.slots.creative, first.slots.creative);
 
   // A stored or graph adoption that now violates a guard falls back to product.
   const farshi = roundTrip(normalizePosePlanning(first, ctx({ bottomCutClass: "farshi" })));
@@ -167,14 +199,15 @@ Deno.test("maximum-length reference text keeps the directive within the stored c
     seatOrSupport: `low carved wooden bench ${"in the corner of the room ".repeat(6)}`,
   });
   assertEquals([longest.description.length, longest.signatureDescription.length, longest.seatOrSupport.length], [420, 420, 120]);
-  const first = roundTrip(normalizePosePlanning({ referencePose: longest }, ctx()));
-  for (const slot of [first.slots.creative, first.slots.showcase]) {
-    assertEquals(slot.source, "reference");
-    assert(slot.directive.length <= MAX_REFERENCE_DIRECTIVE);
-    assert(slot.directive.endsWith("never the reference clothing, face, hair or anything in the hands (jewellery follows the styling plan). Keep the uploaded garment's front design, hem and construction readable."));
-    assertStringIncludes(slot.directive, `Rest on the ${longest.seatOrSupport}, which must already belong to the locked set.`);
-  }
-  assertStringIncludes(first.slots.showcase.directive, "different camera angle and framing from Pose 4");
+  const first = roundTrip(normalizePosePlanning({ referencePose: { ...longest, cameraAngle: "eye-level, ".repeat(16) } }, ctx()));
+  const slot = first.slots.creative;
+  assertEquals(slot.source, "reference");
+  assert(slot.directive.length <= MAX_REFERENCE_DIRECTIVE);
+  assert(slot.directive.endsWith("never the reference clothing, face, hair or anything in the hands (jewellery follows the styling plan). Keep the uploaded garment's front design, print, colours and construction exactly as the product photos show; a folded posture may let the hem rest naturally but never hides the print or changes the garment."));
+  assertStringIncludes(slot.directive, `Rest on the ${longest.seatOrSupport}, which must already belong to the locked set.`);
+  // The camera sentence is fixed text: the free-text description and signature give way first.
+  assertStringIncludes(slot.directive, "Camera and framing as the STYLE REFERENCE is shot: eye-level,");
+  assertEquals(first.slots.showcase.source, "product");
   assertEquals(roundTrip(normalizePosePlanning(first, ctx())), first);
   assertEquals(storedPosePlanning({ posePlanning: first })?.slots, first.slots);
 });
@@ -258,8 +291,13 @@ Deno.test("analysis prompt asks for referencePose, expressionPlan and the frame 
   const prompt = buildCombinedAnalysisPrompt(promptArgs);
   assertStringIncludes(prompt, '"referencePose":{"posture":"standing|seated|leaning|kneeling|crouching|reclining|walking|other|none"');
   assertStringIncludes(prompt, '"expressionPlan":{"attitude":"...","energy":"serene|calm|warm|playful|confident|dramatic"');
-  assertStringIncludes(prompt, "POSE 4 AND POSE 6 MATCH THE REFERENCE POSTURE");
-  assertStringIncludes(prompt, "Poses 1, 2, 3, and 5 never copy the reference posture");
+  assertStringIncludes(prompt, "POSE 4 MATCHES THE REFERENCE POSTURE: whenever the STYLE REFERENCE shows a person");
+  assertStringIncludes(prompt, "shot at the reference cameraAngle and framing, with the reference hand gesture, gaze and mood");
+  assertStringIncludes(prompt, "A walking or mid-stride reference becomes a grounded weight shift with both feet on the floor");
+  assertStringIncludes(prompt, "It does not stop Pose 4 from matching the reference");
+  assertStringIncludes(prompt, "Pose 6 (showcase) never copies the reference posture: it is the PRODUCT HIGHLIGHT close-up");
+  assertStringIncludes(prompt, "Poses 1, 2, 3, 5, and 6 never copy the reference posture");
+  assertEquals(prompt.includes("POSE 4 AND POSE 6 MATCH THE REFERENCE POSTURE"), false);
   assertStringIncludes(prompt, "Record body position and look only: never the clothing, face identity, hair, jewellery, or anything in the hands.");
   // v37: the reference look (camera, expression, gaze, hands) is recorded; objects in the hands never are.
   assertStringIncludes(prompt, '"cameraAngle":"height, angle and distance of the shot","expression":"mouth and mood","gaze":"eye direction and head angle","hands":"hand gesture, never objects"');
@@ -306,19 +344,24 @@ const sareeRaw = (referencePose?: unknown): JsonRecord => ({
   ],
 });
 
-Deno.test("a suitable seated reference is adopted for Pose 4 and Pose 6", () => {
+Deno.test("a seated reference is adopted for Pose 4; Pose 6 is the product-highlight close-up", () => {
   const normalized = normalizeAnalysis(sareeRaw(seated), "saree");
   assertEquals(normalized.posePlanning!.slots.creative.source, "reference");
-  assertEquals(normalized.posePlanning!.slots.showcase.source, "reference");
+  assertEquals(normalized.posePlanning!.slots.showcase.source, "product");
   const [front, , , creative, , showcase] = normalized.posePlan;
   assertStringIncludes(creative.bodyPosition, "seated posture");
+  assertEquals(creative.title, "Signature Reference Pose");
   assertStringIncludes(creative.prompt, "Create a closer editorial portrait.");
   assertStringIncludes(creative.prompt, normalized.posePlanning!.slots.creative.directive);
   assertEquals(/never copy style-reference sitting|Sit only/i.test(JSON.stringify(creative)), false);
   assertEquals(creative.referencePosture, "seated");
-  assertStringIncludes(showcase.bodyPosition, "complementary variation");
-  assert(showcase.productVisibilityRules.some((rule) => rule.includes("pallu artwork")));
-  assertEquals(showcase.referencePosture, "seated");
+  // No showcase plan and no saree truth recorded: the fabric itself is the highlight, cropped close.
+  assertEquals(normalized.creativeDirection.showcasePlan?.productHighlight, true);
+  assertEquals(normalized.creativeDirection.showcasePlan?.evidenceReference, "saree_body_detail");
+  assertEquals(showcase.title, "Product Highlight: Bottle green silk fabric texture and weave");
+  assertStringIncludes(showcase.framing, "detail close-up");
+  assertEquals(showcase.referencePosture, undefined);
+  assertEquals(normalized.posePlan.map((pose) => pose.title).slice(0, 3), ["Full Front View", "Turning Drape & Fall View", "Back View"]);
   assertEquals(front.referencePosture, undefined);
   assertEquals(front.bodyPosition.includes("seated"), false);
   assertEquals(front.attitude, "Serene poise");
@@ -445,7 +488,7 @@ Deno.test("an explicit sit request keeps a leaning reference out of Pose 4 and d
   const template = normalizeAnalysis(leaningRaw([]), "kurti", options).posePlan[3];
   assertEquals(normalized.posePlanning!.slots.creative.source, "product");
   assertStringIncludes(normalized.posePlanning!.slots.creative.rationale, "notes ask Pose 4 to sit");
-  assertEquals(normalized.posePlanning!.slots.showcase.source, "reference");
+  assertEquals(normalized.posePlanning!.slots.showcase.source, "product");
   const creative = normalized.posePlan[3];
   assertEquals(
     [creative.title, creative.bodyPosition, creative.description],
@@ -472,8 +515,9 @@ Deno.test("a product-led Pose 4/6 falls back to its template wherever the model 
   assertEquals(normalized.posePlanning!.slots.showcase.source, "product");
   const [creative, showcase] = [normalized.posePlan[3], normalized.posePlan[5]];
   assertEquals([creative.bodyPosition, creative.framing], [template[3].bodyPosition, template[3].framing]);
-  // After the showcase merge (the model prompt omitted the hero, so the plan brief was appended).
-  assertEquals([showcase.bodyPosition, showcase.prompt], ["Standing mid-turn", template[5].prompt]);
+  // The product-highlight brief replaces the model's Pose 6 posture and prompt.
+  assertEquals([showcase.bodyPosition, showcase.prompt], [template[5].bodyPosition, template[5].prompt]);
+  assertEquals(/kneel|seated/i.test(`${showcase.bodyPosition} ${showcase.prompt}`), false);
   const again = roundTrip(normalizeAnalysis(roundTrip(normalized) as unknown as JsonRecord, "kurti", options));
   assertEquals(again.posePlan, roundTrip(normalized.posePlan));
 
@@ -485,36 +529,186 @@ Deno.test("a product-led Pose 4/6 falls back to its template wherever the model 
   assertEquals(legacy.posePlan[5].bodyPosition, "Kneeling beside the bench");
 });
 
-Deno.test("a showcase plan keeps its hero framing when Pose 6 adopts the posture", () => {
+Deno.test("a v38 Pose 6 is a close-up of its chosen feature, never a reference posture or a full-body frame", () => {
   const raw: JsonRecord = {
     productIdentity: { garmentFamily: "kurta_or_kurti_set", length: "knee length", bottomWearDetails: "none - standalone garment" },
     referencePose: { ...seated, posture: "leaning", seatOrSupport: "" },
+    creativeDirection: { closeupHeroDetail: "square neckline piping" },
     showcasePlan: {
       heroFeature: "mirror-work yoke running into the side panels",
       featureRegion: "embroidery",
       shotType: "full_body_feature",
       bodyPosition: "Standing mid-turn",
+      framing: "Head-to-toe three-quarter frame",
     },
   };
-  // Without a model-written Pose 6 prompt, and with one that omits the hero (the plan brief is appended).
+  // Without a model-written Pose 6 prompt, and with a full-body one that the close-up brief replaces.
   const modelPoses = [
     ...["full_front", "angled", "back", "creative", "closeup"].map((id) => ({ id })),
-    { id: "showcase", prompt: "Create a three-quarter frame that sells the yoke mirror work." },
+    { id: "showcase", framing: "full length", prompt: "Create a full-length three-quarter frame that sells the yoke mirror work." },
   ];
   for (const variant of [raw, { ...raw, posePlan: modelPoses }]) {
     const normalized = normalizeAnalysis(variant, "kurti");
-    assertEquals(normalized.posePlanning!.slots.showcase.source, "reference");
+    assertEquals(normalized.posePlanning!.slots.showcase.source, "product");
+    const plan = normalized.creativeDirection.showcasePlan!;
+    assertEquals([plan.productHighlight, plan.featureRegion, plan.shotType, plan.evidenceReference], [true, "embroidery", "half_body_detail", "fabric_pattern"]);
+    assertEquals([plan.framing, plan.bodyPosition], ["", ""]);
     const showcase = normalized.posePlan[5];
-    const directive = normalized.posePlanning!.slots.showcase.directive;
-    assertEquals(showcase.bodyPosition, directive);
-    assertStringIncludes(showcase.bodyPosition, "leaning posture");
-    assertEquals(showcase.prompt.split(directive).length - 1, 1);
-    // generationPrompt.ts keeps the first 1,200 pose-prompt chars: the hero brief and product lock fit.
-    const kept = showcase.prompt.slice(0, 1_200);
-    assertStringIncludes(kept, "mirror-work yoke running into the side panels");
-    assertStringIncludes(kept, "exactly as the product references show.");
-    assert(showcase.productVisibilityRules.some((rule) => rule.includes("mirror-work yoke")));
+    assertEquals(showcase.title, "Product Highlight: mirror-work yoke running into the side panels");
+    assertStringIncludes(showcase.framing, "Torso crop from just below the chin to the hip");
+    assertEquals(showcase.primaryReference, "fabric_pattern");
+    assertEquals(/full length|full-length|head-to-toe|leaning|mid-turn/i.test(`${showcase.framing} ${showcase.bodyPosition} ${showcase.prompt}`), false);
+    assertStringIncludes(showcase.prompt, "Create a tight, accurate product-highlight close-up of mirror-work yoke running into the side panels");
+    assertEquals(showcase.referencePosture, undefined);
     const again = roundTrip(normalizeAnalysis(roundTrip(normalized) as unknown as JsonRecord, "kurti"));
     assertEquals(again.posePlan, roundTrip(normalized.posePlan));
+    assertEquals(again.creativeDirection.showcasePlan, roundTrip(plan));
   }
+});
+
+/** T94-Kitkat-Kattha as analysis v37 recorded it, run through the v38 normalization. */
+const t94Raw = (overrides: JsonRecord = {}): JsonRecord => ({
+  productIdentity: {
+    garmentFamily: "short_kurti_top",
+    category: "kurti",
+    mainColor: "rust",
+    fabric: "kattha cotton",
+    pattern: "allover cream, black and teal medallion print",
+    neckline: "square neckline",
+    sleeveType: "flared bell sleeves with black lace trim at the cuffs",
+    backConstruction: "criss-cross black lace-up tie down the centre back ending in a bow with hanging ends",
+    bottomWearDetails: "black straight trousers",
+  },
+  creativeDirection: { closeupHeroDetail: "square neckline with the medallion print" },
+  referencePose: {
+    posture: "seated",
+    description: "seated on a low bench, legs crossed, one hand bracing on the bench, head turned sideways",
+    seatOrSupport: "low reddish-brown wooden bench platform",
+    distinctiveness: "generic",
+    cameraAngle: "eye-level slightly low, mid-full framing",
+    gaze: "looking sideways",
+    hands: "one hand bracing on the bench",
+    suitableForProduct: "no",
+    suitabilityReason: "seated crossed legs folds hip hem and hides trouser silhouette and back lace-up",
+  },
+  expressionPlan: { attitude: "Relaxed, quietly confident", energy: "calm", smile: "soft" },
+  showcasePlan: {
+    heroFeature: "Back lace-up showcase",
+    featureRegion: "other",
+    shotType: "full_body_feature",
+    evidenceReference: "front",
+    framing: "full-length back view",
+    distinctFrom: "a second full back view",
+  },
+  ...overrides,
+});
+
+Deno.test("T94: Pose 4 adopts the seated reference with its camera and bench; Pose 6 is the back lace-up close-up", () => {
+  const normalized = normalizeAnalysis(t94Raw(), "kurti", { productDetails: "Rust kattha cotton short kurti top with black trousers" });
+  const { creative, showcase } = normalized.posePlanning!.slots;
+  assertEquals([creative.source, creative.posture, showcase.source], ["reference", "seated", "product"]);
+  const pose4 = normalized.posePlan[3];
+  assertEquals(pose4.title, "Signature Reference Pose");
+  assertEquals(pose4.cameraAngle, "eye-level slightly low, mid-full framing, as the STYLE REFERENCE is shot");
+  assertStringIncludes(pose4.framing, "framed as the STYLE REFERENCE is shot (eye-level slightly low, mid-full framing)");
+  assertStringIncludes(pose4.bodyPosition, "Rest on the low reddish-brown wooden bench platform");
+  assertStringIncludes(pose4.bodyPosition, "a folded posture may let the hem rest naturally but never hides the print");
+
+  const plan = normalized.creativeDirection.showcasePlan!;
+  assertEquals([plan.productHighlight, plan.featureRegion, plan.shotType, plan.evidenceReference], [true, "back_detail", "half_body_detail", "back"]);
+  const pose6 = normalized.posePlan[5];
+  assertEquals(pose6.primaryReference, "back");
+  assertStringIncludes(pose6.framing, "Back-detail crop: the model faces fully away");
+  assertStringIncludes(pose6.framing, "shoulder blades to waist");
+  assertStringIncludes(pose6.bodyPosition, "Model turned fully away from the camera");
+  assert(pose6.productVisibilityRules.some((rule) => rule.includes("BACK product photo is the only authority")));
+  assert(pose6.productVisibilityRules.includes(
+    "recorded back construction to match: criss-cross black lace-up tie down the centre back ending in a bow with hanging ends",
+  ));
+  assertEquals(/full-length|second full back view/i.test(JSON.stringify(pose6)), false);
+  assertEquals(normalized.posePlan.map((pose) => pose.title), [
+    "Full Front View", "Turning 3/4 View", "Back View", "Signature Reference Pose", "Face + Details Close-Up", "Product Highlight: Back lace-up showcase",
+  ]);
+});
+
+Deno.test("Pose 6 takes the next distinctive feature when its pick is what Pose 5 already shows", () => {
+  const raw = t94Raw({
+    showcasePlan: { heroFeature: "square neckline with contrast piping", featureRegion: "neckline", shotType: "macro_detail" },
+  });
+  const plan = normalizeAnalysis(raw, "kurti").creativeDirection.showcasePlan!;
+  // The back lace-up is the first distinctive feature recorded away from the chest.
+  assertEquals([plan.featureRegion, plan.heroFeature, plan.evidenceReference], [
+    "back_detail", "criss-cross black lace-up tie down the centre back ending in a bow with hanging ends", "back",
+  ]);
+  assertStringIncludes(plan.distinctFrom, "not Pose 5's square neckline with the medallion print");
+  // Without a back detail the sleeves and their cuff trim come next, led by the mannequin photo.
+  const noBack = t94Raw({
+    productIdentity: { ...(t94Raw().productIdentity as JsonRecord), backConstruction: "plain back panel" },
+    showcasePlan: { heroFeature: "square neckline with contrast piping", featureRegion: "neckline", shotType: "macro_detail" },
+  });
+  const sleeve = normalizeAnalysis(noBack, "kurti").creativeDirection.showcasePlan!;
+  assertEquals([sleeve.featureRegion, sleeve.shotType, sleeve.evidenceReference], ["sleeve", "macro_detail", "mannequin"]);
+  assertStringIncludes(normalizeAnalysis(noBack, "kurti").posePlan[5].framing, "Forearm and cuff crop");
+});
+
+/** T94's uploads; the model face and the style reference are one photo. */
+const T94_REFERENCES = ["front", "back", "fabric_pattern", "mannequin", "additional_product", "model_identity", "style_reference"]
+  .map((role) => ({ role, hash: role === "model_identity" || role === "style_reference" ? "same-photo" : role }));
+
+function t94Prompt(poseIndex: number) {
+  const normalized = normalizeAnalysis(t94Raw(), "kurti");
+  const pose = { ...normalized.posePlan[poseIndex], poseNumber: poseIndex + 1 };
+  const garmentFamily = String(normalized.productIdentity.garmentFamily);
+  const references = selectReferences(T94_REFERENCES, [], pose.id, garmentFamily, MAX_IMAGE_REFERENCES, pose.primaryReference);
+  const session = {
+    productIdentity: normalized.productIdentity,
+    creativeDirection: normalized.creativeDirection,
+    modelIdentity: normalized.modelIdentity,
+    posePlanning: normalized.posePlanning,
+  };
+  const prompt = composeGenerationPrompt({
+    skuName: "T94-Kitkat-Kattha", productDetails: "Rust kattha cotton short kurti top", pose, session, references,
+    useStyleReferenceAsModelIdentity: true,
+  });
+  return { normalized, pose, references, prompt };
+}
+
+Deno.test("T94 prompts: Pose 3 names the back authority, Pose 4 the reference frame, Pose 6 the back close-up with the back photo first", () => {
+  const back = t94Prompt(2).prompt;
+  assertStringIncludes(back, "- Back panel: criss-cross black lace-up tie down the centre back ending in a bow with hanging ends.");
+  assertStringIncludes(back, "- Match from the BACK PRODUCT image, the only authority for the back: the back neck shape and depth; every closure (lace-up crossings, ties, the bow and its hanging ends");
+
+  const creative = t94Prompt(3).prompt;
+  assertStringIncludes(creative, "REFERENCE POSE MATCH (POSE 4):\n- Match the STYLE REFERENCE person's seated posture: seated on a low bench");
+  assertStringIncludes(creative, "Rest on the low reddish-brown wooden bench platform, which must already belong to the locked set.");
+  assertStringIncludes(creative, "Camera and framing as the STYLE REFERENCE is shot: eye-level slightly low, mid-full framing.");
+  assertStringIncludes(creative, "never hides the print or changes the garment");
+  assertStringIncludes(creative, "- camera angle: eye-level slightly low, mid-full framing, as the STYLE REFERENCE is shot");
+  assertStringIncludes(creative, "one hand bracing on the bench, as the STYLE REFERENCE person does");
+  assertEquals(creative.includes("DO NOT COPY THE STYLE POSE"), false);
+
+  const { pose, references, prompt } = t94Prompt(5);
+  // The back photo leads the product photos in the Pose 6 manifest.
+  const products = references.filter((reference) => !["model_identity", "style_reference"].includes(reference.role));
+  assertEquals(products[0].role, "back");
+  assertStringIncludes(prompt, "CURRENT FRAME (POSE 6 - PRODUCT HIGHLIGHT CLOSE-UP)");
+  assertStringIncludes(prompt, "POSE 6 HARD RULE (PRODUCT HIGHLIGHT DETAIL CLOSE-UP):");
+  assertStringIncludes(prompt, "- CLOSE-UP FRAMING: Back-detail crop: the model faces fully away");
+  assertStringIncludes(prompt, "- BACK DETAIL AUTHORITY: the BACK PRODUCT image is the only authority for this detail.");
+  assertStringIncludes(prompt, "never a repeat of Pose 1 or of Pose 3's full back view");
+  assertStringIncludes(prompt, "- NOT POSE 5: Pose 5 already shows \"square neckline with the medallion print\"");
+  assertStringIncludes(prompt, "- Pose 6 (showcase): PRODUCT HIGHLIGHT - a tight detail close-up");
+  for (const marker of ["REFERENCE POSE MATCH (POSE 6)", "SHOWCASE FRAME DISTANCE", "THIS FRAME'S EXPRESSION"]) {
+    assertEquals(prompt.includes(marker), false, marker);
+  }
+
+  const qa = buildPoseQaPrompt({
+    poseNumber: 6, poseType: "showcase", poseTitle: pose.title, poseDirection: pose,
+    productIdentity: t94Prompt(5).normalized.productIdentity, creativeDirection: t94Prompt(5).normalized.creativeDirection,
+    modelIdentity: {}, garmentFamily: "kurta_or_kurti_set", consistencyRules: [], hasApprovedAnchor: false, hasModelReference: false,
+    referenceManifest: references.map((reference, index) => `IMAGE ${index + 1}: ${roleLabel(reference.role)}`),
+  });
+  assertStringIncludes(qa, "For pose 6 (product-highlight detail close-up: Back lace-up showcase [back_detail]), fail pose_requirement if it is a full-body or three-quarter frame");
+  assertStringIncludes(qa, "(the BACK PRODUCT image decides this back detail)");
+  assertStringIncludes(qa, "Do NOT fail pose_requirement, model_face, or face_realism merely because the face is cropped out");
 });

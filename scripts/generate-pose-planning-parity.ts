@@ -124,6 +124,16 @@ const rawPoses: Record<string, unknown> = {
   leaning_walkway: { posture: "leaning", description: "leaning on the walkway railing by the sidewalk", suitableForProduct: "yes" },
   leaning_kelvin_walk: { posture: "leaning", description: "wal\u212aing shape, shoulder on the pillar", suitableForProduct: "yes" },
   other_yes: { posture: "twirling", description: "half turn with the arms out", suitableForProduct: "yes" },
+  // T94-Kitkat-Kattha: a seated reference the analysis judged unsuitable now adopts Pose 4 with its camera and seat.
+  t94_seated_unsuitable: {
+    posture: "seated",
+    description: "seated on a low bench, legs crossed, one hand bracing on the bench, head turned sideways",
+    seatOrSupport: "low reddish-brown wooden bench platform",
+    distinctiveness: "generic",
+    cameraAngle: "eye-level slightly low, mid-full framing",
+    suitableForProduct: "no",
+    suitabilityReason: "seated crossed legs folds hip hem and hides trouser silhouette and back lace-up",
+  },
   long_signature: {
     posture: "seated",
     description: "seated upright with the torso turned slightly, ".repeat(12),
@@ -156,7 +166,11 @@ const directivePoses: Record<string, ReferencePose> = {
   no_seat_short: pose({ seatOrSupport: "", description: "" }),
 };
 /** Normalized poses whose directive text differs in shape (block-only variants are skipped). */
-const DIRECTIVE_POSE_IDS = ["none", "generic_standing", "signature_standing", "seated_yes", "reclining_yes", "other_yes", "long_signature"];
+const DIRECTIVE_POSE_IDS = [
+  "none", "generic_standing", "signature_standing", "seated_yes", "reclining_yes", "other_yes", "long_signature",
+  // A walk or lifted foot is grounded, never copied; Pose 4 carries the reference camera.
+  "walking_yes", "leaning_foot_lifted", "standing_mid_stride", "seated_raised_heels", "t94_seated_unsuitable",
+];
 
 const contexts: Record<string, PosePlanningContext> = {
   empty: { poseFamily: "", bottomCutClass: "" },
@@ -177,7 +191,7 @@ const contexts: Record<string, PosePlanningContext> = {
   region_silhouette: { poseFamily: "dress", bottomCutClass: "none", showcaseFeatureRegion: "silhouette", showcaseShotType: "full_body_feature" },
   region_complete_set: { poseFamily: "kurta_set", bottomCutClass: "palazzo", showcaseFeatureRegion: "complete_set", showcaseShotType: "full_body_feature" },
   region_sleeve: { poseFamily: "short_kurti_top", bottomCutClass: "none", showcaseFeatureRegion: "sleeve", showcaseShotType: "full_body_feature" },
-  // An explicit sit request keeps a non-seated reference out of Pose 4 only; Pose 6 is unaffected.
+  // An explicit sit request keeps a non-seated reference out of Pose 4; Pose 6 never adopts.
   sit_requested: { poseFamily: "long_kurti", bottomCutClass: "straight", showcaseFeatureRegion: "neckline", showcaseShotType: "full_body_feature", sitRequested: true },
   sit_requested_farshi: { poseFamily: "kurta_set", bottomCutClass: "farshi", showcaseFeatureRegion: "neckline", showcaseShotType: "full_body_feature", sitRequested: true },
   sit_requested_macro: { poseFamily: "saree_ethnic", bottomCutClass: "none", showcaseFeatureRegion: "embroidery", showcaseShotType: "macro_detail", sitRequested: true },

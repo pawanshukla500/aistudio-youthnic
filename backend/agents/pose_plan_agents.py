@@ -7,10 +7,12 @@ outcome keys mirror supabase/functions/app-api/lib/posePlanning.ts exactly
 (tests/test_pose_planning_parity.py replays
 supabase/functions/app-api/tests/fixtures/pose_planning_parity.json).
 
-Only Pose 4 ("creative") and Pose 6 ("showcase") may copy the STYLE REFERENCE
-person's posture; the reference outfit, face, hair and anything in the hands
-stay quarantined in every frame (jewellery follows the styling plan). Every
-plan carries a planned expression for all six poses.
+Only Pose 4 ("creative") copies the STYLE REFERENCE person's posture, whenever
+the reference shows a person and no product guard blocks it; Pose 6
+("showcase") is the product-highlight close-up and never does. The reference
+outfit, face, hair and anything in the hands stay quarantined in every frame
+(jewellery follows the styling plan). Every plan carries a planned expression
+for all six poses.
 """
 import logging
 import re
@@ -39,8 +41,6 @@ DEFAULT_EXPRESSION_PLAN = {
     "smile": "soft",
     "rationale": "",
 }
-TIGHT_SHOWCASE_SHOTS = ("macro_detail", "half_body_detail")
-FULL_LENGTH_SHOWCASE_REGIONS = ("bottom_wear", "hem_border", "silhouette", "complete_set")
 MAX_TEXT = 420
 # posePlanning.ts MAX_REFERENCE_DIRECTIVE (normalizeSlotPlan / storedPosePlanning keep text(raw.directive, 900)).
 MAX_DIRECTIVE = 900
@@ -72,9 +72,16 @@ FROZEN_STEP = re.compile(
     re.I | re.ASCII,
 )
 _SLOT_ERROR = re.compile(r"^(creative|showcase) slot: ")
+# posePlanning.ts GROUNDED_SHIFT: replaces a walk or lifted foot in an adopted posture.
+_GROUNDED_SHIFT = (
+    "Ground the reference movement as a natural weight shift: both feet on the floor, one slightly ahead of the other "
+    "with the weight easing onto it, the body turned the way the reference person moves."
+)
 _QUARANTINE_SENTENCE = (
     "Copy only the body position and attitude, never the reference clothing, face, hair or anything in the hands "
-    "(jewellery follows the styling plan). Keep the uploaded garment's front design, hem and construction readable."
+    "(jewellery follows the styling plan). Keep the uploaded garment's front design, print, colours and construction "
+    "exactly as the product photos show; a folded posture may let the hem rest naturally but never hides the print or "
+    "changes the garment."
 )
 _FAMILY_SAFETY = {
     "lehenga": "Keep the lehenga skirt flare spread visibly.",
@@ -192,46 +199,57 @@ def normalize_expression_plan(raw_value: Any) -> Dict[str, str]:
     }
 
 
+def slot_posture(posture: str) -> str:
+    """posePlanning.ts slotPosture: a walking reference becomes a grounded standing weight shift."""
+    return "standing" if posture == "walking" else posture
+
+
 def reference_adoption_block_reason(slot: str, pose: Dict[str, str], ctx: Dict[str, Any]) -> str:
-    """Hard guards ("" = the slot may copy the reference posture), as referenceAdoptionBlockReason."""
+    """Hard guards ("" = the slot may copy the reference posture), as referenceAdoptionBlockReason.
+
+    Pose 4 adopts whenever the reference shows a person; only a sit request and the construction
+    guards remain. Pose 6 is the product-highlight close-up and never adopts.
+    """
     posture = pose["posture"]
     if posture == "none":
         return "The style reference shows no person to match."
-    if slot == "creative" and ctx.get("sit_requested") and posture != "seated":
+    if slot == "showcase":
+        return "Pose 6 is the product-highlight close-up, so it never copies the reference posture."
+    if ctx.get("sit_requested") and posture != "seated":
         return "Your notes ask Pose 4 to sit, so it follows that request instead of the reference posture."
-    if posture == "standing" and pose["distinctiveness"] == "generic":
-        return "The reference stance is a generic standing pose; the product-led pose fits better."
-    if pose["suitableForProduct"] == "no":
-        reason = pose.get("suitabilityReason") or ""
-        return f"Analysis judged the reference posture unsuitable for this product{': ' + reason if reason else '.'}"
-    if posture == "walking" or FROZEN_STEP.search(f"{pose['description']} {pose['signatureDescription']}"):
-        return "A walking stride or lifted foot would freeze mid-step; catalog frames keep both feet planted."
-    # The analysis prompt adopts only on an explicit "yes"; a missing or malformed verdict stays product-led.
-    if pose["suitableForProduct"] != "yes":
-        return "Analysis did not confirm that the reference posture suits this product."
-    low = posture in LOW_POSTURES
-    if low and ctx.get("bottom_cut_class") == "farshi":
+    if posture in LOW_POSTURES and ctx.get("bottom_cut_class") == "farshi":
         return "Farshi two-leg volume and the 4-inch upper-hem taper need a standing frame."
     if posture == "reclining" and str(ctx.get("pose_family") or "").startswith("saree"):
         return "A reclining pose breaks the saree pleats and pallu fall."
-    if slot == "showcase":
-        shot = str(ctx.get("showcase_shot_type") or "")
-        region = str(ctx.get("showcase_feature_region") or "")
-        if shot in TIGHT_SHOWCASE_SHOTS:
-            return "The showcase is a tight detail crop, so a body posture would not read."
-        if low and shot == "movement_feature":
-            return "A movement showcase cannot use a folded posture."
-        if low and region in FULL_LENGTH_SHOWCASE_REGIONS:
-            return f"The showcase hero ({region.replace('_', ' ')}) needs a full-length standing view."
     return ""
 
 
+def _directive_inputs(pose: Dict[str, str]):
+    """referenceSlotDirective's free text: a walk or lifted foot is dropped (and grounded), never copied."""
+    walking = pose["posture"] == "walking"
+    description = "" if walking or FROZEN_STEP.search(pose["description"]) else pose["description"]
+    raw_signature = pose["signatureDescription"] if pose["distinctiveness"] == "signature" else ""
+    signature = "" if walking or FROZEN_STEP.search(raw_signature) else raw_signature
+    grounded = walking or description != pose["description"] or signature != raw_signature
+    return walking, description, signature, grounded
+
+
 def _reference_directive_parts(slot: str, pose: Dict[str, str], description: str, signature_text: str) -> List[str]:
-    parts = [f"Match the STYLE REFERENCE person's {pose['posture']} posture: {description or pose['posture']}."]
+    walking, _, signature, grounded = _directive_inputs(pose)
+    parts = [
+        "Match the STYLE REFERENCE person's direction of movement in a grounded standing pose."
+        if walking
+        else f"Match the STYLE REFERENCE person's {pose['posture']} posture: {description or pose['posture']}."
+    ]
+    if grounded:
+        parts.append(_GROUNDED_SHIFT)
     if pose["seatOrSupport"]:
         parts.append(f"Rest on the {pose['seatOrSupport']}, which must already belong to the locked set.")
-    if pose["distinctiveness"] == "signature":
+    if signature:
         parts.append(f"Reproduce the signature pose: {signature_text}.")
+    camera = (pose.get("cameraAngle") or "") if slot == "creative" else ""
+    if camera:
+        parts.append(f"Camera and framing as the STYLE REFERENCE is shot: {camera}.")
     if slot == "showcase":
         parts.append(
             "Use a complementary variation of that posture with a different camera angle and framing from Pose 4, "
@@ -247,8 +265,7 @@ def _fit_directive(pose: Dict[str, str], compose: Callable[[str, str], str]) -> 
     On overflow the free-text body description and signature share what is left, so the fixed
     seat, showcase, quarantine (and family) sentences survive Edge's 900-char cut.
     """
-    signature = pose["signatureDescription"] if pose["distinctiveness"] == "signature" else ""
-    description = pose["description"]
+    _, description, signature, _ = _directive_inputs(pose)
     directive = compose(description, signature)
     if _u16len(directive) <= MAX_DIRECTIVE:
         return directive
@@ -457,7 +474,7 @@ def plan_poses(state: PosePlanningState) -> Dict[str, Any]:
             continue
         reference_effect = _signal_effect(state, slot, "reference")
         product_effect = _signal_effect(state, slot, "product")
-        # Every unblocked pose is suitableForProduct "yes" (hard guard), so suitability adds nothing here.
+        # The analysis's suitability verdict no longer gates Pose 4; only learned outcomes can outweigh the reference.
         reference_score = (
             60
             + (20 if pose["distinctiveness"] == "signature" else 0)
@@ -469,10 +486,14 @@ def plan_poses(state: PosePlanningState) -> Dict[str, Any]:
             f"learned reference {reference_effect}, product {product_effect}"
         )
         if reference_score > product_score:
-            matched = "signature style" if pose["distinctiveness"] == "signature" else f"{pose['posture']} posture"
+            matched = (
+                "signature style" if pose["distinctiveness"] == "signature"
+                else "movement as a grounded weight shift" if pose["posture"] == "walking"
+                else f"{pose['posture']} posture"
+            )
             slots[slot] = {
                 "source": "reference",
-                "posture": pose["posture"],
+                "posture": slot_posture(pose["posture"]),
                 "directive": bounded_reference_directive(slot, pose, state.get("pose_family") or ""),
                 "rationale": _text(f"Matches the style reference {matched} ({scores}).", 300),
             }

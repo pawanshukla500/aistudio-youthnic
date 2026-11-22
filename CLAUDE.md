@@ -27,29 +27,45 @@ Six-pose fashion catalog photoshoots generated from product references.
    models or bypass the established chain. Medium/high reasoning is preserved for Meta Muse Spark, Z.ai GLM 5.3 Flash, GPT 6.1 Terra, and GPT 5.6 Luna during analysis and pose planning (`clampProductTruthThinking`), only clamping to `low` under emergency tight remaining budgets (`< 60s` in Edge `app-api` or FastAPI `invoke_vision_json`), while legacy heavy models (`gpt-5.6-terra`, `gpt-5.6-sol`, `gemini-*`) run at `low` (explicit `none`/`minimal` preserved; Qwen thinking off). Image QA runs at `low`. Full contract: [docs/AI_MODEL_ROUTING.md](docs/AI_MODEL_ROUTING.md).
 2. **Product references are the truth (PR 131).** Generated images must take clothing EXCLUSIVELY
    from uploaded product references. The outfit/clothing shown in the STYLE REFERENCE image is 100% DISCARDED and QUARANTINED.
-   Style reference is the authority for backdrop, room architecture, flooring, and lighting, and for the body posture of
-   Pose 4/6 only when the stored pose plan adopts it (rule 4). Its outfit, face, hair, and objects in the hands are
-   quarantined in every frame; jewellery follows `stylingPlan`. Exception: props the product notes ask the model to
-   hold or carry (`requestedHandheldProps`, e.g. "holds a coffee glass and a hand bag as in the reference") carry over
-   from the style reference in every frame except the Pose 5 crop, never covering the garment; other props stay out.
+   Style reference is the authority for backdrop, room architecture, flooring, and lighting, and for the body posture,
+   camera angle and framing of Pose 4 when the stored pose plan adopts it (rule 4). Its outfit, face, hair, and objects
+   in the hands are quarantined in every frame; jewellery follows `stylingPlan`. Exception: props the product notes ask
+   the model to hold or carry (`requestedHandheldProps`, e.g. "holds a coffee glass and a hand bag as in the reference")
+   carry over from the style reference in every frame except the Pose 5 and Pose 6 detail crops, never covering the
+   garment; other props stay out.
    When the same photo is uploaded as model face and style reference, it is sent once, in the identity slot.
    Never compromise product fidelity or generation quality for style matching.
 3. **Natural Human Anatomy (PR 131).** Every generated image must have strictly exactly two arms and two hands.
    Zero third hands, phantom limbs, or floating hands resting on waist/pleats without clear forearm connection.
-4. **Pose Planning Directives (PR 131):**
-   - **Pose 5 (Detail Crop):** Must highlight the signature craftsmanship of the primary uploaded garment (kurti butti work, yoke embroidery, neckline craft). Never hijack with secondary accessories like dupattas/stoles unless product itself is standalone dupatta.
-   - **Pose 6 (Showcase):** Distinct pose complementing frames 1-5 with 100% consistency across model, product, backdrop, and styling.
-   - **Pose 4/6 reference matching:** only Pose 4 (`creative`) and Pose 6 (`showcase`) may copy the style-reference
-     person's posture or signature pose, and only when `session_data.posePlanning` (`lib/posePlanning.ts`) adopts it.
-     The LangGraph planner (`POST /api/v1/plan`) decides each slot after the hard guards in
-     `referenceAdoptionBlockReason` (no person; generic standing; not judged suitable; walking/stride; Farshi + folded
-     posture; saree + reclining; tight showcase crop; folded posture vs full-length or movement showcase), mirrored in
-     `backend/agents/pose_plan_agents.py`; the local plan applies the same guards when the planner is unavailable.
-     An explicit sit request in the product notes takes precedence for Pose 4: Pose 4 then adopts a reference posture
-     only when that posture is seated.
-     Adoption is always read from the stored plan, never from pose fields the client sends. Poses 1, 2, 3 and 5 stay
-     catalog frames. Analyses without `posePlanning` (before v36) keep today's pose behaviour: no posture copying, no
-     planned expressions or attitude line.
+4. **Pose Planning Directives (PR 131):** the six frames are 1 Full Front, 2 Turning (3/4), 3 Back, 4 Signature
+   Reference, 5 Face + Details, 6 Product Highlight. When rules conflict: product accuracy > reference accuracy > pose
+   accuracy > image quality > styling.
+   - **Pose 3 (Back, mandatory):** the uploaded BACK photo is the only authority for the back: back neck shape,
+     closures (lace-up, ties, bow), seams and stitching, print placement and length match it, and no back detail is
+     invented (`rearViewChecklist`, the rear evidence veto).
+   - **Pose 5 (Face + Details):** a natural model face with a sharp view of the primary uploaded garment's signature
+     craftsmanship (kurti butti work, yoke embroidery, neckline craft). Never hijack with secondary accessories like
+     dupattas/stoles unless product itself is standalone dupatta.
+   - **Pose 6 (Product Highlight, analysis v38+):** a tight, accurate detail close-up of the product's most distinctive
+     feature on the worn garment (`productHighlightPlan` in `lib/showcaseFeature.ts`, `showcasePlan.productHighlight`):
+     the analysis's pick, or the next distinctive feature recorded in `productIdentity` when the pick is not a detail
+     or is Pose 5's subject. The crop follows the feature (back closure: back-detail crop from behind; sleeves:
+     forearm/cuff; dupatta: drape detail; print/embroidery: torso), and the Pose 6 reference manifest leads with the
+     photo that best shows it (`back` for back details, `fabric_pattern` for print/embroidery, `mannequin` or
+     `additional_product` for sleeves). Never a full-body frame, never a reference posture; same model, set and light.
+     Analyses before v38 keep their full-body showcase.
+   - **Pose 4 reference matching (Signature Reference):** only Pose 4 (`creative`) copies the style-reference person's
+     posture, camera angle and framing (`referencePose.cameraAngle`), seat (`seatOrSupport`), hand gesture and gaze,
+     dressed in our garment with its front, print and colours exact, and only when `session_data.posePlanning`
+     (`lib/posePlanning.ts`) adopts it. It adopts whenever the reference shows a person; the hard guards in
+     `referenceAdoptionBlockReason` are only: no person; an explicit sit request when the reference is not seated;
+     Farshi + folded posture; saree + reclining. A walking or lifted-foot reference becomes a grounded weight shift.
+     Pose 6 never adopts. The guards are mirrored in `backend/agents/pose_plan_agents.py` (parity fixture); the
+     LangGraph planner (`POST /api/v1/plan`) decides after them and the local plan applies them when it is unavailable.
+     Adoption is always read from the stored plan, never from pose fields the client sends. Poses 1, 2, 3, 5 and 6 stay
+     catalog frames (a plan stored before v38 may still carry a Pose 6 adoption, which generation honours). Analyses
+     without `posePlanning` (before v36) keep today's pose behaviour: no posture copying, no planned expressions or
+     attitude line.
    - **Per-frame expression, gaze and body language (`lib/expressionDirection.ts`):** every face-visible frame has its
      own gaze target, head angle, mouth and one natural gesture (Pose 1 eye contact; Pose 2 past the lens; Pose 4 into
      the set; Pose 5 a quarter turn back to the lens; Pose 6 toward the featured garment), stated once in the
@@ -58,8 +74,8 @@ Six-pose fashion catalog photoshoots generated from product references.
      dropped). Identity locks (`modelIdentity.face`, the face lock, APPROVED POSE 1) carry facial features only, never
      an expression, gaze or head tilt. From analysis v37, Pose 4 also takes the style-reference person's expression,
      gaze and hand gesture (`referencePose.expression|gaze|hands`, scrubbed of posture, stride and held-object words)
-     whatever its posture; `referencePose.cameraAngle` applies only to an adopted posture. An adopted Pose 6 copies the
-     posture but keeps its own showcase look. Never their face or anything in the hands.
+     whatever its posture; `referencePose.cameraAngle` applies only to an adopted posture. A Pose 6 close-up may leave
+     the face out of frame. Never their face or anything in the hands.
 5. **One set per shoot.** Every pose prompt carries the same SCENE LOCK
    (`lib/sceneLock.ts`); only pose, camera angle and framing change between frames.
 6. **Never delete paid output.** Each delivered image is an immutable

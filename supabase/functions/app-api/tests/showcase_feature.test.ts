@@ -224,14 +224,17 @@ Deno.test("the analysis prompt asks for a chosen feature and forbids a hero repe
     referenceManifest: [{ number: 1, role: "front" }],
     showcaseFeedback: "- bottom_wear as full_body_feature: kept 4 time(s) - this reads well for this category.",
   });
-  assertStringIncludes(prompt, "THE SIXTH FRAME IS DECIDED BY YOU");
-  assertStringIncludes(prompt, "MANDATORY NON-DUPLICATION");
-  assertStringIncludes(prompt, "It must NOT be a second full-body hero");
+  assertStringIncludes(prompt, "THE SIXTH FRAME IS THE PRODUCT HIGHLIGHT - a tight, accurate DETAIL CLOSE-UP");
+  assertStringIncludes(prompt, "It never copies the reference posture and is never a full-body or three-quarter frame.");
   assertStringIncludes(prompt, "It must NOT re-shoot pose 5's subject");
+  assertStringIncludes(prompt, "pick the next most distinctive feature - sleeves or cuffs, a back closure, the hem, a dupatta, or the fabric or print");
+  assertStringIncludes(prompt, "a back closure is a back-detail crop with the model facing away, from the shoulder blades to the waist");
+  assertStringIncludes(prompt, "featureRegion: one of back_detail, neckline,");
+  assertStringIncludes(prompt, "shotType: macro_detail (fill the frame with the feature) or half_body_detail");
   assertStringIncludes(prompt, "SIXTH-FRAME FEEDBACK");
   assertStringIncludes(prompt, "bottom_wear as full_body_feature");
   assertStringIncludes(prompt, '"showcasePlan":{"heroFeature":""');
-  assertEquals(ANALYSIS_VERSION, "generation-session-v37-reference-look-per-frame-expression");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v38-signature-reference-product-highlight");
 });
 
 Deno.test("a widened frame is what the slot, the prompt and the feedback key all use", () => {
