@@ -13,6 +13,7 @@ import {
   type PosePlanningContext,
   posePlanningGraphPayload,
   referenceAdoptionBlockReason,
+  referenceSlotDirective,
   type ReferencePose,
   slotReferencePlan,
   storedPosePlanning,
@@ -810,4 +811,30 @@ Deno.test("an adopted Pose 4 drops the analysis's own hand placement for the ref
     posePlan: [{ id: "creative", handPlacement: "one hand resting at the hip" }],
   }), "kurti").posePlan[3];
   assertEquals(productLed.handPlacement, "one hand resting at the hip");
+});
+
+Deno.test("the T94 v39 reference description fits whole; an over-long one is cut on a whole word", () => {
+  const t94 = normalizeReferencePose({
+    posture: "seated",
+    description: "Seated on a low wooden ledge with hips angled three-quarter, both legs extended forward and loosely crossed " +
+      "at the ankles, torso relaxed and slightly reclined against nothing, one arm bent raising a glass near the mouth, " +
+      "the other hand resting lightly on the seat beside the hip, head turned in profile",
+    seatOrSupport: "low maroon wooden ledge/bench at the base of the record-shelf wall",
+    distinctiveness: "signature",
+    signatureDescription: "shot like a friend snapped it",
+    cameraAngle: "eye-level, slightly three-quarter, roughly waist-up to knees framing with shallow depth of field",
+  });
+  // Analysis v39 stored "loosely crossed at the a." under the former 900-character cap.
+  const whole = localPosePlanningDecision(t94, normalizeExpressionPlan({}), ctx()).slots.creative.directive;
+  assert(whole.length <= MAX_REFERENCE_DIRECTIVE);
+  assertStringIncludes(whole, "loosely crossed at the ankles, torso relaxed");
+  assertStringIncludes(whole, "head turned in profile. Rest on the low maroon wooden ledge");
+  const long = referenceSlotDirective("creative", {
+    ...t94,
+    description: "torso turned, shoulders soft ".repeat(40).trim(),
+    seatOrSupport: "carved teak bench ".repeat(10).trim(),
+  });
+  assert(long.length <= MAX_REFERENCE_DIRECTIVE);
+  const body = long.split("seated posture: ")[1].split(". Rest on")[0];
+  assert(/(?:^|\s)(?:torso|turned,|shoulders|soft)$/.test(body), body.slice(-24));
 });

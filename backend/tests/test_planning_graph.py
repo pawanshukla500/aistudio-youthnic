@@ -127,7 +127,7 @@ def test_any_reference_person_adopts_pose_4_past_the_suitability_verdict():
 
 
 @pytest.mark.parametrize("pose_family", ["long_kurti", "saree_classic"])
-def test_long_reference_directive_fits_edge_900_char_cut(pose_family):
+def test_long_reference_directive_fits_edge_directive_cut(pose_family):
     result = plan({
         **SEATED,
         "description": "seated upright with the torso turned slightly, " * 12,
@@ -145,7 +145,7 @@ def test_long_reference_directive_fits_edge_900_char_cut(pose_family):
 
 
 def test_astral_text_directive_fits_edge_utf16_cut():
-    # Edge cuts at 900 UTF-16 units; each emoji is two units but one Python code point.
+    # Edge cuts at MAX_DIRECTIVE UTF-16 units; each emoji is two units but one Python code point.
     emoji = "💃"
     result = plan({
         **SEATED,

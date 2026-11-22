@@ -260,8 +260,19 @@ export function referenceAdoptionBlockReason(slot: AdoptableSlot, pose: Referenc
   return "";
 }
 
-/** Stored and planner directives keep at most this many characters (normalizeSlotPlan, storedPosePlanning). */
-export const MAX_REFERENCE_DIRECTIVE = 900;
+/**
+ * Stored and planner directives keep at most this many characters (normalizeSlotPlan, storedPosePlanning).
+ * The fixed seat, camera, quarantine and family sentences take ~800; 1200 leaves room for a full body description.
+ */
+export const MAX_REFERENCE_DIRECTIVE = 1200;
+
+/** A cut free-text field ends on a whole word ("crossed at the ankles", never "crossed at the a"). */
+function clipWords(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const cut = value.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return (space > 0 ? cut.slice(0, space) : cut).trimEnd();
+}
 
 export function referenceSlotDirective(slot: AdoptableSlot, pose: ReferencePose): string {
   // Held objects are dropped. A walk or lifted foot is never copied as written: that text is dropped and the slot grounds it.
@@ -298,8 +309,8 @@ export function referenceSlotDirective(slot: AdoptableSlot, pose: ReferencePose)
   const budget = Math.max(0, MAX_REFERENCE_DIRECTIVE - (directive.length - description.length - signature.length));
   const signatureLength = Math.min(signature.length, Math.max(Math.floor(budget / 2), budget - description.length));
   return compose(
-    description.slice(0, budget - signatureLength).trimEnd(),
-    signature.slice(0, signatureLength).trimEnd(),
+    clipWords(description, budget - signatureLength).trimEnd(),
+    clipWords(signature, signatureLength).trimEnd(),
   ).slice(0, MAX_REFERENCE_DIRECTIVE);
 }
 
