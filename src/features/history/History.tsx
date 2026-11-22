@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   Ban,
   ChevronDown,
@@ -166,28 +166,88 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 
 const CREATED_AT = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" });
 
-/** Escape closes and the page behind stops scrolling while a History modal is open. */
-function useModalChrome(open: boolean, onClose: () => void, canClose = true) {
+// One scroll lock for all History modals: stacked modals that close in the same render
+// (submitting a regeneration from the preview closes both) must not restore "hidden".
+let scrollLocks = 0;
+let unlockedOverflow = "";
+function lockPageScroll() {
+  if (scrollLocks++ === 0) {
+    unlockedOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+}
+function unlockPageScroll() {
+  if (scrollLocks > 0 && --scrollLocks === 0) document.body.style.overflow = unlockedOverflow;
+}
+
+// Open modals, innermost last: only the top one handles Escape and keeps Tab focus inside itself.
+const openModals: symbol[] = [];
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * While a History modal is open: Escape closes it, the page behind stops scrolling, focus moves into
+ * the dialog and Tab stays inside it, and focus returns to where it was when the modal closes.
+ */
+function useModalChrome(open: boolean, onClose: () => void, canClose = true, dialogRef?: RefObject<HTMLElement | null>) {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   const canCloseRef = useRef(canClose);
   canCloseRef.current = canClose;
+  // Read during the render that opens the modal: an autoFocus field inside it takes focus before effects run.
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current) returnFocusRef.current = document.activeElement as HTMLElement | null;
+  wasOpen.current = open;
   useEffect(() => {
     if (!open) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const id = Symbol("history-modal");
+    openModals.push(id);
+    lockPageScroll();
+    const returnFocus = returnFocusRef.current;
+    const focusTimer = window.setTimeout(() => {
+      const dialog = dialogRef?.current;
+      if (dialog && !dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true });
+    }, 0);
     const onKeyDown = (event: KeyboardEvent) => {
+      if (openModals[openModals.length - 1] !== id) return;
       if (event.key === "Escape" && canCloseRef.current) {
         event.preventDefault();
-        event.stopPropagation();
         closeRef.current();
+        return;
+      }
+      const dialog = dialogRef?.current;
+      if (event.key !== "Tab" || !dialog) return;
+      const items = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((item) => item.offsetParent !== null);
+      if (!items.length) {
+        event.preventDefault();
+        dialog.focus({ preventScroll: true });
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!dialog.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && (active === first || active === dialog)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => {
+      window.clearTimeout(focusTimer);
       window.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = previousOverflow;
+      const index = openModals.indexOf(id);
+      if (index >= 0) openModals.splice(index, 1);
+      unlockPageScroll();
+      if (returnFocus && returnFocus.isConnected) returnFocus.focus({ preventScroll: true });
     };
+    // dialogRef is a stable ref object.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 }
 
@@ -570,7 +630,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const previewKeyHandler = useRef<(event: KeyboardEvent) => void>(() => {});
   useEffect(() => {
     previewKeyHandler.current = (event: KeyboardEvent) => {
-      if (!selectedPose || regenerateTarget) return;
+      if (!selectedPose || regenerateTarget || openModals.length > 1) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable))
@@ -603,10 +663,14 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   }, [previewOpen]);
 
   // The pose preview handles its own keys (arrows, D, Esc); the hooks below only lock scrolling for it.
-  useModalChrome(previewOpen, () => undefined, false);
-  useModalChrome(Boolean(regenerateTarget), () => setRegenerateTarget(null), !regeneratingId);
-  useModalChrome(Boolean(selectedReference), () => setSelectedReference(null));
-  useModalChrome(showModelRoutingModal, () => setShowModelRoutingModal(false));
+  const previewDialog = useRef<HTMLDivElement>(null);
+  const regenerateDialog = useRef<HTMLFormElement>(null);
+  const referenceDialog = useRef<HTMLDivElement>(null);
+  const routingDialog = useRef<HTMLDivElement>(null);
+  useModalChrome(previewOpen, () => undefined, false, previewDialog);
+  useModalChrome(Boolean(regenerateTarget), () => setRegenerateTarget(null), !regeneratingId, regenerateDialog);
+  useModalChrome(Boolean(selectedReference), () => setSelectedReference(null), true, referenceDialog);
+  useModalChrome(showModelRoutingModal, () => setShowModelRoutingModal(false), true, routingDialog);
 
   const batchRunning = batchEntries.some((entry) => entry.state === "submitting");
   // A request that errored after the server had already queued some poses still shows those as queued.
@@ -1235,6 +1299,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             role="dialog"
             aria-modal="true"
             aria-label={`Pose ${selectedPose.poseNumber}: ${selectedPose.title}`}
+            ref={previewDialog}
+            tabIndex={-1}
           >
             {/* LIGHTBOX HEADER */}
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/40 bg-surface-container-lowest px-4 py-3 sm:px-6 sm:py-4">
@@ -1735,6 +1801,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             role="dialog"
             aria-modal="true"
             aria-label={`Regenerate pose ${regenerateTarget.poseNumber}`}
+            ref={regenerateDialog}
+            tabIndex={-1}
           >
             <div className="flex items-start justify-between">
               <div>
@@ -1830,6 +1898,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             role="dialog"
             aria-modal="true"
             aria-label={selectedReference.label}
+            ref={referenceDialog}
+            tabIndex={-1}
           >
             <div className="flex items-center justify-between border-b border-outline-variant/40 px-6 py-4">
               <div>
@@ -1868,6 +1938,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             role="dialog"
             aria-modal="true"
             aria-label="AI pipeline modes"
+            ref={routingDialog}
+            tabIndex={-1}
           >
             <div className="flex items-center justify-between border-b border-outline-variant/40 px-6 py-4">
               <div className="flex items-center gap-2.5">
