@@ -774,4 +774,16 @@ Deno.test("an adopted Pose 4 drops the analysis's own hand placement for the ref
   const pose4 = normalizeAnalysis(t94Raw(), "kurti").posePlan[3];
   assertStringIncludes(pose4.handPlacement, "Hands follow the matched posture and the style-reference hand gesture");
   assertEquals(/pocket/i.test(pose4.handPlacement), false);
+  // The real T94 v38 analysis wrote its own Pose 4 hands (a dupatta the SKU does not have); they never win.
+  const written = normalizeAnalysis(t94Raw({
+    posePlan: [{ id: "creative", handPlacement: "one hand in the trouser pocket, the other lightly guiding the outer dupatta border" }],
+  }), "kurti").posePlan[3];
+  assertStringIncludes(written.handPlacement, "Hands follow the matched posture and the style-reference hand gesture");
+  assertEquals(/pocket|dupatta/i.test(written.handPlacement), false);
+  // A product-led Pose 4 keeps the hands the model wrote.
+  const productLed = normalizeAnalysis(t94Raw({
+    referencePose: { posture: "none" },
+    posePlan: [{ id: "creative", handPlacement: "one hand resting at the hip" }],
+  }), "kurti").posePlan[3];
+  assertEquals(productLed.handPlacement, "one hand resting at the hip");
 });

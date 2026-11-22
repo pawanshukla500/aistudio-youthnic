@@ -2144,7 +2144,8 @@ export function normalizeAnalysis(
       cameraAngle: referenceCamera ? fallback.cameraAngle : stringValue(candidate.cameraAngle ?? candidate.camera_angle, fallback.cameraAngle),
       framing: referenceCamera ? fallback.framing : stringValue(candidate.framing, fallback.framing),
       bodyPosition: adopted ? fallback.bodyPosition : stringValue(candidate.bodyPosition ?? candidate.body_position, fallback.bodyPosition),
-      handPlacement: sanitizeHeldObjectText(
+      // An adopted Pose 4 follows the reference hand gesture, never the hands the model wrote for its own pose.
+      handPlacement: adopted && fallback.id === "creative" ? fallback.handPlacement : sanitizeHeldObjectText(
         stringValue(candidate.handPlacement ?? candidate.hand_placement, fallback.handPlacement),
         fallback.handPlacement,
         allowPropNotes,
