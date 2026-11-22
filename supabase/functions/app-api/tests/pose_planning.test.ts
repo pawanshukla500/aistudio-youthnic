@@ -747,6 +747,14 @@ Deno.test("a clause naming a held object never reaches the Pose 4 directive (T94
   assertEquals(directive.includes("both feet on the floor"), false);
   assertEquals(withoutHeldObjects("Phone raised; hand on hip. Sunglasses up"), "hand on hip");
   assertEquals(withoutHeldObjects("leaning on a bottle green pillar"), "leaning on a bottle green pillar");
+  // A held object and a lifted foot in one clause: dropped, and the step still grounds.
+  const lifted = localPosePlanningDecision(
+    normalizeReferencePose({ posture: "standing", description: "weight on one hip, bag in hand with one foot lifted" }),
+    normalizeExpressionPlan({}),
+    ctx(),
+  ).slots.creative.directive;
+  assertEquals(/\bbag\b|lifted/.test(lifted), false);
+  assertStringIncludes(lifted, "both feet on the floor");
 });
 
 Deno.test("a negated back detail is not a Pose 6 feature, and nothing distinct from Pose 5 still gives a marked close-up", () => {

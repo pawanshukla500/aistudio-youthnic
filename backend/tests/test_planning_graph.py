@@ -333,6 +333,10 @@ def test_held_cup_clause_is_dropped_so_t94_pose_4_adopts_first_time():
     assert result["validation"] == {"attempts": 1, "errors": []} and result["steps"] == PLANNED_STEPS
     assert pose_plan_agents.without_held_objects("Phone raised; hand on hip. Sunglasses up") == "hand on hip"
     assert pose_plan_agents.without_held_objects("leaning on a bottle green pillar") == "leaning on a bottle green pillar"
+    # A held object and a lifted foot in one clause: dropped, and the step still grounds.
+    lifted = plan({"posture": "standing", "description": "weight on one hip, bag in hand with one foot lifted"})["slots"]["creative"]
+    assert lifted["source"] == "reference" and "bag" not in lifted["directive"] and "lifted" not in lifted["directive"]
+    assert "Ground the reference movement as a natural weight shift" in lifted["directive"]
 
 
 def test_persistent_validation_errors_fall_back_to_product(monkeypatch):

@@ -158,6 +158,14 @@ const rawPoses: Record<string, unknown> = {
     description: "leaning on a bottle green pillar, handbag over the forearm, one foot lifted, holding a bottle",
     suitableForProduct: "yes",
   },
+  // A held object and a lifted foot in one clause: the step check reads the unfiltered text, so it still grounds.
+  held_lifted_same_clause: {
+    posture: "standing",
+    description: "weight on one hip, bag in hand with one foot lifted",
+    distinctiveness: "signature",
+    signatureDescription: "phone up with heels raised",
+    suitableForProduct: "yes",
+  },
   long_signature: {
     posture: "seated",
     description: "seated upright with the torso turned slightly, ".repeat(12),
@@ -195,7 +203,7 @@ const DIRECTIVE_POSE_IDS = [
   // A walk or lifted foot is grounded, never copied; Pose 4 carries the reference camera.
   "walking_yes", "leaning_foot_lifted", "standing_mid_stride", "seated_raised_heels", "t94_seated_unsuitable",
   // Clauses naming a held object never reach the directive.
-  "t94_seated_cup", "held_only", "held_bottle_green_lifted",
+  "t94_seated_cup", "held_only", "held_bottle_green_lifted", "held_lifted_same_clause",
 ];
 
 const contexts: Record<string, PosePlanningContext> = {

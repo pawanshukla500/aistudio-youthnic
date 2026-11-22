@@ -238,11 +238,13 @@ def without_held_objects(value: str) -> str:
 def _directive_inputs(pose: Dict[str, str]):
     """referenceSlotDirective's free text: held objects are dropped; a walk or lifted foot is dropped (and grounded)."""
     walking = pose["posture"] == "walking"
-    base_description = without_held_objects(pose["description"])
-    description = "" if walking or FROZEN_STEP.search(base_description) else base_description
-    raw_signature = without_held_objects(pose["signatureDescription"]) if pose["distinctiveness"] == "signature" else ""
-    signature = "" if walking or FROZEN_STEP.search(raw_signature) else raw_signature
-    grounded = walking or description != base_description or signature != raw_signature
+    raw_signature = pose["signatureDescription"] if pose["distinctiveness"] == "signature" else ""
+    # The step check reads the unfiltered text: "bag in hand with one foot lifted" still grounds.
+    frozen_description = bool(FROZEN_STEP.search(pose["description"]))
+    frozen_signature = bool(FROZEN_STEP.search(raw_signature))
+    description = "" if walking or frozen_description else without_held_objects(pose["description"])
+    signature = "" if walking or frozen_signature else without_held_objects(raw_signature)
+    grounded = walking or frozen_description or frozen_signature
     return walking, description, signature, grounded
 
 

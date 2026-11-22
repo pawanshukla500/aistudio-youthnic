@@ -266,11 +266,13 @@ export const MAX_REFERENCE_DIRECTIVE = 900;
 export function referenceSlotDirective(slot: AdoptableSlot, pose: ReferencePose): string {
   // Held objects are dropped. A walk or lifted foot is never copied as written: that text is dropped and the slot grounds it.
   const walking = pose.posture === "walking";
-  const baseDescription = withoutHeldObjects(pose.description);
-  const description = walking || FROZEN_STEP.test(baseDescription) ? "" : baseDescription;
-  const rawSignature = pose.distinctiveness === "signature" ? withoutHeldObjects(pose.signatureDescription) : "";
-  const signature = walking || FROZEN_STEP.test(rawSignature) ? "" : rawSignature;
-  const grounded = walking || description !== baseDescription || signature !== rawSignature;
+  const rawSignature = pose.distinctiveness === "signature" ? pose.signatureDescription : "";
+  // The step check reads the unfiltered text: "bag in hand with one foot lifted" still grounds.
+  const frozenDescription = FROZEN_STEP.test(pose.description);
+  const frozenSignature = FROZEN_STEP.test(rawSignature);
+  const description = walking || frozenDescription ? "" : withoutHeldObjects(pose.description);
+  const signature = walking || frozenSignature ? "" : withoutHeldObjects(rawSignature);
+  const grounded = walking || frozenDescription || frozenSignature;
   const camera = slot === "creative" ? pose.cameraAngle ?? "" : "";
   const compose = (descriptionText: string, signatureText: string) => {
     const parts = [
