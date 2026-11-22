@@ -163,6 +163,11 @@ function qaReviewOutcome(review: any) {
 }
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+/** "$1.67"; an amount under a cent keeps four decimals ("$0.0054") so it never reads as $0.00. */
+const formatUsd = (value: unknown) => {
+  const amount = Number(value || 0);
+  return `$${amount > 0 && amount < 0.01 ? amount.toFixed(4) : amount.toFixed(2)}`;
+};
 
 const CREATED_AT = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" });
 
@@ -749,6 +754,11 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     totalRegenerationMs: 0,
     regenerationCostUsd: 0,
   };
+  const costTitle = job.costBreakdown
+    ? `Analysis $${Number(job.costBreakdown.analysisUsd || 0).toFixed(4)} · Images $${Number(job.costBreakdown.generationUsd || 0).toFixed(4)} · QA ${
+      job.costBreakdown.qaRan ? `$${Number(job.costBreakdown.qaUsd || 0).toFixed(4)}` : "off"
+    }${regenerationSummary.regenerations > 0 ? ` · Retries $${Number(regenerationSummary.regenerationCostUsd || 0).toFixed(4)}` : ""}`
+    : `Spent $${Number(job.actualCost || 0).toFixed(4)}`;
   const jobIsActive = ACTIVE_JOB_STATUSES.includes(job.status);
   const batchEligiblePoses = job.poses.filter((pose: any) => canRegeneratePose(pose, job.status));
   const batchSelectedCount = batchEligiblePoses.filter((pose: any) => batchSelection.includes(pose._id)).length;
@@ -758,131 +768,96 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 
   return (
     <div className="space-y-6">
-      {/* SPECS & ACTIONS RIBBON */}
-      <div className="flex flex-col gap-4 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest/90 p-5 shadow-sm backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-wrap items-center gap-2.5 text-xs text-secondary">
-          <div className="flex items-center gap-1.5 rounded-lg border border-outline-variant/50 bg-white px-2.5 py-1.5 font-medium shadow-xs">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Aspect</span>
-            <span className="font-mono font-bold text-on-surface">{job.aspectRatio || "3:4"}</span>
-          </div>
-
-          <div className="flex items-center gap-1.5 rounded-lg border border-outline-variant/50 bg-white px-2.5 py-1.5 font-medium shadow-xs">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Size</span>
-            <span className="font-mono font-bold text-on-surface">{job.imageSize || "1024x1024"}</span>
-          </div>
-
-          <div className="flex items-center gap-1.5 rounded-lg border border-outline-variant/50 bg-white px-2.5 py-1.5 font-medium shadow-xs">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Tier</span>
-            <span className="font-bold capitalize text-primary">{job.quality || "medium"}</span>
-          </div>
-
-          <div
-            className="flex items-center gap-1.5 rounded-lg border border-primary/25 bg-soft-blush px-2.5 py-1.5 font-medium shadow-xs"
-            title={`Vision Analysis Engine: ${job.analysisModel || "Not recorded"}`}
-          >
-            <Brain className="h-3.5 w-3.5 text-primary" />
-            <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Analysis</span>
-            <span className="font-bold text-primary truncate max-w-[200px]">
-              {job.analysisModel ? formatModelName(job.analysisModel) : "Not recorded"}
+      {/* SPECS & ACTIONS RIBBON: one quiet line of specs and models, one of cost; details live in Pipeline details. */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest/90 px-5 py-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0 space-y-1.5 text-xs text-secondary">
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="font-semibold text-on-surface">
+              {job.aspectRatio || "3:4"} · {job.imageSize || "1024x1024"} · <span className="capitalize">{job.quality || "medium"}</span>
             </span>
-          </div>
-
-          <div
-            className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50/70 px-2.5 py-1.5 font-medium shadow-xs"
-            title={`Image Generation Engine: ${job.generationModel || job.model || "Default Model"}`}
-          >
-            <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
-            <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Image Gen</span>
-            <span className="font-bold text-indigo-700 truncate max-w-[200px]">
-              {formatModelName(job.generationModel || job.model || "")}
+            <span className="inline-flex min-w-0 items-center gap-1" title={`Vision analysis: ${job.analysisModel || "Not recorded"}`}>
+              <Brain className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+              <span className="sr-only">Analysis model:</span>
+              <span className="truncate">{job.analysisModel ? formatModelName(job.analysisModel) : "Not recorded"}</span>
             </span>
-          </div>
-
-          <div className="flex flex-col justify-center rounded-lg border border-outline-variant/50 bg-white px-3 py-1 text-[11px] shadow-xs">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Cost so far</span>
-              <span className="font-mono font-bold text-on-surface">${Number(job.actualCost || 0).toFixed(4)}</span>
-              <span className="text-[10px] text-secondary">(${Number(job.estimatedCost || 0).toFixed(2)} est)</span>
-            </div>
-            {job.costBreakdown && (
-              <span className="text-[9px] text-secondary/80">
-                Analysis ${Number(job.costBreakdown.analysisUsd || 0).toFixed(4)} · Images ${Number(job.costBreakdown.generationUsd || 0).toFixed(4)}
-                {job.costBreakdown.qaEnabled || job.costBreakdown.qaRan
-                  ? ` · QA ${job.costBreakdown.qaRan ? `$${Number(job.costBreakdown.qaUsd || 0).toFixed(4)}` : "off"}`
-                  : " · QA off"}
+            <span className="inline-flex min-w-0 items-center gap-1" title={`Image generation: ${job.generationModel || job.model || "Default model"}`}>
+              <Sparkles className="h-3.5 w-3.5 shrink-0 text-indigo-600" aria-hidden="true" />
+              <span className="sr-only">Image model:</span>
+              <span className="truncate">{formatModelName(job.generationModel || job.model || "")}</span>
+            </span>
+          </p>
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span title={costTitle}>
+              Spent <span className="font-mono font-semibold text-on-surface">{formatUsd(job.actualCost)}</span>
+              <span className="text-secondary/80"> · est. {formatUsd(job.estimatedCost)}</span>
+            </span>
+            {regenerationSummary.regenerations > 0 && (
+              <span className="inline-flex items-center gap-1" title="Every earlier version is kept in this shoot's history">
+                <Layers className="h-3 w-3" aria-hidden="true" />
+                {plural(regenerationSummary.regenerations, "retry", "retries")} on {plural(regenerationSummary.regeneratedPoses, "pose", "poses")}
               </span>
             )}
-          </div>
-
-          {regenerationSummary.regenerations > 0 && (
-            <div
-              className="flex items-center gap-1.5 rounded-lg border border-primary/20 bg-soft-blush px-2.5 py-1.5 text-[11px] font-semibold text-primary shadow-xs"
-              title="Versions retained in history"
+            <button
+              type="button"
+              onClick={() => setShowModelRoutingModal(true)}
+              aria-haspopup="dialog"
+              className="font-semibold text-primary underline-offset-2 hover:underline focus-visible:underline"
             >
-              <Layers className="h-3.5 w-3.5" />
-              <span>
-                {plural(regenerationSummary.regenerations, "retry", "retries")} across {plural(regenerationSummary.regeneratedPoses, "pose", "poses")}
-              </span>
-              <span className="font-mono text-[10px] font-bold text-primary/80">
-                (${Number(regenerationSummary.regenerationCostUsd || 0).toFixed(4)})
-              </span>
-            </div>
-          )}
-
+              Pipeline details
+            </button>
+          </p>
           {visibleError && (
-            <div className="flex items-center gap-1.5 rounded-lg border border-danger/20 bg-danger/5 px-2.5 py-1.5 text-[11px] font-medium text-danger">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            <p className="flex items-center gap-1.5 font-medium text-danger">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span className="line-clamp-1">{visibleError}</span>
-            </div>
+            </p>
           )}
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Actions: neutral secondary buttons, one primary download (on phones: two side by side, download full width). */}
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
           <button
-            onClick={() => setShowModelRoutingModal(true)}
-            className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3.5 py-2 text-xs font-bold text-primary shadow-xs transition-all hover:bg-primary/10 hover:border-primary/50 active:scale-95"
-            title="Inspect vision analysis and image generation models, routing, and mode details"
-          >
-            <Brain className="h-3.5 w-3.5 text-primary" />
-            Pipeline Modes
-          </button>
-
-          <button
+            type="button"
             onClick={() => void toggleReferences()}
             disabled={referencesLoading}
-            className="flex items-center gap-1.5 rounded-xl border border-outline-variant/60 bg-white px-3.5 py-2 text-xs font-bold text-on-surface shadow-xs transition-all hover:border-primary/40 hover:bg-surface-container-low active:scale-95 disabled:opacity-50"
+            aria-expanded={showReferences}
+            className="flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-outline-variant/60 bg-white px-3 py-2 text-xs font-semibold text-on-surface transition-colors hover:border-primary/40 hover:bg-surface-container-low disabled:opacity-50"
           >
-            {referencesLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Images className="h-3.5 w-3.5 text-secondary" />}
+            {referencesLoading ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Images className="h-3.5 w-3.5 shrink-0 text-secondary" />}
             {referencesLoading ? "Loading..." : showReferences ? "Hide references" : "View references"}
           </button>
 
           <button
+            type="button"
             onClick={() => void cloneJob()}
             disabled={isCloning}
-            className="flex items-center gap-1.5 rounded-xl border border-outline-variant/60 bg-white px-3.5 py-2 text-xs font-bold text-on-surface shadow-xs transition-all hover:border-primary/40 hover:bg-surface-container-low active:scale-95 disabled:opacity-50"
+            className="flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-outline-variant/60 bg-white px-3 py-2 text-xs font-semibold text-on-surface transition-colors hover:border-primary/40 hover:bg-surface-container-low disabled:opacity-50"
           >
-            {isCloning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5 text-secondary" />}
+            {isCloning ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5 shrink-0 text-secondary" />}
             {isCloning ? "Cloning..." : "Clone Session"}
           </button>
 
-          <button
-            onClick={() => void downloadZip()}
-            disabled={Boolean(zipping) || !job.poses.some((pose: any) => Boolean(visiblePoseOutputUrl(pose)))}
-            className="flex items-center gap-1.5 rounded-xl bg-primary/10 px-3.5 py-2 text-xs font-bold text-primary shadow-xs transition-all hover:bg-primary/20 active:scale-95 disabled:opacity-50"
-          >
-            {zipping === "all" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-            {zipping === "all" ? "Packaging ZIP..." : "Download ZIP"}
-          </button>
+          {approvedPoseCount > 0 && (
+            <button
+              type="button"
+              onClick={() => void downloadZip(true)}
+              disabled={Boolean(zipping)}
+              title={`Download the ${plural(approvedPoseCount, "approved image", "approved images")}`}
+              className="col-span-2 flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-emerald-600/30 bg-white px-3 py-2 text-xs font-semibold text-emerald-800 transition-colors hover:bg-emerald-50 disabled:opacity-50"
+            >
+              {zipping === "approved" ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-700" />}
+              {zipping === "approved" ? "Packaging..." : `Download approved (${approvedPoseCount})`}
+            </button>
+          )}
 
           <button
-            onClick={() => void downloadZip(true)}
-            disabled={Boolean(zipping) || approvedPoseCount === 0}
-            title={approvedPoseCount === 0 ? "No poses have been approved yet" : `Download the ${approvedPoseCount} approved images`}
-            className="flex items-center gap-1.5 rounded-xl border border-emerald-600/30 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-800 shadow-xs transition-all hover:bg-emerald-100 active:scale-95 disabled:opacity-40"
+            type="button"
+            onClick={() => void downloadZip()}
+            disabled={Boolean(zipping) || !job.poses.some((pose: any) => Boolean(visiblePoseOutputUrl(pose)))}
+            className="col-span-2 flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-white shadow-xs transition-colors hover:bg-primary-dark disabled:opacity-50"
           >
-            {zipping === "approved" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />}
-            {zipping === "approved" ? "Packaging..." : `Approved (${approvedPoseCount})`}
+            {zipping === "all" ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Download className="h-3.5 w-3.5 shrink-0" />}
+            {zipping === "all" ? "Packaging ZIP..." : "Download ZIP"}
           </button>
         </div>
       </div>
@@ -2048,6 +2023,15 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   <span>
                     Delivered: <strong className="text-on-surface">{job.completedPoses} / {job.totalPoses} poses</strong>
                   </span>
+                  {regenerationSummary.regenerations > 0 && (
+                    <span>
+                      Retries:{" "}
+                      <strong className="text-on-surface">
+                        {plural(regenerationSummary.regenerations, "retry", "retries")} on {plural(regenerationSummary.regeneratedPoses, "pose", "poses")}
+                      </strong>{" "}
+                      (${Number(regenerationSummary.regenerationCostUsd || 0).toFixed(4)})
+                    </span>
+                  )}
                   <span>
                     Cost: <strong className="text-on-surface">${Number(job.costBreakdown?.generationUsd || 0).toFixed(4)}</strong>
                   </span>

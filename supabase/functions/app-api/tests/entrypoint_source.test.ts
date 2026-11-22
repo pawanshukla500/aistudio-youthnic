@@ -384,7 +384,14 @@ Deno.test("History modals close on Escape, lock the page behind them, and read c
   assert(!history.includes("Gemini Vision QA Score"));
   assert(!history.includes("Run Gemini consistency QA"));
   // Retries are counted in words.
-  assert(history.includes('{plural(regenerationSummary.regenerations, "retry", "retries")} across'));
+  assert(history.includes('{plural(regenerationSummary.regenerations, "retry", "retries")} on {plural(regenerationSummary.regeneratedPoses, "pose", "poses")}'));
+  // The job header is two quiet lines and three actions: no chip wall, no "Pipeline Modes" or "Approved (0)" button;
+  // exact costs sit in the tooltip and Pipeline details, and approved downloads appear only once a pose is approved.
+  assert(!history.includes("Cost so far") && !history.includes(">\n            Pipeline Modes"));
+  assert(history.includes("Pipeline details"));
+  assert(history.includes("{approvedPoseCount > 0 && ("));
+  assert(history.includes("Retries:{\" \"}"));
+  assert(history.includes("grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center"));
   // Rows and pose tiles open from the keyboard; pose actions show on touch screens.
   assert(history.includes("aria-expanded={open}"));
   assert(history.includes("lg:opacity-0 lg:group-hover/tile:opacity-100"));
