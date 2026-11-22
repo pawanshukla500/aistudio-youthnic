@@ -1160,6 +1160,15 @@ export function shouldPollEndpoint(endpoint: BackendEndpoint, currentValue: unkn
   return false;
 }
 
+/** JSON text of a query payload, or undefined when it cannot be compared (then every result is taken as new). */
+export function serializePayload(value: unknown): string | undefined {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+}
+
 export function useQuery<T = any>(
   endpoint: BackendEndpoint,
   args: Record<string, any> | "skip",
@@ -1168,6 +1177,9 @@ export function useQuery<T = any>(
   const [value, setValue] = useState<any>(undefined);
   const [error, setError] = useState<Error | null>(null);
   const valueRef = useRef<any>(undefined);
+  // The last payload as text: a refresh that returns the same data keeps the previous object,
+  // so a 2.5 s poll with nothing new re-renders nothing.
+  const serializedValueRef = useRef<string | undefined>(undefined);
   // Read through a ref so switching polling off (e.g. once a job is finished)
   // stops the timer's requests without re-running the effect and blanking data.
   const pollRef = useRef(options.poll !== false);
@@ -1177,24 +1189,35 @@ export function useQuery<T = any>(
   useEffect(() => {
     if (serializedArgs === "skip") {
       valueRef.current = undefined;
+      serializedValueRef.current = undefined;
       setValue(undefined);
       setError(null);
       return;
     }
     valueRef.current = undefined;
+    serializedValueRef.current = undefined;
     setValue(undefined);
     setError(null);
     let active = true;
     // One request at a time: a slow response can no longer overlap the next
     // poll and land after it, which made progress jump backwards.
     let inFlight = false;
-    const load = () => {
+    // A refresh after a save always delivers its result (forms re-sync from it); a poll or a
+    // tab-refocus with unchanged data keeps the previous object.
+    let deliverNext = false;
+    const load = (always = false) => {
+      if (always) deliverNext = true;
       if (inFlight) return;
       inFlight = true;
       void queryBackend(endpoint, JSON.parse(serializedArgs)).then((next) => {
         if (active) {
-          valueRef.current = next;
-          setValue(next);
+          const serialized = serializePayload(next);
+          if (deliverNext || serialized === undefined || serialized !== serializedValueRef.current) {
+            deliverNext = false;
+            serializedValueRef.current = serialized;
+            valueRef.current = next;
+            setValue(next);
+          }
           setError(null);
         }
       }).catch((reason) => {
@@ -1213,14 +1236,15 @@ export function useQuery<T = any>(
       }
     };
     const onVisible = () => { if (!document.hidden) load(); };
+    const refreshAfterSave = () => load(true);
     const interval = pollableEndpoint ? window.setInterval(poll, 2500) : undefined;
     if (refreshOnVisible) document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("supabase-backend-refresh", load);
+    window.addEventListener("supabase-backend-refresh", refreshAfterSave);
     return () => {
       active = false;
       if (interval) window.clearInterval(interval);
       if (refreshOnVisible) document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("supabase-backend-refresh", load);
+      window.removeEventListener("supabase-backend-refresh", refreshAfterSave);
     };
   }, [endpoint, serializedArgs]);
 

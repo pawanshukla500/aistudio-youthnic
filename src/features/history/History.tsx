@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { memo, useEffect, useRef, useState, type RefObject } from "react";
 import {
   Ban,
   ChevronDown,
@@ -337,7 +337,9 @@ type BatchEntry = {
   error?: string;
 };
 
-function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
+// memo: the open shoot card only depends on its job id, so search typing, confirmation dialogs and
+// list refreshes in History never re-render it.
+const JobDetails = memo(function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const navigate = useNavigate();
   const { data: job, error: _jobError } = useQuery(api.jobs.get, { jobId });
   const workspace = useWorkspace();
@@ -1293,7 +1295,9 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 </span>
                 {selectedPreviousUrl && selectedOutputUrl && (
                   <button
+                    type="button"
                     onClick={() => setCompareWithPrevious((current) => !current)}
+                    aria-pressed={compareWithPrevious}
                     className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-all ${
                       compareWithPrevious
                         ? "border-primary bg-soft-blush text-primary shadow-xs"
@@ -2087,7 +2091,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       )}
     </div>
   );
-}
+});
 
 export function History() {
   const { organization } = useWorkspace();
