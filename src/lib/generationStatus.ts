@@ -30,14 +30,13 @@ export function regenerationQueuedStatus(poseNumbers: readonly unknown[]): strin
 }
 
 /**
- * The pose number a working job shows: the worker's current pose, else the next undelivered one.
- * 0 (show none) when every pose is already delivered, i.e. a re-generation the worker has not
- * reached yet: "delivered + 1" read "Pose 7" on a finished six-pose shoot.
+ * The pose number a working job shows: the worker's current pose. Before the worker reports one,
+ * Pose 1 on a run with nothing resolved yet, otherwise 0 (show none). The resolved count is not a
+ * pose index: "resolved + 1" read "Pose 7" on a finished six-pose shoot being re-generated, and
+ * names the wrong pose when a retry targets an earlier failed pose.
  */
-export function livePoseNumber(currentPose: unknown, resolvedPoses: unknown, totalPoses: unknown): number {
+export function livePoseNumber(currentPose: unknown, resolvedPoses: unknown): number {
   const current = Math.floor(Number(currentPose) || 0);
   if (current > 0) return current;
-  const resolved = Math.max(0, Math.floor(Number(resolvedPoses) || 0));
-  const total = Math.max(0, Math.floor(Number(totalPoses) || 0));
-  return total > 0 && resolved >= total ? 0 : resolved + 1;
+  return Math.floor(Number(resolvedPoses) || 0) > 0 ? 0 : 1;
 }

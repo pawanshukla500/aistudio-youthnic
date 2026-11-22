@@ -26,12 +26,13 @@ Deno.test("a queued re-generation names its own poses, never the last run's stag
 });
 
 Deno.test("the row's pose number follows the worker and never runs past the pose count", () => {
-  assertEquals(livePoseNumber(3, 2, 6), 3);
-  // A first run the worker has not started: the next undelivered pose.
-  assertEquals(livePoseNumber(0, 0, 6), 1);
-  assertEquals(livePoseNumber(null, 4, 6), 5);
+  assertEquals(livePoseNumber(3, 2), 3);
+  // A first run the worker has not started: Pose 1.
+  assertEquals(livePoseNumber(0, 0), 1);
+  assertEquals(livePoseNumber(null, undefined), 1);
   // A re-generation on a finished shoot read "Pose 7"; with no pose known it shows none.
-  assertEquals(livePoseNumber(0, 6, 6), 0);
-  assertEquals(livePoseNumber(undefined, 7, 6), 0);
-  assertEquals(livePoseNumber(1, 6, 6), 1);
+  assertEquals(livePoseNumber(0, 6), 0);
+  // A retry of failed Pose 2 with five poses delivered is not "Pose 6" (CodeAnt on #202): the count is not an index.
+  assertEquals(livePoseNumber(null, 5), 0);
+  assertEquals(livePoseNumber(1, 6), 1);
 });

@@ -2425,8 +2425,8 @@ export function History() {
                 <div className="hidden lg:block">
                   <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-secondary">
                     <span>
-                      {job.status === "processing" && livePoseNumber(job.currentPose, delivery.resolvedPoses, delivery.totalPoses)
-                        ? `Pose ${livePoseNumber(job.currentPose, delivery.resolvedPoses, delivery.totalPoses)} · `
+                      {job.status === "processing" && livePoseNumber(job.currentPose, delivery.resolvedPoses)
+                        ? `Pose ${livePoseNumber(job.currentPose, delivery.resolvedPoses)} · `
                         : ""}
                       {delivery.imagesStored} / {delivery.totalPoses} images
                     </span>
