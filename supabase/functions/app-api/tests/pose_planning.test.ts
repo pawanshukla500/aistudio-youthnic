@@ -829,6 +829,11 @@ Deno.test("the T94 v39 reference description fits whole; an over-long one is cut
   assert(whole.length <= MAX_REFERENCE_DIRECTIVE);
   assertStringIncludes(whole, "loosely crossed at the ankles, torso relaxed");
   assertStringIncludes(whole, "head turned in profile. Rest on the low maroon wooden ledge");
+  // The held glass never reaches the directive (CodeAnt on #197); glass furniture and bangles are not held.
+  assertEquals(/\bglass\b/i.test(whole), false);
+  assertStringIncludes(whole, "reclined against nothing, the other hand resting lightly on the seat");
+  assertEquals(withoutHeldObjects("leaning on a glass-top table, glass bangles stacked, tumbler at the lips"), "leaning on a glass-top table, glass bangles stacked");
+  assertEquals(withoutHeldObjects("sipping a drink through a straw, head tilted"), "head tilted");
   const long = referenceSlotDirective("creative", {
     ...t94,
     description: "torso turned, shoulders soft ".repeat(40).trim(),

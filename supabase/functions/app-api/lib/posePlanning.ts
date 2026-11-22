@@ -115,8 +115,9 @@ const MAX_TEXT = 420;
 const FROZEN_STEP =
   /\bwalk(?:s|ed|ing)?\b|\bstrode\b|\bmid[- ]?(?:stride|step)\b|\bstrid(?:e|es|ing)\b|\b(?:lifted|raised) (?:foot|feet|heels?)\b|\b(?:foot|feet|heels?) (?:lifted|raised)\b/i;
 /** Something held in the reference hands (pose_plan_agents.py HELD_OBJECT); "bottle green" is a colour. */
+// A drink glass is held; a glass-top table, glass wall or glass bangle is not.
 const HELD_OBJECT =
-  /\b(?:(?:cup|mug|coffee|phone|bag|handbag|purse|sunglasses|umbrella|bouquet|flower)s?|bottles?(?!\s*green))\b/i;
+  /\b(?:(?:cup|mug|coffee|phone|bag|handbag|purse|sunglasses|umbrella|bouquet|flower|tumbler|straw|drink)s?|bottles?(?!\s*green)|glass(?:es)?(?![-\s]?(?:top|block|wall|window|door|panel|front|bangle|bead)))\b/i;
 
 /**
  * Anything in the reference hands is never copied, so a clause naming it ("right elbow bent holding cup up

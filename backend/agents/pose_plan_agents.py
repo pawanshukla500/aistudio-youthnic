@@ -48,8 +48,11 @@ MAX_PLAN_ATTEMPTS = 2
 
 FORCED_EXPRESSION = re.compile(r"grin|grinning|toothy|laughing|forced smile|wink|pout|duck face|tongue", re.I)
 # "bottle green" is a colour, not a held bottle (profiles.ts FORBIDDEN_HELD_OBJECT_CORE bottles?(?!\s*green)).
+# A drink glass is held; a glass-top table, glass wall or glass bangle is not (posePlanning.ts HELD_OBJECT).
 HELD_OBJECT = re.compile(
-    r"\b(?:(?:cup|mug|coffee|phone|bag|handbag|purse|sunglasses|umbrella|bouquet|flower)s?|bottles?(?!\s*green))\b", re.I
+    r"\b(?:(?:cup|mug|coffee|phone|bag|handbag|purse|sunglasses|umbrella|bouquet|flower|tumbler|straw|drink)s?"
+    r"|bottles?(?!\s*green)|glass(?:es)?(?![-\s]?(?:top|block|wall|window|door|panel|front|bangle|bead)))\b",
+    re.I,
 )
 # JavaScript's \s / String.prototype.trim() set, so _text() collapses exactly what posePlanning.ts text() does.
 _JS_WHITESPACE = "\t\n\v\f\r \u00a0\u1680" + "".join(map(chr, range(0x2000, 0x200B))) + "\u2028\u2029\u202f\u205f\u3000\ufeff"
