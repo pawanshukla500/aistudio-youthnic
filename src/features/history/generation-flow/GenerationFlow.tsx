@@ -99,7 +99,7 @@ export function GenerationFlow() {
           </div>
         </div>
         <div className="min-h-0 flex-1 p-3">
-          <CatalogPoseFlow references={board.references} poses={board.poses} storageKey={`admin-flow-${summaryJobId}`} />
+          <CatalogPoseFlow references={board.references} poses={board.poses} summary={board.summary} storageKey={`admin-flow-${summaryJobId}`} />
         </div>
       </div>
     );

@@ -1,5 +1,6 @@
 import { scopePoseRowsToJob } from "../../../lib/generationRuns.ts";
-import type { FlowPose, FlowReference } from "./flowLinks.ts";
+import { qaVerdict, type FlowPose, type FlowReference } from "./flowLinks.ts";
+import { flowSummaryFrom, type FlowSummary } from "./flowSummary.ts";
 
 const REGENERATE_WINDOW_MS = 86_400_000;
 
@@ -43,8 +44,22 @@ function referenceFrom(entry: Loose, fallbackId: string): FlowReference | null {
   };
 }
 
-export function boardFromGenerationData(data: Loose | null | undefined): { references: FlowReference[]; poses: FlowPose[] } {
-  if (!data) return { references: [], poses: [] };
+/** session_data.references (what the generator received) as board inputs. The style card names the Pose 4/6 postures the plan copies. */
+export function referencesFromSession(rows: unknown, postureFor: number[] = [], idPrefix = "session"): FlowReference[] {
+  return (Array.isArray(rows) ? rows as Loose[] : [])
+    .map((entry, index) => referenceFrom(entry || {}, `${idPrefix}-${index}`))
+    .filter((entry): entry is FlowReference => Boolean(entry))
+    .map((reference) => (reference.roomOnly && postureFor.length ? { ...reference, postureFor } : reference));
+}
+
+/** Pose numbers whose posture the stored plan (session_data.posePlanning) copies from the style photo: Pose 4 = creative, Pose 6 = showcase. */
+export function adoptedPostures(sessionData: Loose | null | undefined): number[] {
+  const slots: Loose = sessionData?.posePlanning?.slots || {};
+  return [slots.creative?.source === "reference" ? 4 : 0, slots.showcase?.source === "reference" ? 6 : 0].filter(Boolean);
+}
+
+export function boardFromGenerationData(data: Loose | null | undefined): { references: FlowReference[]; poses: FlowPose[]; summary: FlowSummary } {
+  if (!data) return { references: [], poses: [], summary: flowSummaryFrom({}) };
   if (data.trace) {
     const summary: Loose = data.trace.summary || {};
     const posePlan: Loose[] = Array.isArray(data.trace.session?.posePlan) ? data.trace.session.posePlan : [];
@@ -65,6 +80,7 @@ export function boardFromGenerationData(data: Loose | null | undefined): { refer
       const completedMs = completedStamp ? Date.parse(String(completedStamp)) : NaN;
       const withinRegenerateWindow = Number.isFinite(completedMs) && Date.now() - completedMs < REGENERATE_WINDOW_MS;
       const poseEligibleStatus = poseStatus === "failed" || (poseStatus === "completed" && Boolean(finalOutputUrl));
+      const verdict = finalOutputUrl ? qaVerdict(String(pose.qa_status || ""), pose.qa_payload?.dna) : null;
       return {
         poseIndex: Number(pose.pose_index),
         title: String(pose.title || planned?.title || `Pose ${pose.pose_index}`),
@@ -79,6 +95,10 @@ export function boardFromGenerationData(data: Loose | null | undefined): { refer
         status: poseStatus,
         error: String(pose.error || ""),
         settings: settingsText,
+        aspectRatio: String(summary.aspect_ratio || ""),
+        imageSize: String(summary.image_size || ""),
+        quality: String(summary.quality || ""),
+        ...(verdict ? { qaLabel: verdict.label, qaTone: verdict.tone } : {}),
         versionCount: attempts.length || (imageUrl ? 1 : 0),
         versions: attempts.slice().reverse().slice(0, 4).map((attempt: Loose, index: number) => ({
           version: Number(attempt.attempt_index || attempts.length - index || 1),
@@ -88,15 +108,9 @@ export function boardFromGenerationData(data: Loose | null | undefined): { refer
         canRegenerate: Boolean(pose.generation_id && !jobBusy && poseEligibleStatus && withinRegenerateWindow),
       };
     });
-    const sessionRows: Loose[] = Array.isArray(data.trace.session?.references) ? data.trace.session.references : [];
     // The stored plan (session_data.posePlanning) decides adoption; Pose 4 = creative, Pose 6 = showcase.
-    const slots: Loose = data.trace.session?.posePlanning?.slots || {};
-    const postureFor = [slots.creative?.source === "reference" ? 4 : 0, slots.showcase?.source === "reference" ? 6 : 0].filter(Boolean);
-    const sessionReferences = sessionRows
-      .map((entry, index) => referenceFrom(entry, `trace-${index}`))
-      .filter((entry): entry is FlowReference => Boolean(entry))
-      .map((reference) => (reference.roomOnly && postureFor.length ? { ...reference, postureFor } : reference));
-    return { references: sessionReferences, poses };
+    const sessionReferences = referencesFromSession(data.trace.session?.references, adoptedPostures(data.trace.session), "trace");
+    return { references: sessionReferences, poses, summary: flowSummaryFrom({ sessionData: data.trace.session, job: summary }) };
   }
 
   const nodes: Loose[] = Array.isArray(data.nodes) ? data.nodes : [];
@@ -149,5 +163,5 @@ export function boardFromGenerationData(data: Loose | null | undefined): { refer
     imageUrl: images.get(poseIndex) || "",
     referenceRoles: [],
   }));
-  return { references, poses };
+  return { references, poses, summary: flowSummaryFrom({ sessionData: data.session?.session_data }) };
 }

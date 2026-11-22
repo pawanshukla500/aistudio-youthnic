@@ -1295,6 +1295,14 @@ export function Studio() {
                   <span>Stop Shoot</span>
                 </button>
               )}
+              {/* The flow board shows the analysis, each pose prompt and each image as it arrives. */}
+              <Link
+                to={`/history/flow/${submittedJobId}`}
+                className="flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-xs font-bold text-on-surface shadow-xs border border-outline-variant/50 transition hover:bg-surface-container"
+              >
+                <span>Watch generation flow</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Link>
               <Link
                 to="/history"
                 className="flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-xs font-bold text-primary shadow-xs border border-primary/20 transition hover:bg-primary/5"

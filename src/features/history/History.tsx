@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, getJobReferenceImages, invokeAppApi, useMutation, useQuery, type DnaConsistencySummary, type Id } from "../../lib/backend";
+import { formatModelName } from "../../lib/modelLabels";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
@@ -115,34 +116,6 @@ function qaBannerClass(status: string, poseQaEnabled: boolean, dna?: DnaConsiste
   return status === "unverified" && !poseQaEnabled && dna?.pass === true && !dna.unavailable
     ? "bg-emerald-600/90 text-white backdrop-blur-md"
     : qaStatusBanner(status);
-}
-
-function formatModelName(model?: string | null): string {
-  if (!model) return "Default Model";
-  const map: Record<string, string> = {
-    "muse-spark-1.2-contributor": "Meta Muse Spark 1.2",
-    "muse-spark-1.3-contributor": "Meta Muse Spark 1.3",
-    "muse-spark-1.3": "Meta Muse Spark 1.3",
-    "muse-spark-1.2": "Meta Muse Spark 1.2",
-    "glm-5.3-flash": "Z.ai GLM 5.3 Flash",
-    "glm-5.3-flashx": "Z.ai GLM 5.3 FlashX",
-    "gpt-6.1-terra": "GPT 6.1 Terra",
-    "gpt-5.6-luna": "GPT 5.6 Luna",
-    "gpt-5.6-terra": "GPT 5.6 Terra",
-    "gpt-5.6-sol": "GPT 5.6 Sol",
-    "gemini-3.8-flash": "Gemini 3.8 Flash",
-    "gemini-3.6-flash": "Gemini 3.6 Flash",
-    "qwen3.8-max": "Qwen 3.8 Max",
-    "gpt-image-2.6-sunburst": "GPT Image 2.6 Sunburst",
-    "gpt-image-2.6-flare": "GPT Image 2.6 Flare",
-    "gpt-image-2.6": "GPT Image 2.6",
-    "gpt-image-2.5-flare-2026-09-08": "GPT Image 2.5 Flare",
-    "gpt-image-2.5-flare": "GPT Image 2.5 Flare",
-    "gpt-image-2.5-sunburst": "GPT Image 2.5 Sunburst",
-    "gpt-image-2": "GPT Image 2",
-    "reve-2.1-image": "Reve 2.1 Image",
-  };
-  return map[model] || model.split("-").map((s) => (s ? s[0].toUpperCase() + s.slice(1) : "")).join(" ");
 }
 
 function poseVersions(pose: any): PoseVersion[] {
