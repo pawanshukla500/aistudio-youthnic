@@ -1397,9 +1397,19 @@ export async function signedSessionReferences(service: SupabaseClient, orgId: st
   }));
 }
 
-/** The QA verdict for the image a pose group shows. None while a re-generation runs: the row's verdict then belongs to the new attempt. */
+/** The pose row's status while it is queued, generating or cancelling; null otherwise. */
+export function poseGroupBusyStatus(pose: JsonRecord | null | undefined) {
+  const status = text(pose?.status);
+  return ["queued", "processing", "cancelling"].includes(status) ? status : null;
+}
+
+/**
+ * The QA verdict for the image a pose group shows. Only a completed pose row matches that image: while a
+ * re-generation runs, or after it failed, the row's verdict belongs to the new attempt and the card still
+ * shows the retained earlier version.
+ */
 export function poseGroupQa(pose: JsonRecord | null | undefined, busy: boolean) {
-  return pose && !busy ? { status: text(pose.qa_status), dna: asRecord(pose.qa_payload).dna ?? null } : null;
+  return pose && !busy && text(pose.status) === "completed" ? { status: text(pose.qa_status), dna: asRecord(pose.qa_payload).dna ?? null } : null;
 }
 
 export async function getCatalogWorkflowDetail(
@@ -1500,7 +1510,8 @@ export async function getCatalogWorkflowDetail(
     // attribute the manifest recorded for that version's own epoch.
     const versionEpoch = Number(asRecord(versions[0]?.prompt_metadata)?.sourceGenerationEpoch ?? -1);
     const versionManifest = referenceManifests.find((manifest) => Number(asRecord(manifest)?.generationEpoch ?? -2) === versionEpoch) || null;
-    const poseBusy = ["queued", "processing", "cancelling"].includes(String(currentPose?.status || ""));
+    const busyStatus = poseGroupBusyStatus(currentPose);
+    const poseBusy = Boolean(busyStatus);
     return {
       poseIndex,
       title: text(versions[0]?.title || currentPose?.title || `Pose ${poseIndex}`),
@@ -1527,6 +1538,8 @@ export async function getCatalogWorkflowDetail(
       versions,
       reviews: (reviewsResult.data || []).filter((review) => versions.some((version) => version.id === review.asset_version_id)),
       qa: poseGroupQa(currentPose, poseBusy),
+      // versions[0] is the retained prior image while a re-generation runs; this says the pose itself is working.
+      busy: busyStatus,
     };
   });
   const completedPoseCount = latestByPose.filter((pose) => pose.current && ["completed", "approved"].includes(text(pose.current.generation_status || pose.current.approval_status))).length;

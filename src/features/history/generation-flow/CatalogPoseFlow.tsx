@@ -392,10 +392,12 @@ function FadeImage({ src, alt, className }: { src: string; alt: string; classNam
   const [failed, setFailed] = useState(false);
   if (failed) return <span className="grid h-full w-full place-items-center px-3 text-center text-[11px] text-[#9aa0ab]">Image link expired. Refresh the page.</span>;
   return (
+    // Eager on purpose: lazy loading inside the transformed canvas left cards blank where the
+    // browser defers off-screen work (a background or unpainted window); the old board was eager too.
     <img
       src={src}
       alt={alt}
-      loading="lazy"
+      decoding="async"
       draggable={false}
       onLoad={(event) => { event.currentTarget.dataset.loaded = "true"; }}
       onError={() => setFailed(true)}
@@ -539,7 +541,7 @@ function OutputNode({ id, data }: NodeProps<Node<BoardData>>) {
   const quality = data.quality ? titleCase(data.quality) : "";
   const tone = data.qaTone ? TONE_CHIP[data.qaTone] : null;
   const busy = actions.busyPose !== undefined;
-  const runTitle = !data.canRegenerate ? "Re-generation is closed for this shoot" : actions.busyPose !== undefined ? "Another pose is being queued" : !note.trim() ? "Type what to change first: each version is a paid generation" : "Queue a new version of this pose only";
+  const runTitle = working ? "A new version of this pose is being generated" : !data.canRegenerate ? "Re-generation is closed for this shoot" : actions.busyPose !== undefined ? "Another pose is being queued" : !note.trim() ? "Type what to change first: each version is a paid generation" : "Queue a new version of this pose only";
   return (
     <div className="cpf-node relative h-full w-full" style={{ animationDelay: `${data.delay || 0}ms` }} onMouseLeave={() => setMenu(null)}>
       <NodeLabel icon={ImageIcon} title={`Pose ${data.poseIndex} – ${data.title}`} meta={modelLabel} />
@@ -568,7 +570,7 @@ function OutputNode({ id, data }: NodeProps<Node<BoardData>>) {
             <div className="absolute bottom-2.5 left-2.5 flex gap-1">
               {data.thumbs.slice(0, 4).map((thumb) => (
                 <button key={`${thumb.label}:${thumb.url}`} type="button" title={thumb.label} onClick={() => actions.onPreview(thumb.url, thumb.label)} className="nodrag h-7 w-7 overflow-hidden rounded-md bg-white shadow-sm ring-2 ring-white transition hover:scale-105">
-                  <img src={thumb.url} alt={thumb.label} draggable={false} loading="lazy" className="pointer-events-none h-full w-full object-cover" />
+                  <img src={thumb.url} alt={thumb.label} draggable={false} decoding="async" className="pointer-events-none h-full w-full object-cover" />
                 </button>
               ))}
               {data.thumbs.length > 4 && <span className="grid h-7 min-w-7 place-items-center rounded-md bg-white/90 px-1 text-[10px] font-semibold text-[#4b5563] shadow-sm ring-2 ring-white">+{data.thumbs.length - 4}</span>}
@@ -762,18 +764,28 @@ export function CatalogPoseFlow({
     return map;
   }, [poses]);
 
+  const noticeTimer = useRef<number | undefined>(undefined);
   const flash = useCallback((text: string) => {
     setNotice(text);
-    window.setTimeout(() => setNotice(""), 4000);
+    // A newer notice keeps its full four seconds: the previous timer must not clear it.
+    window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(""), 4000);
   }, []);
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
 
+  const copySeq = useRef(0);
   const copyText = useCallback((value: string, done: string, failed: string) => {
+    // Only the latest copy may post a notice: a late result of an earlier copy must not overwrite it.
+    const copyId = ++copySeq.current;
     let settled = false;
     const finish = (copied: boolean) => {
       if (settled) return;
       settled = true;
-      flash(copied ? done : failed);
+      window.clearTimeout(giveUp);
+      if (copyId === copySeq.current) flash(copied ? done : failed);
     };
+    // A clipboard write that never answers after a failed fallback still gets a verdict.
+    const giveUp = window.setTimeout(() => finish(false), 3000);
     const command = () => {
       try {
         const field = document.createElement("textarea");
@@ -792,7 +804,10 @@ export function CatalogPoseFlow({
         return false;
       }
     };
-    const timer = window.setTimeout(() => finish(command()), 400);
+    // After 400 ms try the fallback, but only a success settles it: a slow clipboard write may still succeed.
+    const timer = window.setTimeout(() => {
+      if (command()) finish(true);
+    }, 400);
     if (!navigator.clipboard?.writeText) {
       window.clearTimeout(timer);
       finish(command());
@@ -814,13 +829,17 @@ export function CatalogPoseFlow({
     onRegenerate,
     onCopy: (url) => copyText(url, "Image link copied", "Could not copy the image link"),
     busyPose,
-    noteFor: (poseIndex) => String(readLayout(storageKey).notes?.[String(poseIndex)] || legacyNote(storageKey, poseIndex)).slice(0, 1000),
+    noteFor: (poseIndex) => {
+      const notes = readLayout(storageKey).notes || {};
+      const key = String(poseIndex);
+      // A key present in the v2 layout (even "") wins; only a pose never touched since reads the old note.
+      return String(key in notes ? notes[key] : legacyNote(storageKey, poseIndex)).slice(0, 1000);
+    },
     saveNote: (poseIndex, next) => {
       remember((saved) => {
         const notes = { ...(saved.notes || {}) };
-        const trimmed = next.slice(0, 1000);
-        if (trimmed) notes[String(poseIndex)] = trimmed;
-        else delete notes[String(poseIndex)];
+        // Kept even when empty, so clearing a carried-over note does not bring the old one back.
+        notes[String(poseIndex)] = next.slice(0, 1000);
         saved.notes = notes;
       });
     },
