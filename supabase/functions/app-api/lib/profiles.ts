@@ -1953,6 +1953,15 @@ export function sanitizeHeldObjectText(value: unknown, replacement: string, allo
   return kept.join(" ").trim() || replacement;
 }
 
+/**
+ * referencePose text is one comma-separated sentence ("seated on the bench, legs crossed, right hand holding
+ * an iced coffee cup, head turned"): only the clauses naming a held object go, never the whole body position.
+ */
+export function withoutHeldObjectClauses(value: string): string {
+  if (!FORBIDDEN_HELD_OBJECT_PATTERN.test(value)) return value;
+  return value.split(/\s*[,;.]\s*/).filter((clause) => clause && !FORBIDDEN_HELD_OBJECT_PATTERN.test(clause)).join(", ");
+}
+
 export function normalizeAnalysis(
   raw: JsonRecord,
   categoryFallback: string,
@@ -2110,7 +2119,7 @@ export function normalizeAnalysis(
       ...rawPlanning,
       referencePose: rawReferencePose,
       expressionPlan: rawExpressionPlan,
-    }, planningContext, (value) => sanitizeHeldObjectText(value, ""))
+    }, planningContext, withoutHeldObjectClauses)
     : undefined;
   const posePlanning = localPlanning && options.posePlanningOverride
     ? mergeGraphPosePlanning(localPlanning, options.posePlanningOverride, planningContext)
@@ -2144,7 +2153,8 @@ export function normalizeAnalysis(
       cameraAngle: referenceCamera ? fallback.cameraAngle : stringValue(candidate.cameraAngle ?? candidate.camera_angle, fallback.cameraAngle),
       framing: referenceCamera ? fallback.framing : stringValue(candidate.framing, fallback.framing),
       bodyPosition: adopted ? fallback.bodyPosition : stringValue(candidate.bodyPosition ?? candidate.body_position, fallback.bodyPosition),
-      handPlacement: sanitizeHeldObjectText(
+      // An adopted Pose 4 follows the reference hand gesture, never the hands the model wrote for its own pose.
+      handPlacement: adopted && fallback.id === "creative" ? fallback.handPlacement : sanitizeHeldObjectText(
         stringValue(candidate.handPlacement ?? candidate.hand_placement, fallback.handPlacement),
         fallback.handPlacement,
         allowPropNotes,
@@ -2552,7 +2562,9 @@ export const CONSISTENCY_RULES = [
 // person, past the soft suitability verdict) and Pose 6 the product-highlight detail
 // close-up (showcasePlan.productHighlight, never a reference posture). Cached v37 plans
 // keep a product-led Pose 4 and a full-body Pose 6.
-export const ANALYSIS_VERSION = "generation-session-v38-signature-reference-product-highlight";
+// v39 drops reference-description clauses that name a held object ("holding cup up near mouth") before
+// the Pose 4 directive is written; cached v38 plans failed validation on them and stayed product-led.
+export const ANALYSIS_VERSION = "generation-session-v39-held-object-clause";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

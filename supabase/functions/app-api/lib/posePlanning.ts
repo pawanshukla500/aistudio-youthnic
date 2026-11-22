@@ -114,6 +114,18 @@ const MAX_TEXT = 420;
 /** A walk, frozen stride or lifted foot in the reference body description (never copied as written). */
 const FROZEN_STEP =
   /\bwalk(?:s|ed|ing)?\b|\bstrode\b|\bmid[- ]?(?:stride|step)\b|\bstrid(?:e|es|ing)\b|\b(?:lifted|raised) (?:foot|feet|heels?)\b|\b(?:foot|feet|heels?) (?:lifted|raised)\b/i;
+/** Something held in the reference hands (pose_plan_agents.py HELD_OBJECT); "bottle green" is a colour. */
+const HELD_OBJECT =
+  /\b(?:(?:cup|mug|coffee|phone|bag|handbag|purse|sunglasses|umbrella|bouquet|flower)s?|bottles?(?!\s*green))\b/i;
+
+/**
+ * Anything in the reference hands is never copied, so a clause naming it ("right elbow bent holding cup up
+ * near mouth") is dropped before it reaches the directive; the planner would otherwise reject the slot.
+ */
+export function withoutHeldObjects(value: string): string {
+  if (!HELD_OBJECT.test(value)) return value;
+  return value.split(/\s*[,;.]\s*/).filter((clause) => clause && !HELD_OBJECT.test(clause)).join(", ");
+}
 /** Replaces a walk or lifted foot in an adopted posture; free of the stride words every prompt scrub removes. */
 const GROUNDED_SHIFT =
   "Ground the reference movement as a natural weight shift: both feet on the floor, one slightly ahead of the other with the weight easing onto it, the body turned the way the reference person moves.";
@@ -252,12 +264,15 @@ export function referenceAdoptionBlockReason(slot: AdoptableSlot, pose: Referenc
 export const MAX_REFERENCE_DIRECTIVE = 900;
 
 export function referenceSlotDirective(slot: AdoptableSlot, pose: ReferencePose): string {
-  // A walk or lifted foot is never copied as written: that text is dropped and the slot grounds it.
+  // Held objects are dropped. A walk or lifted foot is never copied as written: that text is dropped and the slot grounds it.
   const walking = pose.posture === "walking";
-  const description = walking || FROZEN_STEP.test(pose.description) ? "" : pose.description;
   const rawSignature = pose.distinctiveness === "signature" ? pose.signatureDescription : "";
-  const signature = walking || FROZEN_STEP.test(rawSignature) ? "" : rawSignature;
-  const grounded = walking || description !== pose.description || signature !== rawSignature;
+  // The step check reads the unfiltered text: "bag in hand with one foot lifted" still grounds.
+  const frozenDescription = FROZEN_STEP.test(pose.description);
+  const frozenSignature = FROZEN_STEP.test(rawSignature);
+  const description = walking || frozenDescription ? "" : withoutHeldObjects(pose.description);
+  const signature = walking || frozenSignature ? "" : withoutHeldObjects(rawSignature);
+  const grounded = walking || frozenDescription || frozenSignature;
   const camera = slot === "creative" ? pose.cameraAngle ?? "" : "";
   const compose = (descriptionText: string, signatureText: string) => {
     const parts = [
