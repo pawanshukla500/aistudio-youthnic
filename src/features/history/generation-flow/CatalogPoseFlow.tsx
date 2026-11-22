@@ -392,10 +392,12 @@ function FadeImage({ src, alt, className }: { src: string; alt: string; classNam
   const [failed, setFailed] = useState(false);
   if (failed) return <span className="grid h-full w-full place-items-center px-3 text-center text-[11px] text-[#9aa0ab]">Image link expired. Refresh the page.</span>;
   return (
+    // Eager on purpose: lazy loading inside the transformed canvas left cards blank where the
+    // browser defers off-screen work (a background or unpainted window); the old board was eager too.
     <img
       src={src}
       alt={alt}
-      loading="lazy"
+      decoding="async"
       draggable={false}
       onLoad={(event) => { event.currentTarget.dataset.loaded = "true"; }}
       onError={() => setFailed(true)}
@@ -568,7 +570,7 @@ function OutputNode({ id, data }: NodeProps<Node<BoardData>>) {
             <div className="absolute bottom-2.5 left-2.5 flex gap-1">
               {data.thumbs.slice(0, 4).map((thumb) => (
                 <button key={`${thumb.label}:${thumb.url}`} type="button" title={thumb.label} onClick={() => actions.onPreview(thumb.url, thumb.label)} className="nodrag h-7 w-7 overflow-hidden rounded-md bg-white shadow-sm ring-2 ring-white transition hover:scale-105">
-                  <img src={thumb.url} alt={thumb.label} draggable={false} loading="lazy" className="pointer-events-none h-full w-full object-cover" />
+                  <img src={thumb.url} alt={thumb.label} draggable={false} decoding="async" className="pointer-events-none h-full w-full object-cover" />
                 </button>
               ))}
               {data.thumbs.length > 4 && <span className="grid h-7 min-w-7 place-items-center rounded-md bg-white/90 px-1 text-[10px] font-semibold text-[#4b5563] shadow-sm ring-2 ring-white">+{data.thumbs.length - 4}</span>}

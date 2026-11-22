@@ -330,6 +330,8 @@ Deno.test("the flow board avoids React Flow's built-in node styles, keeps a fit 
   assert(flow.includes('"cpf-input": InputNode, "cpf-analysis": AnalysisNode, "cpf-prompt": PromptNode, "cpf-output": OutputNode'));
   // Only a pan or zoom by the person is remembered; a fit at another window size is not.
   assert(flow.includes("if (!event) return;"));
+  // Lazy images never loaded on a live board in an unpainted window; the cards load eagerly.
+  assert(!flow.includes('loading="lazy"'));
   const workflow = read("OperationalWorkflowView.tsx");
   assert(workflow.includes("const inputs = sessionReferences.length ? sessionReferences : references;"));
   assert(workflow.includes("return { references: inputs, poses };"));
