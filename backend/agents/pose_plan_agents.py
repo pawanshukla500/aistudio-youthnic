@@ -67,7 +67,7 @@ _POSTURE_SYNONYMS = tuple((posture, re.compile(pattern, re.ASCII)) for posture, 
 ))
 # posePlanning.ts FROZEN_STEP: a walk, frozen stride or lifted foot in the reference body description (never copied).
 FROZEN_STEP = re.compile(
-    r"\bwalk(?:s|ing)?\b|\bmid[- ]?(?:stride|step)\b|\bstrid(?:e|es|ing)\b|\b(?:lifted|raised) (?:foot|feet|heels?)\b"
+    r"\bwalk(?:s|ed|ing)?\b|\bstrode\b|\bmid[- ]?(?:stride|step)\b|\bstrid(?:e|es|ing)\b|\b(?:lifted|raised) (?:foot|feet|heels?)\b"
     r"|\b(?:foot|feet|heels?) (?:lifted|raised)\b",
     re.I | re.ASCII,
 )

@@ -712,3 +712,16 @@ Deno.test("T94 prompts: Pose 3 names the back authority, Pose 4 the reference fr
   assertStringIncludes(qa, "(the BACK PRODUCT image decides this back detail)");
   assertStringIncludes(qa, "Do NOT fail pose_requirement, model_face, or face_realism merely because the face is cropped out");
 });
+
+Deno.test("past-tense walk wording is grounded too, never copied into the Pose 4 directive", () => {
+  for (const description of ["Leaning as she walked past the counter", "Turned as she strode in"]) {
+    const plan = localPosePlanningDecision(
+      normalizeReferencePose({ posture: "leaning", description, cameraAngle: "eye level" }),
+      normalizeExpressionPlan({}),
+      ctx(),
+    );
+    assertEquals(plan.slots.creative.source, "reference");
+    assertEquals(plan.slots.creative.directive.includes(description), false);
+    assertStringIncludes(plan.slots.creative.directive, "both feet on the floor");
+  }
+});

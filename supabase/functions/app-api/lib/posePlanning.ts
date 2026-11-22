@@ -113,7 +113,7 @@ export type PosePlanningContext = {
 const MAX_TEXT = 420;
 /** A walk, frozen stride or lifted foot in the reference body description (never copied as written). */
 const FROZEN_STEP =
-  /\bwalk(?:s|ing)?\b|\bmid[- ]?(?:stride|step)\b|\bstrid(?:e|es|ing)\b|\b(?:lifted|raised) (?:foot|feet|heels?)\b|\b(?:foot|feet|heels?) (?:lifted|raised)\b/i;
+  /\bwalk(?:s|ed|ing)?\b|\bstrode\b|\bmid[- ]?(?:stride|step)\b|\bstrid(?:e|es|ing)\b|\b(?:lifted|raised) (?:foot|feet|heels?)\b|\b(?:foot|feet|heels?) (?:lifted|raised)\b/i;
 /** Replaces a walk or lifted foot in an adopted posture; free of the stride words every prompt scrub removes. */
 const GROUNDED_SHIFT =
   "Ground the reference movement as a natural weight shift: both feet on the floor, one slightly ahead of the other with the weight easing onto it, the body turned the way the reference person moves.";

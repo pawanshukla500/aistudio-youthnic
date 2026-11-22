@@ -168,6 +168,8 @@ def test_u16slice_never_splits_a_surrogate_pair():
 @pytest.mark.parametrize("field, text", [
     ("description", "Leaning as she walks past the pillar"),
     ("description", "Leaning out of a WALK"),
+    ("description", "Leaning as she walked past the counter"),
+    ("description", "Turned as she strode in"),
     ("signatureDescription", "turned as if walking past"),
 ])
 def test_walking_wording_is_grounded_never_copied(field, text):
