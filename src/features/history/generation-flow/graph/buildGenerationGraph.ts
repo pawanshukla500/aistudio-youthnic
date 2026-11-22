@@ -102,6 +102,8 @@ export function parseTrace(rawBackendData: any): GenerationTraceViewModel {
       title: p.title,
       status: p.status,
       qa_status: p.qa_status,
+      // The always-on product DNA verdict lives here; the flow board shows its score.
+      qa_payload: p.qa_payload ?? null,
       error: p.error,
       storage_path: p.storage_path,
       updated_at: p.updated_at,

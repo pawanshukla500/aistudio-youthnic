@@ -330,6 +330,19 @@ Deno.test("the flow board avoids React Flow's built-in node styles, keeps a fit 
   assert(flow.includes('"cpf-input": InputNode, "cpf-analysis": AnalysisNode, "cpf-prompt": PromptNode, "cpf-output": OutputNode'));
   // Only a pan or zoom by the person is remembered; a fit at another window size is not.
   assert(flow.includes("if (!event) return;"));
+  // A cleared note stays cleared (kept as "" in the v2 layout) instead of reloading the legacy note.
+  assert(flow.includes("return String(key in notes ? notes[key] : legacyNote(storageKey, poseIndex)).slice(0, 1000);"));
+  assert(flow.includes("notes[String(poseIndex)] = next.slice(0, 1000);"));
+  // A newer notice keeps its full four seconds.
+  assert(flow.includes("window.clearTimeout(noticeTimer.current);"));
+  // A slow clipboard write that later succeeds is not reported as failed by the 400 ms fallback.
+  assert(flow.includes("if (command()) finish(true);"));
+  // The trace parser keeps the QA payload, so a trace board shows the DNA score instead of "Not checked".
+  assert(read("graph/buildGenerationGraph.ts").includes("qa_payload: p.qa_payload ?? null,"));
+  // The admin flow view relies on the board header instead of stacking its own.
+  const admin = read("GenerationFlow.tsx");
+  assert(admin.includes("onBack={() => setSelectedGraphData(null)}"));
+  assert(!admin.includes("summaryCost"));
   // Lazy images never loaded on a live board in an unpainted window; the cards load eagerly.
   assert(!flow.includes('loading="lazy"'));
   const workflow = read("OperationalWorkflowView.tsx");

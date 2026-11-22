@@ -136,8 +136,10 @@ Deno.test("the workflow detail signs Supabase session photos, keeps Firebase URL
 });
 
 Deno.test("a pose group shows its own verdict, and none while a re-generation is running", () => {
-  assertEquals(poseGroupQa({ qa_status: "unverified", qa_payload: { dna: { pass: true, score: 94 } } }, false), { status: "unverified", dna: { pass: true, score: 94 } });
-  assertEquals(poseGroupQa({ qa_status: "unverified", qa_payload: { dna: { pass: true } } }, true), null);
+  assertEquals(poseGroupQa({ status: "completed", qa_status: "unverified", qa_payload: { dna: { pass: true, score: 94 } } }, false), { status: "unverified", dna: { pass: true, score: 94 } });
+  assertEquals(poseGroupQa({ status: "processing", qa_status: "unverified", qa_payload: { dna: { pass: true } } }, true), null);
+  // A failed re-generation keeps the earlier image on the card; its own verdict must not be shown on it.
+  assertEquals(poseGroupQa({ status: "failed", qa_status: "rejected_by_qa", qa_payload: { dna: { pass: false, score: 60 } } }, false), null);
   assertEquals(poseGroupQa(null, false), null);
 });
 

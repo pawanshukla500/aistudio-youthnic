@@ -1403,9 +1403,13 @@ export function poseGroupBusyStatus(pose: JsonRecord | null | undefined) {
   return ["queued", "processing", "cancelling"].includes(status) ? status : null;
 }
 
-/** The QA verdict for the image a pose group shows. None while a re-generation runs: the row's verdict then belongs to the new attempt. */
+/**
+ * The QA verdict for the image a pose group shows. Only a completed pose row matches that image: while a
+ * re-generation runs, or after it failed, the row's verdict belongs to the new attempt and the card still
+ * shows the retained earlier version.
+ */
 export function poseGroupQa(pose: JsonRecord | null | undefined, busy: boolean) {
-  return pose && !busy ? { status: text(pose.qa_status), dna: asRecord(pose.qa_payload).dna ?? null } : null;
+  return pose && !busy && text(pose.status) === "completed" ? { status: text(pose.qa_status), dna: asRecord(pose.qa_payload).dna ?? null } : null;
 }
 
 export async function getCatalogWorkflowDetail(

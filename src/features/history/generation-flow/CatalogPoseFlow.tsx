@@ -764,10 +764,14 @@ export function CatalogPoseFlow({
     return map;
   }, [poses]);
 
+  const noticeTimer = useRef<number | undefined>(undefined);
   const flash = useCallback((text: string) => {
     setNotice(text);
-    window.setTimeout(() => setNotice(""), 4000);
+    // A newer notice keeps its full four seconds: the previous timer must not clear it.
+    window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(""), 4000);
   }, []);
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
 
   const copyText = useCallback((value: string, done: string, failed: string) => {
     let settled = false;
@@ -794,7 +798,10 @@ export function CatalogPoseFlow({
         return false;
       }
     };
-    const timer = window.setTimeout(() => finish(command()), 400);
+    // After 400 ms try the fallback, but only a success settles it: a slow clipboard write may still succeed.
+    const timer = window.setTimeout(() => {
+      if (command()) finish(true);
+    }, 400);
     if (!navigator.clipboard?.writeText) {
       window.clearTimeout(timer);
       finish(command());
@@ -816,13 +823,17 @@ export function CatalogPoseFlow({
     onRegenerate,
     onCopy: (url) => copyText(url, "Image link copied", "Could not copy the image link"),
     busyPose,
-    noteFor: (poseIndex) => String(readLayout(storageKey).notes?.[String(poseIndex)] || legacyNote(storageKey, poseIndex)).slice(0, 1000),
+    noteFor: (poseIndex) => {
+      const notes = readLayout(storageKey).notes || {};
+      const key = String(poseIndex);
+      // A key present in the v2 layout (even "") wins; only a pose never touched since reads the old note.
+      return String(key in notes ? notes[key] : legacyNote(storageKey, poseIndex)).slice(0, 1000);
+    },
     saveNote: (poseIndex, next) => {
       remember((saved) => {
         const notes = { ...(saved.notes || {}) };
-        const trimmed = next.slice(0, 1000);
-        if (trimmed) notes[String(poseIndex)] = trimmed;
-        else delete notes[String(poseIndex)];
+        // Kept even when empty, so clearing a carried-over note does not bring the old one back.
+        notes[String(poseIndex)] = next.slice(0, 1000);
         saved.notes = notes;
       });
     },
