@@ -27,3 +27,20 @@ export function formatModelName(model?: string | null): string {
   if (!model) return "Default Model";
   return MODEL_LABELS[model] || model.split("-").map((s) => (s ? s[0].toUpperCase() + s.slice(1) : "")).join(" ");
 }
+
+const PROVIDER_LABELS: Record<string, string> = {
+  openai: "OpenAI",
+  meta: "Meta",
+  zai: "Z.ai",
+  gemini: "Google Gemini",
+  google: "Google",
+  qwen: "Qwen",
+  reve: "Reve",
+};
+
+/** A provider id in words, e.g. "openai" -> "OpenAI". */
+export function formatProviderName(provider?: string | null): string {
+  const id = String(provider || "").trim().toLowerCase();
+  if (!id) return "";
+  return PROVIDER_LABELS[id] || id[0].toUpperCase() + id.slice(1);
+}
