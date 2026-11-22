@@ -30,8 +30,9 @@ function abortableDelay(ms: number, signal?: AbortSignal) {
   });
 }
 
+/** `invoke` gets a signal on each retry: it aborts on cancel or when the total wait runs out mid-call. */
 export async function analyzeUntilSettled<T>(
-  invoke: (args: Record<string, unknown>) => Promise<T>,
+  invoke: (args: Record<string, unknown>, signal?: AbortSignal) => Promise<T>,
   args: Record<string, unknown>,
   options: { signal?: AbortSignal; now?: () => number } = {},
 ): Promise<T> {
@@ -39,9 +40,22 @@ export async function analyzeUntilSettled<T>(
   const deadline = now() + STUDIO_ANALYZE_TOTAL_WAIT_MS;
   let result = await invoke(args);
   for (let retryMs = pendingRetryMs(result); retryMs !== null; retryMs = pendingRetryMs(result)) {
-    if (now() > deadline) throw new Error(ANALYZE_TOO_LONG_MESSAGE);
     await abortableDelay(retryMs, options.signal);
-    result = await invoke({ ...args, resumeAnalysis: true });
+    const remainingMs = deadline - now();
+    if (remainingMs <= 0) throw new Error(ANALYZE_TOO_LONG_MESSAGE);
+    const call = new AbortController();
+    const timer = setTimeout(() => call.abort(), remainingMs);
+    const cancel = () => call.abort();
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    try {
+      result = await invoke({ ...args, resumeAnalysis: true }, call.signal);
+    } catch (error) {
+      if (call.signal.aborted && !options.signal?.aborted) throw new Error(ANALYZE_TOO_LONG_MESSAGE);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", cancel);
+    }
   }
   return result;
 }

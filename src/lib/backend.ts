@@ -995,7 +995,11 @@ async function mutateBackend(
 ) {
   switch (endpoint) {
     case api.analysis.analyzeReferences:
-      return analyzeUntilSettled((callArgs) => invokeAppApi("studio.analyze", callArgs, options), args, options);
+      return analyzeUntilSettled(
+        (callArgs, signal) => invokeAppApi("studio.analyze", callArgs, signal ? { signal } : options),
+        args,
+        options,
+      );
     case api.dna.extract:
       return invokeAppApi("dna.extract", args, options);
     case api.dna.approve:

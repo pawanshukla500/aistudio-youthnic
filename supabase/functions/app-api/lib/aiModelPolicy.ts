@@ -586,13 +586,16 @@ export function remainingVisionTimeoutMs(args: {
   if (args.purpose === "product_truth") {
     if (args.remainingRouteCount <= 1) return remainingWall;
     const cap = args.primaryWindowMs ?? Infinity;
+    // Inside one proxied request a late start gives the primary the leftover. A detached
+    // flight (primaryWindowMs set) always keeps the fallback's reserve instead.
     if (
+      args.primaryWindowMs === undefined &&
       (args.prepElapsedMs ?? 0) >= 60_000 &&
       args.elapsedMs < 5_000 &&
       args.gatewayBudgetMs >= 120_000 &&
       args.gatewayBudgetMs <= ANALYZE_PROXY_BUDGET_MS &&
       remainingWall < 200_000
-    ) return Math.min(cap, remainingWall);
+    ) return remainingWall;
     const reserve = remainingWall > PRODUCT_TRUTH_FALLBACK_RESERVE_MS + PRODUCT_TRUTH_MIN_SLICE_MS
       ? PRODUCT_TRUTH_FALLBACK_RESERVE_MS
       : Math.max(20_000, Math.min(PRODUCT_TRUTH_FALLBACK_RESERVE_MS, Math.floor(remainingWall * 0.4)));

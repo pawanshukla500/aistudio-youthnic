@@ -62,6 +62,8 @@ needs a shared store first.
    `PRODUCT_TRUTH_PRIMARY_WINDOW_MS` (240s) when a fallback follows it. That is above Meta's slowest
    completed run (224s), so no observed success is cut. Later hops use the existing rule: a non-last hop
    keeps 60s for the next, and the last hop gets what is left.
+   A flight that starts late (a long wait for a vision slot) still keeps that reserve. Only the one-request
+   path (catalog preflight) still hands a late primary the whole leftover.
 
 Budget after a Meta timeout, with 10s prep and the default chain:
 

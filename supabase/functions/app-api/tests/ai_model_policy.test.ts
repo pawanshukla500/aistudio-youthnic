@@ -1521,4 +1521,9 @@ Deno.test("the primary window caps only a first hop that has a fallback", () => 
   assertEquals(remainingVisionTimeoutMs({ ...base, gatewayBudgetMs: 200_000, remainingRouteCount: 2, primaryWindowMs: PRODUCT_TRUTH_PRIMARY_WINDOW_MS }), 200_000 - VISION_GATEWAY_RESERVE_MS - PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
   // Without the window (catalog preflight, QA) nothing changes.
   assertEquals(remainingVisionTimeoutMs({ ...base, remainingRouteCount: 2 }), budget - VISION_GATEWAY_RESERVE_MS - PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
+  // A flight that starts late (a long wait for a vision slot) still keeps the fallback's reserve;
+  // the one-request path keeps giving a late primary the whole leftover.
+  const lateStart = { purpose: "product_truth", remainingRouteCount: 2, elapsedMs: 0, gatewayBudgetMs: 200_000, prepElapsedMs: 400_000 };
+  assertEquals(remainingVisionTimeoutMs({ ...lateStart, primaryWindowMs: PRODUCT_TRUTH_PRIMARY_WINDOW_MS }), 200_000 - VISION_GATEWAY_RESERVE_MS - PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
+  assertEquals(remainingVisionTimeoutMs(lateStart), 200_000 - VISION_GATEWAY_RESERVE_MS);
 });

@@ -154,4 +154,23 @@ Deno.test("the Studio stops asking after its total wait and on cancel", async ()
   const error = await cancelled.catch((reason) => reason);
   assertEquals((error as DOMException).name, "AbortError");
   assertEquals(await analyzeUntilSettled(async () => ({ id: 7 }), {}), { id: 7 }, "a finished analysis is returned as is");
+
+  // A retry that is still waiting when the total runs out is cut there, not a full server wait later.
+  let lateClock = 0;
+  const hangs = (_args: Record<string, unknown>, signal?: AbortSignal) => {
+    if (!signal) {
+      lateClock = STUDIO_ANALYZE_TOTAL_WAIT_MS - 20;
+      return Promise.resolve({ analysisPending: true, retryAfterMs: 0 });
+    }
+    return new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+  };
+  await assertRejects(() => analyzeUntilSettled(hangs, {}, { now: () => lateClock }), Error, ANALYZE_TOO_LONG_MESSAGE);
+  // A cancel during a retry stays a cancel.
+  const userCancel = new AbortController();
+  const cancelledRetry = analyzeUntilSettled((_args, signal) => {
+    if (!signal) return Promise.resolve({ analysisPending: true, retryAfterMs: 0 });
+    setTimeout(() => userCancel.abort(), 0);
+    return new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), { once: true }));
+  }, {}, { signal: userCancel.signal });
+  assertEquals(((await cancelledRetry.catch((reason) => reason)) as DOMException).name, "AbortError");
 });
