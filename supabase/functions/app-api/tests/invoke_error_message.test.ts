@@ -75,6 +75,9 @@ Deno.test("a routing read is not told to shrink its images", () => {
 
 Deno.test("only side-effect-free reads may be repeated after a gateway cut", () => {
   assertEquals(isRetryableInvokeOperation("ai.routing.effective"), true);
+  for (const read of ["history.generationFlow.get", "studio.loadSession", "jobs.downloadAsset"]) {
+    assertEquals(isRetryableInvokeOperation(read), true);
+  }
   // Repeating any of these would queue a second paid job or analysis.
   for (
     const mutation of [

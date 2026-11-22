@@ -33,6 +33,12 @@ export type FlowPose = {
   versionCount?: number;
   canRegenerate?: boolean;
   settings?: string;
+  aspectRatio?: string;
+  imageSize?: string;
+  quality?: string;
+  /** The verdict the card shows on the image, e.g. "DNA 95%" or "Needs review". */
+  qaLabel?: string;
+  qaTone?: "good" | "warn" | "bad";
   versions?: Array<{ version: number; at?: string; status?: string; imageUrl?: string }>;
 };
 
@@ -105,10 +111,12 @@ export function neighborIds(activeId: string, edges: Array<{ source: string; tar
   const pose = poseOf(activeId);
   if (pose) {
     const prompt = `prompt-${pose}`;
+    const image = `image-${pose}`;
     add(prompt);
-    add(`image-${pose}`);
+    add(image);
     for (const edge of edges) {
-      if (edge.target === prompt) add(edge.source);
+      // Photos feed the output image directly; the analysis feeds the prompt.
+      if (edge.target === prompt || edge.target === image) add(edge.source);
       if (edge.source === prompt) add(edge.target);
     }
     return linked;
@@ -160,4 +168,22 @@ export function versionStatusLabel(status?: string) {
   if (value === "approved") return "approved";
   if (value === "rejected") return "rejected";
   return value.replaceAll("_", " ");
+}
+
+type DnaVerdict = { pass?: unknown; unavailable?: unknown; score?: unknown } | null | undefined;
+
+/** The verdict an output card shows on its image: a human decision first, then QA, then the always-on product DNA check. */
+export function qaVerdict(qaStatus?: string, dna?: DnaVerdict): { label: string; tone: "good" | "warn" | "bad" } | null {
+  const status = (qaStatus || "").toLowerCase();
+  if (status === "human_approved") return { label: "Approved", tone: "good" };
+  if (status === "human_rejected") return { label: "Rejected", tone: "bad" };
+  if (status === "rejected_by_qa") return { label: "Rejected by QA", tone: "bad" };
+  if (status === "requires_human_review") return { label: "Needs review", tone: "warn" };
+  if (dna && typeof dna.pass === "boolean" && dna.unavailable !== true) {
+    const score = typeof dna.score === "number" && Number.isFinite(dna.score) ? ` ${Math.round(dna.score)}%` : "";
+    return dna.pass ? { label: `DNA${score}`, tone: "good" } : { label: `DNA check failed${score}`, tone: "warn" };
+  }
+  if (status === "automatically_verified") return { label: "QA passed", tone: "good" };
+  if (status === "unverified") return { label: "Not checked", tone: "warn" };
+  return null;
 }

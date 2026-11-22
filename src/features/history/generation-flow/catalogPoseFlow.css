@@ -1,0 +1,132 @@
+/* Generation flow board: node canvas styling (History -> Pipeline flow). */
+.cpf-board {
+  font-family: "Inter", "Manrope", system-ui, -apple-system, sans-serif;
+  color: #1f2430;
+}
+
+/* Opacity only: React Flow measures handle positions once, so a moving node would leave its edges offset. */
+@keyframes cpf-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.cpf-node {
+  animation: cpf-in 380ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.cpf-card {
+  background: #fff;
+  border: 1px solid #e6e8ee;
+  border-radius: 18px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.06);
+  transition: box-shadow 200ms ease, border-color 200ms ease;
+}
+
+.react-flow__node:hover .cpf-card {
+  box-shadow: 0 2px 4px rgba(16, 24, 40, 0.06), 0 16px 36px rgba(16, 24, 40, 0.11);
+}
+
+.cpf-card[data-linked="true"] {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 3px rgba(147, 197, 253, 0.35), 0 8px 24px rgba(16, 24, 40, 0.06);
+}
+
+.react-flow__node.selected .cpf-card {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18), 0 16px 36px rgba(16, 24, 40, 0.11);
+}
+
+.cpf-lane-handle {
+  cursor: grab;
+}
+
+.cpf-lane-handle:active {
+  cursor: grabbing;
+}
+
+@keyframes cpf-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.cpf-skeleton {
+  background: linear-gradient(90deg, #eef0f4 25%, #e2e5ec 37%, #eef0f4 63%);
+  background-size: 400% 100%;
+  animation: cpf-shimmer 1.4s ease infinite;
+}
+
+.cpf-img {
+  opacity: 0;
+  transition: opacity 360ms ease;
+}
+
+.cpf-img[data-loaded="true"] {
+  opacity: 1;
+}
+
+@keyframes cpf-progress {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(260%); }
+}
+
+.cpf-progress {
+  position: relative;
+  overflow: hidden;
+}
+
+.cpf-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, #3b82f6, transparent);
+  animation: cpf-progress 1.3s ease-in-out infinite;
+}
+
+.cpf-board .react-flow__handle.cpf-handle {
+  width: 24px;
+  height: 24px;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 9999px;
+  border: 2px solid #fff;
+  background: #dbeafe;
+  color: #2563eb;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.18);
+  transition: transform 150ms ease, background 150ms ease;
+}
+
+.cpf-board .react-flow__handle.cpf-handle:hover {
+  transform: translate(var(--cpf-hx, -50%), -50%) scale(1.12);
+  background: #bfdbfe;
+}
+
+.cpf-board .react-flow__handle-left.cpf-handle { --cpf-hx: -50%; }
+.cpf-board .react-flow__handle-right.cpf-handle { --cpf-hx: 50%; }
+
+.cpf-board .react-flow__handle.cpf-handle-text {
+  background: #eef0f4;
+  color: #4b5563;
+}
+
+.cpf-board .react-flow__handle.cpf-handle-text:hover {
+  background: #e2e5ec;
+}
+
+.cpf-board .react-flow__edge-path {
+  transition: stroke 200ms ease, stroke-width 200ms ease, opacity 200ms ease;
+}
+
+.cpf-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.cpf-scroll::-webkit-scrollbar-thumb { background: #d6d9e1; border-radius: 9999px; }
+.cpf-scroll::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cpf-node,
+  .cpf-skeleton,
+  .cpf-progress::after {
+    animation: none;
+  }
+}

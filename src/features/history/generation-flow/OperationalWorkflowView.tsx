@@ -30,6 +30,9 @@ import {
 import { saveAs } from "file-saver";
 import { invokeAppApi } from "../../../lib/backend";
 import { CatalogPoseFlow, type FlowPose, type FlowReference } from "./CatalogPoseFlow";
+import { adoptedPostures, referencesFromSession } from "./boardFromGenerationData";
+import { qaVerdict } from "./flowLinks";
+import { flowSummaryFrom } from "./flowSummary";
 
 type Member = { id: string; display_name?: string; email?: string } | null;
 type WorkflowStage = {
@@ -76,6 +79,7 @@ type PoseGroup = {
   current: AssetVersion | null;
   versions: AssetVersion[];
   reviews: any[];
+  qa?: { status?: string; dna?: Record<string, unknown> | null } | null;
 };
 type WorkflowData = Record<string, any> & {
   item: Record<string, any> & {
@@ -186,8 +190,10 @@ function base64Blob(base64: string, mimeType: string) {
   return new Blob([bytes], { type: mimeType || "image/png" });
 }
 
-function posesForBoard(data: { references?: Array<Record<string, unknown>>; poses: PoseGroup[]; planningRequest?: Record<string, unknown> | null }) {
+function posesForBoard(data: { references?: Array<Record<string, unknown>>; sessionReferences?: unknown; session?: Record<string, any> | null; poses: PoseGroup[]; planningRequest?: Record<string, unknown> | null }) {
   const request = data.planningRequest || {};
+  // The photos the generator received win: a cloned or Studio-started shoot has no inputs in planning_assets.
+  const sessionReferences = referencesFromSession(data.sessionReferences, adoptedPostures(data.session?.session_data));
   const rows = (data.references || []).filter((reference) => reference.image_url);
   const currentIds = new Set(rows.filter((reference) => reference.is_current_product_reference).map((reference) => String(reference.id)));
   const visible = currentIds.size
@@ -213,6 +219,7 @@ function posesForBoard(data: { references?: Array<Record<string, unknown>>; pose
     if (!imageUrl || references.some((reference) => reference.role.toLowerCase() === role)) continue;
     references.unshift({ id: role, role, label: words(role), imageUrl, roomOnly: false });
   }
+  const inputs = sessionReferences.length ? sessionReferences : references;
   const plan = Array.isArray(request.pose_plan) ? request.pose_plan as Array<Record<string, unknown>> : [];
   const planFor = (poseIndex: number) => plan[poseIndex - 1] || plan.find((item) => Number(item.id) === poseIndex) || null;
   const source: PoseGroup[] = data.poses.length ? data.poses : plan.map((item, index) => ({
@@ -228,6 +235,10 @@ function posesForBoard(data: { references?: Array<Record<string, unknown>>; pose
     const manifest = asset?.reference_manifest?.references || [];
     const savedPrompt = String(asset?.prompt || planned?.prompt || planned?.description || "").trim();
     const versions = pose.versions || [];
+    const approval = String(asset?.approval_status || "").toLowerCase();
+    const verdict = approval === "approved" ? { label: "Approved", tone: "good" as const }
+      : approval === "rejected" ? { label: "Rejected", tone: "bad" as const }
+      : qaVerdict(pose.qa?.status, pose.qa?.dna);
     return {
       poseIndex: pose.poseIndex,
       title: pose.title || String(planned?.title || `Pose ${pose.poseIndex}`),
@@ -249,9 +260,10 @@ function posesForBoard(data: { references?: Array<Record<string, unknown>>; pose
         imageUrl: String(version.preview_url || version.original_url || version.final_asset_url || ""),
       })),
       canRegenerate: Boolean(asset?.generation_id),
+      ...(verdict && asset ? { qaLabel: verdict.label, qaTone: verdict.tone } : {}),
     };
   });
-  return { references, poses };
+  return { references: inputs, poses };
 }
 
 export function OperationalWorkflowView({ data, onRefresh, onBack, boardOnly = false }: { data: WorkflowData; onRefresh: () => Promise<void>; onBack?: () => void; boardOnly?: boolean }) {
@@ -305,6 +317,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack, boardOnly = f
   }, [workflowFinishedAt]);
 
   const poseFlow = posesForBoard(data);
+  const flowSummary = flowSummaryFrom({ sessionData: data.session?.session_data, job: data.generationJob, skuName: data.item.sku_name });
 
   useEffect(() => {
     if (editingBrief) return;
@@ -559,10 +572,14 @@ export function OperationalWorkflowView({ data, onRefresh, onBack, boardOnly = f
           <CatalogPoseFlow
             className={boardOnly ? "h-[calc(100vh-8rem)] min-h-[560px]" : undefined}
             references={poseFlow.references}
+            summary={flowSummary}
             poses={poseFlow.poses.map((pose) => ({
               ...pose,
               model: pose.model || String(data.generationJob?.model || ""),
               settings: [data.generationJob?.aspect_ratio, data.generationJob?.image_size, data.generationJob?.quality].filter(Boolean).join(" · "),
+              aspectRatio: String(data.generationJob?.aspect_ratio || ""),
+              imageSize: String(data.generationJob?.image_size || ""),
+              quality: String(data.generationJob?.quality || ""),
               canRegenerate: Boolean(pose.canRegenerate && data.permissions.canRegenerate && data.item.qc_status !== "passed" && !packageIsDelivered && !["queued", "processing", "cancelling"].includes(String(data.generationJob?.status || ""))),
             }))}
             storageKey={String(data.item.id || "")}

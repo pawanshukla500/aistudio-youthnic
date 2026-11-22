@@ -321,3 +321,22 @@ Deno.test("History shows the passed product DNA check on QA-off frames, and flow
   assertEquals(versionStatusLabel("approved"), "approved");
   assertEquals(versionStatusLabel("requires_human_review"), "requires human review");
 });
+
+Deno.test("the flow board avoids React Flow's built-in node styles, keeps a fit out of saved layouts, and shows the photos the generator received", () => {
+  const read = (path: string) => Deno.readTextFileSync(new URL(`../../../../src/features/history/generation-flow/${path}`, import.meta.url)).replace(/\r\n/g, "\n");
+  const flow = read("CatalogPoseFlow.tsx");
+  // React Flow styles input/output/default/group wrappers by class, which outlined every card.
+  assert(flow.includes("type: `cpf-${kind}`"));
+  assert(flow.includes('"cpf-input": InputNode, "cpf-analysis": AnalysisNode, "cpf-prompt": PromptNode, "cpf-output": OutputNode'));
+  // Only a pan or zoom by the person is remembered; a fit at another window size is not.
+  assert(flow.includes("if (!event) return;"));
+  const workflow = read("OperationalWorkflowView.tsx");
+  assert(workflow.includes("const inputs = sessionReferences.length ? sessionReferences : references;"));
+  assert(workflow.includes("return { references: inputs, poses };"));
+  const page = read("GenerationFlowPage.tsx");
+  assert(page.includes("void fetchFlow();"));
+  assert(!page.includes("window.location.reload()"));
+  // The Studio's live progress card opens the board for the shoot it just queued.
+  const studio = Deno.readTextFileSync(new URL("../../../../src/features/studio/Studio.tsx", import.meta.url));
+  assert(studio.includes("to={`/history/flow/${submittedJobId}`}"));
+});

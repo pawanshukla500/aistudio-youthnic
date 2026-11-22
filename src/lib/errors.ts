@@ -25,6 +25,10 @@ const RETRYABLE_READ_OPERATIONS = new Set([
   "dna.get",
   "workflows.overview",
   "workflows.checkpoints",
+  // The History flow board, Clone Session's Studio load and a pose download only read and sign URLs.
+  "history.generationFlow.get",
+  "studio.loadSession",
+  "jobs.downloadAsset",
 ]);
 
 export function isRetryableInvokeOperation(operation: string) {
