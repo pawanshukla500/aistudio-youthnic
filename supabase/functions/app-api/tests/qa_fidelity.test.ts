@@ -877,3 +877,30 @@ Deno.test("buildPoseQaPrompt quarantines style-reference face on Pose 1 unless u
   });
   assertStringIncludes(collapsedPose1, "Compare IMAGE A against the STYLE REFERENCE face (uploaded identically in both Face Lock and Style Ref)");
 });
+
+Deno.test("Pose 2 QA tests the three-quarter turn itself; no other pose carries that rule", () => {
+  const qaFor = (poseNumber: number, poseType: string, title: string) =>
+    buildPoseQaPrompt({
+      poseNumber,
+      poseType,
+      poseTitle: title,
+      poseDirection: { id: poseType, title, bodyPosition: "Torso and hips turn 35 to 45 degrees. Both feet stay planted and close." },
+      productIdentity: { garmentFamily: "short_kurti_top", mainColor: "rust" },
+      creativeDirection: {},
+      modelIdentity: {},
+      garmentFamily: "kurta_or_kurti_set",
+      consistencyRules: [],
+      hasApprovedAnchor: true,
+      hasModelReference: false,
+      referenceManifest: ["IMAGE 1: FRONT PRODUCT", "IMAGE 2: BACK PRODUCT"],
+    });
+  // Live T94-Kitkat-Kattha run: a Pose 2 turned about 25 to 30 degrees passed, because QA never tested the turn.
+  const angled = qaFor(2, "angled", "Turning 3/4 View");
+  assertStringIncludes(angled, "For pose 2 (turning three-quarter view), fail pose_requirement if the torso and hips face the camera square-on like Pose 1 or are turned less than about 30 degrees");
+  assertStringIncludes(angled, "or if the body is in a full 90-degree profile");
+  assertStringIncludes(angled, "Pass a turn of roughly 35 to 45 degrees");
+  assertStringIncludes(angled, "State the turn you estimate in degrees in the reason.");
+  for (const [number, type, title] of [[1, "full_front", "Full Front View"], [3, "back", "Back View"], [4, "creative", "Signature Reference Pose"]] as const) {
+    assertEquals(qaFor(number, type, title).includes("For pose 2 (turning three-quarter view)"), false, type);
+  }
+});
