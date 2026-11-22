@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { invokeAppApi } from '../../../lib/backend';
 import { GenerationFlowList } from './GenerationFlowList';
 import { parseTrace } from './graph/buildGenerationGraph';
-import { ArrowLeft } from 'lucide-react';
 import { CatalogPoseFlow } from './CatalogPoseFlow';
 import { boardFromGenerationData } from './boardFromGenerationData';
 
@@ -62,44 +61,16 @@ export function GenerationFlow() {
   }
 
   if (selectedGraphData) {
-    const summarySku = selectedGraphData.is_v2 
-      ? (selectedGraphData.session?.session_data?.skuName || 'Unnamed Product') 
-      : (selectedGraphData.trace?.summary?.sku_name || 'Unnamed Product');
-      
-    const summaryJobId = selectedGraphData.is_v2 
-      ? selectedGraphData.session?.session_id 
+    const summaryJobId = selectedGraphData.is_v2
+      ? selectedGraphData.session?.session_id
       : selectedGraphData.trace?.summary?.job_id;
-      
-    const summaryModel = selectedGraphData.is_v2 ? 'V2 Node Graph' : selectedGraphData.trace?.summary?.model;
-    const summaryCost = selectedGraphData.is_v2 ? 0 : (selectedGraphData.trace?.summary?.actual_cost_usd || 0);
     const board = boardFromGenerationData(selectedGraphData);
 
+    // The board header carries the SKU, status, models, settings and cost.
     return (
       <div className="h-full flex flex-col relative overflow-hidden bg-[#f5f6f8]">
-        <div className="flex-none p-4 border-b border-[#e6e8ee] flex justify-between items-center bg-white z-10">
-          <div>
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => setSelectedGraphData(null)}
-                className="p-2 hover:bg-[#f5f6f8] rounded-full transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5 text-on-surface" />
-              </button>
-              <div>
-                <h2 className="text-lg font-bold text-on-surface leading-tight">
-                  {summarySku}
-                </h2>
-                <div className="text-xs text-secondary flex gap-3 mt-1 font-medium">
-                  <span>ID: {summaryJobId}</span>
-                  <span>Model: {summaryModel}</span>
-                  <span>Cost: ${summaryCost.toFixed(3)}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
         <div className="min-h-0 flex-1 p-3">
-          <CatalogPoseFlow references={board.references} poses={board.poses} summary={board.summary} storageKey={`admin-flow-${summaryJobId}`} />
+          <CatalogPoseFlow className="h-full" references={board.references} poses={board.poses} summary={board.summary} storageKey={`admin-flow-${summaryJobId}`} onBack={() => setSelectedGraphData(null)} />
         </div>
       </div>
     );

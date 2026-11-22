@@ -59,6 +59,7 @@ export type TracePose = {
   title: string;
   status: string;
   qa_status: string;
+  qa_payload?: Record<string, any> | null;
   error?: string;
   storage_path?: string;
   updated_at?: string | null;

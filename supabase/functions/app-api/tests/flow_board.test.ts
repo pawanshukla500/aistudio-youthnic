@@ -100,6 +100,16 @@ Deno.test("the trace board carries settings, the DNA verdict and the summary; a 
   assertEquals([board.poses[0].aspectRatio, board.poses[0].imageSize, board.poses[0].quality], ["3:4", "2K", "medium"]);
   assertEquals(board.poses[0].qaLabel, "DNA 95%");
   assertEquals(board.poses[1].qaLabel, undefined);
+  // After a failed re-generation the row keeps the earlier image, but its QA payload is the failed attempt's.
+  const failed = boardFromGenerationData({
+    trace: {
+      summary: { job_id: "job_1", status: "completed" },
+      session: {},
+      poses: [{ generation_id: "g3", job_id: "job_1", pose_index: 3, status: "failed", output_url: "https://example.test/p3-v1.jpg", qa_status: "rejected_by_qa", qa_payload: { dna: { pass: false, score: 61 } } }],
+    },
+  });
+  assertEquals(failed.poses[0].imageUrl, "https://example.test/p3-v1.jpg");
+  assertEquals(failed.poses[0].qaLabel, undefined);
 });
 
 Deno.test("selecting a pose lights the photos that feed its image directly and the analysis that feeds its prompt", () => {
@@ -136,8 +146,10 @@ Deno.test("the workflow detail signs Supabase session photos, keeps Firebase URL
 });
 
 Deno.test("a pose group shows its own verdict, and none while a re-generation is running", () => {
-  assertEquals(poseGroupQa({ qa_status: "unverified", qa_payload: { dna: { pass: true, score: 94 } } }, false), { status: "unverified", dna: { pass: true, score: 94 } });
-  assertEquals(poseGroupQa({ qa_status: "unverified", qa_payload: { dna: { pass: true } } }, true), null);
+  assertEquals(poseGroupQa({ status: "completed", qa_status: "unverified", qa_payload: { dna: { pass: true, score: 94 } } }, false), { status: "unverified", dna: { pass: true, score: 94 } });
+  assertEquals(poseGroupQa({ status: "processing", qa_status: "unverified", qa_payload: { dna: { pass: true } } }, true), null);
+  // A failed re-generation keeps the earlier image on the card; its own verdict must not be shown on it.
+  assertEquals(poseGroupQa({ status: "failed", qa_status: "rejected_by_qa", qa_payload: { dna: { pass: false, score: 60 } } }, false), null);
   assertEquals(poseGroupQa(null, false), null);
 });
 
