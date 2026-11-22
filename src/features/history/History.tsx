@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   Ban,
   ChevronDown,
@@ -30,7 +30,8 @@ import {
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, getJobReferenceImages, invokeAppApi, useMutation, useQuery, type DnaConsistencySummary, type Id } from "../../lib/backend";
-import { formatModelName } from "../../lib/modelLabels";
+import { formatModelName, formatProviderName } from "../../lib/modelLabels";
+import { skuFileStem, skuLabel } from "../../lib/skuLabel";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
@@ -161,6 +162,120 @@ function qaReviewOutcome(review: any) {
   return review?.passed === true ? "automatically_verified" : review?.passed === false ? "rejected_by_qa" : "requires_human_review";
 }
 
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+const CREATED_AT = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" });
+
+// One scroll lock for all History modals: stacked modals that close in the same render
+// (submitting a regeneration from the preview closes both) must not restore "hidden".
+let scrollLocks = 0;
+let unlockedOverflow = "";
+function lockPageScroll() {
+  if (scrollLocks++ === 0) {
+    unlockedOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+}
+function unlockPageScroll() {
+  if (scrollLocks > 0 && --scrollLocks === 0) document.body.style.overflow = unlockedOverflow;
+}
+
+// Open modals, innermost last: only the top one handles Escape and keeps Tab focus inside itself.
+const openModals: symbol[] = [];
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * While a History modal is open: Escape closes it, the page behind stops scrolling, focus moves into
+ * the dialog and Tab stays inside it, and focus returns to where it was when the modal closes.
+ */
+function useModalChrome(open: boolean, onClose: () => void, canClose = true, dialogRef?: RefObject<HTMLElement | null>) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const canCloseRef = useRef(canClose);
+  canCloseRef.current = canClose;
+  // Read during the render that opens the modal: an autoFocus field inside it takes focus before effects run.
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current) returnFocusRef.current = document.activeElement as HTMLElement | null;
+  wasOpen.current = open;
+  useEffect(() => {
+    if (!open) return;
+    const id = Symbol("history-modal");
+    openModals.push(id);
+    lockPageScroll();
+    const returnFocus = returnFocusRef.current;
+    const focusTimer = window.setTimeout(() => {
+      const dialog = dialogRef?.current;
+      if (dialog && !dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true });
+    }, 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (openModals[openModals.length - 1] !== id) return;
+      if (event.key === "Escape" && canCloseRef.current) {
+        event.preventDefault();
+        closeRef.current();
+        return;
+      }
+      const dialog = dialogRef?.current;
+      if (event.key !== "Tab" || !dialog) return;
+      const items = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((item) => item.offsetParent !== null);
+      if (!items.length) {
+        event.preventDefault();
+        dialog.focus({ preventScroll: true });
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!dialog.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && (active === first || active === dialog)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener("keydown", onKeyDown);
+      const index = openModals.indexOf(id);
+      if (index >= 0) openModals.splice(index, 1);
+      unlockPageScroll();
+      if (returnFocus && returnFocus.isConnected) returnFocus.focus({ preventScroll: true });
+    };
+    // dialogRef is a stable ref object.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+}
+
+/** A large preview image with a spinner until it loads, so browsing never shows the previous frame. */
+function PreviewImage({ src, alt, className }: { src: string; alt: string; className: string }) {
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  return (
+    <span className="relative grid place-items-center">
+      {!loaded && !failed && <Loader2 className="absolute h-7 w-7 animate-spin text-white/70" aria-hidden />}
+      {failed ? (
+        <span className="rounded-lg bg-white/10 px-4 py-3 text-center text-xs font-semibold text-white/80">
+          This image could not be loaded. The link may have expired: reopen the shoot to refresh it.
+        </span>
+      ) : (
+        <img
+          src={src}
+          alt={alt}
+          decoding="async"
+          onLoad={() => setLoaded(true)}
+          onError={() => setFailed(true)}
+          className={`${className} transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
+        />
+      )}
+    </span>
+  );
+}
+
 function statusClass(status: string) {
   if (status === "completed") return "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20";
   if (status === "failed") return "bg-red-50 text-red-700 ring-1 ring-inset ring-red-600/10";
@@ -270,7 +385,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
         navigate(`/studio?session=${result.sessionId}`);
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Could not clone session.");
+      setDownloadError(err instanceof Error ? `Could not clone this shoot: ${err.message}` : "Could not clone this shoot.");
     } finally {
       setIsCloning(false);
     }
@@ -349,7 +464,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       const dlBlob = assetData.blob || base64ToBlob(assetData.base64!, assetData.mimeType || "image/png");
       const extension = dlBlob.type === "image/webp" ? "webp" : dlBlob.type === "image/jpeg" ? "jpg" : "png";
       const round = Number(attempt.generationEpoch) > 1 ? `_round${attempt.generationEpoch}` : "";
-      saveAs(dlBlob, `${job?.skuId || "Youthnic"}_${pose.poseNumber}${round}_attempt${attempt.attempt}_qa-rejected.${extension}`);
+      saveAs(dlBlob, `${skuFileStem(job)}_${pose.poseNumber}${round}_attempt${attempt.attempt}_qa-rejected.${extension}`);
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : "Could not download this image.");
     } finally {
@@ -366,7 +481,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       const extension = dlBlob.type === "image/webp" ? "webp" : dlBlob.type === "image/jpeg" ? "jpg" : "png";
       saveAs(
         dlBlob,
-        `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose")
+        `${skuFileStem(job)}_${pose.poseNumber}_${String(pose.title || "pose")
           .replace(/[^a-z0-9]+/gi, "_")
           .toLowerCase()}_v${version.version}.${extension}`
       );
@@ -389,7 +504,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       const version = hasRetainedPreviousVersion(pose) ? "_prior-retained-version" : "";
       saveAs(
         dlBlob,
-        `${job?.skuId || "Youthnic"}_${pose.poseNumber}_${String(pose.title || "pose")
+        `${skuFileStem(job)}_${pose.poseNumber}_${String(pose.title || "pose")
           .replace(/[^a-z0-9]+/gi, "_")
           .toLowerCase()}${version}.${extension}`
       );
@@ -412,7 +527,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       );
       if (storedPoses.length === 0) return;
 
-      const archiveName = `Youthnic_${job.skuId || "Generation"}${approvedOnly ? "_approved" : ""}`;
+      const archiveName = `Youthnic_${skuFileStem(job)}${approvedOnly ? "_approved" : ""}`;
       const folder = zip.folder(archiveName);
       if (!folder) return;
 
@@ -515,7 +630,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
   const previewKeyHandler = useRef<(event: KeyboardEvent) => void>(() => {});
   useEffect(() => {
     previewKeyHandler.current = (event: KeyboardEvent) => {
-      if (!selectedPose || regenerateTarget) return;
+      if (!selectedPose || regenerateTarget || openModals.length > 1) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable))
@@ -546,6 +661,16 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [previewOpen]);
+
+  // The pose preview handles its own keys (arrows, D, Esc); the hooks below only lock scrolling for it.
+  const previewDialog = useRef<HTMLDivElement>(null);
+  const regenerateDialog = useRef<HTMLFormElement>(null);
+  const referenceDialog = useRef<HTMLDivElement>(null);
+  const routingDialog = useRef<HTMLDivElement>(null);
+  useModalChrome(previewOpen, () => undefined, false, previewDialog);
+  useModalChrome(Boolean(regenerateTarget), () => setRegenerateTarget(null), !regeneratingId, regenerateDialog);
+  useModalChrome(Boolean(selectedReference), () => setSelectedReference(null), true, referenceDialog);
+  useModalChrome(showModelRoutingModal, () => setShowModelRoutingModal(false), true, routingDialog);
 
   const batchRunning = batchEntries.some((entry) => entry.state === "submitting");
   // A request that errored after the server had already queued some poses still shows those as queued.
@@ -581,8 +706,13 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
 
   if (job === undefined) {
     return (
-      <div className="flex justify-center p-12">
-        <Loader2 className="h-7 w-7 animate-spin text-primary" />
+      <div className="space-y-6" aria-busy="true" aria-label="Loading shoot details">
+        <div className="h-24 animate-pulse rounded-2xl bg-surface-container-low" />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div key={index} className="aspect-[3/4] animate-pulse rounded-2xl bg-surface-container-low" />
+          ))}
+        </div>
       </div>
     );
   }
@@ -652,7 +782,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           >
             <Brain className="h-3.5 w-3.5 text-primary" />
             <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Analysis</span>
-            <span className="font-bold text-primary truncate max-w-[130px]">
+            <span className="font-bold text-primary truncate max-w-[200px]">
               {job.analysisModel ? formatModelName(job.analysisModel) : "Not recorded"}
             </span>
           </div>
@@ -663,7 +793,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           >
             <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
             <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">Image Gen</span>
-            <span className="font-bold text-indigo-700 truncate max-w-[130px]">
+            <span className="font-bold text-indigo-700 truncate max-w-[200px]">
               {formatModelName(job.generationModel || job.model || "")}
             </span>
           </div>
@@ -691,7 +821,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             >
               <Layers className="h-3.5 w-3.5" />
               <span>
-                {regenerationSummary.regenerations} retry in {regenerationSummary.regeneratedPoses} pose{regenerationSummary.regeneratedPoses === 1 ? "" : "s"}
+                {plural(regenerationSummary.regenerations, "retry", "retries")} across {plural(regenerationSummary.regeneratedPoses, "pose", "poses")}
               </span>
               <span className="font-mono text-[10px] font-bold text-primary/80">
                 (${Number(regenerationSummary.regenerationCostUsd || 0).toFixed(4)})
@@ -784,7 +914,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   key={reference._id}
                   type="button"
                   onClick={() => setSelectedReference(reference)}
-                  className="group relative flex flex-col overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-1.5 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md"
+                  className="group/ref relative flex flex-col overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-1.5 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md"
                 >
                   <div className="relative aspect-square w-full overflow-hidden rounded-lg bg-surface-container">
                     <img
@@ -792,9 +922,9 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                       alt={reference.label}
                       loading="lazy"
                       decoding="async"
-                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      className="h-full w-full object-cover transition-transform duration-300 group-hover/ref:scale-105"
                     />
-                    <div className="absolute inset-0 bg-navy-soft/0 transition-colors group-hover:bg-navy-soft/20 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                    <div className="absolute inset-0 bg-navy-soft/0 transition-colors group-hover/ref:bg-navy-soft/20 flex items-center justify-center opacity-0 group-hover/ref:opacity-100">
                       <Maximize2 className="h-5 w-5 text-white drop-shadow" />
                     </div>
                   </div>
@@ -861,7 +991,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     onChange={(event) => setBatchPoseQa(event.target.checked)}
                     className="h-4 w-4 rounded border-outline-variant text-primary focus:ring-primary accent-primary"
                   />
-                  <span>Run Gemini consistency QA on newly generated frames</span>
+                  <span>Run automatic consistency QA on the new frames</span>
                 </label>
                 <span className="font-mono text-[10px] text-secondary">{batchNote.length}/1000</span>
               </div>
@@ -960,34 +1090,46 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           const batchEligible = batchSelectable && canRegeneratePose(pose, job.status);
           const versions = poseVersions(pose);
           const currentVersion = versions.find((version) => version.isCurrent) || null;
+          const rejected = latestRejected(pose);
+          const openable = Boolean(outputUrl || rejected);
 
           return (
             <div
               key={pose._id}
-              className={`group flex flex-col ${outputUrl || latestRejected(pose) ? "cursor-zoom-in" : "cursor-default"}`}
-              onClick={() => (outputUrl || latestRejected(pose)) && setSelectedPose(pose)}
+              className={`group/tile flex flex-col rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${openable ? "cursor-zoom-in" : "cursor-default"}`}
+              onClick={() => openable && setSelectedPose(pose)}
+              role={openable ? "button" : undefined}
+              tabIndex={openable ? 0 : undefined}
+              aria-label={openable ? `Open pose ${pose.poseNumber}, ${pose.title}` : undefined}
+              onKeyDown={(event) => {
+                if (!openable || event.target !== event.currentTarget) return;
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setSelectedPose(pose);
+                }
+              }}
             >
               {/* IMAGE TILE (3:4) */}
-              <div className="relative aspect-[3/4] w-full overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all duration-300 group-hover:-translate-y-1 group-hover:border-primary/50 group-hover:shadow-lg">
+              <div className="relative aspect-[3/4] w-full overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm transition-all duration-300 group-hover/tile:-translate-y-1 group-hover/tile:border-primary/50 group-hover/tile:shadow-lg">
                 {outputUrl ? (
                   <img
                     src={outputUrl}
                     alt={retainedPrevious ? `${pose.title} — retained prior version` : pose.title}
                     loading="lazy"
                     decoding="async"
-                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    className="h-full w-full object-cover transition-transform duration-500 group-hover/tile:scale-105"
                   />
-                ) : latestRejected(pose) ? (
+                ) : rejected ? (
                   <>
                     <img
-                      src={latestRejected(pose).url}
+                      src={rejected.url}
                       alt={`${pose.title} — rejected attempt`}
                       loading="lazy"
                       decoding="async"
-                      className="h-full w-full object-cover opacity-70 grayscale transition-transform duration-500 group-hover:scale-105"
+                      className="h-full w-full object-cover opacity-70 grayscale transition-transform duration-500 group-hover/tile:scale-105"
                     />
                     <span className="absolute inset-x-0 bottom-0 bg-red-600/90 px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white backdrop-blur-xs">
-                      QA rejected · attempt {latestRejected(pose).attempt}
+                      QA rejected · attempt {rejected.attempt}
                     </span>
                   </>
                 ) : (
@@ -996,6 +1138,17 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                       <div className="flex flex-col items-center gap-2">
                         <Loader2 className="h-6 w-6 animate-spin text-primary" />
                         <span className="text-[10px] font-bold uppercase tracking-widest text-primary">Generating</span>
+                      </div>
+                    ) : pose.status === "queued" ? (
+                      <div className="flex flex-col items-center gap-2 text-amber-700">
+                        <Clock className="h-6 w-6" />
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Queued</span>
+                      </div>
+                    ) : pose.status === "failed" ? (
+                      <div className="flex flex-col items-center gap-2 px-3 text-center text-red-700">
+                        <AlertCircle className="h-6 w-6" />
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Failed</span>
+                        {canRegeneratePose(pose, job.status) && <span className="text-[10px] font-medium text-secondary">Use ↻ to try this pose again</span>}
                       </div>
                     ) : (
                       <ImageIcon className="h-8 w-8 text-outline-variant/50" />
@@ -1037,7 +1190,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 )}
 
                 {/* HOVER QUICK ACTIONS (Top Right) */}
-                <div className="absolute right-2 top-2 z-10 flex flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                {/* Always visible on touch screens, which have no hover. */}
+                <div className="absolute right-2 top-2 z-10 flex flex-col gap-1 opacity-100 transition-opacity lg:opacity-0 lg:group-hover/tile:opacity-100 lg:group-focus-within/tile:opacity-100">
                   {canRegeneratePose(pose, job.status) && (
                     <button
                       onClick={(e) => {
@@ -1048,6 +1202,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                       }}
                       disabled={regeneratingId === pose._id}
                       title="Regenerate this pose"
+                      aria-label={`Regenerate pose ${pose.poseNumber}`}
                       className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/95 text-primary shadow-md backdrop-blur-sm transition-transform hover:scale-105 active:scale-95"
                     >
                       {regeneratingId === pose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
@@ -1062,6 +1217,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                       }}
                       disabled={downloadingPoseId === pose._id}
                       title={retainedPrevious ? "Download retained prior version" : "Download high-res image"}
+                      aria-label={`Download pose ${pose.poseNumber}`}
                       className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/95 text-primary shadow-md backdrop-blur-sm transition-transform hover:scale-105 active:scale-95"
                     >
                       {downloadingPoseId === pose._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
@@ -1140,17 +1296,22 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           <div
             className="flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/10"
             onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Pose ${selectedPose.poseNumber}: ${selectedPose.title}`}
+            ref={previewDialog}
+            tabIndex={-1}
           >
             {/* LIGHTBOX HEADER */}
-            <div className="flex items-center justify-between border-b border-outline-variant/40 bg-surface-container-lowest px-6 py-4">
-              <div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/40 bg-surface-container-lowest px-4 py-3 sm:px-6 sm:py-4">
+              <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-primary">
                   Pose {selectedPose.poseNumber}
                   {selectedNavIndex >= 0 ? ` · Frame ${selectedNavIndex + 1} of ${navigablePoses.length}` : ""}
                 </p>
-                <h3 className="font-manrope text-xl font-bold text-on-surface">{selectedPose.title}</h3>
+                <h3 className="truncate font-manrope text-lg font-bold text-on-surface sm:text-xl">{selectedPose.title}</h3>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="ml-auto flex flex-wrap items-center gap-2">
                 <span className="mr-2 hidden rounded-lg bg-surface-container px-2 py-1 text-[10px] font-mono text-secondary md:inline">
                   ← / → browse · D download · Esc close
                 </span>
@@ -1171,6 +1332,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   onClick={() => previousNavPose && setSelectedPose(previousNavPose)}
                   disabled={!previousNavPose}
                   title="Previous frame (←)"
+                  aria-label="Previous frame"
                   className="rounded-xl border border-outline-variant/60 p-2 text-secondary hover:bg-surface-container disabled:opacity-30"
                 >
                   <ChevronLeft className="h-5 w-5" />
@@ -1179,6 +1341,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   onClick={() => nextNavPose && setSelectedPose(nextNavPose)}
                   disabled={!nextNavPose}
                   title="Next frame (→)"
+                  aria-label="Next frame"
                   className="rounded-xl border border-outline-variant/60 p-2 text-secondary hover:bg-surface-container disabled:opacity-30"
                 >
                   <ChevronRight className="h-5 w-5" />
@@ -1186,6 +1349,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 <button
                   onClick={() => setSelectedPose(null)}
                   title="Close (Esc)"
+                  aria-label="Close preview"
                   className="rounded-xl border border-outline-variant/60 p-2 text-secondary hover:bg-surface-container"
                 >
                   <X className="h-5 w-5" />
@@ -1194,58 +1358,58 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
             </div>
 
             {/* LIGHTBOX BODY (SPLIT CANVAS & INSPECTOR) */}
-            <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="grid min-h-0 flex-1 gap-0 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_340px] lg:overflow-hidden">
               {/* IMAGE CANVAS */}
               {showCompare ? (
-                <div className="grid min-h-0 grid-cols-2 gap-4 overflow-auto bg-neutral-950 p-6">
+                <div className="grid min-h-[50vh] grid-cols-2 gap-3 overflow-auto bg-neutral-950 p-3 sm:gap-4 sm:p-6 lg:min-h-0">
                   <figure className="flex min-h-0 flex-col items-center justify-center gap-2.5">
                     <figcaption className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white/90">
                       Previous Version
                     </figcaption>
-                    <img
+                    <PreviewImage
+                      key={selectedPreviousUrl}
                       src={selectedPreviousUrl}
                       alt={`${selectedPose.title} — previous version`}
-                      decoding="async"
-                      className="max-h-[72vh] max-w-full rounded-lg object-contain shadow-2xl"
+                      className="max-h-[46vh] max-w-full rounded-lg object-contain shadow-2xl lg:max-h-[72vh]"
                     />
                   </figure>
                   <figure className="flex min-h-0 flex-col items-center justify-center gap-2.5">
                     <figcaption className="rounded-full bg-primary px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white">
                       Current Version
                     </figcaption>
-                    <img
+                    <PreviewImage
+                      key={selectedOutputUrl}
                       src={selectedOutputUrl}
                       alt={`${selectedPose.title} — current version`}
-                      decoding="async"
-                      className="max-h-[72vh] max-w-full rounded-lg object-contain shadow-2xl"
+                      className="max-h-[46vh] max-w-full rounded-lg object-contain shadow-2xl lg:max-h-[72vh]"
                     />
                   </figure>
                 </div>
               ) : selectedViewedVersion ? (
-                <div className="relative grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-6">
+                <div className="relative grid min-h-[50vh] place-items-center overflow-auto bg-neutral-950 p-3 sm:p-6 lg:min-h-0">
                   <span className="absolute left-6 top-6 rounded-full bg-white/20 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white backdrop-blur-md">
                     Version {selectedViewedVersion.version} of {selectedVersions.length} · Archived
                   </span>
-                  <img
+                  <PreviewImage
+                    key={selectedViewedVersion.url}
                     src={selectedViewedVersion.url}
                     alt={`${selectedPose.title} — version ${selectedViewedVersion.version}`}
-                    decoding="async"
-                    className="max-h-[76vh] max-w-full rounded-lg object-contain shadow-2xl"
+                    className="max-h-[46vh] max-w-full rounded-lg object-contain shadow-2xl lg:max-h-[76vh]"
                   />
                 </div>
               ) : (
-                <div className="grid min-h-0 place-items-center overflow-auto bg-neutral-950 p-6">
-                  <img
+                <div className="grid min-h-[50vh] place-items-center overflow-auto bg-neutral-950 p-3 sm:p-6 lg:min-h-0">
+                  <PreviewImage
+                    key={selectedOutputUrl || latestRejected(selectedPose)?.url}
                     src={selectedOutputUrl || latestRejected(selectedPose)?.url}
                     alt={selectedPose.title}
-                    decoding="async"
-                    className="max-h-[76vh] max-w-full rounded-lg object-contain shadow-2xl"
+                    className="max-h-[46vh] max-w-full rounded-lg object-contain shadow-2xl lg:max-h-[76vh]"
                   />
                 </div>
               )}
 
               {/* INSPECTOR ASIDE */}
-              <aside className="space-y-4 overflow-y-auto border-l border-outline-variant/30 bg-white p-5 text-sm">
+              <aside className="space-y-4 border-t border-outline-variant/30 bg-white p-4 text-sm sm:p-5 lg:overflow-y-auto lg:border-l lg:border-t-0">
                 {selectedViewedVersion && (
                   <div className="rounded-2xl border border-primary/30 bg-soft-blush p-4">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-primary">
@@ -1331,10 +1495,16 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 {(selectedQaStatus || selectedDna || selectedPose.productFidelity > 0 || Object.keys(selectedPose.fidelityScores || {}).length > 0) && (
                   <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4 shadow-xs">
                     <div className="flex items-baseline justify-between">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Gemini Vision QA Score</p>
-                      <p className={`font-mono text-xl font-bold ${fidelityTone(selectedPose.productFidelity)}`}>
-                        {selectedPose.productFidelity}%
-                      </p>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-secondary">Automatic QA score</p>
+                      {selectedPose.productFidelity > 0 ? (
+                        <p className={`font-mono text-xl font-bold ${fidelityTone(selectedPose.productFidelity)}`}>
+                          {selectedPose.productFidelity}%
+                        </p>
+                      ) : (
+                        <p className="rounded-full bg-surface-container px-2.5 py-0.5 text-[11px] font-bold text-secondary" title="Automatic QA did not score this frame">
+                          {shownQaEnabled(selectedPose, Boolean(job.poseQa)) ? "Not scored" : "Off"}
+                        </p>
+                      )}
                     </div>
 
                     {selectedQaStatus === "human_approved" ? (
@@ -1445,7 +1615,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                         <Layers className="h-3 w-3 text-primary" /> Version History
                       </p>
                       <span className="font-mono text-[10px] text-secondary">
-                        {selectedVersions.length} kept · {selectedVersions.length - 1} retry
+                        {selectedVersions.length} kept · {plural(selectedVersions.length - 1, "retry", "retries")}
                       </span>
                     </div>
 
@@ -1468,14 +1638,14 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                                 setViewedVersion(version.isCurrent ? null : { poseId: selectedPose._id, versionId: version.id })
                               }
                               title={version.isCurrent ? "Show current version" : `Inspect v${version.version}`}
-                              className="shrink-0 group overflow-hidden rounded-lg border border-outline-variant/40"
+                              className="shrink-0 group/ver overflow-hidden rounded-lg border border-outline-variant/40"
                             >
                               <img
                                 src={version.url}
                                 alt={`v${version.version}`}
                                 loading="lazy"
                                 decoding="async"
-                                className="h-16 w-12 object-cover transition-transform group-hover:scale-105"
+                                className="h-16 w-12 object-cover transition-transform group-hover/ver:scale-105"
                               />
                             </button>
                             <div className="min-w-0 flex-1 text-[10px] leading-snug text-secondary">
@@ -1627,14 +1797,19 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           <form
             onSubmit={submitRegeneration}
             onClick={(event) => event.stopPropagation()}
-            className="w-full max-w-xl rounded-3xl bg-white p-7 shadow-2xl ring-1 ring-black/10"
+            className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl ring-1 ring-black/10 sm:p-7"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Regenerate pose ${regenerateTarget.poseNumber}`}
+            ref={regenerateDialog}
+            tabIndex={-1}
           >
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">
                   Pose {regenerateTarget.poseNumber}
                 </p>
-                <h3 className="mt-1 font-manrope text-2xl font-bold text-on-surface">Regenerate {regenerateTarget.title}</h3>
+                <h3 className="mt-1 font-manrope text-xl font-bold text-on-surface sm:text-2xl">Regenerate {regenerateTarget.title}</h3>
                 <p className="mt-1 text-xs leading-relaxed text-secondary">
                   Specify targeted corrections. Original garment silhouette, fabric texture, model identity, and camera setup remain locked.
                 </p>
@@ -1643,6 +1818,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                 type="button"
                 disabled={Boolean(regeneratingId)}
                 onClick={() => setRegenerateTarget(null)}
+                aria-label="Close"
                 className="rounded-xl border border-outline-variant/60 p-2 text-secondary hover:bg-surface-container disabled:opacity-40"
               >
                 <X className="h-5 w-5" />
@@ -1719,6 +1895,11 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           <div
             className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/10"
             onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={selectedReference.label}
+            ref={referenceDialog}
+            tabIndex={-1}
           >
             <div className="flex items-center justify-between border-b border-outline-variant/40 px-6 py-4">
               <div>
@@ -1727,16 +1908,17 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
               </div>
               <button
                 onClick={() => setSelectedReference(null)}
+                aria-label="Close"
                 className="rounded-xl border border-outline-variant/60 p-2 text-secondary hover:bg-surface-container"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
             <div className="grid min-h-0 flex-1 place-items-center overflow-auto bg-neutral-950 p-6">
-              <img
+              <PreviewImage
+                key={selectedReference.url}
                 src={selectedReference.url}
                 alt={selectedReference.label}
-                decoding="async"
                 className="max-h-[76vh] max-w-full rounded-lg object-contain"
               />
             </div>
@@ -1753,6 +1935,11 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
           <div
             className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/10"
             onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="AI pipeline modes"
+            ref={routingDialog}
+            tabIndex={-1}
           >
             <div className="flex items-center justify-between border-b border-outline-variant/40 px-6 py-4">
               <div className="flex items-center gap-2.5">
@@ -1764,12 +1951,14 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     AI Pipeline Modes & Model Execution
                   </h3>
                   <p className="text-[11px] text-secondary">
-                    SKU: <span className="font-mono font-bold text-on-surface">{job.skuId}</span> · {job.skuName}
+                    SKU: <span className="font-mono font-bold text-on-surface">{skuLabel(job)}</span>
+                    {job.skuName && job.skuName !== skuLabel(job) ? ` · ${job.skuName}` : ""}
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setShowModelRoutingModal(false)}
+                aria-label="Close"
                 className="rounded-xl border border-outline-variant/60 p-2 text-secondary hover:bg-surface-container"
               >
                 <X className="h-4 w-4" />
@@ -1801,7 +1990,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                   <div className="rounded-xl border border-outline-variant/30 bg-white p-3">
                     <span className="block text-[10px] font-bold uppercase text-secondary">Provider & Reasoning</span>
                     <span className="mt-0.5 block font-mono text-xs font-bold text-on-surface">
-                      {job.analysisProvider ? `${job.analysisProvider[0].toUpperCase()}${job.analysisProvider.slice(1)}` : "Not recorded"}
+                      {job.analysisProvider ? formatProviderName(job.analysisProvider) : "Not recorded"}
                     </span>
                     <span className="mt-0.5 block text-[11px] text-secondary">
                       Thinking Effort: <strong className="text-on-surface">{job.analysisThinking || "Not recorded"}</strong>
@@ -1818,7 +2007,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                     </span>
                   )}
                   <span className="rounded-md bg-white px-2 py-0.5 text-[10px] text-secondary border border-outline-variant/30">
-                    Fallback: Organization AI Policy (Default: Meta High → OpenAI GPT 6.1 Terra High)
+                    Fallbacks: the organization AI policy in Administration → AI models
                   </span>
                 </div>
               </div>
@@ -1850,7 +2039,8 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                       Aspect {job.aspectRatio || "3:4"} · {job.imageSize || "1024x1024"}
                     </span>
                     <span className="mt-0.5 block text-[11px] text-secondary">
-                      Quality: <strong className="capitalize text-on-surface">{job.quality || "medium"}</strong> · Provider: OpenAI
+                      Quality: <strong className="capitalize text-on-surface">{job.quality || "medium"}</strong>
+                      {job.generationProvider ? ` · Provider: ${formatProviderName(job.generationProvider)}` : ""}
                     </span>
                   </div>
                 </div>
@@ -1899,7 +2089,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
       )}
 
       {downloadError && (
-        <div className="fixed bottom-6 right-6 z-[120] flex items-center gap-3 rounded-2xl border border-danger/30 bg-white px-5 py-4 text-xs text-danger shadow-2xl">
+        <div role="alert" className="fixed inset-x-4 bottom-4 z-[120] flex items-center gap-3 rounded-2xl border border-danger/30 bg-white px-5 py-4 text-xs text-danger shadow-2xl sm:inset-x-auto sm:bottom-6 sm:right-6 sm:max-w-md">
           <AlertCircle className="h-5 w-5 shrink-0" />
           <span className="font-semibold">{downloadError}</span>
           <button
@@ -1949,6 +2139,13 @@ export function History() {
     error: any;
   };
   const jobs = jobsPage?.items;
+  const listTop = useRef<HTMLDivElement>(null);
+  const goToPage = (value: number) => {
+    setPage(value);
+    setExpanded(null);
+    // Keep the new page in view instead of leaving the reader at the bottom of the old one.
+    listTop.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   useEffect(() => {
     const source = params.get("source");
@@ -2041,7 +2238,7 @@ export function History() {
   return (
     <div className="mx-auto max-w-[1400px] space-y-6 pb-12">
       {/* EDITORIAL ATELIER HEADER */}
-      <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end border-b border-outline-variant/30 pb-6">
+      <div className="flex flex-col justify-between gap-5 2xl:flex-row 2xl:items-end border-b border-outline-variant/30 pb-6">
         <div>
           <div className="flex flex-wrap items-center gap-2 mb-1.5">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-soft-blush px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
@@ -2064,18 +2261,20 @@ export function History() {
 
         {/* SEARCH & FILTERS TOOLBAR */}
         <div className="flex flex-wrap items-center gap-2.5">
-          <div className="relative">
+          <div className="relative w-full sm:w-auto">
             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-secondary" />
             <input
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
               placeholder="Search SKU or prompt…"
-              className="h-10 w-60 rounded-xl border border-outline-variant/70 bg-white pl-9 pr-8 text-xs font-medium text-on-surface shadow-xs outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20"
+              aria-label="Search History"
+              className="h-10 w-full min-w-0 sm:w-60 rounded-xl border border-outline-variant/70 bg-white pl-9 pr-8 text-xs font-medium text-on-surface shadow-xs outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20"
             />
             {searchInput && (
               <button
                 type="button"
                 onClick={() => setSearchInput("")}
+                aria-label="Clear search"
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-secondary hover:text-on-surface"
               >
                 <X className="h-3.5 w-3.5" />
@@ -2124,13 +2323,19 @@ export function History() {
       </div>
 
       {/* JOBS ARCHIVE ACCORDION TABLE */}
-      <div className="flex flex-col overflow-hidden rounded-3xl border border-outline-variant/40 bg-white shadow-sm ring-1 ring-black/5">
+      <div ref={listTop} className="flex scroll-mt-4 flex-col overflow-hidden rounded-3xl border border-outline-variant/40 bg-white shadow-sm ring-1 ring-black/5">
         {jobs === undefined && (
-          <div className="flex flex-col items-center justify-center py-24 text-secondary">
-            <Loader2 className="mb-3 h-8 w-8 animate-spin text-primary" />
-            <span className="font-manrope text-xs font-bold uppercase tracking-wider text-secondary">
-              Synchronizing Archive…
-            </span>
+          <div aria-busy="true" aria-label="Loading History">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div key={index} className="flex items-center gap-4 border-b border-outline-variant/20 p-4 last:border-b-0">
+                <div className="h-12 w-12 shrink-0 animate-pulse rounded-xl bg-surface-container-low" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 w-56 max-w-full animate-pulse rounded-md bg-surface-container-low" />
+                  <div className="h-3 w-36 max-w-full animate-pulse rounded-md bg-surface-container-low" />
+                </div>
+                <div className="hidden h-2 w-40 animate-pulse rounded-full bg-surface-container-low lg:block" />
+              </div>
+            ))}
           </div>
         )}
 
@@ -2141,6 +2346,8 @@ export function History() {
             completedPoses: Math.max(Number(job.completedPoses || 0), Number(job.storedPoseCount || 0)),
           });
           const progress = delivery.deliveredPercent;
+          const label = skuLabel(job);
+          const toggle = () => setExpanded(open ? null : job._id);
 
           return (
             <article
@@ -2151,8 +2358,19 @@ export function History() {
             >
               {/* ACCORDION HEADER ROW */}
               <div
-                onClick={() => setExpanded(open ? null : job._id)}
-                className="flex cursor-pointer items-center gap-4 p-4 lg:grid lg:grid-cols-[minmax(0,1.2fr)_180px_180px_auto]"
+                onClick={toggle}
+                role="button"
+                tabIndex={0}
+                aria-expanded={open}
+                aria-label={`${open ? "Collapse" : "Expand"} ${label}`}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    toggle();
+                  }
+                }}
+                className="flex cursor-pointer items-center gap-4 rounded-2xl p-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50 lg:grid lg:grid-cols-[minmax(0,1.2fr)_180px_180px_auto]"
               >
                 {/* COL 1: SKU & Thumbnail */}
                 <div className="flex min-w-0 items-center gap-3.5">
@@ -2171,8 +2389,8 @@ export function History() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-mono text-xs font-bold text-on-surface bg-surface-container-low px-2 py-0.5 rounded-md border border-outline-variant/40">
-                        {job.skuId}
+                      <span className="max-w-full break-words font-mono text-xs font-bold text-on-surface bg-surface-container-low px-2 py-0.5 rounded-md border border-outline-variant/40 lg:truncate" title={label}>
+                        {label}
                       </span>
                       <span
                         className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${statusClass(
@@ -2202,8 +2420,13 @@ export function History() {
                         </span>
                       )}
                     </div>
-                    <p className="mt-1 truncate text-xs font-semibold text-secondary">
-                      {job.skuName || "Untitled Studio Production"}
+                    {job.skuName && job.skuName !== label && (
+                      <p className="mt-1 truncate text-xs font-semibold text-secondary">{job.skuName}</p>
+                    )}
+                    {/* Below the wide layout the progress and date columns are hidden; keep them visible here. */}
+                    <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-secondary lg:hidden">
+                      <span className="font-semibold text-on-surface">{delivery.imagesStored}/{delivery.totalPoses} images · {progress}%</span>
+                      <span>{CREATED_AT.format(job.createdAt)}</span>
                     </p>
                   </div>
                 </div>
@@ -2237,7 +2460,7 @@ export function History() {
                     {job.creatorName}
                   </span>
                   <span className="text-[10px] text-secondary">
-                    {new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(job.createdAt)}
+                    {CREATED_AT.format(job.createdAt)}
                   </span>
                 </div>
 
@@ -2247,9 +2470,10 @@ export function History() {
                     <button
                       disabled={busyJobId === job._id}
                       title="Stop generation"
+                      aria-label={`Stop ${label}`}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setPendingAction({ type: "stop", jobId: job._id, sku: job.skuName || job.skuId });
+                        setPendingAction({ type: "stop", jobId: job._id, sku: label });
                       }}
                       className="rounded-lg p-2 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
                     >
@@ -2261,9 +2485,10 @@ export function History() {
                     <button
                       disabled={busyJobId === job._id}
                       title="Regenerate failed poses"
+                      aria-label={`Retry failed poses of ${label}`}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setPendingAction({ type: "regenerate", jobId: job._id, sku: job.skuName || job.skuId });
+                        setPendingAction({ type: "regenerate", jobId: job._id, sku: label });
                       }}
                       className="rounded-lg p-2 text-secondary hover:bg-primary/10 hover:text-primary disabled:opacity-50"
                     >
@@ -2275,9 +2500,10 @@ export function History() {
                     <button
                       disabled={busyJobId === job._id}
                       title="Delete generation"
+                      aria-label={`Delete ${label}`}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setPendingAction({ type: "delete", jobId: job._id, sku: job.skuName || job.skuId });
+                        setPendingAction({ type: "delete", jobId: job._id, sku: label });
                       }}
                       className="rounded-lg p-2 text-secondary hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
                     >
@@ -2291,6 +2517,7 @@ export function History() {
                       navigate(`/history/flow/${job._id}`);
                     }}
                     title="View Generation Flow"
+                    aria-label={`Open the generation flow of ${label}`}
                     className="rounded-lg p-2 text-secondary hover:bg-primary/10 hover:text-primary"
                   >
                     <Brain className="h-4 w-4" />
@@ -2342,10 +2569,7 @@ export function History() {
             <button
               type="button"
               disabled={page <= 1}
-              onClick={() => {
-                setPage((value) => Math.max(1, value - 1));
-                setExpanded(null);
-              }}
+              onClick={() => goToPage(Math.max(1, page - 1))}
               className="rounded-xl border border-outline-variant/70 px-3 py-1.5 text-xs font-semibold text-on-surface shadow-xs transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
               Previous
@@ -2358,10 +2582,8 @@ export function History() {
                   {index > 0 && value - visiblePages[index - 1] > 1 && <span className="px-1 text-xs text-secondary">…</span>}
                   <button
                     type="button"
-                    onClick={() => {
-                      setPage(value);
-                      setExpanded(null);
-                    }}
+                    onClick={() => goToPage(value)}
+                    aria-current={value === page ? "page" : undefined}
                     className={`h-8 min-w-8 rounded-xl px-2.5 text-xs font-bold transition-all ${
                       value === page
                         ? "bg-primary text-white shadow-xs"
@@ -2376,10 +2598,7 @@ export function History() {
             <button
               type="button"
               disabled={page >= jobsPage.totalPages}
-              onClick={() => {
-                setPage((value) => Math.min(jobsPage.totalPages, value + 1));
-                setExpanded(null);
-              }}
+              onClick={() => goToPage(Math.min(jobsPage.totalPages, page + 1))}
               className="rounded-xl border border-outline-variant/70 px-3 py-1.5 text-xs font-semibold text-on-surface shadow-xs transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
               Next
@@ -2401,7 +2620,7 @@ export function History() {
       />
 
       {error && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-2xl border border-danger/30 bg-white px-5 py-4 text-xs text-danger shadow-2xl animate-in slide-in-from-bottom-5">
+        <div role="alert" className="fixed inset-x-4 bottom-4 z-50 flex items-center gap-3 rounded-2xl border border-danger/30 bg-white px-5 py-4 text-xs text-danger shadow-2xl animate-in slide-in-from-bottom-5 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:max-w-md">
           <AlertCircle className="h-5 w-5 shrink-0" />
           <span className="font-semibold">{error}</span>
           <button

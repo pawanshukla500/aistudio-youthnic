@@ -4,6 +4,7 @@ import { adoptedPostures, boardFromGenerationData, referencesFromSession } from 
 import { neighborIds, qaVerdict } from "../../../../src/features/history/generation-flow/flowLinks.ts";
 import { flowSummaryFrom, settingsLine } from "../../../../src/features/history/generation-flow/flowSummary.ts";
 import { formatModelName } from "../../../../src/lib/modelLabels.ts";
+import { skuFileStem, skuLabel } from "../../../../src/lib/skuLabel.ts";
 
 const sessionData = {
   skuName: "B161-Kishori-Bottle Green",
@@ -165,4 +166,13 @@ Deno.test("History and the flow board share one model label map", () => {
   assertEquals(formatModelName("new-model-9"), "New Model 9");
   assertEquals(formatModelName(""), "Default Model");
   assert(formatModelName("gpt-image-2.5-sunburst").startsWith("GPT Image 2.5"));
+});
+
+Deno.test("History shows the SKU code, or the product name for clones that stored an internal id", () => {
+  assertEquals(skuLabel({ skuId: "T94-Kitkat-Kattha", skuName: "T94-Kitkat-Kattha" }), "T94-Kitkat-Kattha");
+  // Clones made before #189 stored their planning request id as skuId.
+  assertEquals(skuLabel({ skuId: "3af00930-7d7a-4431-b730-a7b273f2387b", skuName: "B161-Kishori-Bottle Green" }), "B161-Kishori-Bottle Green");
+  assertEquals(skuLabel({ skuId: "", skuName: "" }), "Untitled shoot");
+  assertEquals(skuFileStem({ skuId: "3af00930-7d7a-4431-b730-a7b273f2387b", skuName: "B161-Kishori-Bottle Green" }), "B161-Kishori-Bottle-Green");
+  assertEquals(skuFileStem({ skuId: "  ", skuName: "///" }), "Youthnic");
 });

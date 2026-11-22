@@ -365,3 +365,33 @@ Deno.test("the flow board avoids React Flow's built-in node styles, keeps a fit 
   const studio = Deno.readTextFileSync(new URL("../../../../src/features/studio/Studio.tsx", import.meta.url));
   assert(studio.includes("to={`/history/flow/${submittedJobId}`}"));
 });
+
+Deno.test("History modals close on Escape, lock the page behind them, and read correctly on phones", () => {
+  const history = Deno.readTextFileSync(new URL("../../../../src/features/history/History.tsx", import.meta.url)).replace(/\r\n/g, "\n");
+  // Escape and scroll lock for every History modal (the pose preview keeps its own keys).
+  assert(history.includes("useModalChrome(Boolean(regenerateTarget), () => setRegenerateTarget(null), !regeneratingId, regenerateDialog);"));
+  assert(history.includes("useModalChrome(Boolean(selectedReference), () => setSelectedReference(null), true, referenceDialog);"));
+  assert(history.includes("useModalChrome(showModelRoutingModal, () => setShowModelRoutingModal(false), true, routingDialog);"));
+  // One shared scroll lock: stacked modals closing in the same render cannot leave the page locked.
+  assert(history.includes("if (scrollLocks > 0 && --scrollLocks === 0) document.body.style.overflow = unlockedOverflow;"));
+  // Only the top modal handles Escape and Tab; focus moves in, stays in, and returns to the trigger.
+  assert(history.includes("if (openModals[openModals.length - 1] !== id) return;"));
+  assert(history.includes("if (open && !wasOpen.current) returnFocusRef.current = document.activeElement as HTMLElement | null;"));
+  // The inspector scrolls on phones instead of being clipped.
+  assert(history.includes("overflow-y-auto lg:grid-cols-[minmax(0,1fr)_340px] lg:overflow-hidden"));
+  // QA that did not run reads "Off", not a red 0%; the QA model is configured, so it is not called Gemini.
+  assert(history.includes("Automatic QA score"));
+  assert(!history.includes("Gemini Vision QA Score"));
+  assert(!history.includes("Run Gemini consistency QA"));
+  // Retries are counted in words.
+  assert(history.includes('{plural(regenerationSummary.regenerations, "retry", "retries")} across'));
+  // Rows and pose tiles open from the keyboard; pose actions show on touch screens.
+  assert(history.includes("aria-expanded={open}"));
+  assert(history.includes("lg:opacity-0 lg:group-hover/tile:opacity-100"));
+  // Hover effects are scoped to the tile: hovering anywhere in a row no longer animates all six poses.
+  assert(history.includes("group/tile flex flex-col"));
+  // On phones the preview image keeps half the screen instead of collapsing above the inspector.
+  assert(history.includes("min-h-[50vh] place-items-center overflow-auto bg-neutral-950 p-3 sm:p-6 lg:min-h-0"));
+  // No browser alert for a failed clone.
+  assert(!history.includes("alert("));
+});
