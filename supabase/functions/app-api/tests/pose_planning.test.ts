@@ -725,3 +725,30 @@ Deno.test("past-tense walk wording is grounded too, never copied into the Pose 4
     assertStringIncludes(plan.slots.creative.directive, "both feet on the floor");
   }
 });
+
+Deno.test("a negated back detail is not a Pose 6 feature, and nothing distinct from Pose 5 still gives a marked close-up", () => {
+  const negated = t94Raw({
+    productIdentity: { ...(t94Raw().productIdentity as JsonRecord), backConstruction: "plain back panel with no ties or closure" },
+    showcasePlan: { heroFeature: "square neckline with contrast piping", featureRegion: "neckline", shotType: "macro_detail" },
+  });
+  // "no ties or closure" must not read as a back closure; the sleeves come next.
+  assertEquals(normalizeAnalysis(negated, "kurti").creativeDirection.showcasePlan!.featureRegion, "sleeve");
+
+  const bare = t94Raw({
+    productIdentity: {
+      ...(t94Raw().productIdentity as JsonRecord),
+      backConstruction: "plain back panel", sleeveType: "plain straight sleeves", hemline: "", hem: "", embroidery: "none", pattern: "", print: "",
+    },
+    showcasePlan: { heroFeature: "square neckline with contrast piping", featureRegion: "neckline", shotType: "macro_detail" },
+  });
+  const plan = normalizeAnalysis(bare, "kurti").creativeDirection.showcasePlan!;
+  // Never an unmarked plan that effectiveShowcaseShot could widen to a full-body frame.
+  assertEquals(plan.productHighlight, true);
+  assert(!["neckline", "silhouette", "complete_set"].includes(plan.featureRegion));
+});
+
+Deno.test("an adopted Pose 4 drops the analysis's own hand placement for the reference gesture", () => {
+  const pose4 = normalizeAnalysis(t94Raw(), "kurti").posePlan[3];
+  assertStringIncludes(pose4.handPlacement, "Hands follow the matched posture and the style-reference hand gesture");
+  assertEquals(/pocket/i.test(pose4.handPlacement), false);
+});

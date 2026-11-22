@@ -580,6 +580,8 @@ function referenceCreativeSlot(base: StudioPose, slot: SlotPlan, isSaree: boolea
       ? `3:4 portrait framed as the STYLE REFERENCE is shot (${camera}), with the complete matched ${slot.posture} posture and the garment's front design, print and colours reading clearly`
       : `3:4 portrait framed so the complete matched ${slot.posture} posture and the garment's front design, hem and construction read clearly, composed differently from Pose 1`,
     bodyPosition: slot.directive,
+    // The analysis wrote its own Pose 4 hands (e.g. "hand in trouser pocket"); a matched posture follows the reference.
+    handPlacement: "Hands follow the matched posture and the style-reference hand gesture, anatomically continuous and clear of the garment's print, closures and construction",
     cameraAngle: camera
       ? `${camera}, as the STYLE REFERENCE is shot`
       : "Editorial angle chosen for the matched posture, distinct from Pose 1's straight-on hero",

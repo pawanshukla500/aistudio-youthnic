@@ -409,7 +409,8 @@ function regionsIn(value: string): ShowcaseFeatureRegion[] {
 function distinctive(value: unknown, detail?: RegExp): string {
   const cleaned = bounded(value, 240);
   if (!cleaned || cleaned === "-" || /^(?:not visible|unknown|n\/a|none|no|without)\b/i.test(cleaned)) return "";
-  if (detail) return detail.test(cleaned) ? cleaned : "";
+  // "plain back panel with no ties or closure": only an affirmed detail counts, never a negated one.
+  if (detail) return detail.test(cleaned.replace(/\b(?:no|without|not|never|lacks?|free of)\b[^,.;]*/gi, " ")) ? cleaned : "";
   return /^(?:plain|simple|solid)\b/i.test(cleaned) ? "" : cleaned;
 }
 
@@ -511,7 +512,29 @@ export function productHighlightPlan(args: {
       visibilityRules: [],
     }, region);
   }
-  return args.plan;
+  // Nothing recorded is distinct from Pose 5: still a marked close-up (never widened to a full-body
+  // frame), on the region that overlaps Pose 5 least.
+  const fallback = (["print", "hem_border", "sleeve", "embroidery"] as ShowcaseFeatureRegion[]).find(usable) ?? "print";
+  const fallbackFeature: Partial<Record<ShowcaseFeatureRegion, string>> = {
+    print: "the allover print and fabric finish",
+    hem_border: "the hem finish",
+    sleeve: "the sleeve and cuff finish",
+    embroidery: "the embroidery detail",
+  };
+  return build({
+    heroFeature: fallbackFeature[fallback] || "the fabric and finishing",
+    featureRegion: fallback,
+    shotType: HIGHLIGHT_FRAMES[fallback].shotType,
+    whyItSells: args.plan?.whyItSells || "",
+    evidenceReference: "",
+    framing: "",
+    cameraAngle: "",
+    bodyPosition: "",
+    handPlacement: "",
+    expression: "",
+    distinctFrom: "",
+    visibilityRules: args.plan?.visibilityRules || [],
+  }, fallback);
 }
 
 export function showcaseShotDirection(shotType: ShowcaseShotType) {
