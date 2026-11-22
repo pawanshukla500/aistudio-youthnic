@@ -1205,15 +1205,22 @@ export function useQuery<T = any>(
     // A refresh after a save always delivers its result (forms re-sync from it); a poll or a
     // tab-refocus with unchanged data keeps the previous object.
     let deliverNext = false;
+    // A save that finishes while a request is in flight: that response predates the save, so one
+    // more request follows it and carries the save's refresh.
+    let refreshQueued = false;
     const load = (always = false) => {
       if (always) deliverNext = true;
-      if (inFlight) return;
+      if (inFlight) {
+        if (always) refreshQueued = true;
+        return;
+      }
       inFlight = true;
       void queryBackend(endpoint, JSON.parse(serializedArgs)).then((next) => {
         if (active) {
           const serialized = serializePayload(next);
-          if (deliverNext || serialized === undefined || serialized !== serializedValueRef.current) {
-            deliverNext = false;
+          const deliver = deliverNext && !refreshQueued;
+          if (deliver || serialized === undefined || serialized !== serializedValueRef.current) {
+            if (deliver) deliverNext = false;
             serializedValueRef.current = serialized;
             valueRef.current = next;
             setValue(next);
@@ -1224,6 +1231,10 @@ export function useQuery<T = any>(
         if (active) setError(reason instanceof Error ? reason : new Error(String(reason)));
       }).finally(() => {
         inFlight = false;
+        if (refreshQueued && active) {
+          refreshQueued = false;
+          load(true);
+        }
       });
     };
     load();

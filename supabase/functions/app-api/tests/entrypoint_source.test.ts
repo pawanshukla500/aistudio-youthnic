@@ -412,7 +412,12 @@ Deno.test("an unchanged poll re-renders nothing, a refresh after a save always d
   const backend = Deno.readTextFileSync(new URL("../../../../src/lib/backend.ts", import.meta.url)).replace(/\r\n/g, "\n");
   const history = Deno.readTextFileSync(new URL("../../../../src/features/history/History.tsx", import.meta.url)).replace(/\r\n/g, "\n");
   // Measured on History with one shoot open: an unchanged refresh re-rendered 907 of 907 nodes before, 0 after.
-  assert(backend.includes("if (deliverNext || serialized === undefined || serialized !== serializedValueRef.current) {"));
+  assert(backend.includes("if (deliver || serialized === undefined || serialized !== serializedValueRef.current) {"));
+  // A save that lands while a request is in flight queues one more request: the in-flight response
+  // predates the save, so it is never taken as the save's refresh (CodeAnt on #200).
+  assert(backend.includes("const deliver = deliverNext && !refreshQueued;"));
+  assert(backend.includes("if (always) refreshQueued = true;"));
+  assert(/inFlight = false;\n\s+if \(refreshQueued && active\) \{\n\s+refreshQueued = false;\n\s+load\(true\);/.test(backend));
   // The comparison text is reset with the data, so new arguments never compare against the old payload.
   assertEquals(backend.split("serializedValueRef.current = undefined;").length - 1, 2);
   // Only polls and tab-refocus skip unchanged data: Admin re-syncs its draft forms from a refresh after a save.
