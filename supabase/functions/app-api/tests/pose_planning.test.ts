@@ -861,11 +861,15 @@ Deno.test("a STYLE REFERENCE cropped above the feet keeps Pose 4's feet out of f
   // T94 v40 needed a manual correction for this: the footwear-continuity lines widened Pose 4 to head-to-feet.
   const cropped = pose4Prompt("eye-level, slightly three-quarter, cut at mid-shin with the feet out of frame");
   assertStringIncludes(cropped, "the feet and footwear fall outside this frame, cut where the STYLE REFERENCE cuts (this frame only)");
+  // A crop never also asks for the complete posture (CodeAnt on #198); a full-length reference still does.
+  assertStringIncludes(cropped, "with the matched seated posture as far as the reference frame shows it");
+  assertStringIncludes(pose4Prompt("eye-level, slightly three-quarter, full length"), "with the complete matched seated posture");
   assertEquals(pose4Prompt("eye-level, slightly three-quarter, full length").includes("footwear fall outside this frame"), false);
-  for (const camera of ["waist-up to knees framing", "knees-up, eye level", "cropped at the thighs", "shoes out of frame"]) {
+  for (const camera of ["waist-up to knees framing", "knees-up, eye level", "cropped at the thighs", "shoes out of frame",
+    "eye level, frame cuts at mid-shin", "mid-thigh crop, shallow depth", "knee-length framing", "feet are out of frame"]) {
     assert(referenceCropsAboveFeet(camera), camera);
   }
-  for (const camera of ["eye-level, medium-full, slightly three-quarter distance", "full length head to toe", "low angle, feet planted"]) {
+  for (const camera of ["eye-level, medium-full, slightly three-quarter distance", "full length head to toe", "low angle, feet planted", "full-length shot, waist height camera", "waist-level shot, full length"]) {
     assertEquals(referenceCropsAboveFeet(camera), false, camera);
   }
   assertStringIncludes(buildCombinedAnalysisPrompt(promptArgs), "where the frame cuts the body");

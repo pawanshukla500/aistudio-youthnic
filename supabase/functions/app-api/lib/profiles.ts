@@ -575,8 +575,14 @@ function adoptedSlot(planning: PosePlanning | undefined, poseId: string): SlotPl
  * A STYLE REFERENCE frame that cuts the body above the feet ("cut at mid-shin, feet out of frame", "waist-up",
  * "knees-up"). Without saying so, the footwear-continuity lines pull an adopted Pose 4 back to head-to-feet.
  */
-const REFERENCE_CROPPED_ABOVE_FEET =
-  /\b(?:feet|foot|shoes?|footwear)\s+(?:out of|outside|cropped|cut|not in)\b|\b(?:cut|cropped|crops?|framed)\s+(?:off\s+)?(?:at|above|across|below)\s+(?:the\s+)?(?:mid[-\s]?)?(?:shins?|calf|calves|knees?|thighs?|hips?|waist)\b|\b(?:waist|knees?|thighs?|hips?|chest)[-\s]?up\b/i;
+const REFERENCE_CROPPED_ABOVE_FEET = new RegExp([
+  String.raw`\b(?:feet|foot|shoes?|footwear)\s+(?:are\s+)?(?:out of|outside|cropped|cut|not in)\b`,
+  // "cut at mid-shin", "frame cuts at mid-shin", "cropped above the knees"
+  String.raw`\b(?:cuts?|cutting|cropped|crops?|framed|ends?)\s+(?:off\s+)?(?:at|above|across|below|around)\s+(?:the\s+)?(?:mid[-\s]?)?(?:shins?|calf|calves|knees?|thighs?|hips?|waist)\b`,
+  // "mid-thigh crop", "knee-length framing"
+  String.raw`\b(?:mid[-\s]?)?(?:shins?|calf|calves|knees?|thighs?|hips?|waist)[-\s]?(?:length\s+)?(?:crop|cut|framing|frame|shot)\b`,
+  String.raw`\b(?:waist|knees?|thighs?|hips?|chest)[-\s]?up\b`,
+].join("|"), "i");
 
 export function referenceCropsAboveFeet(cameraAngle: string): boolean {
   return REFERENCE_CROPPED_ABOVE_FEET.test(cameraAngle);
@@ -592,7 +598,7 @@ function referenceCreativeSlot(base: StudioPose, slot: SlotPlan, isSaree: boolea
     ...base,
     title: "Signature Reference Pose",
     framing: camera
-      ? `3:4 portrait framed as the STYLE REFERENCE is shot (${camera})${feetOut}, with the complete matched ${slot.posture} posture and the garment's front design, print and colours reading clearly`
+      ? `3:4 portrait framed as the STYLE REFERENCE is shot (${camera})${feetOut}, with the ${feetOut ? "" : "complete "}matched ${slot.posture} posture${feetOut ? " as far as the reference frame shows it" : ""} and the garment's front design, print and colours reading clearly`
       : `3:4 portrait framed so the complete matched ${slot.posture} posture and the garment's front design, hem and construction read clearly, composed differently from Pose 1`,
     bodyPosition: slot.directive,
     // The analysis wrote its own Pose 4 hands (e.g. "hand in trouser pocket"); a matched posture follows the reference.
