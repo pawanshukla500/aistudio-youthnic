@@ -25,6 +25,7 @@ import {
 } from "./profiles.ts";
 import {
   effectiveShowcaseShot,
+  productHighlightFrame,
   showcaseAestheticDirection,
   type ShowcaseFeatureRegion,
   type ShowcasePlan,
@@ -602,7 +603,7 @@ ${options.expression ? `- Expression: ${options.expression}.` : "- Expression sh
 - Framing might be slightly cropped or closer to highlight a specific feature.`,
     reference: `
 - REFERENCE POSTURE: follow the REFERENCE POSE MATCH block for body position, support and signature styling; copy the posture only.
-- Exactly two arms and two hands. The neckline, front design, hem and bottom wear stay readable, uncrumpled and unobstructed.`,
+- Exactly two arms and two hands. The neckline, front design, print and colours stay exact, readable and unobstructed; a seated or folded posture may let the hem and bottom wear rest naturally, never bunched over the print.`,
     showcase: "",
     generic: "",
   }[category] || "";
@@ -722,6 +723,7 @@ function showcasePlanHardRule(args: {
   closeupHeroDetail: string;
   referencePosture?: ReferencePosture;
 }) {
+  if (args.plan.productHighlight) return productHighlightHardRule(args.plan, args.closeupHeroDetail);
   const lowReference = Boolean(args.referencePosture && isLowPosture(args.referencePosture));
   const aesthetic = showcaseAesthetic(args.shotType, args.plan.featureRegion, lowReference);
   const lines = [
@@ -749,6 +751,26 @@ function showcasePlanHardRule(args: {
   }
   lines.push("- Everything else stays locked: same model identity, styling, footwear, set, backdrop, lighting, and the exact garment design, print, colour, fit and construction the product references show.");
   return lines.join("\n");
+}
+
+/**
+ * Analysis v38+: Pose 6 as the PRODUCT HIGHLIGHT - a tight, accurate detail close-up of one
+ * feature, cropped where it sits on the worn garment. A back detail answers to the BACK image only.
+ */
+function productHighlightHardRule(plan: ShowcasePlan, closeupHeroDetail: string) {
+  const frame = productHighlightFrame(plan.featureRegion);
+  const back = plan.featureRegion === "back_detail";
+  return [
+    `- PRODUCT HIGHLIGHT SUBJECT: ${plan.heroFeature}. This frame is a tight, accurate detail close-up of that one feature on the worn garment${plan.whyItSells ? ` - ${plan.whyItSells}` : ""}.`,
+    `- CLOSE-UP FRAMING: ${frame.crop} ${frame.body}.`,
+    back
+      ? "- BACK DETAIL AUTHORITY: the BACK PRODUCT image is the only authority for this detail. Match its back neck shape, closure type, every lace crossing or tie, the bow and its hanging ends, seams and stitching, print placement and length exactly. Front photos supply only fabric and colour; never invent, mirror or simplify a back detail."
+      : `- DETAIL FIDELITY: render every stitch, trim, motif, closure and fold of ${plan.heroFeature} at true scale, colour and placement exactly as the product photos show; never invent, simplify or move a detail.`,
+    `- NOT A FULL-BODY FRAME: never a full-length or three-quarter body frame and never a repeat of Pose 1${back ? " or of Pose 3's full back view" : ""}. The model still wears the garment, and the same set and light stay softly visible behind the crop.`,
+    closeupHeroDetail ? `- NOT POSE 5: Pose 5 already shows "${closeupHeroDetail}"; this close-up sells a different feature.` : "",
+    ...plan.visibilityRules.slice(0, 4).map((rule) => `- ${rule}`),
+    "- Everything else stays locked: same model identity, styling, set, backdrop, lighting, and the exact garment design, print, colour, fit and construction the product references show.",
+  ].filter(Boolean).join("\n");
 }
 
 const STANDING_SHOWCASE_SHOTS: readonly ShowcaseShotType[] = ["full_body_feature", "movement_feature"];
@@ -801,6 +823,11 @@ function pose6HardRule(args: {
       referencePosture: args.referencePosture,
     })
     : showcaseHardRule(args.showcaseIntent, args.poseFamily, args.expression, args.referencePosture);
+  if (args.showcaseShot?.plan.productHighlight) {
+    return `POSE 6 HARD RULE (PRODUCT HIGHLIGHT DETAIL CLOSE-UP):
+${coreRule}
+- EDITORIAL DETAIL EXECUTION: magazine-grade detail photography with tack-sharp focus across the feature, directional studio light that sculpts its texture and construction, strictly two anatomically natural hands clear of it, and 100% locked model, set, styling, and garment fidelity.`;
+  }
   const posture = args.referencePosture
     ? `the adopted STYLE REFERENCE ${args.referencePosture} posture from the REFERENCE POSE MATCH block (never a Pose 1 repeat)`
     : "natural posture diverging from Pose 1";
@@ -819,6 +846,7 @@ function poseVariationDirective(
   pose4CroppedAboveAnkles = false,
   adopted: { creative: SlotPlan | null; showcase: SlotPlan | null } = { creative: null, showcase: null },
   styleIsIdentity = false,
+  productHighlight = false,
 ): string {
   const text = [
     "6-POSE PLAN VARIATION DIRECTIVE (MANDATORY PHYSICAL DIVERGENCE):",
@@ -832,7 +860,9 @@ function poseVariationDirective(
       ? "- Pose 4 (creative): A natural editorial stance that is clearly not Pose 1 - relaxed contrapposto or a soft lean honoring the planned editorial crop, or a seated editorial only when the product notes demand sitting. Never copy the style photo's pose. Never a frozen walking stride, a spin, or a wide leg split."
       : "- Pose 4 (creative): A natural editorial stance that is clearly not Pose 1 - relaxed contrapposto or a soft lean, both feet grounded and close, or a seated editorial only when the product notes demand sitting. Never copy the style photo's pose. Never a frozen walking stride, a spin, or a wide leg split.",
     "- Pose 5 (closeup): Genuinely zoomed-in detail crop (face-and-detail or tight product-detail); strictly prohibit full-body hero repeat.",
-    adopted.showcase
+    productHighlight
+      ? "- Pose 6 (showcase): PRODUCT HIGHLIGHT - a tight detail close-up of the named feature, cropped where it sits (a back detail from behind); never a full-body frame, never Pose 5's subject, never a reference posture."
+      : adopted.showcase
       ? `- Pose 6 (showcase): A distinct variation of the STYLE REFERENCE person's ${adopted.showcase.posture} posture, as the pose plan adopted, that sells the named feature without repeating Pose 1 or Pose 4. Body position only, never the reference outfit, face or handheld objects.`
       : "- Pose 6 (showcase): A distinct natural catalog stance and framing that sells the named feature without repeating Pose 1. Keep the feet close enough that a joined or tapered hem stays intact.",
   ].join("\n");
@@ -941,6 +971,7 @@ function currentFrameLine(
   isSittingDemanded: boolean,
   croppedAboveAnkles = false,
   expression = "",
+  productHighlight = false,
 ): string {
   const poseNum = pose.poseNumber;
   if (poseNum === 1 || pose.id === "full_front") {
@@ -962,6 +993,9 @@ function currentFrameLine(
   }
   if (poseNum === 5 || pose.id === "closeup") {
     return "CURRENT FRAME (POSE 5 - ZOOMED-IN DETAIL): Genuinely zoomed in on product craftsmanship and selling details. NEVER repeat a full-body or wide hero frame. The close-up MUST highlight the primary uploaded garment's signature details (such as kurti butti work, chest/yoke embroidery, or neckline craft), and must NEVER focus on a secondary accessory like a dupatta or stole.";
+  }
+  if ((poseNum === 6 || pose.id === "showcase") && productHighlight) {
+    return "CURRENT FRAME (POSE 6 - PRODUCT HIGHLIGHT CLOSE-UP): A tight, accurate detail close-up of the named feature on the worn garment, cropped where that feature sits. Never a full-body or three-quarter frame, never Pose 5's subject. Same model, the same uploaded product, and the same style-reference set and light behind the crop.";
   }
   if (poseNum === 6 || pose.id === "showcase") {
     return "CURRENT FRAME (POSE 6 - SIGNATURE FEATURE SHOWCASE): Framing, angle, and physical stance MUST visibly diverge from Pose 1, with a natural weight shift that keeps the named feature readable. Do not split the legs wide. Never repeat the flat frontal hero stance. Same model face, same uploaded product, and the same style-reference backdrop as the other five frames.";
@@ -1044,8 +1078,9 @@ export function rearViewChecklist(productIdentity: unknown, includesBottomWear: 
     orientation ? `- Print or stripe direction: ${fact(orientation, 160)}, running the same way as in the BACK PRODUCT image.` : "",
     slits.length ? `- Side slits: ${slits.map((entry) => fact(entry, 160)).join("; ")}. Seen from behind at both side seams, at the same height as the front.` : "",
     includesBottomWear ? "- Bottom wear from behind: the same cut, volume, fall and hem panel as the BOTTOM WEAR reference, both legs visible." : "",
+    "- Match from the BACK PRODUCT image, the only authority for the back: the back neck shape and depth; every closure (lace-up crossings, ties, the bow and its hanging ends, buttons, hooks, zip) at its exact position; seams and stitching lines; print or motif placement; and the length. Never invent, mirror from the front, or simplify a back detail that image does not show.",
   ].filter(Boolean);
-  return lines.length ? `REAR VIEW CHECKLIST (RECORDED PRODUCT FACTS - CHECK EACH AGAINST THE BACK PRODUCT IMAGE):\n${lines.join("\n")}` : "";
+  return `REAR VIEW CHECKLIST (RECORDED PRODUCT FACTS - CHECK EACH AGAINST THE BACK PRODUCT IMAGE):\n${lines.join("\n")}`;
 }
 
 function anatomicalIntegrityDirective(): string {
@@ -1384,12 +1419,13 @@ export function composeGenerationPrompt(args: {
   const posePlanning = storedPosePlanning(args.session);
   const adoptedSlots = promptReferenceSlots(args.session, farshiGeneration);
   const referenceSlot = args.pose.id === "creative" || args.pose.id === "showcase" ? adoptedSlots[args.pose.id] : null;
-  const isSittingDemanded = isSeatedEditorialPoseDemanded({
+  const notesDemandSitting = isSeatedEditorialPoseDemanded({
     pose: args.pose,
     productDetails: String(args.productDetails || ""),
     creative,
     stylingNotes: styling?.stylingNotes,
-  }) || referenceSlot?.posture === "seated";
+  });
+  const isSittingDemanded = notesDemandSitting || referenceSlot?.posture === "seated";
   // Farshi keeps the planted, feet-close rewrites in a reference frame: a spread opens the joined hem.
   const poseScrub: PoseScrub = referenceSlot && !farshiGeneration ? "reference" : isSittingDemanded;
   const resolvedAspectRatio = resolveAspectRatioLabel(args.aspectRatio);
@@ -1473,7 +1509,9 @@ export function composeGenerationPrompt(args: {
   // shared helper so the pose brief, this rule, the shoot memory and the feedback
   // row all describe the same frame.
   const sceneLock = sceneLockBlock({ creativeDirection: directedCreative, poseNumber: args.pose.poseNumber, hasApprovedAnchor, hasStyleReference });
-  const isMacroShowcase = isShowcase && showcaseShot?.shotType === "macro_detail";
+  const productHighlight = isShowcase && Boolean(showcaseShot?.plan.productHighlight);
+  // A product-highlight close-up, like a macro crop, may leave the face and the props out of frame.
+  const isMacroShowcase = isShowcase && (showcaseShot?.shotType === "macro_detail" || productHighlight);
   // A tight crop keeps every prop out of frame, so its prompt keeps the general no-props rules.
   const promptProps: RequestedHandheldProps = isCloseup || isMacroShowcase ? { groups: [], labels: [], note: "" } : requestedProps;
   const faceRequired = !isTrueBack && !(isCloseup && closeupMode === CLOSEUP_PRODUCT_DETAIL) && !isMacroShowcase;
@@ -1610,9 +1648,11 @@ export function composeGenerationPrompt(args: {
     // playful/detail category and would fight a full-length set frame).
     : args.pose.id === "showcase"
       ? "showcase"
-      : (isPose4 && isSittingDemanded)
+      // A seat the notes ask for keeps the full-garment sitting rules; a seat copied from the reference
+      // keeps the reference camera and framing (Poses 1-3 already show the full silhouette).
+      : (isPose4 && notesDemandSitting)
         ? "sitting"
-        // A plan-adopted non-seated reference posture (leaning, kneeling, signature...).
+        // A plan-adopted reference posture (seated, leaning, kneeling, signature...).
         : (isPose4 && referenceSlot)
         ? "reference"
         // Pose 4 is a planted editorial stance. Planner wording such as
@@ -1643,10 +1683,10 @@ export function composeGenerationPrompt(args: {
   const poseRequirementLead = [
     referenceSlot
       ? referencePoseMatchBlock(args.pose.poseNumber, referenceSlot, farshiGeneration, useStyleModelIdentity)
-      : currentFrameLine(args.pose, isSittingDemanded, isPose4CroppedAboveAnkles, plannedExpression),
+      : currentFrameLine(args.pose, isSittingDemanded, isPose4CroppedAboveAnkles, plannedExpression, productHighlight),
     isPose4 && isSittingDemanded && !referenceSlot ? SEATED_EDITORIAL_REQUIREMENT : "",
     categoryRules ? `POSE CATEGORY RULES (${poseCategory.toUpperCase()}):\n${categoryRules}` : "",
-    poseVariationDirective(isPose4CroppedAboveAnkles, adoptedSlots, useStyleModelIdentity),
+    poseVariationDirective(isPose4CroppedAboveAnkles, adoptedSlots, useStyleModelIdentity, productHighlight),
   ].filter(Boolean).join("\n");
   const evidenceLines = promptEvidence.slice(0, 16).map((entry) => {
     const row = objectValue(entry);

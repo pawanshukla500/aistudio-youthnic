@@ -267,7 +267,9 @@ export function buildPoseQaPrompt(args: {
       (showcaseShot.shotType === "macro_detail" || showcaseShot.shotType === "half_body_detail") &&
       showcaseShot.plan.featureRegion !== "bottom_wear",
   );
-  const macroShowcase = args.poseType === "showcase" && showcaseShot?.shotType === "macro_detail";
+  // A product-highlight close-up (analysis v38+) may crop the face out, like a macro crop.
+  const productHighlight = args.poseType === "showcase" && Boolean(showcaseShot?.plan.productHighlight);
+  const macroShowcase = args.poseType === "showcase" && (showcaseShot?.shotType === "macro_detail" || productHighlight);
   const { checkKeys, isSaree } = qaKeys(args.garmentFamily, args.poseType, hasBottomWear, showcaseTightCrop);
   const qaProductIdentity = args.poseType === "back" ? rearOnlyQaProductIdentity(args.productIdentity) : args.productIdentity;
   const exampleChecks = Object.fromEntries(checkKeys.map((key) => [key, "pass"]));
@@ -286,7 +288,9 @@ export function buildPoseQaPrompt(args: {
       : `For pose 5 (face-and-product-detail close-up${closeupHeroDetail ? `: ${closeupHeroDetail}` : ""}), fail pose_requirement if it is a full-body or wide shot that just repeats the hero framing instead of a genuine zoomed-in face-to-chest/face-to-waist crop, if the face is not sharp and clearly visible, if the product detail is not LARGE and sharply highlighted in the same frame (a tiny sliver of embroidery under a beauty close-up is a fail), if the crop focuses on a secondary accessory like a dupatta instead of the primary garment's signature craftsmanship (e.g. kurti butti work or yoke embroidery), or if the expression is a frozen wide grin, a plastic smile, or a distorted face. A calm closed-mouth expression is acceptable.`
     : "";
   const pose6Rule = args.poseType === "showcase"
-    ? showcaseShot
+    ? productHighlight && showcaseShot
+      ? `For pose 6 (product-highlight detail close-up: ${showcaseShot.plan.heroFeature} [${showcaseShot.plan.featureRegion}]), fail pose_requirement if it is a full-body or three-quarter frame instead of a tight close-up of that feature, if the feature is not large, sharp and unobstructed, if it shows Pose 5's subject${closeupHeroDetail ? ` (${closeupHeroDetail})` : ""} instead, or if any closure, trim, motif or seam of the feature differs from the product photos${showcaseShot.plan.featureRegion === "back_detail" ? " (the BACK PRODUCT image decides this back detail)" : ""}. Do NOT fail pose_requirement, model_face, or face_realism merely because the face is cropped out or only partially visible in this close-up.`
+      : showcaseShot
       ? `For pose 6 (garment-led feature showcase: ${showcaseShot.plan.heroFeature} [${showcaseShot.plan.featureRegion} / ${showcaseShot.shotType}]), fail pose_requirement if the named hero feature (${showcaseShot.plan.heroFeature}) is not prominently, sharply, and aesthetically showcased, if the frame merely repeats Pose 1's static flat-frontal hero stance without angle/stance/framing divergence, or if it duplicates Pose 5's tight close-up crop${closeupHeroDetail ? ` on ${closeupHeroDetail}` : ""}.${macroShowcase ? " Do NOT fail pose_requirement, model_face, or face_realism merely because the face is cropped out or only partially visible in this macro_detail showcase crop." : ""}`
       : "For pose 6 (garment-led showcase), fail pose_requirement if it merely repeats Pose 1's static flat-frontal hero stance instead of presenting a distinct, aesthetic editorial angle/stance that highlights the garment's signature drape, silhouette, or set coordination."
     : "";

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { AlertTriangle, Ban, Check, CheckCircle2, ChevronRight, History as HistoryIcon, Images, Loader2, Sparkles, Store, Wand2, X } from "lucide-react";
+import { AlertTriangle, Ban, Check, CheckCircle2, ChevronRight, Clock, History as HistoryIcon, Images, Loader2, Maximize2, RefreshCcw, Sparkles, Store, Wand2, X } from "lucide-react";
 import { api, invokeAppApi, useAction, useMutation, useQuery, type Id, type ProductDnaExtractResult, type ProductDnaSummary } from "../../lib/backend";
 import { Button } from "@/components/ui/button";
 import { ActionDialog } from "../../components/ui/ActionDialog";
@@ -56,12 +56,12 @@ function loadedStudioReference(reference: LoadedStudioSession["references"][numb
 }
 
 const basePoses: StudioPose[] = [
-  { id: "full_front", title: "Full Front Product View", description: "Straight-on full-body primary listing image.", cameraAngle: "Eye-level front view", highlightedDetails: ["front construction", "complete silhouette"], primaryReference: "front", purpose: "Primary e-commerce listing image", prompt: "Straight-on full-body front view showing the complete product head to hem.", enabled: true },
-  { id: "angled", title: "Professional Side / 3/4 View", description: "Three-quarter view showing depth, fit, and construction.", cameraAngle: "35-55 degree three-quarter", highlightedDetails: ["side silhouette", "fit and drape"], primaryReference: "front", purpose: "Show depth and fit", prompt: "Professional three-quarter fashion pose with the full product readable. Both feet stay planted and close.", enabled: true },
-  { id: "back", title: "Full Back View", description: "True back view grounded in the uploaded back image, with the same model and the style-reference backdrop.", cameraAngle: "Straight-on back view", highlightedDetails: ["back neckline", "back construction"], primaryReference: "back", purpose: "Document the real back design", prompt: "Model turned fully around. Reproduce only the uploaded back garment. Keep the model face identity and the style-reference backdrop.", enabled: true },
-  { id: "creative", title: "Natural Editorial Pose", description: "A relaxed catalog stance that is not the hero pose, or a seated editorial pose if the style reference is sitting.", cameraAngle: "Product-appropriate editorial angle", highlightedDetails: ["natural stance", "creative direction"], primaryReference: "front", purpose: "A distinct natural listing frame", prompt: "Create a natural editorial stance with both feet grounded and close, clearly not the hero pose. Never a frozen walking stride or a wide leg split. If the style reference shows a sitting pose, sit this 4th pose while keeping garment, bottoms, hem, and footwear visible. Rebuild the backdrop from the style reference only.", enabled: true },
-  { id: "closeup", title: "Zoomed-In Product Detail Highlight", description: "A zoomed-in shot that sells the product's most important detail, with the locked face included only when that detail stays large and readable.", cameraAngle: "Eye-level, zoomed in to a product-detail crop or a face-to-chest/face-to-waist crop that still leaves the detail large", highlightedDetails: ["key product detail", "craftsmanship", "optional face"], primaryReference: "fabric_pattern", purpose: "Social-first product-detail shot", prompt: "Genuinely zoomed-in product-detail shot - not a repeat of the full-body hero. Lead with one sharp, large product detail. If the face is in frame it must be the locked model identity with a calm natural expression, and only when that crop still leaves the detail readable; otherwise crop to the product detail and let the face be partial or omitted.", enabled: true },
-  { id: "showcase", title: "Garment-Led Showcase", description: "A sixth frame built around the product's strongest selling feature, with the same model face and the same style-reference backdrop.", cameraAngle: "Eye-level editorial angle distanced for the featured garment detail", framing: "3:4 portrait framed for the product's signature feature", bodyPosition: "Natural catalog posture, feet close, chosen so the featured detail opens cleanly to the camera, with strictly two natural arms and hands", handPlacement: "Hands clear of the featured detail in two-hand coordination", expression: "Calm natural expression matching the locked model identity", highlightedDetails: ["signature product feature", "natural framing", "craftsmanship detail"], productVisibilityRules: ["the chosen hero feature must be large, sharp, and completely unobstructed", "never a repeat of Pose 1 hero framing or Pose 5 close-up crop"], consistencyNotes: "Same model identity, styling, footwear, set, backdrop and lighting as Pose 1; only framing and posture change to sell this feature", primaryReference: "front", purpose: "Sell what a buyer of this garment actually judges", prompt: "Create the garment-led showcase frame around the product's signature selling feature. Keep the locked model face, the uploaded product DNA, and the style-reference backdrop unchanged. Use a natural stance with the feet close.", enabled: true },
+  { id: "full_front", title: "Full Front View", description: "Straight-on full-body primary listing image.", cameraAngle: "Eye-level front view", highlightedDetails: ["front construction", "complete silhouette"], primaryReference: "front", purpose: "Primary e-commerce listing image", prompt: "Straight-on full-body front view showing the complete product head to hem.", enabled: true },
+  { id: "angled", title: "Turning 3/4 View", description: "Three-quarter view showing depth, fit, and construction.", cameraAngle: "35-55 degree three-quarter", highlightedDetails: ["side silhouette", "fit and drape"], primaryReference: "front", purpose: "Show depth and fit", prompt: "Professional three-quarter fashion pose with the full product readable. Both feet stay planted and close.", enabled: true },
+  { id: "back", title: "Back View", description: "True back view grounded in the uploaded back image, with the same model and the style-reference backdrop.", cameraAngle: "Straight-on back view", highlightedDetails: ["back neckline", "back construction"], primaryReference: "back", purpose: "Document the real back design", prompt: "Model turned fully around. Reproduce only the uploaded back garment. Keep the model face identity and the style-reference backdrop.", enabled: true },
+  { id: "creative", title: "Signature Reference Pose", description: "The style-reference person's pose, camera angle and framing in the uploaded garment, or a relaxed editorial stance when the reference shows no person.", cameraAngle: "Product-appropriate editorial angle", highlightedDetails: ["natural stance", "creative direction"], primaryReference: "front", purpose: "A distinct natural listing frame", prompt: "Reproduce the style-reference person's pose, camera angle and framing in the uploaded garment, never their clothing, face or anything in their hands; a walking pose becomes a grounded weight shift. Keep the garment's front, print and colours exact. Rebuild the backdrop from the style reference only.", enabled: true },
+  { id: "closeup", title: "Face + Details Close-Up", description: "A zoomed-in shot that sells the product's most important detail, with the locked face included only when that detail stays large and readable.", cameraAngle: "Eye-level, zoomed in to a product-detail crop or a face-to-chest/face-to-waist crop that still leaves the detail large", highlightedDetails: ["key product detail", "craftsmanship", "optional face"], primaryReference: "fabric_pattern", purpose: "Social-first product-detail shot", prompt: "Genuinely zoomed-in product-detail shot - not a repeat of the full-body hero. Lead with one sharp, large product detail. If the face is in frame it must be the locked model identity with a calm natural expression, and only when that crop still leaves the detail readable; otherwise crop to the product detail and let the face be partial or omitted.", enabled: true },
+  { id: "showcase", title: "Product Highlight", description: "A tight detail close-up of the product's most distinctive feature on the worn garment, in the same style-reference set.", cameraAngle: "Eye-level, close detail distance centred on the featured detail", framing: "3:4 portrait detail close-up cropped where the featured detail sits", bodyPosition: "Natural posture that opens the featured detail to the camera, with strictly two natural arms and hands", handPlacement: "Hands clear of the featured detail in two-hand coordination", expression: "Calm natural expression matching the locked model identity", highlightedDetails: ["signature product feature", "natural framing", "craftsmanship detail"], productVisibilityRules: ["the chosen feature must be large, sharp, and completely unobstructed", "never a full-body frame or the Pose 5 subject"], consistencyNotes: "Same model identity, styling, set, backdrop and lighting as Pose 1; only the camera moves in close on this feature", primaryReference: "front", purpose: "Show up close what a buyer of this garment actually judges", prompt: "Create a tight, accurate detail close-up of the product's most distinctive feature on the worn garment. Keep the uploaded product DNA and the style-reference set and light unchanged.", enabled: true },
 ];
 
 const REQUIRED_POSE_COUNT = 6;
@@ -133,6 +133,16 @@ function submissionStatusLabel(job: any) {
   if (job.status === "queued") return "Queued";
   if (job.status === "processing") return "Generating";
   return String(job.status || "Unknown");
+}
+
+/** A pose's live state in words for the Studio progress tiles. */
+function poseTileState(status: string, hasImage: boolean) {
+  if (status === "failed") return { label: "Failed", tone: "bg-red-600/90 text-white" };
+  if (status === "processing" || status === "regenerating") return { label: "Generating", tone: "bg-primary/90 text-white" };
+  if (status === "queued") return { label: "Queued", tone: "bg-amber-500/90 text-white" };
+  if (status === "cancelled") return { label: "Cancelled", tone: "bg-navy-soft/80 text-white" };
+  if (hasImage) return { label: "Done", tone: "bg-emerald-600/90 text-white" };
+  return { label: status || "Waiting", tone: "bg-navy-soft/80 text-white" };
 }
 
 function SessionSubmissionRow({ jobId, latest, onRemove }: { jobId: string; latest: boolean; onRemove: () => void }) {
@@ -244,6 +254,19 @@ export function Studio() {
   const updateStylingPlan = useMutation(api.styling.updateSessionPlan);
   const queueSku = useMutation(api.generation.queueSku);
   const cancelJob = useMutation(api.jobs.cancel);
+  const regeneratePose = useMutation(api.generation.regeneratePose);
+  // Per-pose retry and preview on the live progress card.
+  const [retryingPoseId, setRetryingPoseId] = useState<string | null>(null);
+  const [poseRetryError, setPoseRetryError] = useState<{ poseId: string; message: string } | null>(null);
+  const [previewPose, setPreviewPose] = useState<{ url: string; title: string } | null>(null);
+  useEffect(() => {
+    if (!previewPose) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPreviewPose(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [previewPose]);
   const [dnaState, setDnaState] = useState<StudioDnaState | null>(null);
   const lastDnaParamsRef = useRef<{
     skuId: string;
@@ -1341,31 +1364,107 @@ export function Studio() {
 
               {submittedJob.poses?.length > 0 && (
                 <div className="mt-4 grid grid-cols-3 gap-2.5 sm:grid-cols-6">
-                  {submittedJob.poses.map((pose: any) => (
-                    <div
-                      key={pose._id}
-                      className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-outline-variant/40 bg-white shadow-xs"
-                    >
-                      {pose.outputUrl ? (
-                        <img src={pose.outputUrl} alt={pose.title} className="h-full w-full object-cover" />
-                      ) : (
-                        <div className="grid h-full place-items-center bg-surface-container-low">
-                          {pose.status === "processing" ? (
-                            <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                          ) : (
-                            <Images className="h-5 w-5 text-secondary/40" />
-                          )}
-                        </div>
-                      )}
-                      <span className="absolute inset-x-1 bottom-1 truncate rounded-md bg-navy-soft/80 px-1.5 py-0.5 text-center text-[8px] font-bold uppercase tracking-wider text-white backdrop-blur-xs">
-                        {pose.poseNumber}. {pose.status}
-                      </span>
-                    </div>
-                  ))}
+                  {submittedJob.poses.map((pose: any) => {
+                    const hasImage = Boolean(pose.outputUrl);
+                    const state = poseTileState(String(pose.status || ""), hasImage);
+                    const jobIdle = !["queued", "processing", "cancelling"].includes(String(submittedJob.status || ""));
+                    // Retry only what failed, only on a click, and only once the shoot is idle: no extra generation calls.
+                    const canRetry = pose.status === "failed" && jobIdle;
+                    const retryError = poseRetryError && poseRetryError.poseId === pose._id ? poseRetryError.message : "";
+                    return (
+                      <div
+                        key={pose._id}
+                        className={`group relative aspect-[3/4] overflow-hidden rounded-xl border bg-white shadow-xs ${pose.status === "failed" ? "border-red-300" : "border-outline-variant/40"}`}
+                        title={pose.error ? `Pose ${pose.poseNumber}: ${pose.error}` : `Pose ${pose.poseNumber}: ${pose.title}`}
+                      >
+                        {hasImage ? (
+                          <button
+                            type="button"
+                            onClick={() => setPreviewPose({ url: pose.outputUrl, title: `Pose ${pose.poseNumber}. ${pose.title}` })}
+                            className="block h-full w-full cursor-zoom-in"
+                            aria-label={`Preview pose ${pose.poseNumber}, ${pose.title}`}
+                          >
+                            <img src={pose.outputUrl} alt={pose.title} decoding="async" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                            <Maximize2 className="absolute right-1.5 top-1.5 h-3.5 w-3.5 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
+                          </button>
+                        ) : (
+                          <div className="grid h-full place-items-center bg-surface-container-low px-1.5 text-center">
+                            {pose.status === "processing" ? (
+                              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                            ) : pose.status === "queued" ? (
+                              <Clock className="h-5 w-5 text-amber-600" />
+                            ) : pose.status === "failed" ? (
+                              <div className="flex flex-col items-center gap-1.5">
+                                <AlertTriangle className="h-5 w-5 text-red-600" />
+                                {canRetry && (
+                                  <button
+                                    type="button"
+                                    disabled={retryingPoseId !== null}
+                                    onClick={async () => {
+                                      setRetryingPoseId(pose._id);
+                                      setPoseRetryError(null);
+                                      try {
+                                        await regeneratePose({ poseId: pose._id, requestedBy: user._id, poseQa: false, extraInstructions: "" });
+                                      } catch (reason) {
+                                        setPoseRetryError({ poseId: pose._id, message: reason instanceof Error ? reason.message : "Could not retry this pose." });
+                                      } finally {
+                                        setRetryingPoseId(null);
+                                      }
+                                    }}
+                                    className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[9px] font-bold text-red-700 shadow-xs ring-1 ring-red-200 hover:bg-red-50 disabled:opacity-50"
+                                    aria-label={`Retry pose ${pose.poseNumber}`}
+                                  >
+                                    {retryingPoseId === pose._id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCcw className="h-3 w-3" />}
+                                    Retry
+                                  </button>
+                                )}
+                                {retryError && <span className="line-clamp-2 text-[8px] leading-tight text-red-700">{retryError}</span>}
+                              </div>
+                            ) : (
+                              <Images className="h-5 w-5 text-secondary/40" />
+                            )}
+                          </div>
+                        )}
+                        <span className={`pointer-events-none absolute inset-x-1 bottom-1 truncate rounded-md px-1.5 py-0.5 text-center text-[8px] font-bold uppercase tracking-wider backdrop-blur-xs ${state.tone}`}>
+                          {pose.poseNumber}. {state.label}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {previewPose && (
+        <div
+          className="fixed inset-0 z-[90] grid place-items-center bg-navy-soft/85 p-4 backdrop-blur-md"
+          onClick={() => setPreviewPose(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={previewPose.title}
+        >
+          <figure className="relative flex max-h-full flex-col items-center gap-2" onClick={(event) => event.stopPropagation()}>
+            <img src={previewPose.url} alt={previewPose.title} decoding="async" className="max-h-[82vh] max-w-full rounded-xl object-contain shadow-2xl" />
+            <figcaption className="flex items-center gap-3 text-xs font-semibold text-white">
+              {previewPose.title}
+              {submittedJobId && (
+                <Link to={`/history/flow/${submittedJobId}`} className="rounded-lg bg-white/15 px-2.5 py-1 font-bold hover:bg-white/25">
+                  Open in generation flow
+                </Link>
+              )}
+            </figcaption>
+            <button
+              type="button"
+              onClick={() => setPreviewPose(null)}
+              aria-label="Close preview"
+              className="absolute -right-2 -top-2 grid h-8 w-8 place-items-center rounded-full bg-white text-on-surface shadow-lg"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </figure>
         </div>
       )}
 

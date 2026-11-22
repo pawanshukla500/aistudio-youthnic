@@ -5,10 +5,12 @@
  * QA (qa.ts), the Edge worker (index.ts) and the FastAPI LangGraph planner
  * (backend/agents/pose_plan_agents.py, POST /api/v1/plan).
  *
- * Only Pose 4 ("creative") and Pose 6 ("showcase") may adopt the STYLE
- * REFERENCE person's posture or signature style. Frames 1, 2, 3 and 5 stay
- * catalog frames. The reference outfit, face, hair and anything in
- * the hands stay quarantined in every frame.
+ * Only Pose 4 ("creative") adopts the STYLE REFERENCE person's posture or
+ * signature style, whenever the reference shows a person and no product guard
+ * blocks it. Pose 6 ("showcase") is the product-highlight close-up and never
+ * adopts (a plan stored before analysis v38 may still carry a Pose 6 adoption).
+ * Frames 1, 2, 3 and 5 stay catalog frames. The reference outfit, face, hair and
+ * anything in the hands stay quarantined in every frame.
  */
 
 export type JsonRecord = Record<string, unknown>;
@@ -109,11 +111,14 @@ export type PosePlanningContext = {
 };
 
 const MAX_TEXT = 420;
-const TIGHT_SHOWCASE_SHOTS = ["macro_detail", "half_body_detail"];
-const FULL_LENGTH_SHOWCASE_REGIONS = ["bottom_wear", "hem_border", "silhouette", "complete_set"];
-/** A walk, frozen stride or lifted foot in the reference body description (never copied). */
+/** A walk, frozen stride or lifted foot in the reference body description (never copied as written). */
 const FROZEN_STEP =
-  /\bwalk(?:s|ing)?\b|\bmid[- ]?(?:stride|step)\b|\bstrid(?:e|es|ing)\b|\b(?:lifted|raised) (?:foot|feet|heels?)\b|\b(?:foot|feet|heels?) (?:lifted|raised)\b/i;
+  /\bwalk(?:s|ed|ing)?\b|\bstrode\b|\bmid[- ]?(?:stride|step)\b|\bstrid(?:e|es|ing)\b|\b(?:lifted|raised) (?:foot|feet|heels?)\b|\b(?:foot|feet|heels?) (?:lifted|raised)\b/i;
+/** Replaces a walk or lifted foot in an adopted posture; free of the stride words every prompt scrub removes. */
+const GROUNDED_SHIFT =
+  "Ground the reference movement as a natural weight shift: both feet on the floor, one slightly ahead of the other with the weight easing onto it, the body turned the way the reference person moves.";
+const QUARANTINE_SENTENCE =
+  "Copy only the body position and attitude, never the reference clothing, face, hair or anything in the hands (jewellery follows the styling plan). Keep the uploaded garment's front design, print, colours and construction exactly as the product photos show; a folded posture may let the hem rest naturally but never hides the print or changes the garment.";
 
 function text(value: unknown, max = MAX_TEXT): string {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -151,6 +156,11 @@ export function isLowPosture(posture: ReferencePosture): boolean {
   return LOW_POSTURES.includes(posture);
 }
 
+/** The posture an adopted slot renders: a walking reference becomes a grounded standing weight shift. */
+export function slotPosture(posture: ReferencePosture): ReferencePosture {
+  return posture === "walking" ? "standing" : posture;
+}
+
 /** `scrub` removes handheld-prop clauses (profiles.ts sanitizeHeldObjectText). */
 export function normalizeReferencePose(
   rawValue: unknown,
@@ -171,7 +181,7 @@ export function normalizeReferencePose(
     distinctiveness: distinctiveness === "signature" && signatureDescription ? "signature" : "generic",
     signatureDescription: distinctiveness === "signature" ? signatureDescription : "",
     attitude: text(pick(raw, "attitude"), 200),
-    cameraAngle: posture === "none" ? "" : text(pick(raw, "cameraAngle", "camera_angle"), 160),
+    cameraAngle: posture === "none" ? "" : scrub(text(pick(raw, "cameraAngle", "camera_angle"), 160)),
     expression: posture === "none" ? "" : scrub(text(pick(raw, "expression"), 160)),
     gaze: posture === "none" ? "" : scrub(text(pick(raw, "gaze"), 160)),
     hands: posture === "none" ? "" : scrub(text(pick(raw, "hands", "handGesture", "hand_gesture"), 160)),
@@ -216,38 +226,24 @@ export function expressionAttitudeLine(plan: ExpressionPlan): string {
  * Hard guards. Returns "" when the slot may copy the reference posture, or the
  * reason it must stay product-led. The LangGraph planner applies the same
  * guards (backend/agents/pose_plan_agents.py) before its learned scoring.
+ *
+ * Pose 4 adopts whenever the reference shows a person: the analysis's soft
+ * suitability verdict and a generic stance no longer block it (Poses 1-3
+ * already cover the full silhouette and the back), and a walk or lifted foot is
+ * grounded by the directive. Only an explicit sit request and the construction
+ * guards that protect product truth remain. Pose 6 is the product highlight.
  */
 export function referenceAdoptionBlockReason(slot: AdoptableSlot, pose: ReferencePose, ctx: PosePlanningContext): string {
   if (pose.posture === "none") return "The style reference shows no person to match.";
-  if (slot === "creative" && ctx.sitRequested && pose.posture !== "seated") {
+  if (slot === "showcase") return "Pose 6 is the product-highlight close-up, so it never copies the reference posture.";
+  if (ctx.sitRequested && pose.posture !== "seated") {
     return "Your notes ask Pose 4 to sit, so it follows that request instead of the reference posture.";
   }
-  if (pose.posture === "standing" && pose.distinctiveness === "generic") {
-    return "The reference stance is a generic standing pose; the product-led pose fits better.";
-  }
-  if (pose.suitableForProduct === "no") {
-    return `Analysis judged the reference posture unsuitable for this product${pose.suitabilityReason ? `: ${pose.suitabilityReason}` : "."}`;
-  }
-  if (pose.posture === "walking" || FROZEN_STEP.test(`${pose.description} ${pose.signatureDescription}`)) {
-    return "A walking stride or lifted foot would freeze mid-step; catalog frames keep both feet planted.";
-  }
-  // The analysis prompt adopts only on an explicit "yes"; a missing or malformed verdict stays product-led.
-  if (pose.suitableForProduct !== "yes") return "Analysis did not confirm that the reference posture suits this product.";
-  const low = isLowPosture(pose.posture);
-  if (low && ctx.bottomCutClass === "farshi") {
+  if (isLowPosture(pose.posture) && ctx.bottomCutClass === "farshi") {
     return "Farshi two-leg volume and the 4-inch upper-hem taper need a standing frame.";
   }
   if (pose.posture === "reclining" && ctx.poseFamily.startsWith("saree")) {
     return "A reclining pose breaks the saree pleats and pallu fall.";
-  }
-  if (slot === "showcase") {
-    if (TIGHT_SHOWCASE_SHOTS.includes(String(ctx.showcaseShotType || ""))) {
-      return "The showcase is a tight detail crop, so a body posture would not read.";
-    }
-    if (low && ctx.showcaseShotType === "movement_feature") return "A movement showcase cannot use a folded posture.";
-    if (low && FULL_LENGTH_SHOWCASE_REGIONS.includes(String(ctx.showcaseFeatureRegion || ""))) {
-      return `The showcase hero (${String(ctx.showcaseFeatureRegion).replace(/_/g, " ")}) needs a full-length standing view.`;
-    }
   }
   return "";
 }
@@ -256,28 +252,38 @@ export function referenceAdoptionBlockReason(slot: AdoptableSlot, pose: Referenc
 export const MAX_REFERENCE_DIRECTIVE = 900;
 
 export function referenceSlotDirective(slot: AdoptableSlot, pose: ReferencePose): string {
-  const signature = pose.distinctiveness === "signature" ? pose.signatureDescription : "";
-  const compose = (description: string, signatureText: string) => {
+  // A walk or lifted foot is never copied as written: that text is dropped and the slot grounds it.
+  const walking = pose.posture === "walking";
+  const description = walking || FROZEN_STEP.test(pose.description) ? "" : pose.description;
+  const rawSignature = pose.distinctiveness === "signature" ? pose.signatureDescription : "";
+  const signature = walking || FROZEN_STEP.test(rawSignature) ? "" : rawSignature;
+  const grounded = walking || description !== pose.description || signature !== rawSignature;
+  const camera = slot === "creative" ? pose.cameraAngle ?? "" : "";
+  const compose = (descriptionText: string, signatureText: string) => {
     const parts = [
-      `Match the STYLE REFERENCE person's ${pose.posture} posture: ${description || pose.posture}.`,
+      walking
+        ? "Match the STYLE REFERENCE person's direction of movement in a grounded standing pose."
+        : `Match the STYLE REFERENCE person's ${pose.posture} posture: ${descriptionText || pose.posture}.`,
     ];
+    if (grounded) parts.push(GROUNDED_SHIFT);
     if (pose.seatOrSupport) parts.push(`Rest on the ${pose.seatOrSupport}, which must already belong to the locked set.`);
-    if (pose.distinctiveness === "signature") parts.push(`Reproduce the signature pose: ${signatureText}.`);
+    if (signature) parts.push(`Reproduce the signature pose: ${signatureText}.`);
+    if (camera) parts.push(`Camera and framing as the STYLE REFERENCE is shot: ${camera}.`);
     if (slot === "showcase") {
       parts.push("Use a complementary variation of that posture with a different camera angle and framing from Pose 4, framed for the showcase hero feature.");
     }
-    parts.push("Copy only the body position and attitude, never the reference clothing, face, hair or anything in the hands (jewellery follows the styling plan). Keep the uploaded garment's front design, hem and construction readable.");
+    parts.push(QUARANTINE_SENTENCE);
     return parts.join(" ");
   };
-  const directive = compose(pose.description, signature);
+  const directive = compose(description, signature);
   if (directive.length <= MAX_REFERENCE_DIRECTIVE) return directive;
   // Same budget as bounded_reference_directive (backend/agents/pose_plan_agents.py): the
-  // free-text description and signature share what is left, so the fixed seat, showcase
-  // and quarantine sentences survive and a re-normalized directive is unchanged.
-  const budget = Math.max(0, MAX_REFERENCE_DIRECTIVE - (directive.length - pose.description.length - signature.length));
-  const signatureLength = Math.min(signature.length, Math.max(Math.floor(budget / 2), budget - pose.description.length));
+  // free-text description and signature share what is left, so the fixed seat, camera,
+  // showcase and quarantine sentences survive and a re-normalized directive is unchanged.
+  const budget = Math.max(0, MAX_REFERENCE_DIRECTIVE - (directive.length - description.length - signature.length));
+  const signatureLength = Math.min(signature.length, Math.max(Math.floor(budget / 2), budget - description.length));
   return compose(
-    pose.description.slice(0, budget - signatureLength).trimEnd(),
+    description.slice(0, budget - signatureLength).trimEnd(),
     signature.slice(0, signatureLength).trimEnd(),
   ).slice(0, MAX_REFERENCE_DIRECTIVE);
 }
@@ -287,11 +293,14 @@ function productSlotPlan(reason: string): SlotPlan {
 }
 
 function referenceSlotPlan(slot: AdoptableSlot, pose: ReferencePose, rationale = ""): SlotPlan {
+  const matched = pose.distinctiveness === "signature"
+    ? "signature style"
+    : pose.posture === "walking" ? "movement as a grounded weight shift" : `${pose.posture} posture`;
   return {
     source: "reference",
-    posture: pose.posture,
+    posture: slotPosture(pose.posture),
     directive: referenceSlotDirective(slot, pose),
-    rationale: rationale || `Matches the style reference ${pose.distinctiveness === "signature" ? "signature style" : `${pose.posture} posture`}.`,
+    rationale: rationale || `Matches the style reference ${matched}.`,
   };
 }
 
@@ -342,7 +351,7 @@ function normalizeSlotPlan(value: unknown, slot: AdoptableSlot, pose: ReferenceP
   if (blocked) return productSlotPlan(blocked);
   return {
     source: "reference",
-    posture: pose.posture,
+    posture: slotPosture(pose.posture),
     directive: text(raw.directive, MAX_REFERENCE_DIRECTIVE) || referenceSlotDirective(slot, pose),
     rationale: text(raw.rationale, 300) || referenceSlotPlan(slot, pose).rationale,
   };
@@ -455,7 +464,7 @@ export function storedPosePlanning(session: unknown): PosePlanning | null {
     return entry.source === "reference" && referencePose.posture !== "none"
       ? {
         source: "reference",
-        posture: referencePose.posture,
+        posture: slotPosture(referencePose.posture),
         directive: text(entry.directive, MAX_REFERENCE_DIRECTIVE) || referenceSlotDirective(id, referencePose),
         rationale: text(entry.rationale, 300),
       }

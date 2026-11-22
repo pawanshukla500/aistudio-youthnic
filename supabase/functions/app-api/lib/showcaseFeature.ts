@@ -30,6 +30,8 @@ export const SHOWCASE_FEATURE_REGIONS = [
   "blouse",
   "silhouette",
   "complete_set",
+  /** Back closures, ties, lace-ups, back neck or back yoke (analysis v38+). */
+  "back_detail",
   "other",
 ] as const;
 export type ShowcaseFeatureRegion = typeof SHOWCASE_FEATURE_REGIONS[number];
@@ -60,6 +62,8 @@ export type ShowcasePlan = {
   expression: string;
   distinctFrom: string;
   visibilityRules: string[];
+  /** Analysis v38+: Pose 6 is a tight detail close-up of this feature (productHighlightPlan), never widened. */
+  productHighlight?: true;
 };
 
 export const MAX_SHOWCASE_FEEDBACK_ROWS = 3;
@@ -175,6 +179,17 @@ const SHOWCASE_REGION_SYNONYMS: Record<string, ShowcaseFeatureRegion> = {
   full_set: "complete_set",
   coord_set: "complete_set",
   two_piece_set: "complete_set",
+  back: "back_detail",
+  back_closure: "back_detail",
+  back_neck: "back_detail",
+  back_neckline: "back_detail",
+  back_tie: "back_detail",
+  tie_back: "back_detail",
+  lace_up: "back_detail",
+  closure: "back_detail",
+  fabric: "print",
+  texture: "print",
+  weave: "print",
 };
 
 export function normalizeShowcaseFeatureRegion(value: unknown): ShowcaseFeatureRegion | "" {
@@ -228,6 +243,7 @@ export function normalizeShowcasePlan(value: unknown): ShowcasePlan | null {
       .map((entry) => bounded(entry, 200))
       .filter(Boolean)
       .slice(0, 8),
+    ...(raw.productHighlight === true ? { productHighlight: true as const } : {}),
   };
 }
 
@@ -282,9 +298,243 @@ export function effectiveShowcaseShot(
   ) {
     return null;
   }
+  // A product highlight was resolved against Pose 5 when it was planned: it stays the close-up.
+  if (plan.productHighlight) return { plan, shotType: plan.shotType, widenedFromCloseup: false };
   const heroDetail = text(creative.closeupHeroDetail ?? creative.closeup_hero_detail);
   const resolved = resolveShowcaseShotType(plan, { heroDetail });
   return { plan, shotType: resolved.shotType, widenedFromCloseup: resolved.widenedFromCloseup };
+}
+
+/** Where on the body each product-highlight region is cropped (analysis v38+). */
+const HIGHLIGHT_FRAMES: Record<ShowcaseFeatureRegion, { shotType: ShowcaseShotType; crop: string; body: string; camera: string }> = (() => {
+  const torso = {
+    shotType: "half_body_detail" as const,
+    crop: "Torso crop from just below the chin to the hip, so the feature fills most of the frame at its true scale and placement.",
+    body: "Torso turned a few degrees off camera with relaxed shoulders, so the feature lies flat and open to the lens",
+    camera: "Eye-level, close detail distance centred on the feature",
+  };
+  const drape = {
+    shotType: "half_body_detail" as const,
+    crop: "Drape-detail crop of the shoulder-to-hip section where the panel falls, so its border, print and edge finish read large, flat and uncreased.",
+    body: "Shoulder turned toward the camera so the draped panel falls open and flat across the frame",
+    camera: "Eye-level, close detail distance centred on the drape",
+  };
+  return {
+    neckline: { ...torso, crop: "Chest crop from the chin to the bust line, so the neckline construction fills most of the frame." },
+    embroidery: torso,
+    print: torso,
+    upper_garment: torso,
+    blouse: torso,
+    other: torso,
+    silhouette: torso,
+    complete_set: torso,
+    sleeve: {
+      shotType: "macro_detail",
+      crop: "Forearm and cuff crop from the elbow to the fingertips, so the sleeve shape, flare and cuff trim fill most of the frame.",
+      body: "One arm relaxed slightly away from the body with the forearm turned so the sleeve and cuff face the lens",
+      camera: "Eye-level, close detail distance centred on the sleeve and cuff",
+    },
+    dupatta: drape,
+    pallu: drape,
+    drape,
+    hem_border: {
+      shotType: "half_body_detail",
+      crop: "Hem-detail crop from the hip to just below the hem, so the hem finish, border, trim or tassels fill most of the frame.",
+      body: "Standing with a soft weight shift, feet close, so the hem hangs straight and its finish faces the lens",
+      camera: "Slightly low, close detail distance centred on the hem",
+    },
+    bottom_wear: {
+      shotType: "half_body_detail",
+      crop: "Bottom-wear detail crop from the waist to the feet, so the bottom-wear cut, print and hem construction fill most of the frame.",
+      body: "Standing with a soft weight shift, feet close, so the bottom-wear cut, print and hem face the lens",
+      camera: "Slightly low, close detail distance centred on the bottom wear",
+    },
+    back_detail: {
+      shotType: "half_body_detail",
+      crop: "Back-detail crop: the model faces fully away and the frame runs from the shoulder line to just past where the back detail ends (shoulder blades to waist for a back closure), so every closure, tie, lace crossing, bow and hanging end reads large and sharp.",
+      body: "Model turned fully away from the camera, shoulders square, hair swept forward off the back, arms eased slightly away from the sides so the whole back detail is clear",
+      camera: "Eye-level from directly behind, close detail distance centred on the back detail",
+    },
+  };
+})();
+
+export function productHighlightFrame(region: ShowcaseFeatureRegion) {
+  return HIGHLIGHT_FRAMES[region];
+}
+
+/** The product photo that best shows each region; the analysis's own pick is kept when it is one of these. */
+function highlightEvidence(region: ShowcaseFeatureRegion, isSaree: boolean, picked: string): string {
+  const allowed: string[] = isSaree
+    ? ({
+      back_detail: ["saree_back_drape", "saree_blouse_back_piece", "back"],
+      pallu: ["saree_pallu_spread"],
+      dupatta: ["saree_pallu_spread"],
+      drape: ["saree_front_drape", "saree_pallu_spread"],
+      hem_border: ["saree_border_tassels"],
+      blouse: ["saree_blouse_front", "saree_blouse_back_piece"],
+    } as Partial<Record<ShowcaseFeatureRegion, string[]>>)[region] ?? ["saree_body_detail", "fabric_pattern"]
+    : ({
+      back_detail: ["back"],
+      sleeve: ["mannequin", "additional_product"],
+      dupatta: ["additional_product", "mannequin"],
+      hem_border: ["front", "mannequin"],
+      bottom_wear: ["bottom", "front"],
+    } as Partial<Record<ShowcaseFeatureRegion, string[]>>)[region] ?? ["fabric_pattern"];
+  return allowed.includes(picked) ? picked : allowed[0];
+}
+
+const BACK_LOCATION = /\b(?:back|rear|backless)\b|\btie[- ]?back\b/i;
+/** Not a detail a close-up can sell on its own; Pose 6 then takes the next distinctive feature. */
+const VAGUE_REGIONS: readonly ShowcaseFeatureRegion[] = ["upper_garment", "other", "silhouette", "complete_set"];
+/** Torso regions a "back ..." feature moves to the back-detail crop (a sleeve or hem keeps its own crop). */
+const BACK_CAPABLE_REGIONS: readonly ShowcaseFeatureRegion[] = [...VAGUE_REGIONS, "neckline", "embroidery", "print", "blouse", "back_detail"];
+/** Regions a text names, most specific first. */
+const REGION_WORDS: Array<[ShowcaseFeatureRegion, RegExp]> = [
+  ["back_detail", BACK_LOCATION],
+  ["sleeve", /\bsleeves?\b|\bcuffs?\b/i],
+  ["pallu", /\bpallu\b|\baanchal\b/i],
+  ["dupatta", /\bdupatta\b|\bstole\b|\bchunni\b|\bodhani\b/i],
+  ["hem_border", /\bhem(?:line)?s?\b|\bborders?\b|\btassels?\b/i],
+  ["blouse", /\bblouse\b/i],
+  ["neckline", /\bneck(?:line)?\b|\byoke\b|\bcollar\b|\bplacket\b/i],
+  ["embroidery", /embroider|\bbutti\b|\bzari\b|mirror[- ]?work|\bgota\b|\bsequin|zardozi|\bchikan|handwork/i],
+  ["print", /\bprint(?:ed)?\b|\bmotifs?\b|\bpattern\b/i],
+];
+
+function regionsIn(value: string): ShowcaseFeatureRegion[] {
+  return REGION_WORDS.filter(([, pattern]) => pattern.test(value)).map(([region]) => region);
+}
+
+/** A recorded field that names real construction: never "none" or a negation, and never "plain" unless `detail` matches. */
+function distinctive(value: unknown, detail?: RegExp): string {
+  const cleaned = bounded(value, 240);
+  if (!cleaned || cleaned === "-" || /^(?:not visible|unknown|n\/a|none|no|without)\b/i.test(cleaned)) return "";
+  // "plain back panel with no ties or closure": only an affirmed detail counts, never a negated one.
+  if (detail) return detail.test(cleaned.replace(/\b(?:no|without|not|never|lacks?|free of)\b[^,.;]*/gi, " ")) ? cleaned : "";
+  return /^(?:plain|simple|solid)\b/i.test(cleaned) ? "" : cleaned;
+}
+
+const BACK_DETAIL_WORDS = /lace|\bties?\b|\bbow\b|dori|tassel|latkan|button|hook|\bzip|keyhole|cut[- ]?out|closure|knot|embroider|yoke|smock|drawstring|criss[- ]?cross/i;
+const SLEEVE_DETAIL_WORDS = /lace|trim|cuff|\bbell\b|flare|puff|ruffle|frill|embroider|tassel|scallop|balloon|bishop|button|pleat|gather|\bbow\b|\btie\b/i;
+const HEM_DETAIL_WORDS = /lace|trim|border|tassel|scallop|embroider|piping|fringe|latkan/i;
+
+/** Distinctive features recorded in productIdentity, in the order Pose 6 falls back to them. */
+function highlightCandidates(productIdentity: unknown, includesBottomWear: boolean, isSaree: boolean): Array<[ShowcaseFeatureRegion, string]> {
+  const product = objectValue(productIdentity);
+  const mainColor = bounded(product.mainColor ?? product.main_color, 60);
+  const fabric = distinctive(product.fabric);
+  const texture: [ShowcaseFeatureRegion, string] = ["print", fabric ? `${mainColor ? `${mainColor} ` : ""}${fabric} fabric texture and weave` : ""];
+  if (isSaree) {
+    const saree = objectValue(product.sareeTruth);
+    return [
+      ["pallu", distinctive(objectValue(saree.pallu).artwork)],
+      ["hem_border", distinctive(objectValue(saree.borders).lowerBorder)],
+      ["back_detail", distinctive(objectValue(saree.blouse).backConstruction, BACK_DETAIL_WORDS)],
+      ["print", distinctive(objectValue(saree.body).pattern)],
+      texture,
+    ];
+  }
+  const placement = (Array.isArray(product.detailPlacementMap) ? product.detailPlacementMap : []).map((entry) => String(entry ?? ""));
+  const hem = placement.find((entry) => /\bhem|\bborder/i.test(entry) && HEM_DETAIL_WORDS.test(entry) && !/\b(?:no|without|none)\b/i.test(entry));
+  const dupatta = distinctive(product.accessoriesIncluded ?? product.accessories_included);
+  return [
+    ["back_detail", distinctive(product.backConstruction ?? product.back_construction, BACK_DETAIL_WORDS)],
+    ["sleeve", distinctive(product.sleeveType ?? product.sleeve_type, SLEEVE_DETAIL_WORDS)],
+    ["dupatta", /\b(?:dupatta|stole|chunni|odhani)\b/i.test(dupatta) && !/\b(?:no|without)\b/i.test(dupatta) ? dupatta : ""],
+    ["hem_border", distinctive(hem)],
+    ["bottom_wear", includesBottomWear ? distinctive(product.bottomWearDetails ?? product.bottom_wear_details) : ""],
+    ["embroidery", distinctive(product.embroidery)],
+    ["print", distinctive(product.pattern ?? product.print)],
+    texture,
+    ["neckline", distinctive(product.neckline)],
+  ];
+}
+
+/**
+ * Analysis v38+: Pose 6 is the PRODUCT HIGHLIGHT - a tight, accurate detail close-up of the
+ * product's most distinctive feature on the worn garment, never a full-body frame and never
+ * Pose 5's subject. It starts from the feature the analysis chose (showcasePlan); a feature on
+ * the back is cropped from behind. When that choice is not a detail (silhouette, complete set),
+ * is missing, or is what Pose 5 already shows, the next distinctive feature recorded in
+ * productIdentity takes its place. Idempotent: a resolved plan is returned unchanged.
+ */
+export function productHighlightPlan(args: {
+  plan: ShowcasePlan | null;
+  closeupHeroDetail: string;
+  productIdentity: unknown;
+  includesBottomWear: boolean;
+  isSaree: boolean;
+}): ShowcasePlan | null {
+  if (args.plan?.productHighlight) return args.plan;
+  // Pose 5 frames the chest by default, so an unrecorded Pose 5 subject counts as the neckline.
+  const closeupRegions = regionsIn(args.closeupHeroDetail);
+  const taken = new Set<ShowcaseFeatureRegion>(closeupRegions.length ? closeupRegions : ["neckline"]);
+  const usable = (region: ShowcaseFeatureRegion) =>
+    !VAGUE_REGIONS.includes(region) && !taken.has(region) && (args.includesBottomWear || region !== "bottom_wear");
+  const distinctFrom = (feature: string) =>
+    `A tight detail close-up of ${feature}${args.closeupHeroDetail ? `, not Pose 5's ${args.closeupHeroDetail}` : ""}, and never a full-body frame like Poses 1-3.`;
+  const build = (base: ShowcasePlan, region: ShowcaseFeatureRegion): ShowcasePlan => ({
+    ...base,
+    featureRegion: region,
+    shotType: HIGHLIGHT_FRAMES[region].shotType,
+    evidenceReference: highlightEvidence(region, args.isSaree, base.evidenceReference),
+    // The analysis wrote these for its own distance; the close-up framing comes from the region.
+    framing: "",
+    cameraAngle: "",
+    bodyPosition: "",
+    distinctFrom: distinctFrom(base.heroFeature),
+    productHighlight: true,
+  });
+  if (args.plan) {
+    const named = regionsIn(args.plan.heroFeature);
+    // A torso feature on the back is shot from behind; a vague region takes the one its feature names.
+    const region = named[0] === "back_detail" && BACK_CAPABLE_REGIONS.includes(args.plan.featureRegion)
+      ? "back_detail"
+      : VAGUE_REGIONS.includes(args.plan.featureRegion) && named.length
+      ? named[0]
+      : args.plan.featureRegion;
+    if (usable(region)) return build(args.plan, region);
+  }
+  for (const [region, feature] of highlightCandidates(args.productIdentity, args.includesBottomWear, args.isSaree)) {
+    if (!feature || !usable(region)) continue;
+    return build({
+      heroFeature: feature,
+      featureRegion: region,
+      shotType: HIGHLIGHT_FRAMES[region].shotType,
+      whyItSells: "",
+      evidenceReference: "",
+      framing: "",
+      cameraAngle: "",
+      bodyPosition: "",
+      handPlacement: "",
+      expression: "",
+      distinctFrom: "",
+      visibilityRules: [],
+    }, region);
+  }
+  // Nothing recorded is distinct from Pose 5: still a marked close-up (never widened to a full-body
+  // frame), on the region that overlaps Pose 5 least.
+  const fallback = (["print", "hem_border", "sleeve", "embroidery"] as ShowcaseFeatureRegion[]).find(usable) ?? "print";
+  const fallbackFeature: Partial<Record<ShowcaseFeatureRegion, string>> = {
+    print: "the allover print and fabric finish",
+    hem_border: "the hem finish",
+    sleeve: "the sleeve and cuff finish",
+    embroidery: "the embroidery detail",
+  };
+  return build({
+    heroFeature: fallbackFeature[fallback] || "the fabric and finishing",
+    featureRegion: fallback,
+    shotType: HIGHLIGHT_FRAMES[fallback].shotType,
+    whyItSells: args.plan?.whyItSells || "",
+    evidenceReference: "",
+    framing: "",
+    cameraAngle: "",
+    bodyPosition: "",
+    handPlacement: "",
+    expression: "",
+    distinctFrom: "",
+    visibilityRules: args.plan?.visibilityRules || [],
+  }, fallback);
 }
 
 export function showcaseShotDirection(shotType: ShowcaseShotType) {

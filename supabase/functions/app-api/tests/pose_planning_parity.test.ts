@@ -49,16 +49,21 @@ Deno.test("parity fixture: referenceAdoptionBlockReason reproduces every slot x 
       );
     }
   }
-  // Coverage stays meaningful after a regeneration: both slots see adoptions and blocks.
-  for (const slot of ADOPTABLE_SLOTS) {
-    const outputs = blockRows.filter((row) => row.slot === slot).flatMap((row) => Object.values(row.outputs));
-    assertEquals(outputs.length, Object.keys(poses).length * Object.keys(contexts).length);
-    assert(outputs.includes("") && outputs.some(Boolean), `${slot} needs both adoptable and blocked cases`);
+  // Coverage stays meaningful after a regeneration: Pose 4 sees adoptions and blocks; Pose 6 never adopts.
+  const slotOutputs = (slot: string) => blockRows.filter((row) => row.slot === slot).flatMap((row) => Object.values(row.outputs));
+  for (const slot of ADOPTABLE_SLOTS) assertEquals(slotOutputs(slot).length, Object.keys(poses).length * Object.keys(contexts).length);
+  assert(slotOutputs("creative").includes("") && slotOutputs("creative").some(Boolean), "creative needs both adoptable and blocked cases");
+  assert(slotOutputs("showcase").every(Boolean), "showcase is the product-highlight close-up and never adopts");
+  // A sit request blocks a non-seated Pose 4 only; a seated Pose 4 still adopts.
+  const outputs = (slot: string, pose: string) => blockRows.find((row) => row.slot === slot && row.pose === pose)!.outputs;
+  assert(outputs("creative", "leaning_yes").sit_requested.startsWith("Your notes ask Pose 4 to sit"));
+  assertEquals(outputs("creative", "seated_yes").sit_requested, "");
+  // The analysis's suitability verdict, a generic stance and a walk no longer block Pose 4; Farshi folds still do.
+  for (const pose of ["t94_seated_unsuitable", "seated_no_reason", "seated_unknown", "generic_standing", "walking_yes"]) {
+    assertEquals(outputs("creative", pose).kurti_plain, "", pose);
   }
-  // A sit request blocks a non-seated Pose 4 only: a seated Pose 4 and a leaning Pose 6 still adopt.
-  const sit = (slot: string, pose: string) => blockRows.find((row) => row.slot === slot && row.pose === pose)!.outputs.sit_requested;
-  assert(sit("creative", "leaning_yes").startsWith("Your notes ask Pose 4 to sit"));
-  assertEquals([sit("creative", "seated_yes"), sit("showcase", "leaning_yes")], ["", ""]);
+  assert(outputs("creative", "t94_seated_unsuitable").farshi_bottom.startsWith("Farshi"));
+  assert(outputs("creative", "reclining_yes").saree_ethnic_drape.includes("saree"));
 });
 
 Deno.test("parity fixture: referenceSlotDirective reproduces every directive, including overflow", () => {

@@ -314,7 +314,11 @@ Deno.test("the rear checklist keeps high-low hems uneven and takes only real sid
   assertStringIncludes(checklist, "back hem longer at the knee.");
   assert(!checklist.includes("same height as the front hem"));
   assert(!checklist.includes("Side slits"));
-  assertEquals(rearViewChecklist({}, false), "");
+  // With nothing recorded, the back still names what must match the BACK PRODUCT image and forbids inventing it.
+  assertEquals(
+    rearViewChecklist({}, false),
+    "REAR VIEW CHECKLIST (RECORDED PRODUCT FACTS - CHECK EACH AGAINST THE BACK PRODUCT IMAGE):\n- Match from the BACK PRODUCT image, the only authority for the back: the back neck shape and depth; every closure (lace-up crossings, ties, the bow and its hanging ends, buttons, hooks, zip) at its exact position; seams and stitching lines; print or motif placement; and the length. Never invent, mirror from the front, or simplify a back detail that image does not show.",
+  );
 });
 
 Deno.test("requested props never push the prompt into the emergency cut that drops ALLOWED DELTA", () => {

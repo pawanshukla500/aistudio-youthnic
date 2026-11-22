@@ -9,6 +9,8 @@ import {
   normalizeExpressionPlan,
   normalizeReferencePose,
   type PosePlanning,
+  referenceSlotDirective,
+  type SlotPlan,
 } from "../lib/posePlanning.ts";
 
 const POSE_IDS = ["full_front", "angled", "back", "creative", "closeup", "showcase"];
@@ -61,6 +63,26 @@ function plan(referencePose: Record<string, unknown>, ctx: Record<string, string
   };
 }
 
+/** A plan as analysis v36/v37 stored it, with Pose 6 adopted beside Pose 4. Generation still honours it. */
+function legacyPlan(referencePose: Record<string, unknown>, ctx: Record<string, string> = {}, extra: Partial<PosePlanning> = {}): PosePlanning {
+  const stored = plan(referencePose, ctx, extra);
+  if (stored.slots.creative.source !== "reference") return stored;
+  const showcase: SlotPlan = {
+    source: "reference",
+    posture: stored.slots.creative.posture,
+    directive: referenceSlotDirective("showcase", stored.referencePose),
+    rationale: "",
+  };
+  return { ...stored, slots: { ...stored.slots, showcase } };
+}
+
+/** A stored plan whose Pose 4 and Pose 6 stayed product-led (a learned penalty, or a v37 guard). */
+function productLedPlan(referencePose: Record<string, unknown>, extra: Partial<PosePlanning> = {}): PosePlanning {
+  const stored = plan(referencePose, {}, extra);
+  const product: SlotPlan = { source: "product", posture: "standing", directive: "", rationale: "learned penalty" };
+  return { ...stored, slots: { creative: product, showcase: product } };
+}
+
 const SEATED = { posture: "seated", description: "seated upright on a low stool, knees together, hands resting on the knees", seatOrSupport: "low wooden stool" };
 const LEANING = {
   posture: "leaning",
@@ -97,10 +119,16 @@ Deno.test("adopted seated creative frame sits, leads with REFERENCE POSE MATCH a
   });
   assertStringIncludes(prompt, "POSE REQUIREMENT:\nREFERENCE POSE MATCH (POSE 4):\n- Match the STYLE REFERENCE person's seated posture");
   assertStringIncludes(prompt, "Rest on the low wooden stool, which must already belong to the locked set.");
-  assertStringIncludes(prompt, "POSE CATEGORY RULES (SITTING):");
+  // A seat copied from the reference keeps its framing; only a seat the notes ask for gets the full-garment sitting rules.
+  assertStringIncludes(prompt, "POSE CATEGORY RULES (REFERENCE):");
+  assertStringIncludes(prompt, "a seated or folded posture may let the hem and bottom wear rest naturally, never bunched over the print.");
+  assertEquals(prompt.includes("POSE CATEGORY RULES (SITTING):"), false);
+  assertStringIncludes(composeGenerationPrompt({
+    skuName: "TEAL-KURTI", productDetails: "Teal kurti with palazzo, seated pose on the bench", pose: pose("creative"), session, references: REFERENCES,
+  }), "POSE CATEGORY RULES (SITTING):");
   assertStringIncludes(prompt, "- Pose 4 (creative): Matches the STYLE REFERENCE person's seated posture");
   assertStringIncludes(prompt, "EDIT GOAL:\nPlace the exact uploaded product on one consistent professional adult fashion model and create Pose 4: Seated on the stool.");
-  assertStringIncludes(prompt, "copy the person's posture only in Pose 4 and Pose 6, which the pose plan matched to this reference.");
+  assertStringIncludes(prompt, "copy the person's posture only in Pose 4, which the pose plan matched to this reference.");
   assertEquals(prompt.includes("DO NOT COPY THE STYLE POSE"), false);
   assertEquals(prompt.includes("SEATED EDITORIAL POSE REQUIREMENT (POSE 4)"), false);
   assertEquals(prompt.includes("CURRENT FRAME (POSE 4"), false);
@@ -145,11 +173,14 @@ Deno.test("an adopted frame never carries a frozen stride from the planned expre
   assertStringIncludes(prompt, `\n- expression: ${FRAME_POINTER}\n`);
   assertStringIncludes(frameBlock(prompt), "THIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: gaze drifts away from the camera into the set");
 
-  // A stored walking adoption (never written by the planner) is ignored like a missing one.
-  const walking = plan(SEATED);
-  walking.referencePose = { ...walking.referencePose, posture: "walking" };
-  const legacy = compose("creative", baseSession());
-  assertEquals(withLegacyMood(compose("creative", baseSession({ posePlanning: walking }))), legacy);
+  // A walking reference is adopted as a grounded standing weight shift, never a frozen stride.
+  const walking = plan({ posture: "walking", description: "walking toward the camera mid-stride" });
+  assertEquals([walking.slots.creative.source, walking.slots.creative.posture], ["reference", "standing"]);
+  const walkingPrompt = compose("creative", baseSession({ posePlanning: walking }));
+  const matchBlock = walkingPrompt.split("REFERENCE POSE MATCH (POSE 4):\n")[1].split("\nPOSE CATEGORY RULES")[0];
+  assertStringIncludes(matchBlock, "Match the STYLE REFERENCE person's direction of movement in a grounded standing pose.");
+  assertStringIncludes(matchBlock, "both feet on the floor, one slightly ahead of the other");
+  assertEquals(/walk|stride|mid-step/i.test(matchBlock), false);
 
   // The planned mood ("Playful half-smile, mid-stride") reaches the frame direction block, so it is checked last.
   assertEquals(/mid-stride|walking past/i.test(prompt), false);
@@ -170,7 +201,7 @@ Deno.test("Farshi reference frame keeps planted-stance scrubbing and adds the jo
 Deno.test("a stale stored plan never seats a Farshi frame, in the prompt or in QA", () => {
   const farshiProduct = { garmentFamily: "kurta_or_kurti_set", mainColor: "teal", bottomWearDetails: "farshi pajama" };
   // Planned before the Farshi guard applied (palazzo context), then replayed on a Farshi shoot.
-  const stalePlan = plan(SEATED);
+  const stalePlan = legacyPlan(SEATED);
   assertEquals([stalePlan.slots.creative.source, stalePlan.slots.showcase.source], ["reference", "reference"]);
   const stale = baseSession({ productIdentity: farshiProduct, posePlanning: stalePlan });
   const legacy = baseSession({ productIdentity: farshiProduct });
@@ -250,7 +281,7 @@ Deno.test("adopted showcase frame matches the reference posture and keeps its sh
       backgroundStyle: "Lime-washed courtyard",
       showcasePlan: { heroFeature: "mirror-work yoke", featureRegion: "embroidery", shotType: "full_body_feature" },
     },
-    posePlanning: plan(LEANING, { showcaseFeatureRegion: "embroidery", showcaseShotType: "full_body_feature" }),
+    posePlanning: legacyPlan(LEANING, { showcaseFeatureRegion: "embroidery", showcaseShotType: "full_body_feature" }),
   });
   const prompt = compose("showcase", session);
   assertStringIncludes(prompt, "REFERENCE POSE MATCH (POSE 6):");
@@ -274,7 +305,7 @@ Deno.test("an adopted showcase posture replaces only the showcase stance clauses
   assertStringIncludes(compose("showcase", saree), legacyPleats);
   const seatedSaree = compose("showcase", {
     ...saree,
-    posePlanning: plan(SEATED, { poseFamily: "saree_ethnic", bottomCutClass: "none", showcaseFeatureRegion: "pallu", showcaseShotType: "drape_feature" }),
+    posePlanning: legacyPlan(SEATED, { poseFamily: "saree_ethnic", bottomCutClass: "none", showcaseFeatureRegion: "pallu", showcaseShotType: "drape_feature" }),
   });
   assertStringIncludes(seatedSaree, "REFERENCE POSE MATCH (POSE 6):");
   assertStringIncludes(seatedSaree, "SHOWCASE FRAME HARD RULE (DRAPE-LED)");
@@ -289,7 +320,7 @@ Deno.test("an adopted showcase posture replaces only the showcase stance clauses
     session: {
       ...baseSession({ productIdentity: { garmentFamily: "western_or_casual", category: "western top", mainColor: "white" } }),
       bottomWearMode: "top_only",
-      posePlanning: plan(LEANING, { poseFamily: "short_kurti_top", bottomCutClass: "none", showcaseFeatureRegion: "upper_garment", showcaseShotType: "movement_feature" }),
+      posePlanning: legacyPlan(LEANING, { poseFamily: "short_kurti_top", bottomCutClass: "none", showcaseFeatureRegion: "upper_garment", showcaseShotType: "movement_feature" }),
     },
     references: REFERENCES,
   });
@@ -302,7 +333,7 @@ Deno.test("an adopted showcase posture replaces only the showcase stance clauses
       backgroundStyle: "Lime-washed courtyard",
       showcasePlan: { heroFeature: "mirror-work yoke", featureRegion: "embroidery", shotType: "full_body_feature" },
     },
-    posePlanning: plan(SEATED, { showcaseFeatureRegion: "embroidery", showcaseShotType: "full_body_feature" }),
+    posePlanning: legacyPlan(SEATED, { showcaseFeatureRegion: "embroidery", showcaseShotType: "full_body_feature" }),
   }));
   assertStringIncludes(seatedFeature, "SHOWCASE FRAME DISTANCE: Frame around the REFERENCE POSE MATCH posture");
   assertStringIncludes(seatedFeature, "the REFERENCE POSE MATCH posture at a soft camera angle so the embroidery reads clearly");
@@ -311,7 +342,7 @@ Deno.test("an adopted showcase posture replaces only the showcase stance clauses
 });
 
 Deno.test("frames 1, 2, 3 and 5 of an adopted shoot keep the no-pose-copy wording", () => {
-  const session = baseSession({ posePlanning: plan(SEATED) });
+  const session = baseSession({ posePlanning: legacyPlan(SEATED) });
   for (const id of ["full_front", "angled", "back", "closeup"]) {
     const prompt = compose(id, session);
     assertEquals(prompt.includes("REFERENCE POSE MATCH (POSE"), false, id);
@@ -385,7 +416,7 @@ Deno.test("each face-visible frame of a legacy shoot gets its own gaze, and the 
 
 Deno.test("a stored plan with no adopted slot changes only the expression mood", () => {
   const legacy = baseSession();
-  const productLed = baseSession({ posePlanning: plan({ posture: "standing" }) });
+  const productLed = baseSession({ posePlanning: productLedPlan({ posture: "standing" }) });
   for (const id of POSE_IDS) {
     const prompt = compose(id, productLed);
     assertEquals(withLegacyMood(prompt), compose(id, legacy), id);
@@ -432,7 +463,7 @@ Deno.test("planned expressions drive the expression lines and keep the calm fall
 
 Deno.test("a planner mood keeps its mouth and mood but leaves the gaze to the slot", () => {
   const session = baseSession({
-    posePlanning: plan({ posture: "standing" }, {}, {
+    posePlanning: productLedPlan({ posture: "standing" }, {
       expressions: { full_front: "Serene, closed-lip smile with a soft gaze.", showcase: "Quiet pride, eyes to camera" },
     }),
   });
@@ -466,7 +497,7 @@ Deno.test("the shoot-wide attitude line drops posture words in every frame that 
   assertStringIncludes(attitudeLine(compose("creative", seated)), "Attitude: Seated ease.");
 
   const leaningAttitude = normalizeExpressionPlan({ attitude: "Leaning, languid poise", energy: "warm", smile: "warm" });
-  const productLed = baseSession({ posePlanning: plan({ posture: "standing" }, {}, { expressionPlan: leaningAttitude }) });
+  const productLed = baseSession({ posePlanning: productLedPlan({ posture: "standing" }, { expressionPlan: leaningAttitude }) });
   for (const id of ["creative", "showcase"]) {
     const line = attitudeLine(compose(id, productLed));
     assertStringIncludes(line, "Energy: warm. Mouth: warm natural smile at most, never a forced or toothy grin.", id);
@@ -475,7 +506,7 @@ Deno.test("the shoot-wide attitude line drops posture words in every frame that 
   }
   // Nothing left but posture words falls back to the calm line.
   const postureOnly = normalizeExpressionPlan({ attitude: "Seated", gaze: "kneeling glance" });
-  const onlyPosture = baseSession({ posePlanning: plan({ posture: "standing" }, {}, { expressionPlan: postureOnly }) });
+  const onlyPosture = baseSession({ posePlanning: productLedPlan({ posture: "standing" }, { expressionPlan: postureOnly }) });
   assertEquals(/seated|kneeling/i.test(attitudeLine(compose("full_front", onlyPosture))), false);
 });
 
@@ -488,7 +519,7 @@ Deno.test("a planner plan with six expressions and no adoption drops every plann
     closeup: "Quiet, warm half-smile",
     showcase: "Relaxed smile, sitting tall",
   };
-  const planned = baseSession({ posePlanning: plan({ posture: "standing" }, {}, { planner: "langgraph", expressions }) });
+  const planned = baseSession({ posePlanning: productLedPlan({ posture: "standing" }, { planner: "langgraph", expressions }) });
   const deltaExpression = (prompt: string) => prompt.match(/\n- expression: [^\n]*/)?.[0];
   for (const id of POSE_IDS) {
     const prompt = compose(id, planned);
@@ -647,7 +678,7 @@ Deno.test("style-reference label and shoot memory name the reference-matched fra
 
   const legacyMemory = buildGenerationMemory({ productIdentity: { garmentFamily: "kurta_or_kurti_set" } });
   assertEquals(legacyMemory.preservedDetails.at(-1), "Product images are garment/SKU truth. Style reference is set/backdrop/jewellery taste only.");
-  const plannedMemory = buildGenerationMemory({ productIdentity: { garmentFamily: "kurta_or_kurti_set" }, posePlanning: plan(SEATED) });
+  const plannedMemory = buildGenerationMemory({ productIdentity: { garmentFamily: "kurta_or_kurti_set" }, posePlanning: legacyPlan(SEATED) });
   const line = plannedMemory.preservedDetails.at(-1) ?? "";
   assertStringIncludes(line, "plus its posture in Pose 4 and Pose 6 only; never its outfit or handheld objects.");
   assert(line.length <= 180);
@@ -730,11 +761,11 @@ Deno.test("adopted Pose 4/6 keep face, clothing and handheld quarantine for ever
       references: row.roles.map((role) => ({ role })),
       useStyleReferenceAsModelIdentity: row.useStyle,
     });
-    const hero = run("full_front", plan(LEANING));
+    const hero = run("full_front", legacyPlan(LEANING));
     for (const id of ["creative", "showcase"]) {
       const label = `${row.name} / ${id}`;
-      const adopted = run(id, plan(LEANING));
-      const productLed = run(id, plan({ posture: "standing" }));
+      const adopted = run(id, legacyPlan(LEANING));
+      const productLed = run(id, productLedPlan({ posture: "standing" }));
       assertStringIncludes(adopted, `REFERENCE POSE MATCH (POSE ${id === "creative" ? 4 : 6}):`, label);
       for (const text of [...QUARANTINE, ...row.face.adopted]) assertStringIncludes(adopted, text, label);
       assertStringIncludes(adopted, row.styleFace ? "Never copy the outfit or objects in the hands" : "Never copy the person's face, outfit or objects in the hands", label);
@@ -768,7 +799,7 @@ Deno.test("a style photo that is the model identity is never forbidden as the fa
     skuName: "TEAL-KURTI",
     productDetails: "Teal kurti with palazzo",
     pose: pose(id),
-    session: baseSession({ posePlanning: plan(LEANING) }),
+    session: baseSession({ posePlanning: legacyPlan(LEANING) }),
     references,
     useStyleReferenceAsModelIdentity: useStyle,
   });
@@ -813,13 +844,13 @@ Deno.test("a planned expression never carries a reference posture word into a fr
   const deltaExpression = (prompt: string) => prompt.match(/\n- expression: [^\n]*/)?.[0] ?? "";
   const frameExpression = (prompt: string) => prompt.match(/\n- Model expression in this frame: [^\n]*/)?.[0] ?? "";
 
-  const back = compose("back", baseSession({ posePlanning: plan({ posture: "standing" }, {}, { expressions }) }));
+  const back = compose("back", baseSession({ posePlanning: productLedPlan({ posture: "standing" }, { expressions }) }));
   assertEquals(deltaExpression(back), "\n- expression: Face turned away from the lens, chin softly lowered.");
   assertEquals(frameExpression(back), "\n- Model expression in this frame: Face turned away from the lens, chin softly lowered; never a stiff, forced, or frozen smile.");
   assertEquals(/leaning|languid/i.test(deltaExpression(back) + frameExpression(back)), false);
 
   // Face-visible Pose 4 points at its own direction block.
-  const productLed = compose("creative", baseSession({ posePlanning: plan({ posture: "standing" }, {}, { expressions }) }));
+  const productLed = compose("creative", baseSession({ posePlanning: productLedPlan({ posture: "standing" }, { expressions }) }));
   assertEquals(deltaExpression(productLed), `\n- expression: ${FRAME_POINTER}`);
   assertEquals(frameExpression(productLed), `\n- Model expression in this frame: ${FRAME_POINTER}; never a stiff, forced, or frozen smile.`);
   assertStringIncludes(frameBlock(productLed), "THIS FRAME'S EXPRESSION, GAZE & BODY LANGUAGE: gaze drifts away from the camera into the set");
@@ -840,7 +871,7 @@ const REFERENCE_LOOK = {
 };
 
 Deno.test("Pose 4 takes the STYLE REFERENCE person's v37 look, Pose 6 only with the posture, the camera only with the posture", () => {
-  const standing = baseSession({ posePlanning: plan({ posture: "standing", distinctiveness: "generic", ...REFERENCE_LOOK }) });
+  const standing = baseSession({ posePlanning: productLedPlan({ posture: "standing", distinctiveness: "generic", ...REFERENCE_LOOK }) });
   const creative = compose("creative", standing);
   assertEquals(creative.includes("REFERENCE POSE MATCH"), false);
   const block = frameBlock(creative);

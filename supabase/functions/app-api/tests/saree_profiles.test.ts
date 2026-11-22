@@ -61,7 +61,7 @@ const references = [
 ];
 
 Deno.test("analysis version invalidates cached analyses without rear evidence provenance and bottom wear fidelity", () => {
-  assertEquals(ANALYSIS_VERSION, "generation-session-v37-reference-look-per-frame-expression");
+  assertEquals(ANALYSIS_VERSION, "generation-session-v38-signature-reference-product-highlight");
 });
 
 Deno.test("analysis prompt distinguishes farshi from palazzo and does not take bottom print from upper fabric close-ups", () => {
@@ -376,7 +376,7 @@ Deno.test("analysis prompt locks style-reference backdrop, jewellery, seated pos
   assertStringIncludes(prompt, "PRODUCT FIRST, STYLE REFERENCE SECOND");
   assertStringIncludes(prompt, "SEATED POSE LOCK");
   assertStringIncludes(prompt, "A person sitting in the STYLE REFERENCE");
-  assertStringIncludes(prompt, "it may be copied only into Pose 4 and Pose 6");
+  assertStringIncludes(prompt, "it is copied only into Pose 4 as REFERENCE POSE & EXPRESSION PLAN directs, never into Poses 1, 2, 3, 5 or 6");
   assertStringIncludes(prompt, "never copy its handheld props");
   assertStringIncludes(prompt, "is not a request to sit");
   assertStringIncludes(prompt, "seatedPoseRequired");

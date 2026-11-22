@@ -3,6 +3,12 @@
 Status: implemented (branch `feat/reference-pose-expression-planning`). Agent rules: CLAUDE.md rules 2, 4 and 8,
 AGENTS.md prime directives 2 and 4, MEMORY.md §2.1, §2.4, §2.6 and §3. Pipeline: `docs/GENERATION_ORCHESTRATION.md`.
 
+> **Superseded in part by analysis v38 (`feat/product-aware-six-pose-generation`).** Pose 4 now adopts the
+> reference posture, camera angle and framing whenever the reference shows a person (only no person, a sit request
+> with a non-seated reference, Farshi + folded and saree + reclining block it; a walk is grounded), and Pose 6 is the
+> product-highlight detail close-up that never adopts. The current contract is CLAUDE.md rule 4 and MEMORY.md §2.4/§2.6;
+> the owner decisions below describe v36/v37 plans, which generation still honours.
+
 ## Owner decisions (2026-11-20)
 
 1. **Pose match scope:** Pose 4 (`creative`) and Pose 6 (`showcase`) copy the STYLE REFERENCE person's
