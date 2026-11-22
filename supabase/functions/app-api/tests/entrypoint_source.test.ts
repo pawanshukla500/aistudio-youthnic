@@ -395,3 +395,13 @@ Deno.test("History modals close on Escape, lock the page behind them, and read c
   // No browser alert for a failed clone.
   assert(!history.includes("alert("));
 });
+
+Deno.test("the Studio progress tiles name each pose's state, retry only a failed pose on a click, and preview finished images", () => {
+  const studio = Deno.readTextFileSync(new URL("../../../../src/features/studio/Studio.tsx", import.meta.url)).replace(/\r\n/g, "\n");
+  assert(studio.includes('if (status === "failed") return { label: "Failed"'));
+  assert(studio.includes('if (hasImage) return { label: "Done"'));
+  // No extra generation calls: retry is a click on a failed pose once the shoot is idle.
+  assert(studio.includes('const canRetry = pose.status === "failed" && jobIdle;'));
+  assert(studio.includes("await regeneratePose({ poseId: pose._id, requestedBy: user._id, poseQa: false, extraInstructions: \"\" });"));
+  assert(studio.includes("aria-label={`Preview pose ${pose.poseNumber}, ${pose.title}`}"));
+});
