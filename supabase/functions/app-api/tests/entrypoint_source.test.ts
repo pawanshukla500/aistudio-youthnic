@@ -336,4 +336,7 @@ Deno.test("the flow board avoids React Flow's built-in node styles, keeps a fit 
   const page = read("GenerationFlowPage.tsx");
   assert(page.includes("void fetchFlow();"));
   assert(!page.includes("window.location.reload()"));
+  // The Studio's live progress card opens the board for the shoot it just queued.
+  const studio = Deno.readTextFileSync(new URL("../../../../src/features/studio/Studio.tsx", import.meta.url));
+  assert(studio.includes("to={`/history/flow/${submittedJobId}`}"));
 });
