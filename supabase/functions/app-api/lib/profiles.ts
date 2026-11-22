@@ -1953,6 +1953,15 @@ export function sanitizeHeldObjectText(value: unknown, replacement: string, allo
   return kept.join(" ").trim() || replacement;
 }
 
+/**
+ * referencePose text is one comma-separated sentence ("seated on the bench, legs crossed, right hand holding
+ * an iced coffee cup, head turned"): only the clauses naming a held object go, never the whole body position.
+ */
+export function withoutHeldObjectClauses(value: string): string {
+  if (!FORBIDDEN_HELD_OBJECT_PATTERN.test(value)) return value;
+  return value.split(/\s*[,;.]\s*/).filter((clause) => clause && !FORBIDDEN_HELD_OBJECT_PATTERN.test(clause)).join(", ");
+}
+
 export function normalizeAnalysis(
   raw: JsonRecord,
   categoryFallback: string,
@@ -2110,7 +2119,7 @@ export function normalizeAnalysis(
       ...rawPlanning,
       referencePose: rawReferencePose,
       expressionPlan: rawExpressionPlan,
-    }, planningContext, (value) => sanitizeHeldObjectText(value, ""))
+    }, planningContext, withoutHeldObjectClauses)
     : undefined;
   const posePlanning = localPlanning && options.posePlanningOverride
     ? mergeGraphPosePlanning(localPlanning, options.posePlanningOverride, planningContext)

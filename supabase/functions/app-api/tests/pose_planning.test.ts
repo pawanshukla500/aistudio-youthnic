@@ -25,6 +25,7 @@ import {
   normalizeAnalysis,
   posePlanningContextFor,
   sanitizeHeldObjectText,
+  withoutHeldObjectClauses,
   type JsonRecord,
 } from "../lib/profiles.ts";
 import { composeGenerationPrompt } from "../lib/generationPrompt.ts";
@@ -755,6 +756,21 @@ Deno.test("a clause naming a held object never reaches the Pose 4 directive (T94
   ).slots.creative.directive;
   assertEquals(/\bbag\b|lifted/.test(lifted), false);
   assertStringIncludes(lifted, "both feet on the floor");
+  // Through normalizeAnalysis (the production scrub): a "coffee cup" clause goes, never the whole body position.
+  const planning = normalizeAnalysis(t94Raw({
+    referencePose: {
+      posture: "seated",
+      description: "seated on low wood bench, legs crossed with one knee over other, right elbow bent holding an iced coffee cup near mouth, head turned to side",
+      seatOrSupport: "low dark wood bench",
+      hands: "right hand holds an iced coffee cup up",
+      suitableForProduct: "yes",
+    },
+  }), "kurti").posePlanning!;
+  assertEquals(planning.referencePose.description, "seated on low wood bench, legs crossed with one knee over other, head turned to side");
+  assertEquals(planning.referencePose.hands, "");
+  assertEquals(planning.slots.creative.source, "reference");
+  assertStringIncludes(planning.slots.creative.directive, "seated posture: seated on low wood bench, legs crossed with one knee over other, head turned to side.");
+  assertEquals(withoutHeldObjectClauses("seated, sipping iced coffee. Head tilted"), "seated, Head tilted");
 });
 
 Deno.test("a negated back detail is not a Pose 6 feature, and nothing distinct from Pose 5 still gives a marked close-up", () => {
