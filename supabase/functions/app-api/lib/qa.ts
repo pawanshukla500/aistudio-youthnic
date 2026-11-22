@@ -302,8 +302,9 @@ export function buildPoseQaPrompt(args: {
     : "";
   // The Pose 2 prompt asks for a 35 to 45 degree turn (generationPrompt CURRENT FRAME POSE 2). The live
   // T94-Kitkat-Kattha run once delivered about 25 to 30 degrees and nothing here tested the turn itself.
+  // The bounds sit about 5 to 10 degrees outside the planned range: a still image cannot be read more finely.
   const pose2Rule = args.poseType === "angled"
-    ? "For pose 2 (turning three-quarter view), fail pose_requirement if the torso and hips face the camera square-on like Pose 1 or are turned less than about 30 degrees (both shoulders and both sides of the neckline still read at near-equal width), or if the body is in a full 90-degree profile. Pass a turn of roughly 35 to 45 degrees: the far shoulder and the far side of the neckline read clearly narrower than the near side, and the side seam or side silhouette shows. The head may turn back toward the camera. State the turn you estimate in degrees in the reason."
+    ? "For pose 2 (turning three-quarter view), fail pose_requirement when the turn is outside the planned range on either side: the torso and hips face the camera square-on like Pose 1 or are turned less than about 30 degrees (both shoulders and both sides of the neckline still read at near-equal width), or they are turned more than about 55 degrees (the far shoulder is hidden or the front of the garment is mostly turned away), up to and including a full 90-degree profile. Pass a turn of roughly 35 to 45 degrees: the far shoulder and the far side of the neckline read clearly narrower than the near side yet both stay visible, and the side seam or side silhouette shows. The head may turn back toward the camera. State the turn you estimate in degrees in the reason."
     : "";
   const resolvedAspectRatio = resolveAspectRatioLabel(args.aspectRatio);
   const resolvedOrientation = resolveAspectRatioOrientation(resolvedAspectRatio);

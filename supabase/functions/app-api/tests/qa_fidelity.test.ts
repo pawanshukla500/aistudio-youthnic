@@ -896,8 +896,9 @@ Deno.test("Pose 2 QA tests the three-quarter turn itself; no other pose carries 
     });
   // Live T94-Kitkat-Kattha run: a Pose 2 turned about 25 to 30 degrees passed, because QA never tested the turn.
   const angled = qaFor(2, "angled", "Turning 3/4 View");
-  assertStringIncludes(angled, "For pose 2 (turning three-quarter view), fail pose_requirement if the torso and hips face the camera square-on like Pose 1 or are turned less than about 30 degrees");
-  assertStringIncludes(angled, "or if the body is in a full 90-degree profile");
+  assertStringIncludes(angled, "For pose 2 (turning three-quarter view), fail pose_requirement when the turn is outside the planned range on either side: the torso and hips face the camera square-on like Pose 1 or are turned less than about 30 degrees");
+  // Both sides are bounded: a 60 degree turn is out of range too (CodeAnt on #201).
+  assertStringIncludes(angled, "or they are turned more than about 55 degrees (the far shoulder is hidden or the front of the garment is mostly turned away), up to and including a full 90-degree profile");
   assertStringIncludes(angled, "Pass a turn of roughly 35 to 45 degrees");
   assertStringIncludes(angled, "State the turn you estimate in degrees in the reason.");
   for (const [number, type, title] of [[1, "full_front", "Full Front View"], [3, "back", "Back View"], [4, "creative", "Signature Reference Pose"]] as const) {
