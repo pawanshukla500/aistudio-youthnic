@@ -754,10 +754,11 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
     totalRegenerationMs: 0,
     regenerationCostUsd: 0,
   };
+  // Retries are image generations, so their cost is already inside Images: shown as "incl.", never added.
   const costTitle = job.costBreakdown
-    ? `Analysis $${Number(job.costBreakdown.analysisUsd || 0).toFixed(4)} · Images $${Number(job.costBreakdown.generationUsd || 0).toFixed(4)} · QA ${
-      job.costBreakdown.qaRan ? `$${Number(job.costBreakdown.qaUsd || 0).toFixed(4)}` : "off"
-    }${regenerationSummary.regenerations > 0 ? ` · Retries $${Number(regenerationSummary.regenerationCostUsd || 0).toFixed(4)}` : ""}`
+    ? `Analysis $${Number(job.costBreakdown.analysisUsd || 0).toFixed(4)} · Images $${Number(job.costBreakdown.generationUsd || 0).toFixed(4)}${
+      regenerationSummary.regenerations > 0 ? ` (incl. retries $${Number(regenerationSummary.regenerationCostUsd || 0).toFixed(4)})` : ""
+    } · QA ${job.costBreakdown.qaRan ? `$${Number(job.costBreakdown.qaUsd || 0).toFixed(4)}` : "off"}`
     : `Spent $${Number(job.actualCost || 0).toFixed(4)}`;
   const jobIsActive = ACTIVE_JOB_STATUSES.includes(job.status);
   const batchEligiblePoses = job.poses.filter((pose: any) => canRegeneratePose(pose, job.status));
@@ -2029,7 +2030,7 @@ function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {
                       <strong className="text-on-surface">
                         {plural(regenerationSummary.regenerations, "retry", "retries")} on {plural(regenerationSummary.regeneratedPoses, "pose", "poses")}
                       </strong>{" "}
-                      (${Number(regenerationSummary.regenerationCostUsd || 0).toFixed(4)})
+                      (${Number(regenerationSummary.regenerationCostUsd || 0).toFixed(4)}, included in the cost)
                     </span>
                   )}
                   <span>

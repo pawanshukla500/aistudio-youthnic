@@ -391,6 +391,9 @@ Deno.test("History modals close on Escape, lock the page behind them, and read c
   assert(history.includes("Pipeline details"));
   assert(history.includes("{approvedPoseCount > 0 && ("));
   assert(history.includes("Retries:{\" \"}"));
+  // Retry cost is part of the image cost: shown as included, never as an extra line item (CodeAnt on #199).
+  assert(history.includes("(incl. retries $") && history.includes(", included in the cost)"));
+  assert(!history.includes("` · Retries $$"));
   assert(history.includes("grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center"));
   // Rows and pose tiles open from the keyboard; pose actions show on touch screens.
   assert(history.includes("aria-expanded={open}"));
