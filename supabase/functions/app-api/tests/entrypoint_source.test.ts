@@ -335,6 +335,8 @@ Deno.test("the flow board avoids React Flow's built-in node styles, keeps a fit 
   const workflow = read("OperationalWorkflowView.tsx");
   assert(workflow.includes("const inputs = sessionReferences.length ? sessionReferences : references;"));
   assert(workflow.includes("return { references: inputs, poses };"));
+  // A re-generating pose shows as working even though its retained prior version is "completed".
+  assert(workflow.includes("status: pose.busy || poseStatus("));
   const page = read("GenerationFlowPage.tsx");
   assert(page.includes("void fetchFlow();"));
   assert(!page.includes("window.location.reload()"));

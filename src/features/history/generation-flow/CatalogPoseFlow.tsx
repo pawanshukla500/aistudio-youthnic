@@ -541,7 +541,7 @@ function OutputNode({ id, data }: NodeProps<Node<BoardData>>) {
   const quality = data.quality ? titleCase(data.quality) : "";
   const tone = data.qaTone ? TONE_CHIP[data.qaTone] : null;
   const busy = actions.busyPose !== undefined;
-  const runTitle = !data.canRegenerate ? "Re-generation is closed for this shoot" : actions.busyPose !== undefined ? "Another pose is being queued" : !note.trim() ? "Type what to change first: each version is a paid generation" : "Queue a new version of this pose only";
+  const runTitle = working ? "A new version of this pose is being generated" : !data.canRegenerate ? "Re-generation is closed for this shoot" : actions.busyPose !== undefined ? "Another pose is being queued" : !note.trim() ? "Type what to change first: each version is a paid generation" : "Queue a new version of this pose only";
   return (
     <div className="cpf-node relative h-full w-full" style={{ animationDelay: `${data.delay || 0}ms` }} onMouseLeave={() => setMenu(null)}>
       <NodeLabel icon={ImageIcon} title={`Pose ${data.poseIndex} – ${data.title}`} meta={modelLabel} />

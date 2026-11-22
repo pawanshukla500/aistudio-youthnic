@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { poseGroupQa, signedSessionReferences } from "../catalogProduction.ts";
+import { poseGroupBusyStatus, poseGroupQa, signedSessionReferences } from "../catalogProduction.ts";
 import { adoptedPostures, boardFromGenerationData, referencesFromSession } from "../../../../src/features/history/generation-flow/boardFromGenerationData.ts";
 import { neighborIds, qaVerdict } from "../../../../src/features/history/generation-flow/flowLinks.ts";
 import { flowSummaryFrom, settingsLine } from "../../../../src/features/history/generation-flow/flowSummary.ts";
@@ -139,6 +139,13 @@ Deno.test("a pose group shows its own verdict, and none while a re-generation is
   assertEquals(poseGroupQa({ qa_status: "unverified", qa_payload: { dna: { pass: true, score: 94 } } }, false), { status: "unverified", dna: { pass: true, score: 94 } });
   assertEquals(poseGroupQa({ qa_status: "unverified", qa_payload: { dna: { pass: true } } }, true), null);
   assertEquals(poseGroupQa(null, false), null);
+});
+
+Deno.test("a pose group says it is working while its re-generation runs, so the card is not shown as finished", () => {
+  assertEquals(poseGroupBusyStatus({ status: "processing" }), "processing");
+  assertEquals(poseGroupBusyStatus({ status: "queued" }), "queued");
+  assertEquals(poseGroupBusyStatus({ status: "completed" }), null);
+  assertEquals(poseGroupBusyStatus(null), null);
 });
 
 Deno.test("History and the flow board share one model label map", () => {
