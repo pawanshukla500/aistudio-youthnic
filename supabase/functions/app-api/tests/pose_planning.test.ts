@@ -17,6 +17,7 @@ import {
   slotReferencePlan,
   storedPosePlanning,
   styleReferenceProfileFromAnalysis,
+  withoutHeldObjects,
 } from "../lib/posePlanning.ts";
 import {
   buildCombinedAnalysisPrompt,
@@ -724,6 +725,28 @@ Deno.test("past-tense walk wording is grounded too, never copied into the Pose 4
     assertEquals(plan.slots.creative.directive.includes(description), false);
     assertStringIncludes(plan.slots.creative.directive, "both feet on the floor");
   }
+});
+
+Deno.test("a clause naming a held object never reaches the Pose 4 directive (T94 v38 cup)", () => {
+  const plan = localPosePlanningDecision(
+    normalizeReferencePose({
+      posture: "seated",
+      description: "seated on low wood bench/platform, torso three-quarter left, legs crossed with one knee over other, " +
+        "right elbow bent holding cup up near mouth, left arm extended back resting on bench, head turned to side",
+      seatOrSupport: "low dark wood bench/platform",
+      cameraAngle: "eye-level slightly three-quarter, medium full seated framing",
+      suitableForProduct: "yes",
+    }),
+    normalizeExpressionPlan({}),
+    ctx(),
+  );
+  const { directive } = plan.slots.creative;
+  assertEquals([plan.slots.creative.source, plan.slots.creative.posture], ["reference", "seated"]);
+  assertEquals(/\bcup\b|near mouth/.test(directive), false);
+  assertStringIncludes(directive, "legs crossed with one knee over other, left arm extended back resting on bench, head turned to side.");
+  assertEquals(directive.includes("both feet on the floor"), false);
+  assertEquals(withoutHeldObjects("Phone raised; hand on hip. Sunglasses up"), "hand on hip");
+  assertEquals(withoutHeldObjects("leaning on a bottle green pillar"), "leaning on a bottle green pillar");
 });
 
 Deno.test("a negated back detail is not a Pose 6 feature, and nothing distinct from Pose 5 still gives a marked close-up", () => {

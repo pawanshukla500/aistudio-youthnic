@@ -314,6 +314,27 @@ def test_held_object_directive_loops_to_forced_product(monkeypatch):
     assert result["steps"] == PLANNED_STEPS + ["plan_poses", "plan_expression", "validate_plan"]
 
 
+def test_held_cup_clause_is_dropped_so_t94_pose_4_adopts_first_time():
+    # T94 v38 analysis: the cup in the reference hand used to fail validation and force Pose 4 product-led.
+    result = plan({
+        "posture": "seated",
+        "description": "seated on low wood bench/platform, torso three-quarter left, legs crossed with one knee over other, "
+                       "right elbow bent holding cup up near mouth, left arm extended back resting on bench, head turned to side",
+        "seatOrSupport": "low dark wood bench/platform",
+        "distinctiveness": "generic",
+        "cameraAngle": "eye-level slightly three-quarter, medium full seated framing",
+        "suitableForProduct": "yes",
+    }, pose_family="short_kurti_top")
+    creative = result["slots"]["creative"]
+    assert creative["source"] == "reference" and creative["posture"] == "seated"
+    assert "cup" not in creative["directive"] and "near mouth" not in creative["directive"]
+    assert "legs crossed with one knee over other, left arm extended back resting on bench, head turned to side." in creative["directive"]
+    assert "Ground the reference movement" not in creative["directive"]
+    assert result["validation"] == {"attempts": 1, "errors": []} and result["steps"] == PLANNED_STEPS
+    assert pose_plan_agents.without_held_objects("Phone raised; hand on hip. Sunglasses up") == "hand on hip"
+    assert pose_plan_agents.without_held_objects("leaning on a bottle green pillar") == "leaning on a bottle green pillar"
+
+
 def test_persistent_validation_errors_fall_back_to_product(monkeypatch):
     monkeypatch.setattr(pose_plan_agents, "plan_errors", lambda state: ["full_front expression: missing."])
     result = plan()

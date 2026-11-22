@@ -134,6 +134,30 @@ const rawPoses: Record<string, unknown> = {
     suitableForProduct: "no",
     suitabilityReason: "seated crossed legs folds hip hem and hides trouser silhouette and back lace-up",
   },
+  // T94 v38 analysis: the held cup clause is dropped so Pose 4 adopts (the planner rejects a directive naming a cup).
+  t94_seated_cup: {
+    posture: "seated",
+    description: "seated on low wood bench/platform, torso three-quarter left, legs crossed with one knee over other, " +
+      "right elbow bent holding cup up near mouth, left arm extended back resting on bench, head turned to side",
+    seatOrSupport: "low dark wood bench/platform",
+    distinctiveness: "generic",
+    cameraAngle: "eye-level slightly three-quarter, medium full seated framing",
+    suitableForProduct: "yes",
+  },
+  // Every clause held: the posture word stands in; the signature splits on ";" and "." too.
+  held_only: {
+    posture: "standing",
+    description: "holding a coffee cup in both hands",
+    distinctiveness: "signature",
+    signatureDescription: "Phone raised for a mirror selfie; hand on hip. Sunglasses pushed up",
+    suitableForProduct: "yes",
+  },
+  // "bottle green" is a colour and stays; the dropped bag clause leaves a lifted foot, which still grounds.
+  held_bottle_green_lifted: {
+    posture: "leaning",
+    description: "leaning on a bottle green pillar, handbag over the forearm, one foot lifted, holding a bottle",
+    suitableForProduct: "yes",
+  },
   long_signature: {
     posture: "seated",
     description: "seated upright with the torso turned slightly, ".repeat(12),
@@ -170,6 +194,8 @@ const DIRECTIVE_POSE_IDS = [
   "none", "generic_standing", "signature_standing", "seated_yes", "reclining_yes", "other_yes", "long_signature",
   // A walk or lifted foot is grounded, never copied; Pose 4 carries the reference camera.
   "walking_yes", "leaning_foot_lifted", "standing_mid_stride", "seated_raised_heels", "t94_seated_unsuitable",
+  // Clauses naming a held object never reach the directive.
+  "t94_seated_cup", "held_only", "held_bottle_green_lifted",
 ];
 
 const contexts: Record<string, PosePlanningContext> = {

@@ -2552,7 +2552,9 @@ export const CONSISTENCY_RULES = [
 // person, past the soft suitability verdict) and Pose 6 the product-highlight detail
 // close-up (showcasePlan.productHighlight, never a reference posture). Cached v37 plans
 // keep a product-led Pose 4 and a full-body Pose 6.
-export const ANALYSIS_VERSION = "generation-session-v38-signature-reference-product-highlight";
+// v39 drops reference-description clauses that name a held object ("holding cup up near mouth") before
+// the Pose 4 directive is written; cached v38 plans failed validation on them and stayed product-led.
+export const ANALYSIS_VERSION = "generation-session-v39-held-object-clause";
 
 export function smallHash(value: string) {
   let hash = 2166136261;

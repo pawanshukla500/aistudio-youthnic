@@ -60,6 +60,8 @@ Six-pose fashion catalog photoshoots generated from product references.
      (`lib/posePlanning.ts`) adopts it. It adopts whenever the reference shows a person; the hard guards in
      `referenceAdoptionBlockReason` are only: no person; an explicit sit request when the reference is not seated;
      Farshi + folded posture; saree + reclining. A walking or lifted-foot reference becomes a grounded weight shift.
+     A description clause naming a held object (cup, phone, bag…) is dropped from the directive (`withoutHeldObjects`),
+     so the posture is still adopted (analysis v39).
      Pose 6 never adopts. The guards are mirrored in `backend/agents/pose_plan_agents.py` (parity fixture); the
      LangGraph planner (`POST /api/v1/plan`) decides after them and the local plan applies them when it is unavailable.
      Adoption is always read from the stored plan, never from pose fields the client sends. Poses 1, 2, 3, 5 and 6 stay
