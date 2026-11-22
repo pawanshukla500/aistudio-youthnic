@@ -68,7 +68,11 @@ import {
   FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE,
   FAST_PRODUCT_TRUTH_ZAI_ROUTE,
   FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+  ANALYZE_PROXY_BUDGET_MS,
+  PRODUCT_TRUTH_PRIMARY_WINDOW_MS,
   PRODUCT_TRUTH_TIMEOUT_MS,
+  STUDIO_ANALYSIS_FLIGHT_BUDGET_MS,
+  studioAnalysisBudgetMs,
   VISION_GATEWAY_BUDGET_MS,
   VISION_HOP_MIN_MS,
   VISION_PROVIDER_TIMEOUT_MS,
@@ -173,6 +177,7 @@ import {
   type ProviderUsage,
 } from "./lib/providerCost.ts";
 import { sendSentryException, type SentryContext } from "./lib/sentry.ts";
+import { createAnalysisFlights } from "./lib/studioAnalysisFlights.ts";
 
 const SUPABASE_URL = requiredEnv("SUPABASE_URL");
 const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -2179,7 +2184,17 @@ function asVisionProviderError(error: unknown, route: NormalizedAiModelRoute) {
 async function visionJson(
   policy: VisionPolicy,
   parts: JsonRecord[],
-  options?: { onAttempt?: (attempt: VisionHopAttempt) => Promise<void>; signal?: AbortSignal; gatewayBudgetMs?: number; prepElapsedMs?: number },
+  options?: {
+    onAttempt?: (attempt: VisionHopAttempt) => Promise<void>;
+    signal?: AbortSignal;
+    gatewayBudgetMs?: number;
+    prepElapsedMs?: number;
+    /**
+     * A detached Studio analysis flight: its budget is measured against the flight,
+     * not the client wait, and its primary hop leaves the fallback a full window.
+     */
+    detachedFlight?: boolean;
+  },
 ): Promise<VisionResult> {
   const requested = policy.purpose === "product_truth"
     ? productTruthRouteChain({
@@ -2200,7 +2215,9 @@ async function visionJson(
   // on; it is not dropped silently, so an administrator can see why a
   // configured fallback never answered.
   try {
-    const configuredBudget = visionGatewayBudgetMs(policy.purpose);
+    const configuredBudget = options?.detachedFlight
+      ? STUDIO_ANALYSIS_FLIGHT_BUDGET_MS
+      : visionGatewayBudgetMs(policy.purpose);
     const requestedBudget = options?.gatewayBudgetMs;
     const gatewayBudgetMs = Number.isFinite(requestedBudget)
       ? Math.max(0, Math.min(configuredBudget, Math.round(requestedBudget as number)))
@@ -2210,6 +2227,7 @@ async function visionJson(
       purpose: policy.purpose,
       gatewayBudgetMs,
       prepElapsedMs: options?.prepElapsedMs,
+      primaryWindowMs: options?.detachedFlight ? PRODUCT_TRUTH_PRIMARY_WINDOW_MS : undefined,
       signal: options?.signal,
       invoke: async (route, timeoutMs) => {
         if (options?.signal?.aborted) throw abortError();
@@ -2313,13 +2331,7 @@ function explicitBottomCutHint(bottomWearValue: unknown, productDetails: unknown
 const ANALYSIS_REFERENCE_DOWNLOAD_MS = 20_000;
 const ANALYSIS_REFERENCE_DOWNLOAD_ATTEMPTS = 2;
 const ANALYSIS_PREP_QUERY_MS = 8_000;
-type StudioAnalysisFlight = {
-  promise: Promise<JsonRecord>;
-  orgId: string;
-  controller: AbortController;
-  clientSignals: Set<AbortSignal>;
-};
-const studioAnalysisFlights = new Map<string, StudioAnalysisFlight>();
+const studioAnalysisFlights = createAnalysisFlights<JsonRecord>();
 
 function withDeadline<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2371,45 +2383,13 @@ async function analyze(request: Request, args: JsonRecord) {
   // a duplicate (auto-analysis plus a click, or a retry after a gateway cut) that arrived during
   // prep, or whose prep briefs timed out differently, used to start a second paid analysis.
   const flightKey = `${orgId}:${pHash}:${rHash}:${ANALYSIS_VERSION}`;
-  const existingFlight = studioAnalysisFlights.get(flightKey);
-  if (existingFlight) {
-    existingFlight.clientSignals.add(request.signal);
-    return await existingFlight.promise;
-  }
-  // Cancel any older flight for this organization whose client already aborted
-  // (e.g. user added another reference image or changed inputs) so obsolete
-  // intermediate requests do not keep burning Meta Muse Spark per-minute tokens.
-  for (const [oldKey, oldFlight] of studioAnalysisFlights.entries()) {
-    if (
-      oldFlight.orgId === orgId &&
-      oldKey !== flightKey &&
-      [...oldFlight.clientSignals].every((sig) => sig.aborted)
-    ) {
-      oldFlight.controller.abort();
-      studioAnalysisFlights.delete(oldKey);
-    }
-  }
-  const flightController = new AbortController();
-  let resolveFlight!: (value: JsonRecord) => void;
-  let rejectFlight!: (reason: unknown) => void;
-  const flightPromise = new Promise<JsonRecord>((resolve, reject) => {
-    resolveFlight = resolve;
-    rejectFlight = reject;
-  });
-  // Prevent Deno unhandledrejection crash when the leader rejects before any waiter attaches.
-  flightPromise.catch(() => {});
-  const flight: StudioAnalysisFlight = {
-    promise: flightPromise,
-    orgId,
-    controller: flightController,
-    clientSignals: new Set([request.signal]),
-  };
-  studioAnalysisFlights.set(flightKey, flight);
-  const finishAnalysis = (payload: JsonRecord) => {
-    resolveFlight(payload);
-    return payload;
-  };
-  try {
+  // The flight is detached from this request: it may outlive Railway's 300s proxy cut so a
+  // slow primary still leaves its fallback a full window. An older flight of this organization
+  // that nobody waits on any more (inputs changed) is aborted so it stops spending Meta tokens.
+  // The Studio's retry after `analysisPending` (resumeAnalysis) never discards the result it waits for.
+  const flight = studioAnalysisFlights.acquire(flightKey, orgId, {
+    discardHeld: args.forceRefresh === true && args.resumeAnalysis !== true,
+  }, async (flightSignal) => {
   // House preference is an analysis input, so it belongs in the cache identity:
   // otherwise a cached plan keeps proposing the styling a stylist corrected, for
   // up to the cache's thirty days. It stays out of the fingerprint on purpose -
@@ -2472,7 +2452,7 @@ async function analyze(request: Request, args: JsonRecord) {
         String(args.category || ""),
         { useStyleAsModelFace, hasModelReference: rawHasModelReference },
         {
-          signal: flightController.signal,
+          signal: flightSignal,
           timeoutMs: ANALYSIS_REFERENCE_DOWNLOAD_MS,
           maxAttempts: ANALYSIS_REFERENCE_DOWNLOAD_ATTEMPTS,
         },
@@ -2488,7 +2468,7 @@ async function analyze(request: Request, args: JsonRecord) {
       }) });
 
       const persistFailedHop = async (attempt: VisionAttempt) => {
-        if (attempt.outcome !== "failed" || flightController.signal.aborted) return;
+        if (attempt.outcome !== "failed" || flightSignal.aborted) return;
         const hopIds = await recordVisionHopRuns({
           organizationId: orgId,
           runKind: "product_reference_analysis",
@@ -2502,23 +2482,21 @@ async function analyze(request: Request, args: JsonRecord) {
       };
       try {
         const prepMs = Date.now() - requestStarted;
-        const gatewayBudgetMs = productTruthRemainingBudgetMs(
-          prepMs,
-          Number(Deno.env.get("VISION_GATEWAY_BUDGET_MS") || ""),
-        );
+        const gatewayBudgetMs = studioAnalysisBudgetMs(prepMs);
         console.info(`[studio.analyze] prepMs=${prepMs} visionBudgetMs=${gatewayBudgetMs}`);
-        // The client connection is not the deadline. A proxy cut at 300s must
-        // still let Muse finish and save the plan; the retry joins this flight.
-        // Only when a newer flight supersedes an aborted client request is
-        // flightController aborted.
+        // The client connection is not the deadline: the flight is measured against
+        // STUDIO_ANALYSIS_FLIGHT_BUDGET_MS and the Studio re-joins it after each
+        // `analysisPending`. flightSignal aborts only when a newer flight of the
+        // organization supersedes this abandoned one.
         return await visionJson(policy, parts, {
           onAttempt: persistFailedHop,
-          signal: flightController.signal,
+          signal: flightSignal,
           gatewayBudgetMs,
           prepElapsedMs: prepMs,
+          detachedFlight: true,
         });
       } catch (error) {
-        if (flightController.signal.aborted || isAbortError(error)) {
+        if (flightSignal.aborted || isAbortError(error)) {
           throw error;
         }
         const attempts = error instanceof VisionProviderError ? error.attempts : [];
@@ -2545,7 +2523,7 @@ async function analyze(request: Request, args: JsonRecord) {
       } finally {
         parts.length = 0;
       }
-    }, flightController.signal);
+    }, flightSignal);
     normalized = await withGraphPosePlanning({
       target: fastApi,
       normalized: normalizeAnalysis(result.json, String(args.category || "ethnic/fusion"), analysisOptions),
@@ -2554,7 +2532,7 @@ async function analyze(request: Request, args: JsonRecord) {
       options: analysisOptions,
       organizationId: orgId,
       threadKey: fingerprint,
-      remainingBudgetMs: productTruthRemainingBudgetMs(Date.now() - requestStarted, Number(Deno.env.get("VISION_GATEWAY_BUDGET_MS") || "")),
+      remainingBudgetMs: studioAnalysisBudgetMs(Date.now() - requestStarted),
     });
     if (styleCacheKey && !cachedStyleProfile && styleReferencesLoaded) await saveStyleReferenceProfile(orgId, styleCacheKey, normalized);
     await service.from("analysis_cache").upsert({
@@ -2600,7 +2578,7 @@ async function analyze(request: Request, args: JsonRecord) {
     ? missingRequiredReferenceLabels(references, "saree")
     : [];
   if (missingDetectedSareeEvidence.length) {
-    return finishAnalysis({
+    return {
       sessionId: "",
       referenceIds: [],
       analysisFingerprint: fingerprint,
@@ -2613,7 +2591,7 @@ async function analyze(request: Request, args: JsonRecord) {
       analysisThinking: usedPolicy.thinkingLevel,
       requiresSareeEvidence: true,
       sareeEvidenceIssues: missingDetectedSareeEvidence,
-    });
+    };
   }
 
   const requestCode = `STUDIO-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
@@ -2669,13 +2647,10 @@ async function analyze(request: Request, args: JsonRecord) {
     planningRequestId: planningRequest.id,
     fingerprint,
   });
-  return finishAnalysis({ sessionId, referenceIds: sessionData.referenceIds, analysisFingerprint: fingerprint, productHash: pHash, referenceHash: rHash, ...normalized, cacheHit, analysisProvider: usedPolicy.provider, analysisModel: usedPolicy.model, analysisThinking: usedPolicy.thinkingLevel });
-  } catch (error) {
-    rejectFlight(error);
-    throw error;
-  } finally {
-    if (studioAnalysisFlights.get(flightKey) === flight) studioAnalysisFlights.delete(flightKey);
-  }
+  return { sessionId, referenceIds: sessionData.referenceIds, analysisFingerprint: fingerprint, productHash: pHash, referenceHash: rHash, ...normalized, cacheHit, analysisProvider: usedPolicy.provider, analysisModel: usedPolicy.model, analysisThinking: usedPolicy.thinkingLevel };
+  });
+  // Answers before Railway's 300s proxy cut; the flight keeps running and the Studio asks again.
+  return await studioAnalysisFlights.wait(flight, request.signal, requestStarted + ANALYZE_PROXY_BUDGET_MS);
 }
 
 function normalizeImageSize(aspectRatio: string, imageSize: string, model: string) {

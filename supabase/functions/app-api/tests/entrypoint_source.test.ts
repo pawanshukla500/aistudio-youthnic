@@ -264,11 +264,17 @@ Deno.test("a duplicate analysis joins the one in flight, registered before the s
   const start = source.indexOf("async function analyze(request: Request, args: JsonRecord)");
   const body = source.slice(start, source.indexOf("\nfunction normalizeImageSize(", start));
   const flightAt = body.indexOf("const flightKey = `${orgId}:${pHash}:${rHash}:${ANALYSIS_VERSION}`;");
-  const registerAt = body.indexOf("studioAnalysisFlights.set(flightKey, flight);");
+  const registerAt = body.indexOf("const flight = studioAnalysisFlights.acquire(flightKey, orgId, {");
   const prepAt = body.indexOf('resolveVisionPolicy(orgId, { purpose: "product_truth"');
   assert(flightAt > 0 && registerAt > flightAt, "the flight key is fixed by the inputs");
   // Prep briefs (house preferences, learning) can time out differently, so they stay out of the key.
   assert(prepAt > registerAt, "the flight is registered before the up-to-8s prep queries");
+  // The flight outlives the request: the request answers before the 300s proxy cut and the chain
+  // runs on the flight's own budget, so a slow Meta still leaves its fallback a full window.
+  assert(body.includes("return await studioAnalysisFlights.wait(flight, request.signal, requestStarted + ANALYZE_PROXY_BUDGET_MS);"));
+  assert(body.includes("const gatewayBudgetMs = studioAnalysisBudgetMs(prepMs);"));
+  assert(body.includes("detachedFlight: true,"));
+  assert(body.includes("discardHeld: args.forceRefresh === true && args.resumeAnalysis !== true,"));
 });
 
 Deno.test("Clone Session opens in the Studio with its references and analysis instead of an empty Studio", () => {

@@ -14,12 +14,16 @@ import {
   FAST_PRODUCT_TRUTH_ROUTE,
   FAST_PRODUCT_TRUTH_CONTRIBUTOR_ROUTE,
   FAST_PRODUCT_TRUTH_GEMINI_ROUTE,
+  FAST_PRODUCT_TRUTH_ZAI_ROUTE,
   CHEAP_OPENAI_VISION_ROUTE,
   LUNA_HIGH_THINKING_VISION_ROUTE,
   OPENAI_TERRA_VISION_ROUTE,
   ANALYZE_PROXY_BUDGET_MS,
   PRODUCT_TRUTH_FALLBACK_RESERVE_MS,
+  PRODUCT_TRUTH_PRIMARY_WINDOW_MS,
   PRODUCT_TRUTH_TIMEOUT_MS,
+  STUDIO_ANALYSIS_FLIGHT_BUDGET_MS,
+  studioAnalysisBudgetMs,
   STUDIO_INVOKE_BUDGET_MS,
   VISION_GATEWAY_RESERVE_MS,
   VISION_REQUEST_OVERHEAD_MS,
@@ -1456,4 +1460,65 @@ Deno.test("Meta Muse Spark -> Z.ai GLM 5.3 Flash -> OpenAI GPT 6.1 Terra -> GPT 
   ]);
   assertEquals(result.route.provider, "zai");
   assertEquals(result.route.model, "glm-5.3-flash");
+});
+
+// Production, 14 days to Nov 22 2026: Meta completed 338 analyses (12 over 165s, max 224s) and timed out 3 times;
+// GLM 5.3 Flash completed 5 with p50 202s. Inside one 280s proxy window the fallback after a Meta timeout got ~60s.
+const timeoutError = () => Object.assign(new Error("The selected vision provider timed out."), { name: "TimeoutError" });
+
+function slowMetaChain(gatewayBudgetMs: number, primaryWindowMs?: number) {
+  let clock = 0;
+  const invoked: { model: string; timeoutMs: number }[] = [];
+  const run = runVisionProviderChain({
+    routes: [FAST_PRODUCT_TRUTH_ROUTE, FAST_PRODUCT_TRUTH_ZAI_ROUTE, OPENAI_TERRA_VISION_ROUTE],
+    purpose: "product_truth",
+    gatewayBudgetMs,
+    primaryWindowMs,
+    now: () => clock,
+    invoke: async (route, timeoutMs) => {
+      invoked.push({ model: route.model, timeoutMs });
+      // Meta hangs until its hop times out; GLM needs its p50 of 202s.
+      if (route.provider === "meta" || timeoutMs < 202_000) {
+        clock += timeoutMs;
+        throw timeoutError();
+      }
+      clock += 202_000;
+      return { ok: true, model: route.model };
+    },
+    classify: (route, error) => classifyVisionProviderFailure(route.provider, {
+      name: (error as { name?: string }).name,
+      message: error instanceof Error ? error.message : String(error),
+    }),
+  });
+  return { run, invoked };
+}
+
+Deno.test("a detached Studio analysis leaves GLM a full window after a Meta timeout; one 280s request could not", async () => {
+  const proxyBound = slowMetaChain(ANALYZE_PROXY_BUDGET_MS);
+  await assertRejects(() => proxyBound.run);
+  assert(proxyBound.invoked[1].timeoutMs <= PRODUCT_TRUTH_FALLBACK_RESERVE_MS, "the old fallback window is about a minute");
+
+  const prepMs = 10_000;
+  const detached = slowMetaChain(studioAnalysisBudgetMs(prepMs), PRODUCT_TRUTH_PRIMARY_WINDOW_MS);
+  const result = await detached.run;
+  assertEquals(result.route.model, "glm-5.3-flash");
+  assertEquals(result.route.thinkingLevel, "medium", "GLM keeps medium reasoning: its window is far over 60s");
+  assertEquals(detached.invoked[0], { model: "muse-spark-1.3", timeoutMs: PRODUCT_TRUTH_PRIMARY_WINDOW_MS });
+  // 600s - 10s prep - 240s Meta - 5s reserve - 60s for Terra.
+  assertEquals(detached.invoked[1].timeoutMs, STUDIO_ANALYSIS_FLIGHT_BUDGET_MS - prepMs - PRODUCT_TRUTH_PRIMARY_WINDOW_MS - VISION_GATEWAY_RESERVE_MS - PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
+  assert(PRODUCT_TRUTH_PRIMARY_WINDOW_MS > 224_000, "Meta's slowest completed analysis still fits its window");
+});
+
+Deno.test("the primary window caps only a first hop that has a fallback", () => {
+  const budget = studioAnalysisBudgetMs(0);
+  assertEquals(budget, STUDIO_ANALYSIS_FLIGHT_BUDGET_MS);
+  assertEquals(studioAnalysisBudgetMs(700_000), 0);
+  const base = { purpose: "product_truth", elapsedMs: 0, gatewayBudgetMs: budget };
+  assertEquals(remainingVisionTimeoutMs({ ...base, remainingRouteCount: 3, primaryWindowMs: PRODUCT_TRUTH_PRIMARY_WINDOW_MS }), PRODUCT_TRUTH_PRIMARY_WINDOW_MS);
+  // A lone route keeps the whole flight, as the last hop always has.
+  assertEquals(remainingVisionTimeoutMs({ ...base, remainingRouteCount: 1, primaryWindowMs: PRODUCT_TRUTH_PRIMARY_WINDOW_MS }), budget - VISION_GATEWAY_RESERVE_MS);
+  // A tight budget still holds the fallback reserve back from the primary.
+  assertEquals(remainingVisionTimeoutMs({ ...base, gatewayBudgetMs: 200_000, remainingRouteCount: 2, primaryWindowMs: PRODUCT_TRUTH_PRIMARY_WINDOW_MS }), 200_000 - VISION_GATEWAY_RESERVE_MS - PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
+  // Without the window (catalog preflight, QA) nothing changes.
+  assertEquals(remainingVisionTimeoutMs({ ...base, remainingRouteCount: 2 }), budget - VISION_GATEWAY_RESERVE_MS - PRODUCT_TRUTH_FALLBACK_RESERVE_MS);
 });

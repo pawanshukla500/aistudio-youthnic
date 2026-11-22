@@ -361,6 +361,20 @@ export const VISION_REQUEST_OVERHEAD_MS = 5_000;
  * before this deadline.
  */
 export const ANALYZE_PROXY_BUDGET_MS = 280_000;
+/**
+ * Studio analysis runs in a flight detached from the HTTP request
+ * (`lib/studioAnalysisFlights.ts`), so its product-truth chain is measured
+ * against this budget instead of the 300s proxy cut. It holds prep, the primary
+ * window, a full fallback window (GLM 5.3 Flash: p50 202s over its last five
+ * runs) and the last hop's reserve.
+ */
+export const STUDIO_ANALYSIS_FLIGHT_BUDGET_MS = 600_000;
+/**
+ * How long the primary hop of a detached Studio analysis may run before the
+ * fallback takes over. Meta's slowest completed analysis in 14 days took 224s
+ * (12 of 338 over 165s), so no observed success is cut off.
+ */
+export const PRODUCT_TRUTH_PRIMARY_WINDOW_MS = 240_000;
 export const PRODUCT_TRUTH_MIN_SLICE_MS = 10_000;
 export const VISION_HOP_MIN_MS = 8_000;
 /**
@@ -487,6 +501,12 @@ export function productTruthRemainingBudgetMs(elapsedBeforeChainMs: number, conf
   return Math.min(fromGateway, beforeProxy);
 }
 
+/** Budget left for a detached Studio analysis after the time already spent in its flight. */
+export function studioAnalysisBudgetMs(elapsedMs: number) {
+  const elapsed = Number.isFinite(elapsedMs) ? Math.max(0, Math.round(elapsedMs)) : 0;
+  return Math.max(0, STUDIO_ANALYSIS_FLIGHT_BUDGET_MS - elapsed);
+}
+
 /**
  * The routes product-truth analysis tries, in order: exactly the primary and
  * the fallback(s) saved in Administration or defaults. No model is inserted ahead
@@ -551,6 +571,8 @@ export function remainingVisionTimeoutMs(args: {
   preferredTimeoutMs?: number;
   /** Time spent before this chain started (auth, briefs, photo download). */
   prepElapsedMs?: number;
+  /** Caps a product-truth hop that still has a fallback after it (the primary of a detached Studio analysis). */
+  primaryWindowMs?: number;
 }): number {
   const remainingWall = Math.max(
     0,
@@ -563,20 +585,21 @@ export function remainingVisionTimeoutMs(args: {
   // enough runway to finish before the 280s proxy deadline.
   if (args.purpose === "product_truth") {
     if (args.remainingRouteCount <= 1) return remainingWall;
+    const cap = args.primaryWindowMs ?? Infinity;
     if (
       (args.prepElapsedMs ?? 0) >= 60_000 &&
       args.elapsedMs < 5_000 &&
       args.gatewayBudgetMs >= 120_000 &&
       args.gatewayBudgetMs <= ANALYZE_PROXY_BUDGET_MS &&
       remainingWall < 200_000
-    ) return remainingWall;
+    ) return Math.min(cap, remainingWall);
     const reserve = remainingWall > PRODUCT_TRUTH_FALLBACK_RESERVE_MS + PRODUCT_TRUTH_MIN_SLICE_MS
       ? PRODUCT_TRUTH_FALLBACK_RESERVE_MS
       : Math.max(20_000, Math.min(PRODUCT_TRUTH_FALLBACK_RESERVE_MS, Math.floor(remainingWall * 0.4)));
-    return Math.max(
+    return Math.min(cap, Math.max(
       Math.min(PRODUCT_TRUTH_MIN_SLICE_MS, remainingWall),
       remainingWall - reserve,
-    );
+    ));
   }
   const preferred = args.preferredTimeoutMs ?? VISION_PROVIDER_TIMEOUT_MS;
   if (args.remainingRouteCount <= 1) return Math.min(preferred, remainingWall);
@@ -676,6 +699,8 @@ export async function runVisionProviderChain<T>(args: {
   gatewayBudgetMs: number;
   /** Time already spent before the chain, so a late start can keep its leftover. */
   prepElapsedMs?: number;
+  /** Caps the first route when a fallback follows it; see `PRODUCT_TRUTH_PRIMARY_WINDOW_MS`. */
+  primaryWindowMs?: number;
   invoke: (route: NormalizedAiModelRoute, timeoutMs: number) => Promise<T>;
   classify: (route: NormalizedAiModelRoute, error: unknown) => VisionProviderFailure;
   now?: () => number;
@@ -753,6 +778,7 @@ export async function runVisionProviderChain<T>(args: {
       elapsedMs: now() - started,
       gatewayBudgetMs: args.gatewayBudgetMs,
       prepElapsedMs: args.prepElapsedMs,
+      primaryWindowMs: index === 0 ? args.primaryWindowMs : undefined,
     });
     if (args.purpose === "product_truth") {
       route = clampProductTruthHopThinking(route, timeoutMs);
