@@ -393,19 +393,9 @@ function Workflow() {
               />
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-inverse-on-surface/60">References</span>
-              {["Front", "Back", "Fabric close-up", "Style reference"].map(
-                (role) => (
-                  <span
-                    key={role}
-                    className="rounded-full border border-white/15 px-2.5 py-1 font-medium text-inverse-on-surface/90"
-                  >
-                    {role}
-                  </span>
-                ),
-              )}
-            </div>
+            <p className="mt-4 text-xs text-inverse-on-surface/60">
+              References: front, back, fabric close-up, style reference
+            </p>
 
             <p className="mt-4 min-h-[4rem] text-sm leading-snug text-white sm:min-h-[2.75rem]">
               {board.note}
