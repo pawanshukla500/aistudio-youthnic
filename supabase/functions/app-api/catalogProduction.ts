@@ -1383,6 +1383,25 @@ async function signedCatalogAssetUrl(service: SupabaseClient, orgId: string, row
   return error || !data?.signedUrl ? fallback : data.signedUrl;
 }
 
+/** session_data.references with download URLs the browser can open. A path outside the organization prefix keeps its stored URL instead of failing the board. */
+export async function signedSessionReferences(service: SupabaseClient, orgId: string, rows: unknown): Promise<JsonRecord[]> {
+  return await Promise.all((Array.isArray(rows) ? rows : []).map(async (entry) => {
+    const reference = asRecord(entry);
+    const fallback = text(reference.downloadUrl || reference.url);
+    const downloadUrl = await signedCatalogAssetUrl(service, orgId, {
+      storage_backend: reference.storageBackend,
+      storage_path: reference.storagePath,
+      downloadUrl: fallback,
+    }, "downloadUrl").catch(() => fallback);
+    return { ...reference, downloadUrl };
+  }));
+}
+
+/** The QA verdict for the image a pose group shows. None while a re-generation runs: the row's verdict then belongs to the new attempt. */
+export function poseGroupQa(pose: JsonRecord | null | undefined, busy: boolean) {
+  return pose && !busy ? { status: text(pose.qa_status), dna: asRecord(pose.qa_payload).dna ?? null } : null;
+}
+
 export async function getCatalogWorkflowDetail(
   service: SupabaseClient,
   workspace: CatalogWorkspace,
@@ -1507,6 +1526,7 @@ export async function getCatalogWorkflowDetail(
       } : null),
       versions,
       reviews: (reviewsResult.data || []).filter((review) => versions.some((version) => version.id === review.asset_version_id)),
+      qa: poseGroupQa(currentPose, poseBusy),
     };
   });
   const completedPoseCount = latestByPose.filter((pose) => pose.current && ["completed", "approved"].includes(text(pose.current.generation_status || pose.current.approval_status))).length;
@@ -1530,6 +1550,9 @@ export async function getCatalogWorkflowDetail(
     is_current_product_reference: currentReferenceIds.has(text(asset.id)),
     image_url: await signedCatalogAssetUrl(service, workspace.organization.id, asset as JsonRecord, "image_url") || asset.image_url,
   })));
+  // The photos the generator actually received (product, face, style). A cloned or Studio-started
+  // shoot has none of its inputs in planning_assets, so the flow board would show no inputs.
+  const sessionReferences = await signedSessionReferences(service, workspace.organization.id, asRecord(sessionResult.data?.session_data).references);
   const dependencyReferences = currentReferenceRows.map((reference) => ({
     role: reference.role, downloadUrl: text(reference.downloadUrl), storagePath: text(reference.storagePath),
   }));
@@ -1588,6 +1611,7 @@ export async function getCatalogWorkflowDetail(
     creativeDirection: directionsResult.data,
     generationJob: jobResult.data,
     session: sessionResult.data,
+    sessionReferences,
     stages: stageRows,
     poses: latestByPose,
     dependencies,

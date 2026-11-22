@@ -2,10 +2,9 @@ import { useCallback, useRef, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { invokeAppApi } from '../../../lib/backend';
 import { parseTrace } from './graph/buildGenerationGraph';
-import { ArrowLeft } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { OperationalWorkflowView } from './OperationalWorkflowView';
-import { CatalogPoseFlow } from './CatalogPoseFlow';
+import { CatalogPoseFlow, FlowBoardSkeleton } from './CatalogPoseFlow';
 import { boardFromGenerationData } from './boardFromGenerationData';
 
 export function GenerationFlowPage() {
@@ -128,7 +127,7 @@ export function GenerationFlowPage() {
             <button onClick={() => navigate('/history')} className="flex-1 px-4 py-2 bg-surface-container hover:bg-surface-container-high text-on-surface rounded-lg text-sm font-semibold transition-colors">
               Back to History
             </button>
-            <button onClick={() => window.location.reload()} className="flex-1 px-4 py-2 bg-error text-on-error rounded-lg text-sm font-semibold hover:bg-error-dark transition-colors">
+            <button onClick={() => { setError(null); void fetchFlow(); }} className="flex-1 px-4 py-2 bg-error text-on-error rounded-lg text-sm font-semibold hover:bg-error-dark transition-colors">
               Retry
             </button>
           </div>
@@ -139,9 +138,8 @@ export function GenerationFlowPage() {
 
   if (isLoadingTrace || !selectedGraphData) {
     return (
-      <div className="h-screen w-full flex flex-col items-center justify-center bg-surface-container-lowest text-secondary">
-        <div className="h-8 w-8 border-4 border-primary border-t-transparent animate-spin rounded-full mb-4"></div>
-        <p className="font-medium text-sm">Loading flow visualization...</p>
+      <div className="h-screen w-full bg-[#f5f6f8] p-3">
+        <FlowBoardSkeleton className="h-full" />
       </div>
     );
   }
@@ -150,17 +148,8 @@ export function GenerationFlowPage() {
     return <OperationalWorkflowView boardOnly data={selectedGraphData} onRefresh={() => fetchFlow(true)} />;
   }
 
-  const summarySku = selectedGraphData.is_v2 
-    ? (selectedGraphData.session?.session_data?.skuName || 'Unnamed Product') 
-    : (selectedGraphData.trace?.summary?.sku_name || 'Unnamed Product');
-    
-  const summaryJobId = selectedGraphData.is_v2 
-    ? selectedGraphData.session?.session_id 
-    : selectedGraphData.trace?.summary?.job_id;
-    
-  const summaryModel = selectedGraphData.is_v2 ? 'V2 Node Graph' : selectedGraphData.trace?.summary?.model;
-  const summaryCost = selectedGraphData.is_v2 ? 0 : (selectedGraphData.trace?.summary?.actual_cost_usd || 0);
   const board = boardFromGenerationData(selectedGraphData);
+  const summarySku = board.summary.skuName;
   const tracePoses = (selectedGraphData.trace?.poses || []) as Array<{ generation_id?: string; pose_index: number; storage_path?: string; final_output_url?: string }>;
   const traceJobId = String(selectedGraphData.trace?.summary?.job_id || "");
 
@@ -219,34 +208,13 @@ export function GenerationFlowPage() {
 
   return (
     <div className="h-screen w-full flex flex-col relative overflow-hidden bg-[#f5f6f8]">
-      <div className="flex-none p-4 border-b border-[#e6e8ee] flex justify-between items-center bg-white z-10">
-        <div>
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => navigate('/history')}
-              className="p-2 hover:bg-[#f5f6f8] rounded-full transition-colors flex flex-shrink-0"
-              title="Back to History"
-            >
-              <ArrowLeft className="w-5 h-5 text-on-surface" />
-            </button>
-            <div>
-              <h2 className="text-lg font-bold text-on-surface leading-tight">
-                {summarySku}
-              </h2>
-              <div className="text-xs text-secondary flex gap-3 mt-1 font-medium">
-                <span>ID: {summaryJobId}</span>
-                <span>Model: {summaryModel}</span>
-                <span>Cost: ${summaryCost.toFixed(3)}</span>
-              </div>
-              {actionError && <p className="mt-1 text-xs font-medium text-red-600">{actionError}</p>}
-            </div>
-          </div>
-        </div>
-      </div>
       <div className="min-h-0 flex-1 p-3">
         <CatalogPoseFlow
+          className="h-full"
           references={board.references}
           poses={board.poses}
+          summary={board.summary}
+          message={actionError}
           storageKey={`flow-${jobId}`}
           onBack={() => navigate('/history')}
           onDownload={traceJobId ? handleDownloadPose : undefined}
