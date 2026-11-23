@@ -4,6 +4,7 @@ import { Bell, BookOpen, Calendar as CalendarIcon, CalendarDays, ChevronLeft, Hi
 import { api, useMutation, useQuery } from "../../lib/backend";
 import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
 import { useWorkspace } from "../../lib/WorkspaceContext";
+import { PACKS_FROM } from "../../lib/pricingPacks";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { DailyReminderPopup } from "./DailyReminderPopup";
 
@@ -192,7 +193,7 @@ export function Layout() {
                     : "Trial Expired"}
                 </span>
                 <span className="border-l border-outline-variant/50 pl-2 text-[10px] text-secondary font-medium">
-                  $1.00 High · +$0.50 QA
+                  {PACKS_FROM}
                 </span>
               </div>
             ) : (

@@ -18,11 +18,13 @@ import {
 } from "../../../../src/features/auth/showcaseShoots.ts";
 import {
   FRAMES_PER_SKU,
+  PACK_LIST,
   PACKS,
+  PACKS_FROM,
   TRIAL_SKUS,
   perSku,
   rupees,
-} from "../../../../src/features/auth/pricingPacks.ts";
+} from "../../../../src/lib/pricingPacks.ts";
 
 const loginSource = Deno.readTextFileSync(
   new URL("../../../../src/features/auth/Login.tsx", import.meta.url),
@@ -168,6 +170,14 @@ Deno.test("Login pricing lists the trial and the four rupee packs, with no dolla
   assertEquals(rupees(10000), "₹10,000");
   assertEquals(showcaseSource.includes("$1.00"), false);
   assertEquals(showcaseSource.includes("+$0.50"), false);
+  // The app header, Studio and the onboarding note quote the same packs, not the old dollar rates
+  assertEquals(PACKS_FROM, "Packs from \u20b9500");
+  assertEquals(PACK_LIST, "\u20b9500 for 2 SKUs, \u20b92,000 for 11 SKUs, \u20b95,000 for 30 SKUs, \u20b910,000 for 60 SKUs");
+  for (const file of ["components/ui/Layout.tsx", "features/studio/Studio.tsx", "features/auth/SellerOnboarding.tsx"]) {
+    const source = Deno.readTextFileSync(new URL(`../../../../src/${file}`, import.meta.url));
+    assertEquals(/\$1\.00|\$0\.50/.test(source), false);
+    assertEquals(/PACKS_FROM|PACK_LIST/.test(source), true);
+  }
   assertEquals(showcaseSource.includes("mailto:${CONTACT_EMAIL}"), true);
   assertEquals(showcaseSource.includes("https://www.linkedin.com/company/youthnic"), true);
   assertEquals(showcaseSource.includes("https://www.instagram.com/youthnic.in"), true);

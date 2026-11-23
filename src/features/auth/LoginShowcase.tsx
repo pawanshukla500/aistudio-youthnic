@@ -31,7 +31,7 @@ import {
   TRIAL_SKUS,
   perSku,
   rupees,
-} from "./pricingPacks";
+} from "../../lib/pricingPacks";
 import { KITKAT_KATTHA, WINE_KAFTAN } from "./showcaseShoots";
 
 const SECTION = "scroll-mt-16 px-5 py-20 sm:px-8 lg:px-10 lg:py-28 xl:px-14";

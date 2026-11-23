@@ -19,3 +19,11 @@ export const perSku = (pack: Pack) => Math.round(pack.price / pack.skus);
 
 export const rupees = (amount: number) =>
   `₹${Math.round(amount).toLocaleString("en-IN")}`;
+
+/** "Packs from ₹500": the entry price, for tight spots in the app header. */
+export const PACKS_FROM = `Packs from ${rupees(PACKS[0].price)}`;
+
+/** Every pack on one line, for the onboarding note. */
+export const PACK_LIST = PACKS.map(
+  (pack) => `${rupees(pack.price)} for ${pack.skus} SKUs`,
+).join(", ");
