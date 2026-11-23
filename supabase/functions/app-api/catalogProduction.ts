@@ -1278,7 +1278,8 @@ export async function updateCatalogWorkItem(
     special_instructions: specialInstructions,
     remarks: text(args.remarks) || null,
     blocked_reason: text(args.blockedReason),
-    campaign_event_details: args.campaignEventDetails && typeof args.campaignEventDetails === "object" ? args.campaignEventDetails : {},
+    // Only when sent: the brief editor never sends it, and writing {} erased the stored details on every save.
+    ...(args.campaignEventDetails && typeof args.campaignEventDetails === "object" ? { campaign_event_details: args.campaignEventDetails } : {}),
   };
   const { data: currentItem, error: currentItemError } = await service.from("catalog_work_items")
     .select("id,status,generation_status,qc_status")

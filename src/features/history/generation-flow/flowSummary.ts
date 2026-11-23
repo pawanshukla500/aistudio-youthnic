@@ -124,3 +124,14 @@ export function settingsLine(run: { aspectRatio?: string; imageSize?: string; qu
   const quality = run.quality ? run.quality[0].toUpperCase() + run.quality.slice(1) : "";
   return [run.aspectRatio, run.imageSize, quality].filter(Boolean).join(" · ");
 }
+
+/**
+ * A stored timestamp as the local value a `datetime-local` input shows. Slicing the UTC text
+ * instead moved the deadline by the browser's UTC offset on every save.
+ */
+export function deadlineInputValue(value: unknown) {
+  const date = value ? new Date(String(value)) : null;
+  if (!date || Number.isNaN(date.getTime())) return "";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}

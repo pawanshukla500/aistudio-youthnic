@@ -415,12 +415,19 @@ export function CatalogProduction() {
     try {
       const result = await invokeAppApi<{ inserted: number; skipped: number; errors: unknown[]; workItemIds: string[]; queueableWorkItemIds: string[] }>("catalogProduction.importGoogleSheet", { rows: pending.rows });
       let queuedMessage = "";
+      let startFailed = false;
       if (pending.autoStart && result.queueableWorkItemIds.length) {
-        const queued = await invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", { workItemIds: result.queueableWorkItemIds });
-        queuedMessage = ` Started generation for ${queued.queued} queue-ready SKU${queued.queued === 1 ? "" : "s"}.`;
+        try {
+          const queued = await invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", { workItemIds: result.queueableWorkItemIds });
+          queuedMessage = ` Started generation for ${queued.queued} queue-ready SKU${queued.queued === 1 ? "" : "s"}.`;
+        } catch (error) {
+          // The rows are imported; only the start failed, so it must not read as a failed import.
+          startFailed = true;
+          queuedMessage = ` ${errorMessage(error)}`;
+        }
       }
       setNotice({
-        tone: result.errors.length ? "error" : "success",
+        tone: result.errors.length || startFailed ? "error" : "success",
         message: `Import finished: ${result.inserted} inserted, ${result.skipped} skipped${result.errors.length ? `, ${result.errors.length} failed` : ""}.${queuedMessage}`,
       });
       setImportDialog(null);

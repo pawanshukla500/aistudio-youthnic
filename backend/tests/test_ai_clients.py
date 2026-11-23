@@ -678,6 +678,42 @@ def test_dna_agent_uses_seed_analysis_without_second_vlm_call(monkeypatch):
     assert out["product_dna"]["metadata"]["model"] == "muse-spark-1.3-contributor"
 
 
+def test_forced_reanalysis_builds_dna_from_its_fresh_seed_without_a_second_vlm_call(monkeypatch):
+    """Studio "Re-analyze" sends force_refresh with the new analysis as seed: no stored version, no VLM call, no download."""
+    from agents.evidence_agent import ProductEvidenceAgent
+
+    stored = {"source_fingerprint": "fp_seed_forced", "dna_payload": {"main_color": "stale blue", "metadata": {}}, "sku_id": "T94", "version": 3}
+    monkeypatch.setattr("agents.dna_agent.cache_manager.get_hot_dna", lambda *a, **k: stored["dna_payload"] | {"source_fingerprint": "fp_seed_forced"})
+    monkeypatch.setattr("agents.dna_agent.cache_manager.set_hot_dna", lambda *a, **k: None)
+    monkeypatch.setattr("agents.dna_agent.get_latest_dna_version", lambda org_id, sku_id: stored)
+    monkeypatch.setattr("agents.dna_agent.get_dna_version_by_fingerprint", lambda org_id, sku_id, fp: stored)
+    monkeypatch.setattr("agents.dna_agent.save_dna_version", lambda *a, **k: 4)
+
+    def no_second_call(*args, **kwargs):
+        raise AssertionError("a forced re-analysis with a seed must not call the VLM or download references again")
+
+    monkeypatch.setattr("agents.dna_agent.invoke_vision_json", no_second_call)
+    monkeypatch.setattr("agents.dna_agent.load_reference_image", no_second_call)
+    seed = {"provider": "zai", "model": "glm-5.3-flash", "product_identity": {"garmentFamily": "kurta_or_kurti_set", "mainColor": "kattha brown"}}
+    references = [{"role": "front", "hash": "h1"}, {"role": "back", "hash": "h2"}]
+    out = ProductDNAAgent().process({
+        "organization_id": "org_1", "sku_id": "T94", "sku_name": "T94", "source_fingerprint": "fp_seed_forced",
+        "force_refresh": True, "seed_analysis": seed, "references": references,
+    })
+    assert out["product_dna"]["main_color"] == "kattha brown", "the fresh seed wins over the stored version"
+    assert out["product_dna"]["version"] == 4
+    assert out["product_dna"]["metadata"]["provider"] == "zai"
+
+    monkeypatch.setattr("agents.evidence_agent.cache_manager.get_manifest_cache", lambda *a, **k: None)
+    monkeypatch.setattr("agents.evidence_agent.cache_manager.set_manifest_cache", lambda *a, **k: None)
+    monkeypatch.setattr("agents.evidence_agent.save_reference_evidence", lambda **k: "")
+    monkeypatch.setattr("agents.evidence_agent.load_reference_image", no_second_call)
+    evidence = ProductEvidenceAgent().process({
+        "organization_id": "org_1", "sku_id": "T94", "force_refresh": True, "seed_analysis": seed, "references": references,
+    })
+    assert [ref["sha256_hash"] for ref in evidence["references"]] == ["h1", "h2"]
+
+
 def test_python_sentry_telemetry_dsn_and_envelope():
     from services.sentry_telemetry import (
         build_sentry_envelope,

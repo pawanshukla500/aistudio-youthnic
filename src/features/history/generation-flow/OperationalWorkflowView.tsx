@@ -32,7 +32,7 @@ import { invokeAppApi } from "../../../lib/backend";
 import { CatalogPoseFlow, type FlowPose, type FlowReference } from "./CatalogPoseFlow";
 import { adoptedPostures, referencesFromSession } from "./boardFromGenerationData";
 import { qaVerdict } from "./flowLinks";
-import { flowSummaryFrom } from "./flowSummary";
+import { deadlineInputValue, flowSummaryFrom } from "./flowSummary";
 
 type Member = { id: string; display_name?: string; email?: string } | null;
 type WorkflowStage = {
@@ -281,7 +281,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack, boardOnly = f
   const [actionNotes, setActionNotes] = useState("");
   const [briefDraft, setBriefDraft] = useState({
     priority: data.item.priority || "normal",
-    deadlineAt: data.item.deadline_at ? String(data.item.deadline_at).slice(0, 16) : "",
+    deadlineAt: deadlineInputValue(data.item.deadline_at),
     marketplaces: (data.item.marketplaces || []).join(", "),
     campaignSeason: data.item.campaign_season || "",
     specialInstructions: data.item.special_instructions || "",
@@ -326,7 +326,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack, boardOnly = f
     if (editingBrief) return;
     setBriefDraft({
       priority: data.item.priority || "normal",
-      deadlineAt: data.item.deadline_at ? String(data.item.deadline_at).slice(0, 16) : "",
+      deadlineAt: deadlineInputValue(data.item.deadline_at),
       marketplaces: (data.item.marketplaces || []).join(", "),
       campaignSeason: data.item.campaign_season || "",
       specialInstructions: data.item.special_instructions || "",
@@ -417,8 +417,7 @@ export function OperationalWorkflowView({ data, onRefresh, onBack, boardOnly = f
   const addComment = async () => {
     const body = comment.trim();
     if (!body) return;
-    await run("comment", () => invokeAppApi("catalogProduction.comment", { workItemId: item.id, body }), "Comment added.");
-    setComment("");
+    if (await run("comment", () => invokeAppApi("catalogProduction.comment", { workItemId: item.id, body }), "Comment added.")) setComment("");
   };
 
   const saveBrief = async () => {

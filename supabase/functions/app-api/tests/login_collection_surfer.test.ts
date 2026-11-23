@@ -290,3 +290,14 @@ Deno.test("24-hour login session expiration is enforced across FirebaseAuthConte
     1700000000,
   );
 });
+
+Deno.test("a workspace refresh (shoot queued, profile or AI models saved) keeps the app on screen", () => {
+  const source = Deno.readTextFileSync(new URL("../../../../src/lib/WorkspaceContext.tsx", import.meta.url)).replace(/\r\n/g, "\n");
+  const effect = source.slice(source.indexOf("let active = true;"), source.indexOf("}, [firebaseUser, retry]);"));
+  // Blanking the workspace on every refresh unmounted the whole app: the Studio lost its
+  // "Generation submitted" notice and Administration jumped back to its first tab after a save.
+  assertEquals(effect.includes("setWorkspace((current) => (current && loadedUidRef.current === uid ? current : undefined));"), true);
+  assertEquals(effect.split("setWorkspace(undefined);").length - 1, 1, "only a signed-out user blanks it outright");
+  assertEquals(effect.indexOf("loadedUidRef.current = \"\";") < effect.indexOf("setWorkspace(undefined);"), true, "another account never sees the previous workspace");
+  assertEquals(/if \(active\) \{\s+loadedUidRef\.current = uid;\s+setWorkspace\(normalizeWorkspace\(/.test(effect), true);
+});

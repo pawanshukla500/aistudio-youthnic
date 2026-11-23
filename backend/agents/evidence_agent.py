@@ -119,8 +119,7 @@ class ProductEvidenceAgent:
             )
 
         has_seed_and_hashes = (
-            not state.get("force_refresh")
-            and isinstance(state.get("seed_analysis"), dict)
+            isinstance(state.get("seed_analysis"), dict)
             and bool(raw_references)
             and all(bool(r.get("hash") or r.get("sha256_hash")) for r in raw_references)
         )

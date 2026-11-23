@@ -313,6 +313,8 @@ export function Studio() {
   const [category, setCategory] = useState("ethnic/fusion");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string; jobId?: Id<"generationJobs"> } | null>(null);
   const analysisRequestRef = useRef(0);
+  // Names this Studio tab to studio.analyze, which stops the tab's earlier analysis when a newer one starts.
+  const [analysisClientId] = useState(() => crypto.randomUUID());
   const analysisAbortRef = useRef<AbortController | null>(null);
   const dnaAbortRef = useRef<AbortController | null>(null);
   const uploadPromisesRef = useRef(new Map<string, Promise<StudioReference>>());
@@ -690,6 +692,7 @@ export function Studio() {
           size: reference.file.size,
         })),
         forceRefresh,
+        analysisClientId,
       };
       const result = await analyzeReferences(analysisArgs, { signal: controller.signal }) as StudioAnalysis;
       if (!acceptAnalysis(result)) return;

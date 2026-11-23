@@ -58,6 +58,13 @@ needs a shared store first.
    are aborted if no request waits on them and no client was told to come back within
    `ANALYSIS_REATTACH_GRACE_MS` (30s). This keeps the old behaviour: changing the photos stops the
    obsolete analysis.
+   That rule depends on the server seeing the cancelled request end, and in production it does not:
+   on 23 Nov 2026 the proxy logged five cancelled Studio requests as 499 within 3s each while their
+   flights ran 250-320s to the end (28 of 75 completed analyses, 20-23 Nov, were superseded this way).
+   So the Studio sends `analysisClientId` (one id per Studio tab) and `acquire` takes it as `clientId`:
+   a tab works on one input set at a time, and when it asks for other inputs its earlier flights are
+   aborted at once unless another tab still wants them. A request without an id (an older Studio
+   bundle) marks its flight `unowned`, and only the disconnect rule applies to it.
 6. **Primary window.** In a detached flight the first hop is capped at
    `PRODUCT_TRUTH_PRIMARY_WINDOW_MS` (240s) when a fallback follows it. That is above Meta's slowest
    completed run (224s), so no observed success is cut. Later hops use the existing rule: a non-last hop

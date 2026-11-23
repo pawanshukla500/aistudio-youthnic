@@ -275,6 +275,47 @@ Deno.test("a duplicate analysis joins the one in flight, registered before the s
   assert(body.includes("const gatewayBudgetMs = studioAnalysisBudgetMs(prepMs);"));
   assert(body.includes("detachedFlight: true,"));
   assert(body.includes("discardHeld: args.forceRefresh === true && args.resumeAnalysis !== true,"));
+  // The Studio names its tab, so its earlier analysis of other inputs is stopped (studio_analysis_flights.test.ts).
+  assert(body.includes('clientId: String(args.analysisClientId || "").slice(0, 64),'));
+  const studio = Deno.readTextFileSync(new URL("../../../../src/features/studio/Studio.tsx", import.meta.url));
+  assert(studio.includes("const [analysisClientId] = useState(() => crypto.randomUUID());"), "one id per Studio tab");
+  assert(/forceRefresh,\s+analysisClientId,\s+\};/.test(studio), "sent with every analysis");
+});
+
+Deno.test("a catalog with a queued or running job cannot be deleted, and seeded sales are prepared before they start", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  const start = source.indexOf("async function deleteCatalogOperation(");
+  const body = source.slice(start, source.indexOf("\nasync function stopCatalogGenerationOperation(", start));
+  // generation_jobs is keyed by job_id: select("id") failed, the error was only logged, and the guard never fired.
+  assert(body.includes('service.from("generation_jobs").select("job_id").eq("batch_id", batchId).in("status", ["queued", "processing"]).limit(1)'));
+  assert(body.includes("if (activeJobsError) throw new Error("), "a check that fails must not let the delete through");
+  assert(body.indexOf("This catalog currently has active generation jobs.") < body.indexOf('service.from("generation_jobs").delete()'));
+  const types = Deno.readTextFileSync(new URL("../../../../src/database.types.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  const jobsAt = types.indexOf("      generation_jobs: {");
+  const jobsRow = types.slice(jobsAt, types.indexOf("Insert: {", jobsAt));
+  assert(jobsRow.includes("          job_id: string;") && !/\n          id: /.test(jobsRow), "generation_jobs has job_id and no id column");
+  // Marketplace sales were given a prep deadline 40-45 days after the sale began.
+  assert(source.includes('preparation_deadline: shiftIsoDate(window.startDate, priority === "urgent" ? -45 : -40),'));
+  assert(!/preparation_deadline: shiftIsoDate\([^\n]*\? 45 : 40\)/.test(source));
+});
+
+Deno.test("a handoff that was not sent, or a bulk generation that did not start, is an error and not a success message", () => {
+  const source = Deno.readTextFileSync(new URL("../index.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  const start = source.indexOf("async function sendCatalogHandoffDigestOperation(");
+  const handoff = source.slice(start, source.indexOf("\nfunction matchesFilterList(", start));
+  const refusedAt = handoff.indexOf("if (!result.sent) {");
+  assert(refusedAt > 0 && handoff.includes("No email was sent: today's handoff has already gone out or is still sending."));
+  assert(refusedAt < handoff.indexOf('"catalog.handoff_digest.sent"'), "a skipped send is not audit-logged as sent");
+  const bulkStart = source.indexOf('"catalogProduction.bulkGenerate": async () => {');
+  const bulk = source.slice(bulkStart, source.indexOf('"catalogProduction.automation"', bulkStart));
+  assert(bulk.includes("const notStarted = scheduleOutcomes.filter((outcome) => !outcome.success);"));
+  assert(bulk.indexOf("throw new Error(`The items were queued, but generation did not start for") < bulk.indexOf("return { ...result, scheduleOutcomes };"));
+  // The screens that call them: a paused catalog can be approved, and a failed comment keeps its text.
+  const planning = Deno.readTextFileSync(new URL("../../../../src/features/planning/Planning.tsx", import.meta.url));
+  assert(planning.includes('disabled={!canEditReferences && selected.status !== "awaiting_styling_approval"}'), "Approve works while generation waits for it");
+  const workflow = Deno.readTextFileSync(new URL("../../../../src/features/history/generation-flow/OperationalWorkflowView.tsx", import.meta.url));
+  assert(workflow.includes('"Comment added.")) setComment("");'));
+  assert(!workflow.includes("String(data.item.deadline_at).slice(0, 16)"), "the deadline is shown in local time (flow_board.test.ts)");
 });
 
 Deno.test("Clone Session opens in the Studio with its references and analysis instead of an empty Studio", () => {
