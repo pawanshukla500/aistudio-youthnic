@@ -179,6 +179,13 @@ import {
 } from "./lib/providerCost.ts";
 import { sendSentryException, type SentryContext } from "./lib/sentry.ts";
 import { createAnalysisFlights } from "./lib/studioAnalysisFlights.ts";
+import {
+  OUT_OF_CREDITS_MESSAGE,
+  canApproveRecharges,
+  isExternalSeller,
+  sellerShootGate,
+  tokenClaims,
+} from "./lib/sellerAccess.ts";
 
 const SUPABASE_URL = requiredEnv("SUPABASE_URL");
 const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -3115,15 +3122,19 @@ async function queueGeneration(request: Request, args: JsonRecord) {
     queuedReferences,
     isSareeReferenceSet(queuedReferences, queuedGarmentFamily) ? "saree" : queuedGarmentFamily,
   );
-  const orgSettings = workspace.organization.settings as JsonRecord | undefined;
-  const isExternalSeller = orgSettings?.seller_type === "external";
+  // An internal organization is never charged or blocked; a seller store needs a verified email.
+  const shootGate = sellerShootGate({
+    settings: workspace.organization.settings,
+    claims: tokenClaims(request.headers.get("Authorization") || ""),
+  });
+  if (shootGate.error) throw new Error(shootGate.error);
   let creditDeducted = false;
-  if (isExternalSeller) {
+  if (shootGate.charge) {
     const { data: credited, error: creditErr } = await service.rpc("app_consume_seller_credit", {
       p_org_id: workspace.organization.id,
     });
     if (creditErr || !credited) {
-      throw new Error("You have reached your 5 free photoshoot trial limit (0 credits remaining). Contact sales or upgrade your account to generate more photoshoots.");
+      throw new Error(OUT_OF_CREDITS_MESSAGE);
     }
     creditDeducted = true;
   }
@@ -6043,6 +6054,86 @@ function adminAiPolicyRow(purpose: AiModelPurpose, row?: JsonRecord | null) {
       repairMessage: "The stored fallback provider/model pair is no longer valid. It has been removed in this form; save to repair the policy.",
     };
   }
+}
+
+// Credits and prepaid recharge requests. credit_recharges is server-only: every read and write
+// goes through the service client with the organization and member taken from the verified
+// workspace, never from the request arguments.
+const RECHARGE_COLUMNS = "id, pack_skus, amount_inr, status, provider, created_at, paid_at";
+
+function rechargeIdFrom(value: unknown) {
+  const id = String(value || "");
+  if (!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)) throw new Error("Unknown recharge request.");
+  return id;
+}
+
+async function billingOverviewOperation(request: Request) {
+  const { workspace } = await workspaceFor(request);
+  const { data, error } = await service.from("credit_recharges")
+    .select(RECHARGE_COLUMNS)
+    .eq("organization_id", workspace.organization.id)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (error) throw new Error("Could not load your recharge history.");
+  return {
+    usesCredits: isExternalSeller(workspace.organization.settings),
+    credits: Number(workspace.organization.credits ?? 0),
+    recharges: data || [],
+  };
+}
+
+async function requestRechargeOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "studio.generate");
+  if (!isExternalSeller(workspace.organization.settings)) {
+    throw new Error("This workspace has full access and does not use recharge packs.");
+  }
+  const { data, error } = await service.rpc("app_request_credit_recharge", {
+    p_org_id: workspace.organization.id,
+    p_member_id: workspace.member.id,
+    p_pack_skus: Math.trunc(Number(args.skus)) || 0,
+  });
+  if (error) throw new Error(error.message || "Could not send the recharge request.");
+  return data;
+}
+
+async function cancelRechargeOperation(request: Request, args: JsonRecord) {
+  const { workspace } = await workspaceFor(request, "studio.generate");
+  const { data, error } = await service.from("credit_recharges")
+    .update({ status: "cancelled", updated_at: new Date().toISOString() })
+    .eq("id", rechargeIdFrom(args.id))
+    .eq("organization_id", workspace.organization.id)
+    .eq("status", "requested")
+    .select("id");
+  if (error) throw new Error("Could not cancel the recharge request.");
+  return { cancelled: (data || []).length > 0 };
+}
+
+async function rechargeApproverFor(request: Request) {
+  const { workspace } = await workspaceFor(request);
+  if (!canApproveRecharges(workspace)) {
+    throw new Error("Only administrators of the primary organization can manage recharges.");
+  }
+  return workspace;
+}
+
+async function adminRechargesListOperation(request: Request) {
+  await rechargeApproverFor(request);
+  const { data, error } = await service.from("credit_recharges")
+    .select(`${RECHARGE_COLUMNS}, organization_id, organization:organizations(name, credits)`)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error) throw new Error("Could not load recharge requests.");
+  return { recharges: data || [] };
+}
+
+async function adminRechargesApproveOperation(request: Request, args: JsonRecord) {
+  const workspace = await rechargeApproverFor(request);
+  const { data, error } = await service.rpc("app_approve_credit_recharge", {
+    p_recharge_id: rechargeIdFrom(args.id),
+    p_approved_by: workspace.member.id,
+  });
+  if (error) throw new Error(error.message || "Could not approve the recharge.");
+  return data;
 }
 
 async function adminOverview(request: Request) {
@@ -10213,6 +10304,11 @@ const appRequestHandler = async (request: Request) => {
       "admin.updateAutomationSettings": () => updateAutomationSettingsOperation(request, args),
       "admin.updateAiModelPolicies": () => updateAiModelPoliciesOperation(request, args),
       "admin.probeAiRoute": () => probeAiRouteOperation(request, args),
+      "admin.recharges.list": () => adminRechargesListOperation(request),
+      "admin.recharges.approve": () => adminRechargesApproveOperation(request, args),
+      "billing.overview": () => billingOverviewOperation(request),
+      "billing.requestRecharge": () => requestRechargeOperation(request, args),
+      "billing.cancelRecharge": () => cancelRechargeOperation(request, args),
       "ai.routing.effective": async () => {
         const { workspace } = await workspaceFor(request);
         const imagePolicy = await resolveImageGenerationPolicy(workspace.organization.id);

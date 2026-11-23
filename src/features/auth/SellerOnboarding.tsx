@@ -90,7 +90,7 @@ export function SellerOnboarding({ user, onEnrolled, onSignOut }: SellerOnboardi
               </div>
             </div>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-50 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> 5 Free Shoots
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> 1 Free Shoot
             </span>
           </div>
 
@@ -108,7 +108,7 @@ export function SellerOnboarding({ user, onEnrolled, onSignOut }: SellerOnboardi
             <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/50 p-3.5">
               <div className="flex items-center gap-2 font-bold text-on-surface">
                 <Sparkles className="h-4 w-4 text-primary" />
-                <span>5 Free Shoots</span>
+                <span>1 Free Shoot</span>
               </div>
               <p className="mt-1 text-[11px] leading-snug text-secondary">
                 Auto-credited on enrollment with full 6-pose commercial planning.
@@ -131,7 +131,7 @@ export function SellerOnboarding({ user, onEnrolled, onSignOut }: SellerOnboardi
               Transparent Pack Prices
             </p>
             <p className="mt-1 text-[12px] leading-relaxed">
-              First 5 complete photoshoots free (6-pose catalog runs). After the trial, buy SKUs in packs: {PACK_LIST}.
+              Your first complete photoshoot is free (a 6-pose catalog run) once your email is verified. After the trial, buy SKUs in packs: {PACK_LIST}.
             </p>
           </div>
 
@@ -189,7 +189,7 @@ export function SellerOnboarding({ user, onEnrolled, onSignOut }: SellerOnboardi
                 </>
               ) : (
                 <>
-                  <span>Create Store & Claim 5 Free Shoots</span>
+                  <span>Create Store & Claim 1 Free Shoot</span>
                   <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
                 </>
               )}

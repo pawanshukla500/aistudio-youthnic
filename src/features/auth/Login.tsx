@@ -54,10 +54,11 @@ const HERO_FACTS = [
 
 interface LoginProps {
   redirect?: string;
+  initialMode?: "signin" | "signup";
 }
 
-export function Login({ redirect }: LoginProps) {
-  const { signIn, signUp } = useFirebaseAuth();
+export function Login({ redirect, initialMode = "signin" }: LoginProps) {
+  const { signIn, signUp, resetPassword } = useFirebaseAuth();
   const navigate = useNavigate();
   const scrollBehavior = useReducedMotion() ? "auto" : "smooth";
   // The runway glides only while the hero is on screen; below it the sections cover it.
@@ -76,17 +77,19 @@ export function Login({ redirect }: LoginProps) {
       ? rawRedirect
       : "";
 
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup">(initialMode);
   const [storeName, setStoreName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
+    setNotice("");
     setSubmitting(true);
     try {
       if (mode === "signup") {
@@ -101,7 +104,7 @@ export function Login({ redirect }: LoginProps) {
         }
         const userCred = await signUp(email, password);
         await userCred.user.getIdToken(true);
-        // Enroll seller organization atomically with 5 free credits
+        // Enroll seller organization atomically with 1 free trial credit
         const { error: rpcError } = await supabase.rpc("app_enroll_seller", {
           store_name: cleanStoreName,
           contact_email: email.trim().toLowerCase(),
@@ -128,6 +131,22 @@ export function Login({ redirect }: LoginProps) {
       );
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const forgotPassword = async () => {
+    setError("");
+    setNotice("");
+    const address = email.trim().toLowerCase();
+    if (!address) {
+      setError("Enter your work email first, then press Forgot password.");
+      return;
+    }
+    try {
+      await resetPassword(address);
+      setNotice(`If ${address} has an account, a password reset link is on its way.`);
+    } catch (reason) {
+      setError(getErrorMessage(reason, "Could not send the reset email."));
     }
   };
 
@@ -278,7 +297,7 @@ export function Login({ redirect }: LoginProps) {
                   >
                     <span>Start Free Studio</span>
                     <span className="ml-1.5 hidden rounded-full bg-success px-1.5 py-0.5 text-[10px] font-semibold text-on-primary sm:inline">
-                      5 Free
+                      1 Free
                     </span>
                   </button>
                 </div>
@@ -291,7 +310,7 @@ export function Login({ redirect }: LoginProps) {
                   </h2>
                   <p className="mt-1 text-xs leading-relaxed text-secondary">
                     {mode === "signup"
-                      ? "Enroll your e-commerce brand to get 5 free commercial photoshoots instantly."
+                      ? "Enroll your brand for 1 free six-frame shoot. We email you a link to verify your address first."
                       : "Sign in with your store credentials to access your catalog sessions."}
                   </p>
                 </div>
@@ -405,6 +424,25 @@ export function Login({ redirect }: LoginProps) {
                     </div>
                   </div>
 
+                  {mode === "signin" && (
+                    <button
+                      type="button"
+                      onClick={() => void forgotPassword()}
+                      className="cursor-pointer text-xs font-semibold text-primary underline-offset-4 hover:underline"
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+
+                  {notice && (
+                    <p
+                      role="status"
+                      className="rounded-xl border border-success/20 bg-success-surface p-3.5 text-xs font-medium text-success"
+                    >
+                      {notice}
+                    </p>
+                  )}
+
                   {error && (
                     <div
                       role="alert"
@@ -425,7 +463,7 @@ export function Login({ redirect }: LoginProps) {
                         <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
                         <span>
                           {mode === "signup"
-                            ? "Creating store & claiming free shoots…"
+                            ? "Creating store & claiming your free shoot…"
                             : "Signing in to Studio…"}
                         </span>
                       </>
@@ -433,7 +471,7 @@ export function Login({ redirect }: LoginProps) {
                       <>
                         <span>
                           {mode === "signup"
-                            ? "Create Store & Claim 5 Free Shoots"
+                            ? "Create Store & Claim 1 Free Shoot"
                             : "Sign in to Studio"}
                         </span>
                         <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1 motion-reduce:transition-none" />
@@ -484,7 +522,7 @@ export function Login({ redirect }: LoginProps) {
               <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
                 <span className="inline-flex items-center gap-1.5 font-bold text-on-surface">
                   <CheckCircle2 className="h-4 w-4 text-success" />
-                  5 Free Shoots on Enrollment
+                  1 Free Shoot on Enrollment
                 </span>
                 <a
                   href="#workflow"

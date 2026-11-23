@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Bell, BookOpen, Calendar as CalendarIcon, CalendarDays, ChevronLeft, History, LayoutDashboard, Loader2, LogOut, Menu, Pencil, Shield, Sparkles, Store, Wand2, X } from "lucide-react";
+import { Bell, BookOpen, Calendar as CalendarIcon, CalendarDays, ChevronLeft, History, LayoutDashboard, Loader2, LogOut, Menu, Pencil, Shield, Sparkles, Store, Wallet, Wand2, X } from "lucide-react";
 import { api, useMutation, useQuery } from "../../lib/backend";
 import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import { PACKS_FROM } from "../../lib/pricingPacks";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { DailyReminderPopup } from "./DailyReminderPopup";
+import { VerifyEmailBanner } from "../../features/billing/VerifyEmailBanner";
 
 export function Layout() {
   const { organization, user, membership, permissions, roles, isAdmin } = useWorkspace();
@@ -72,6 +73,7 @@ export function Layout() {
     { to: "/planning", icon: CalendarDays, label: "Planning", show: can("planning.view") },
     { to: "/events", icon: CalendarIcon, label: "Events", show: can("planning.view") },
     { to: "/history", icon: History, label: "History", show: can("studio.view") },
+    { to: "/credits", icon: Wallet, label: "Credits", show: isExternalSeller },
   ];
 
   return (
@@ -96,10 +98,10 @@ export function Layout() {
               <p className="truncate text-xs font-bold text-on-surface">{organization.name}</p>
             </div>
             <div className="mt-2 flex items-center justify-between border-t border-outline-variant/40 pt-2 text-[10px] text-secondary">
-              <span>{isExternalSeller ? "Trial Credits:" : "Operational Balance:"}</span>
+              <span>{isExternalSeller ? "Shoots left:" : "Operational Balance:"}</span>
               <span className="font-bold text-primary">
                 {isExternalSeller
-                  ? typeof credits === "number" && credits > 0 ? `${credits} ${credits === 1 ? "shoot" : "shoots"}` : "Trial Expired"
+                  ? typeof credits === "number" && credits > 0 ? `${credits} ${credits === 1 ? "shoot" : "shoots"}` : "None"
                   : typeof credits === "number" ? `${credits} shoots` : "Active"}
               </span>
             </div>
@@ -185,17 +187,17 @@ export function Layout() {
               <span className="hidden sm:inline-block rounded-md bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary">Store</span>
             </div>
             {isExternalSeller ? (
-              <div className="hidden md:flex items-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-1.5 text-xs">
+              <NavLink to="/credits" title="Open Credits" className="hidden md:flex items-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-1.5 text-xs">
                 <Sparkles className="h-3.5 w-3.5 text-primary" />
                 <span className="font-semibold text-on-surface">
                   {typeof credits === "number" && credits > 0
-                    ? `${credits} ${credits === 1 ? "Shoot" : "Shoots"} Free`
-                    : "Trial Expired"}
+                    ? `${credits} ${credits === 1 ? "shoot" : "shoots"} left`
+                    : "No shoots left"}
                 </span>
                 <span className="border-l border-outline-variant/50 pl-2 text-[10px] text-secondary font-medium">
                   {PACKS_FROM}
                 </span>
-              </div>
+              </NavLink>
             ) : (
               <div className="hidden md:flex items-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-1.5 text-xs">
                 <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -214,6 +216,7 @@ export function Layout() {
             </div>
           </div>
         </header>
+        {isExternalSeller && <VerifyEmailBanner />}
         <div className="flex-1 p-3 sm:p-5 lg:p-8">
           <ErrorBoundary key={location.pathname}>
             <Outlet />

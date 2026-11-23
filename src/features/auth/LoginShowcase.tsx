@@ -25,6 +25,7 @@ import {
   type ShootStep,
 } from "./shootTimeline";
 import {
+  CONTACT_EMAIL,
   FRAMES_PER_SKU,
   PACKS,
   TRIAL_SKUS,
@@ -107,8 +108,6 @@ const RULES = [
     "Each delivered image is kept as its own version. Regenerating a pose adds a version beside the earlier ones.",
   ],
 ];
-
-const CONTACT_EMAIL = "pawan@youthnic.shop";
 
 const CONTACT_LINKS = [
   ["Email", CONTACT_EMAIL, `mailto:${CONTACT_EMAIL}`],
@@ -421,8 +420,9 @@ function Pricing({ onStartFree }: { onStartFree: () => void }) {
           Start free. Then buy shoots by the pack.
         </h2>
         <p className="mt-5 max-w-2xl text-base leading-relaxed text-secondary sm:text-lg">
-          One SKU is one product, shot as a full six-frame set. Your store
-          starts with {TRIAL_SKUS} free; after that you buy SKUs in packs.
+          One SKU is one product, shot as a full six-frame set. Your first
+          one is free once your email is verified; after that you buy SKUs
+          in packs.
         </p>
 
         <MotionConfig reducedMotion="user">
@@ -481,31 +481,21 @@ function Pricing({ onStartFree }: { onStartFree: () => void }) {
                 )}
               </p>
               <p className="mt-4 text-lg font-semibold text-on-surface">
-                {pack.skus} SKUs, {pack.skus * FRAMES_PER_SKU} catalog frames
+                {pack.skus} {pack.skus === 1 ? "SKU" : "SKUs"},{" "}
+                {pack.skus * FRAMES_PER_SKU} catalog frames
               </p>
               <p className="mt-1 text-base text-secondary">{pack.rate}</p>
-              {trial ? (
-                <button
-                  type="button"
-                  onClick={onStartFree}
-                  className="mt-8 cursor-pointer rounded-full bg-primary px-6 py-3 text-sm font-bold text-on-primary transition-colors hover:bg-primary-container"
-                >
-                  Start free studio
-                </button>
-              ) : (
-                <>
-                  <a
-                    href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(
-                      `Youthnic AI Studio: ${pack.skus} SKU pack (${rupees(pack.price)})`,
-                    )}`}
-                    className="mt-8 inline-block rounded-full bg-primary px-6 py-3 text-sm font-bold text-on-primary transition-colors hover:bg-primary-container"
-                  >
-                    Ask for the {pack.skus} SKU pack
-                  </a>
-                  <p className="mt-3 text-sm text-secondary">
-                    Opens an email to {CONTACT_EMAIL}.
-                  </p>
-                </>
+              <button
+                type="button"
+                onClick={onStartFree}
+                className="mt-8 cursor-pointer rounded-full bg-primary px-6 py-3 text-sm font-bold text-on-primary transition-colors hover:bg-primary-container"
+              >
+                Start free studio
+              </button>
+              {!trial && (
+                <p className="mt-3 text-sm text-secondary">
+                  Packs are requested from Credits once you are signed in.
+                </p>
               )}
             </div>
           </div>
