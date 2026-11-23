@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   animate,
   motion,
@@ -33,6 +32,8 @@ import {
   rupees,
 } from "../../lib/pricingPacks";
 import { KITKAT_KATTHA, WINE_KAFTAN } from "./showcaseShoots";
+import { POSTS } from "../site/content";
+import { SiteFooter } from "../site/SiteChrome";
 
 const SECTION = "scroll-mt-16 px-5 py-20 sm:px-8 lg:px-10 lg:py-28 xl:px-14";
 const HEADING =
@@ -648,6 +649,45 @@ export function LoginShowcase({
       <Pricing onStartFree={() => onStart("signup")} />
 
       <section
+        id="guides"
+        className={`${SECTION} border-t border-outline-variant/50 bg-background`}
+      >
+        <div className="mx-auto grid max-w-[1560px] gap-12 lg:grid-cols-[0.82fr_1.18fr] lg:gap-16">
+          <div>
+            <h2 className={`${HEADING} text-on-surface`}>
+              Guides for catalog shoots.
+            </h2>
+            <p className="mt-5 max-w-md text-base leading-relaxed text-secondary sm:text-lg">
+              What to upload, which frames a listing needs, and when a studio
+              is still the better choice.
+            </p>
+          </div>
+          <ul className="divide-y divide-outline-variant/50 border-y border-outline-variant/50">
+            {POSTS.slice(0, 4).map((post) => (
+              <li key={post.slug}>
+                <a href={`/blog/${post.slug}`} className="group block py-6">
+                  <h3 className="font-syne text-lg font-bold leading-snug text-on-surface underline-offset-4 group-hover:underline">
+                    {post.title}
+                  </h3>
+                  <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-secondary">
+                    {post.description}
+                  </p>
+                </a>
+              </li>
+            ))}
+            <li>
+              <a
+                href="/blog"
+                className="block py-6 text-sm font-bold text-primary underline-offset-4 hover:underline"
+              >
+                All guides
+              </a>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section
         id="contact"
         className={`${SECTION} bg-on-surface text-inverse-on-surface`}
       >
@@ -694,22 +734,7 @@ export function LoginShowcase({
         </div>
       </section>
 
-      <footer className="border-t border-white/10 bg-on-surface px-5 py-10 text-sm text-inverse-on-surface/75 sm:px-8 lg:px-10 xl:px-14">
-        <div className="mx-auto flex max-w-[1560px] flex-wrap items-center justify-between gap-4">
-          <p>
-            <span className="font-syne text-base font-bold text-white">
-              Youthnic AI Studio
-            </span>{" "}
-            Six-pose catalog photoshoots from your product photos.
-          </p>
-          <Link
-            to="/docs"
-            className="font-semibold text-white underline-offset-4 hover:underline"
-          >
-            Read the documentation
-          </Link>
-        </div>
-      </footer>
+      <SiteFooter />
     </>
   );
 }

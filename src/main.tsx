@@ -13,6 +13,12 @@ if (window.location.pathname === '/flow-example') {
   void import('./features/history/generation-flow/NodeWorkflowExample.tsx').then(({ NodeWorkflowExample }) => {
     root.render(<StrictMode><NodeWorkflowExample /></StrictMode>)
   })
+} else if (/^\/(blog|privacy|terms|refund-policy)(\/|$)/.test(window.location.pathname)) {
+  // The blog and legal pages are reading pages: no sign-in and no app bundle. The build
+  // also writes them as static HTML (scripts/prerender-site.mjs), which this replaces.
+  void import('./features/site/PublicSite.tsx').then(({ default: PublicSite }) => {
+    root.render(<StrictMode><PublicSite /></StrictMode>)
+  })
 } else {
   void Promise.all([
     import('./App.tsx'),

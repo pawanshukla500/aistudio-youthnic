@@ -121,6 +121,7 @@ Six-pose fashion catalog photoshoots generated from product references.
 | Pipeline, version history, LangGraph architecture | `docs/GENERATION_ORCHESTRATION.md` |
 | Repository Knowledge Graph (`/graphify`) | `graphify-out/graph.json`, `graphify-out/GRAPH_REPORT.md` |
 | In-app user docs (source of `src/features/docs/docsData.ts`) | `youthnic-ai-studio-docs/` |
+| Public site: blog posts, legal pages, SEO tags, sitemap | `content/`, `src/features/site/`, `scripts/prerender-site.mjs` |
 
 ## Checks before pushing
 
