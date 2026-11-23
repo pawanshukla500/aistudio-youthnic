@@ -19,7 +19,7 @@ const STEPS: Array<{ key: ShootStep; name: string; text: string }> = [
   {
     key: "upload",
     name: "Upload",
-    text: "Front and back photos are required. A fabric close-up, bottom wear, a mannequin shot, a model face and a style reference are optional.",
+    text: "Front and back photos are required; a saree also needs its spread pallu and a body fabric detail. A fabric close-up, bottom wear, a mannequin shot, a model face and a style reference are optional.",
   },
   {
     key: "analyse",
@@ -29,7 +29,7 @@ const STEPS: Array<{ key: ShootStep; name: string; text: string }> = [
   {
     key: "plan",
     name: "Plan",
-    text: "Six poses are planned for this product. If your style reference shows a person, Pose 4 takes their posture and camera angle.",
+    text: "Six poses are planned for this product. If your style reference shows a person, Pose 4 takes their posture and camera angle, unless a product rule blocks it: a saree is never shot reclining.",
   },
   {
     key: "generate",
@@ -52,7 +52,7 @@ const FRAME_NOTES = [
   "Head to toe from the front. This frame fixes the model, the set and the light for the other five.",
   "A three-quarter turn that shows the drape and the side construction.",
   "The back as your back photo shows it: neck shape, ties, closures, seams, print placement and length.",
-  "If your style reference shows a person, this frame takes their posture, camera angle and framing, in your garment.",
+  "If your style reference shows a person, this frame takes their posture, camera angle and framing, in your garment, unless a product rule blocks that posture.",
   "A natural face with a sharp view of the garment's signature work, such as yoke embroidery or neckline craft.",
   "A tight close-up of the most distinctive feature, cropped where it sits: a cuff, a border, a back closure, a print.",
 ];
@@ -60,7 +60,7 @@ const FRAME_NOTES = [
 const RULES = [
   [
     "Clothing comes only from your product photos.",
-    "The outfit in a style reference is discarded. That image supplies the backdrop, the floor, the lighting and, for Pose 4, the posture.",
+    "The outfit in a style reference is discarded. That image supplies the backdrop, the floor, the lighting and, when Pose 4 adopts it, the posture.",
   ],
   [
     "The back view follows your back photo.",
@@ -479,7 +479,7 @@ export function LoginShowcase({
             Six frames, one set.
           </h2>
           <p className="mt-5 max-w-2xl text-base leading-relaxed text-secondary sm:text-lg">
-            Every shoot delivers the same six frames in the same order, so a
+            Every new shoot delivers the same six frames in the same order, so a
             whole catalog reads as one brand. The arch and floor in these
             diagrams stay put because the set does too: only the pose, the
             camera angle and the framing change.

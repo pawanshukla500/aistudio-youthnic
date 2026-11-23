@@ -50,7 +50,10 @@ Deno.test("functions invoke base stays a single slash before app-api", () => {
 Deno.test("Option 2 Login integrates CollectionSurfer in Light Atelier Mode with default Magnetic + Glide and no badge/runway-switcher clutter", () => {
   assertEquals(loginSource.includes("<CollectionSurfer"), true);
   assertEquals(loginSource.includes('variant="magnetic"'), true);
-  assertEquals(loginSource.includes("autoPlay={true}"), true);
+  // The runway glides only while the hero is on screen: the showcase sections cover it below the fold
+  assertEquals(loginSource.includes("autoPlay={heroInView}"), true);
+  assertEquals(loginSource.includes("const heroInView = useInView(heroRef);"), true);
+  assertEquals(loginSource.includes("<section ref={heroRef}"), true);
   assertEquals(loginSource.includes("showOverlays={false}"), true);
   // Light Atelier Mode tokens used; no #070609 dark mode, saree mannequin box, or removed pills
   assertEquals(loginSource.includes("bg-background"), true);

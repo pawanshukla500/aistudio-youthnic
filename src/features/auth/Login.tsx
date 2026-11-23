@@ -1,6 +1,6 @@
-import { useState, type FormEvent, type MouseEvent } from "react";
+import { useRef, useState, type FormEvent, type MouseEvent } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
-import { useReducedMotion } from "framer-motion";
+import { useInView, useReducedMotion } from "framer-motion";
 import {
   ArrowDown,
   ArrowRight,
@@ -29,9 +29,9 @@ const SECTIONS = [
 ];
 
 const HERO_FACTS = [
-  ["6", "frames in every shoot"],
+  ["6", "frames in every new shoot"],
   ["3:4", "at 2K, 1536 × 2048"],
-  ["2", "product photos required"],
+  ["2", "photos to start, 4 for a saree"],
 ];
 
 interface LoginProps {
@@ -42,6 +42,9 @@ export function Login({ redirect }: LoginProps) {
   const { signIn, signUp } = useFirebaseAuth();
   const navigate = useNavigate();
   const scrollBehavior = useReducedMotion() ? "auto" : "smooth";
+  // The runway glides only while the hero is on screen; below it the sections cover it.
+  const heroRef = useRef<HTMLElement>(null);
+  const heroInView = useInView(heroRef);
   const [searchParams] = useSearchParams();
   const rawRedirect = redirect || searchParams.get("redirect") || "";
   const targetRedirect =
@@ -130,7 +133,7 @@ export function Login({ redirect }: LoginProps) {
       <div className="h-0" aria-hidden="true">
         <CollectionSurfer
           variant="magnetic"
-          autoPlay={true}
+          autoPlay={heroInView}
           autoPlaySpeed={46}
           showOverlays={false}
           perspectiveOrigin="16% 22%"
@@ -188,7 +191,7 @@ export function Login({ redirect }: LoginProps) {
         </header>
 
         {/* Hero: the headline and the auth card over the runway */}
-        <section className="pointer-events-none">
+        <section ref={heroRef} className="pointer-events-none">
           <div className="mx-auto grid min-h-[calc(100svh-4rem)] max-w-[1560px] gap-x-10 gap-y-8 px-5 pb-10 pt-8 sm:px-8 lg:grid-cols-[1.08fr_0.92fr] lg:grid-rows-[1fr_auto] lg:px-10 lg:pb-12 lg:pt-10 xl:px-14">
             <div className="pointer-events-auto self-center lg:col-start-1 lg:row-start-1">
               <h1 className="font-syne text-[clamp(2.6rem,5.6vw,5.5rem)] font-bold leading-[0.98] tracking-tighter text-on-surface">
