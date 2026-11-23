@@ -69,6 +69,9 @@ const REQUIRED_POSE_COUNT = 6;
 const AUTO_ANALYZE_DELAY_MS = 1000;
 const NOTE_ANALYZE_DELAY_MS = 2500;
 const ANALYZE_GATEWAY_RECOVERY_ATTEMPTS = 2;
+// Names this browser tab to studio.analyze, which stops the tab's earlier analysis when a newer one starts.
+// Held outside the component: leaving the Studio and coming back must not look like another tab.
+let studioAnalysisClientId = "";
 const ANALYZE_GATEWAY_RECOVERY_DELAY_MS = 1500;
 
 const defaultOptions: OutputOptions = {
@@ -690,6 +693,7 @@ export function Studio() {
           size: reference.file.size,
         })),
         forceRefresh,
+        analysisClientId: (studioAnalysisClientId ||= crypto.randomUUID()),
       };
       const result = await analyzeReferences(analysisArgs, { signal: controller.signal }) as StudioAnalysis;
       if (!acceptAnalysis(result)) return;

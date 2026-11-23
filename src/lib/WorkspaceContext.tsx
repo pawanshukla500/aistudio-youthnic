@@ -1,5 +1,5 @@
 // oxlint-disable react/only-export-components -- provider and consumer hook intentionally share the workspace contract.
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useFirebaseAuth } from "./FirebaseAuthContext";
 import { supabase } from "./supabase";
 import { getErrorMessage } from "./errors";
@@ -53,6 +53,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [workspace, setWorkspace] = useState<WorkspaceValue | null | undefined>(undefined);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
+  /** The Firebase user the workspace on screen was loaded for. */
+  const loadedUidRef = useRef("");
 
   useEffect(() => {
     const refresh = () => setRetry((current) => current + 1);
@@ -63,16 +65,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true;
     if (!firebaseUser) {
+      loadedUidRef.current = "";
       setWorkspace(undefined);
       setError("");
       return () => { active = false; };
     }
-    setWorkspace(undefined);
+    // A refresh (credits spent, profile or AI models saved) keeps the loaded workspace on screen:
+    // blanking it unmounted the whole app, which dropped the page's state and its success notice.
+    const uid = firebaseUser.uid;
+    setWorkspace((current) => (current && loadedUidRef.current === uid ? current : undefined));
     setError("");
     void firebaseUser.getIdToken(true).then(async () => {
       const { data, error: rpcError } = await supabase.rpc("app_current_workspace");
       if (rpcError) throw rpcError;
-      if (active) setWorkspace(normalizeWorkspace(data as Record<string, any>));
+      if (active) {
+        loadedUidRef.current = uid;
+        setWorkspace(normalizeWorkspace(data as Record<string, any>));
+      }
     }).catch((reason) => {
       if (active) setError(getErrorMessage(reason, "Could not load your Supabase workspace."));
     });

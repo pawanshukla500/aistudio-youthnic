@@ -737,7 +737,7 @@ export function Planning() {
                     saving={busy === "styling-plan"}
                     saveLabel="Save changes"
                     approveLabel={selected.awaitingStylingApproval ? "Approve and start generating" : "Re-approve"}
-                    disabled={!canEditReferences}
+                    disabled={!canEditReferences && selected.status !== "awaiting_styling_approval"}
                     onSave={(plan) => saveStylingPlan(plan, false)}
                     onApprove={(plan) => saveStylingPlan(plan, true)}
                   />

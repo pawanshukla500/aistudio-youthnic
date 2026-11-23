@@ -33,6 +33,9 @@ type ImportPreview = {
   invalidDeadlines: number;
 };
 
+/** catalogProduction.bulkGenerate starts at most this many items per request (BULK_GENERATE_LIMIT on the server). */
+const BULK_GENERATE_LIMIT = 100;
+
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error || "Unknown error");
 }
@@ -415,12 +418,20 @@ export function CatalogProduction() {
     try {
       const result = await invokeAppApi<{ inserted: number; skipped: number; errors: unknown[]; workItemIds: string[]; queueableWorkItemIds: string[] }>("catalogProduction.importGoogleSheet", { rows: pending.rows });
       let queuedMessage = "";
+      let startFailed = false;
       if (pending.autoStart && result.queueableWorkItemIds.length) {
-        const queued = await invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", { workItemIds: result.queueableWorkItemIds });
-        queuedMessage = ` Started generation for ${queued.queued} queue-ready SKU${queued.queued === 1 ? "" : "s"}.`;
+        try {
+          const waiting = Math.max(0, result.queueableWorkItemIds.length - BULK_GENERATE_LIMIT);
+          const queued = await invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", { workItemIds: result.queueableWorkItemIds.slice(0, BULK_GENERATE_LIMIT) });
+          queuedMessage = ` Started generation for ${queued.queued} queue-ready SKU${queued.queued === 1 ? "" : "s"}.${waiting ? ` ${waiting} more are ready: start them with Auto-Start.` : ""}`;
+        } catch (error) {
+          // The rows are imported; only the start failed, so it must not read as a failed import.
+          startFailed = true;
+          queuedMessage = ` ${errorMessage(error)}`;
+        }
       }
       setNotice({
-        tone: result.errors.length ? "error" : "success",
+        tone: result.errors.length || startFailed ? "error" : "success",
         message: `Import finished: ${result.inserted} inserted, ${result.skipped} skipped${result.errors.length ? `, ${result.errors.length} failed` : ""}.${queuedMessage}`,
       });
       setImportDialog(null);
@@ -500,12 +511,15 @@ export function CatalogProduction() {
   const confirmGeneration = async () => {
     if (!generationDialog) return;
     const pending = generationDialog;
+    const startIds = pending.ids.slice(0, BULK_GENERATE_LIMIT);
+    const waitingIds = pending.ids.slice(BULK_GENERATE_LIMIT);
     try {
       await runAction(pending.mode === "selected" ? "bulkGenerate" : "autoStart", () => invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", {
-        workItemIds: pending.ids,
-      }), `Started generation for ${pending.ids.length} catalog item${pending.ids.length === 1 ? "" : "s"}.`);
+        workItemIds: startIds,
+      }), `Started generation for ${startIds.length} catalog item${startIds.length === 1 ? "" : "s"}.${waitingIds.length ? ` ${waitingIds.length} more are waiting: start them next.` : ""}`);
       setGenerationDialog(null);
-      setSelectedTableIds(new Set());
+      // Items past the limit stay selected for the next start.
+      setSelectedTableIds(new Set(pending.mode === "selected" ? waitingIds : []));
     } catch {
       // runAction already surfaces the actionable backend error and preserves the
       // selection so the manager can fix the affected SKU and retry.

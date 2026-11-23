@@ -2397,6 +2397,8 @@ async function analyze(request: Request, args: JsonRecord) {
   // The Studio's retry after `analysisPending` (resumeAnalysis) never discards the result it waits for.
   const flight = studioAnalysisFlights.acquire(flightKey, orgId, {
     discardHeld: args.forceRefresh === true && args.resumeAnalysis !== true,
+    // The Studio tab: its earlier analysis of other inputs (a photo added since) is stopped now.
+    clientId: String(args.analysisClientId || "").slice(0, 64),
   }, async (flightSignal) => {
   // House preference is an analysis input, so it belongs in the cache identity:
   // otherwise a cached plan keeps proposing the styling a stylist corrected, for
@@ -6838,8 +6840,9 @@ async function deleteCatalogOperation(request: Request, args: JsonRecord) {
   if (String(batch.queue_status) === "running") throw new Error("A catalog that is currently scheduling cannot be deleted. Wait for it to finish or stall.");
   
   // Check for active generation jobs that might be currently running in workers
-  const { data: activeJobs, error: activeJobsError } = await service.from("generation_jobs").select("id").eq("batch_id", batchId).in("status", ["queued", "processing"]).limit(1);
-  if (activeJobsError) console.error(activeJobsError.message);
+  // generation_jobs is keyed by job_id: selecting "id" failed, and the failure was only logged, so this guard never fired.
+  const { data: activeJobs, error: activeJobsError } = await service.from("generation_jobs").select("job_id").eq("batch_id", batchId).in("status", ["queued", "processing"]).limit(1);
+  if (activeJobsError) throw new Error(`Could not check this catalog for active generation jobs: ${activeJobsError.message}`);
   if (activeJobs && activeJobs.length > 0) {
     throw new Error("This catalog currently has active generation jobs. Please cancel them in the History tab before deleting.");
   }
@@ -8542,7 +8545,8 @@ async function seedEventsOperation(request: Request) {
       category: "marketplace_sale",
       start_date: window.startDate,
       end_date: window.endDate,
-      preparation_deadline: shiftIsoDate(window.startDate, priority === "urgent" ? 45 : 40),
+      // Before the sale starts, like the festival and baseline rows; a positive shift put it weeks after.
+      preparation_deadline: shiftIsoDate(window.startDate, priority === "urgent" ? -45 : -40),
       priority,
       applicable_states: ["Pan-India"],
       target_marketplaces: [String(campaign.marketplace || "All")],
@@ -9565,6 +9569,12 @@ async function sendCatalogHandoffDigestOperation(request: Request, args: JsonRec
     forceResend,
     existingDeliveryId: resendDeliveryId || undefined,
   });
+  // A skipped send is not a send: both callers showed "handoff sent" and the audit log recorded one.
+  if (!result.sent) {
+    throw new Error((result as JsonRecord).reason === "approval_state_changed"
+      ? "No email was sent: an approval changed while the handoff was being prepared. Refresh and send again."
+      : "No email was sent: today's handoff has already gone out or is still sending. Use Resend on that delivery in Handoff administration.");
+  }
   await service.from("audit_logs").insert({
     organization_id: workspace.organization.id, actor_member_id: workspace.member.id, actor_email: workspace.user.email,
     action: forceResend ? "catalog.handoff_digest.resent" : "catalog.handoff_digest.sent",
@@ -10475,6 +10485,11 @@ const appRequestHandler = async (request: Request) => {
           } catch (err: any) {
             scheduleOutcomes.push({ batchId, success: false, error: err.message });
           }
+        }
+        // The work items are queued by now; say so instead of reporting a start that did not happen.
+        const notStarted = scheduleOutcomes.filter((outcome) => !outcome.success);
+        if (notStarted.length) {
+          throw new Error(`The items were queued, but generation did not start for ${notStarted.length} of ${scheduleOutcomes.length} catalog(s): ${notStarted[0].error || "unknown error"}`);
         }
         return { ...result, scheduleOutcomes };
       },

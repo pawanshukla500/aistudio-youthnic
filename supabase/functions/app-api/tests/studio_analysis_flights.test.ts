@@ -139,6 +139,45 @@ Deno.test("an abandoned flight is aborted when its organization starts other inp
   assert(waitedOn.controller.signal.aborted && attached.controller.signal.aborted);
 });
 
+Deno.test("a Studio tab that starts other inputs stops its earlier analysis at once, though its cancelled request still looks connected", async () => {
+  const flights = createAnalysisFlights<Result>();
+  const never = () => new Promise<Result>(() => {});
+  // Photos added one by one: each set starts an analysis and the Studio cancels the previous request,
+  // but the server never sees that request end, so it still counts as a waiter.
+  // Like studio.analyze, every request acquires its flight and then waits on it.
+  const requests = new AbortController();
+  const pending = { analysisPending: true as const, retryAfterMs: 1_000 };
+  const ask = (key: string, orgId: string, clientId?: string) => {
+    const flight = flights.acquire(key, orgId, { clientId }, never);
+    return { flight, answer: flights.wait(flight, requests.signal, Date.now() + 60_000) };
+  };
+  const twoPhotos = ask("org:2-photos", "org", "tab-1");
+  const shared = ask("org:shared", "org", "tab-1");
+  assert(twoPhotos.flight.controller.signal.aborted, "the tab moved on, so nobody wants the two-photo analysis");
+  assertEquals(await twoPhotos.answer, pending, "the cancelled request ends quietly");
+  assertEquals(twoPhotos.flight.waiters, 0);
+
+  // A teammate on the same inputs keeps the flight alive when the first tab moves on.
+  assertEquals(ask("org:shared", "org", "tab-2").flight, shared.flight);
+  const legacy = ask("org:legacy", "org");
+  assertEquals(ask("org:legacy", "org", "tab-1").flight, legacy.flight);
+  const otherOrg = ask("other:a", "other", "tab-1");
+  const final = ask("org:10-photos", "org", "tab-1");
+  assert(!shared.flight.controller.signal.aborted, "tab-2 still wants it");
+  assert(!legacy.flight.controller.signal.aborted, "a request without a client id is never superseded by one with it");
+  assert(!otherOrg.flight.controller.signal.aborted, "a client id only reaches its own organization");
+
+  // The Studio's own retry (resumeAnalysis, same inputs) joins its flight and stops nothing.
+  assertEquals(ask("org:10-photos", "org", "tab-1").flight, final.flight);
+  ask("org:next-product", "org", "tab-2");
+  assert(shared.flight.controller.signal.aborted, "its last tab moved on");
+  assertEquals(await shared.answer, pending);
+  assert(!final.flight.controller.signal.aborted, "tab-1 is still on it");
+  requests.abort();
+  assertEquals(await final.answer, pending, "a disconnect still ends only the wait");
+  assert(!final.flight.controller.signal.aborted);
+});
+
 Deno.test("the Studio stops asking after its total wait and on cancel", async () => {
   let clock = 0;
   const pending = async () => {

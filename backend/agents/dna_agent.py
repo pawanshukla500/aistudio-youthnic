@@ -652,7 +652,9 @@ class ProductDNAAgent:
         )
 
         dna: Optional[ProductDNAV2] = None
-        seed_analysis = state.get("seed_analysis") if not force_refresh else None
+        # force_refresh skips the stored versions above, not the seed: a forced Studio re-analysis
+        # sends its fresh result, and dropping it cost a second 28-35s vision call. "Retry DNA" sends none.
+        seed_analysis = state.get("seed_analysis")
         seed_raw = self._raw_from_seed_analysis(seed_analysis) if seed_analysis else None
         if seed_raw is not None:
             seed_provider = str((seed_analysis or {}).get("provider") or "meta").strip() or "meta"

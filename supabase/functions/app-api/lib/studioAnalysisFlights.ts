@@ -26,6 +26,10 @@ export type AnalysisFlight<T> = {
   readonly controller: AbortController;
   /** Requests waiting on this flight right now. */
   waiters: number;
+  /** Studio tabs (client ids) that asked for this flight and have not started other inputs since. */
+  readonly owners: Set<string>;
+  /** A request without a client id asked for it: only the disconnect rule below can abandon it. */
+  unowned: boolean;
   /** A request was answered "pending"; its client asks again before this time. */
   reattachBy: number;
   /** Set when the flight finished with nobody waiting: its outcome is held for the next call. */
@@ -39,20 +43,40 @@ export function createAnalysisFlights<T>(now: () => number = Date.now) {
    * Joins the running flight for `key`, claims the outcome it finished with while
    * nobody waited, or starts `run`. `discardHeld` (a fresh forceRefresh) drops a
    * held outcome; it never interrupts a running flight.
+   *
+   * `clientId` names the Studio tab asking. A tab works on one input set at a time,
+   * so asking for other inputs gives up its earlier flights, and a flight no tab
+   * still wants is aborted at once. The disconnect rule below is not enough in
+   * production: the proxy logged the Studio's cancelled requests as 499 while their
+   * flights ran to the end (37% of completed analyses, 20-23 Nov 2026).
    */
   const acquire = (
     key: string,
     orgId: string,
-    options: { discardHeld?: boolean },
+    options: { discardHeld?: boolean; clientId?: string },
     run: (signal: AbortSignal) => Promise<T>,
   ): AnalysisFlight<T> => {
     const at = now();
+    const clientId = options.clientId || "";
     for (const [otherKey, other] of flights) {
       if (other.settledAt !== undefined && at - other.settledAt > ANALYSIS_RESULT_HOLD_MS) flights.delete(otherKey);
     }
+    if (clientId) {
+      for (const [otherKey, other] of flights) {
+        if (otherKey === key || other.orgId !== orgId || other.settledAt !== undefined) continue;
+        if (other.owners.delete(clientId) && other.owners.size === 0 && !other.unowned) {
+          other.controller.abort();
+          flights.delete(otherKey);
+        }
+      }
+    }
     const existing = flights.get(key);
     if (existing) {
-      if (existing.settledAt === undefined) return existing;
+      if (existing.settledAt === undefined) {
+        if (clientId) existing.owners.add(clientId);
+        else existing.unowned = true;
+        return existing;
+      }
       flights.delete(key);
       if (!options.discardHeld) return existing;
     }
@@ -67,7 +91,10 @@ export function createAnalysisFlights<T>(now: () => number = Date.now) {
     const controller = new AbortController();
     // Registered before `run` starts its first query.
     const promise = Promise.resolve().then(() => run(controller.signal));
-    const flight: AnalysisFlight<T> = { promise, orgId, controller, waiters: 0, reattachBy: 0 };
+    const flight: AnalysisFlight<T> = {
+      promise, orgId, controller, waiters: 0, reattachBy: 0,
+      owners: new Set(clientId ? [clientId] : []), unowned: !clientId,
+    };
     flights.set(key, flight);
     const settle = () => {
       if (flights.get(key) !== flight) return;
@@ -96,8 +123,12 @@ export function createAnalysisFlights<T>(now: () => number = Date.now) {
       const stop = new Promise<"deadline" | "aborted">((resolve) => {
         timer = setTimeout(() => resolve("deadline"), Math.max(0, deadlineAt - now()));
         onAbort = () => resolve("aborted");
-        if (signal.aborted) onAbort();
-        else signal.addEventListener("abort", onAbort, { once: true });
+        // A superseded flight ends the wait of the request that was cancelled for it.
+        if (signal.aborted || flight.controller.signal.aborted) onAbort();
+        else {
+          signal.addEventListener("abort", onAbort, { once: true });
+          flight.controller.signal.addEventListener("abort", onAbort, { once: true });
+        }
       });
       const outcome = await Promise.race([flight.promise.then((value) => ({ value })), stop]);
       if (typeof outcome === "object") return outcome.value;
@@ -106,7 +137,10 @@ export function createAnalysisFlights<T>(now: () => number = Date.now) {
     } finally {
       flight.waiters -= 1;
       if (timer !== undefined) clearTimeout(timer);
-      if (onAbort) signal.removeEventListener("abort", onAbort);
+      if (onAbort) {
+        signal.removeEventListener("abort", onAbort);
+        flight.controller.signal.removeEventListener("abort", onAbort);
+      }
     }
   };
 

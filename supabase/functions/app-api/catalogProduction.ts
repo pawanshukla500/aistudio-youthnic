@@ -1278,7 +1278,8 @@ export async function updateCatalogWorkItem(
     special_instructions: specialInstructions,
     remarks: text(args.remarks) || null,
     blocked_reason: text(args.blockedReason),
-    campaign_event_details: args.campaignEventDetails && typeof args.campaignEventDetails === "object" ? args.campaignEventDetails : {},
+    // Only when sent: the brief editor never sends it, and writing {} erased the stored details on every save.
+    ...(args.campaignEventDetails && typeof args.campaignEventDetails === "object" ? { campaign_event_details: args.campaignEventDetails } : {}),
   };
   const { data: currentItem, error: currentItemError } = await service.from("catalog_work_items")
     .select("id,status,generation_status,qc_status")
@@ -1690,13 +1691,20 @@ export async function reconcileExistingGenerations(
   return { exactMatches, ambiguous };
 }
 
+export const BULK_GENERATE_LIMIT = 100;
+
 export async function bulkGenerateCatalogWorkItems(
   service: SupabaseClient,
   workspace: CatalogWorkspace,
   args: JsonRecord,
 ) {
-  const workItemIds = [...new Set((Array.isArray(args.workItemIds) ? args.workItemIds : []).map((id) => text(id)).filter(Boolean))].slice(0, 100);
+  const workItemIds = [...new Set((Array.isArray(args.workItemIds) ? args.workItemIds : []).map((id) => text(id)).filter(Boolean))];
   if (!workItemIds.length) throw new Error("Select at least one catalog item.");
+  // One request starts at most 100 paid shoots. A longer list used to be cut to its first 100
+  // without a word, while the screen reported every item as started.
+  if (workItemIds.length > BULK_GENERATE_LIMIT) {
+    throw new Error(`Start at most ${BULK_GENERATE_LIMIT} catalog items at a time (${workItemIds.length} were sent).`);
+  }
 
   const { data: workItems, error } = await service.from("catalog_work_items")
     .select("*")

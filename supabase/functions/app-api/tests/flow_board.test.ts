@@ -1,8 +1,8 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { poseGroupBusyStatus, poseGroupQa, signedSessionReferences } from "../catalogProduction.ts";
+import { BULK_GENERATE_LIMIT, bulkGenerateCatalogWorkItems, poseGroupBusyStatus, poseGroupQa, signedSessionReferences } from "../catalogProduction.ts";
 import { adoptedPostures, boardFromGenerationData, referencesFromSession } from "../../../../src/features/history/generation-flow/boardFromGenerationData.ts";
 import { neighborIds, qaVerdict } from "../../../../src/features/history/generation-flow/flowLinks.ts";
-import { flowSummaryFrom, settingsLine } from "../../../../src/features/history/generation-flow/flowSummary.ts";
+import { deadlineInputValue, flowSummaryFrom, settingsLine } from "../../../../src/features/history/generation-flow/flowSummary.ts";
 import { formatModelName } from "../../../../src/lib/modelLabels.ts";
 import { skuFileStem, skuLabel } from "../../../../src/lib/skuLabel.ts";
 
@@ -175,4 +175,27 @@ Deno.test("History shows the SKU code, or the product name for clones that store
   assertEquals(skuLabel({ skuId: "", skuName: "" }), "Untitled shoot");
   assertEquals(skuFileStem({ skuId: "3af00930-7d7a-4431-b730-a7b273f2387b", skuName: "B161-Kishori-Bottle Green" }), "B161-Kishori-Bottle-Green");
   assertEquals(skuFileStem({ skuId: "  ", skuName: "///" }), "Youthnic");
+});
+
+Deno.test("saving the brief without touching the deadline leaves it where it was, in any time zone", () => {
+  // The editor used the first 16 characters of the stored UTC text as local time: in IST each save moved it 5h30m earlier.
+  for (const stored of ["2026-11-25T10:00:00+00:00", "2026-03-08T23:45:00Z", "2026-12-31T18:30:00.000Z"]) {
+    const shown = deadlineInputValue(stored);
+    assert(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(shown), "the format a datetime-local input takes");
+    // What saveBrief sends back for an untouched field.
+    assertEquals(new Date(shown).getTime(), Date.parse(stored));
+  }
+  assertEquals(deadlineInputValue(null), "");
+  assertEquals(deadlineInputValue("not a date"), "");
+});
+
+Deno.test("bulk generate refuses a list past its limit instead of starting the first 100 in silence", async () => {
+  const reached: string[] = [];
+  const service = { from: (table: string) => (reached.push(table), {}) };
+  const ids = Array.from({ length: BULK_GENERATE_LIMIT + 1 }, (_, index) => `item-${index}`);
+  const workspace = { organization: { id: "org" } };
+  // deno-lint-ignore no-explicit-any
+  const error = await bulkGenerateCatalogWorkItems(service as any, workspace as any, { workItemIds: ids }).catch((reason) => reason);
+  assertEquals((error as Error).message, `Start at most ${BULK_GENERATE_LIMIT} catalog items at a time (${ids.length} were sent).`);
+  assertEquals(reached, [], "nothing is read or written for a refused list");
 });
