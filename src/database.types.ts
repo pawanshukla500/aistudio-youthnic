@@ -1953,6 +1953,74 @@ export type Database = {
           },
         ];
       };
+      credit_recharges: {
+        Row: {
+          amount_inr: number;
+          approved_by_member_id: string | null;
+          created_at: string;
+          id: string;
+          organization_id: string;
+          pack_skus: number;
+          paid_at: string | null;
+          provider: string;
+          provider_ref: string | null;
+          requested_by_member_id: string | null;
+          status: string;
+          updated_at: string;
+        };
+        ComputedFields: never;
+        Insert: {
+          amount_inr: number;
+          approved_by_member_id?: string | null;
+          created_at?: string;
+          id?: string;
+          organization_id: string;
+          pack_skus: number;
+          paid_at?: string | null;
+          provider?: string;
+          provider_ref?: string | null;
+          requested_by_member_id?: string | null;
+          status?: string;
+          updated_at?: string;
+        };
+        Update: {
+          amount_inr?: number;
+          approved_by_member_id?: string | null;
+          created_at?: string;
+          id?: string;
+          organization_id?: string;
+          pack_skus?: number;
+          paid_at?: string | null;
+          provider?: string;
+          provider_ref?: string | null;
+          requested_by_member_id?: string | null;
+          status?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "credit_recharges_approved_by_member_id_fkey";
+            columns: ["approved_by_member_id"];
+            isOneToOne: false;
+            referencedRelation: "organization_members";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "credit_recharges_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "credit_recharges_requested_by_member_id_fkey";
+            columns: ["requested_by_member_id"];
+            isOneToOne: false;
+            referencedRelation: "organization_members";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       event_automation_settings: {
         Row: {
           created_at: string;
@@ -5236,6 +5304,15 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      app_approve_credit_recharge: {
+        Args: {
+          p_approved_by: string;
+          p_provider?: string;
+          p_provider_ref?: string;
+          p_recharge_id: string;
+        };
+        Returns: Json;
+      };
       app_consume_seller_credit: {
         Args: {
           p_org_id: string;
@@ -5255,6 +5332,14 @@ export type Database = {
           p_org_id: string;
         };
         Returns: undefined;
+      };
+      app_request_credit_recharge: {
+        Args: {
+          p_member_id: string;
+          p_org_id: string;
+          p_pack_skus: number;
+        };
+        Returns: Json;
       };
       claim_due_catalog_batch: {
         Args: Record<PropertyKey, never>;
