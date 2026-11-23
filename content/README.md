@@ -38,4 +38,4 @@ The first paragraph.
 
 ## Site address
 
-The address used in the sitemap and page tags is `https://aistudio.youthnic.com`. Set `VITE_SITE_URL` at build time to change it.
+The address used in the sitemap and page tags is `https://aistudio.youthnic.com`. To change it, set the repository variable `VITE_SITE_URL` (the deploy workflow passes it to the Docker build), or the environment variable of the same name for a local build.

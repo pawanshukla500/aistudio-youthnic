@@ -16,7 +16,9 @@ A pack is a prepaid number of SKUs. One SKU is one product shot as a full six-fr
 
 ## If a shoot fails
 
-If a shoot fails to start, or fails because of a fault on our side, the SKU is returned to your balance automatically. You do not need to ask.
+If a shoot fails to start, the SKU is returned to your balance automatically. You do not need to ask.
+
+If a shoot starts and then fails before all six frames are delivered, write to us with the SKU code and we will review it.
 
 ## If a frame is wrong
 

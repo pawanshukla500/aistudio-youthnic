@@ -32,6 +32,18 @@ export const HOME_META: PageMeta = {
   image: DEFAULT_IMAGE,
 };
 
+/** Public pages the app draws in the browser: they get their own tags, not their own text. */
+export const SHELL_PAGES: PageMeta[] = [
+  {
+    path: "/docs",
+    title: `Documentation | ${SITE_NAME}`,
+    description:
+      "How to use Youthnic AI Studio: product photos, running a shoot, history, planning and administration.",
+    type: "website",
+    image: DEFAULT_IMAGE,
+  },
+];
+
 /** Every public page that is written to its own HTML file, in sitemap order. */
 export const PUBLIC_PATHS = [
   "/blog",
@@ -42,6 +54,8 @@ export const PUBLIC_PATHS = [
 export function metaFor(pathname: string): PageMeta | null {
   const path = pathname.replace(/\/+$/, "") || "/";
   if (path === "/") return HOME_META;
+  const shell = SHELL_PAGES.find((item) => item.path === path);
+  if (shell) return shell;
   if (path === "/blog") {
     return {
       path,

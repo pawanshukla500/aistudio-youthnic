@@ -208,6 +208,11 @@ Deno.test("Site markdown reader handles front matter, headings, lists, images, q
     { type: "text", text: "." },
   ]);
   assertEquals(plainText(doc.blocks).startsWith("Intro with bold and a link."), true);
+  // A heading or image with no blank line after it is still its own block
+  assertEquals(
+    parseDocument("## Title\nText right after\n![Alt](/a.webp)\nMore text").blocks.map((block) => block.type),
+    ["heading", "paragraph", "image", "paragraph"],
+  );
 });
 
 Deno.test("Public site: blog and legal pages load without the app bundle, and the landing links to them", () => {

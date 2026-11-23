@@ -31,6 +31,9 @@ export function parseDocument(source: string): ParsedDocument {
     }
   }
 
+  // A heading or an image is always its own block, even with no blank line around it
+  body = body.replace(/^(#{2,3} .+|!\[[^\]]*\]\([^)\s]+\))$/gm, "\n$1\n");
+
   const blocks: Block[] = [];
   for (const chunk of body.split(/\n{2,}/)) {
     const lines = chunk.split("\n").map((line) => line.trimEnd()).filter(Boolean);

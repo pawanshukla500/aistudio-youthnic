@@ -41,6 +41,13 @@ try {
     fs.writeFileSync(file, withHead(page.head).replace(EMPTY_ROOT, `<div id="root">${page.html}</div>`));
   }
 
+  // /docs and the like: the app still draws them, but they answer with their own tags
+  for (const page of site.shellPages) {
+    const file = path.join(dist, page.meta.path, "index.html");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, withHead(page.head));
+  }
+
   const today = new Date().toISOString().slice(0, 10);
   const urls = site.sitemapPaths.map((item) => {
     const page = pages.find((candidate) => candidate.meta.path === item);

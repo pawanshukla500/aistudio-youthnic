@@ -4,7 +4,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { StaticRouter } from "react-router";
 import { PublicRoutes } from "./PublicSite";
-import { HOME_META, PUBLIC_PATHS, jsonLdFor, metaFor, type PageMeta } from "./pageMeta";
+import {
+  HOME_META,
+  PUBLIC_PATHS,
+  SHELL_PAGES,
+  jsonLdFor,
+  metaFor,
+  type PageMeta,
+} from "./pageMeta";
 import { SITE_NAME, SITE_URL, absoluteUrl } from "./siteConfig";
 
 export type PrerenderedPage = { meta: PageMeta; head: string; html: string };
@@ -38,8 +45,11 @@ export function headFor(meta: PageMeta): string {
 export const siteUrl = SITE_URL;
 export const homeHead = headFor(HOME_META);
 
-/** Addresses for the sitemap: the home page, the public pages and the documentation. */
-export const sitemapPaths = ["/", ...PUBLIC_PATHS, "/docs"];
+/** Pages that keep an empty root for the app but get their own tags, such as /docs. */
+export const shellPages = SHELL_PAGES.map((meta) => ({ meta, head: headFor(meta) }));
+
+/** Addresses for the sitemap: every address here has its own HTML file and canonical tag. */
+export const sitemapPaths = ["/", ...PUBLIC_PATHS, ...SHELL_PAGES.map((page) => page.path)];
 
 export function renderPublicPages(): PrerenderedPage[] {
   return PUBLIC_PATHS.map((path) => {

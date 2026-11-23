@@ -12,7 +12,7 @@ This guide explains what happens between the upload and the finished frames, so 
 
 ## What you upload
 
-Two photos are required: the **front** and the **back** of the garment. Everything else is optional, and each extra photo removes a guess:
+Two photos are required: the **front** and the **back** of the garment. A saree needs two more, its spread pallu and a body fabric detail; [the saree guide](/blog/saree-catalog-photography-with-ai) explains them. Everything else is optional, and each extra photo removes a guess:
 
 - A fabric or embroidery close-up, so texture and thread work are read from a real photo.
 - Bottom wear, when the product is a set.

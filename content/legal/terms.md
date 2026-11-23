@@ -41,7 +41,7 @@ The studio generates images with AI. It checks each frame against your product p
 
 ## Availability
 
-We work to keep the studio available, but we do not promise uninterrupted service. Shoots depend on outside AI and cloud providers, and may be delayed or fail when those are unavailable. If a shoot fails on our side, the SKU is returned to your balance.
+We work to keep the studio available, but we do not promise uninterrupted service. Shoots depend on outside AI and cloud providers, and may be delayed or fail when those are unavailable. If a shoot fails to start, the SKU is returned to your balance. If it fails after it has started, write to us and we will review it.
 
 ## What we are not responsible for
 
