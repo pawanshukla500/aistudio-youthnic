@@ -20,8 +20,10 @@ import {
   Trash2,
   UserCog,
   Users,
+  Wallet,
   X,
 } from "lucide-react";
+import { RechargeRequests } from "./RechargeRequests";
 import { useWorkspace } from "../../lib/WorkspaceContext";
 import { getErrorMessage } from "../../lib/errors";
 import { coerceAdminAiPolicy, modelsForProviderPurpose, preferredConfiguredProvider, preferredModelId } from "./aiRouting";
@@ -72,7 +74,7 @@ type AdminOverview = {
   aiModelPolicies?: AiModelPolicy[];
   aiModelRegistry?: AiModelRegistryEntry[];
 };
-type Tab = "users" | "teams" | "roles" | "automation" | "ai" | "system" | "flow" | "costs";
+type Tab = "users" | "teams" | "roles" | "automation" | "ai" | "system" | "flow" | "costs" | "recharges";
 
 const managedAiPurposes: Array<{ purpose: AiPolicyPurpose; label: string; description: string }> = [
   {
@@ -423,7 +425,11 @@ function TeamEditor({
 }
 
 export function Admin() {
-  const { organization, user } = useWorkspace();
+  const { organization, user, isAdmin, permissions: workspacePermissions } = useWorkspace();
+  // The same rule the server applies (canApproveRecharges in app-api/lib/sellerAccess.ts), so the
+  // tab never shows to a delegated admin who would only get its error.
+  const canApproveRecharges =
+    organization.is_primary === true && (isAdmin || workspacePermissions.includes("admin.settings"));
   const { data: overview, error: overviewError } = useQuery(api.admin.overview, {
     organizationId: organization._id,
   }) as { data: AdminOverview | undefined; error: any };
@@ -962,6 +968,7 @@ export function Admin() {
             { id: "ai", label: "AI routing", icon: Brain },
             { id: "system", label: "System", icon: Activity },
             { id: "costs", label: "Cost Breakdown", icon: Database },
+            ...(canApproveRecharges ? [{ id: "recharges", label: "Recharges", icon: Wallet }] : []),
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -1537,6 +1544,8 @@ export function Admin() {
           </section>
         )}
         
+        {tab === "recharges" && canApproveRecharges && <RechargeRequests />}
+
         {tab === "costs" && (
           <section className="space-y-6">
             <div>

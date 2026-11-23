@@ -11,6 +11,8 @@ import {
 import {
   createUserWithEmailAndPassword,
   onIdTokenChanged,
+  sendEmailVerification,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   type User,
@@ -38,6 +40,12 @@ export {
 type FirebaseAuthValue = {
   user: User | null;
   isLoading: boolean;
+  /** False until the owner opens the link Firebase emailed; a seller store's free shoot needs it. */
+  emailVerified: boolean;
+  sendVerificationEmail: () => Promise<void>;
+  /** Re-reads the account and, once verified, takes a new ID token that carries the claim. */
+  refreshEmailVerified: () => Promise<boolean>;
+  resetPassword: (email: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<UserCredential>;
   signOut: () => Promise<void>;
@@ -48,10 +56,17 @@ const FirebaseAuthContext = createContext<FirebaseAuthValue | null>(null);
 export function FirebaseAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [emailVerified, setEmailVerified] = useState(false);
 
   useEffect(() => {
     let expiryTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
+
+    // A refreshed token can carry the claim before the cached account object is reloaded.
+    const showUser = (next: User | null, verifiedClaim = false) => {
+      setUser(next);
+      setEmailVerified(Boolean(next?.emailVerified) || verifiedClaim);
+    };
 
     const clearTimer = () => {
       if (expiryTimer !== null) {
@@ -65,7 +80,7 @@ export function FirebaseAuthProvider({ children }: { children: ReactNode }) {
       if (!activeUser) {
         clearStoredSessionLoginAtMs();
         if (!cancelled) {
-          setUser(null);
+          showUser(null);
           setIsLoading(false);
         }
         return;
@@ -83,7 +98,7 @@ export function FirebaseAuthProvider({ children }: { children: ReactNode }) {
           clearStoredSessionLoginAtMs();
           await firebaseSignOut(firebaseAuth);
           if (!cancelled) {
-            setUser(null);
+            showUser(null);
             setIsLoading(false);
           }
           return;
@@ -103,12 +118,12 @@ export function FirebaseAuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (!cancelled) {
-          setUser(activeUser);
+          showUser(activeUser, tokenResult.claims.email_verified === true);
           setIsLoading(false);
         }
       } catch {
         if (!cancelled) {
-          setUser(activeUser);
+          showUser(activeUser);
           setIsLoading(false);
         }
       }
@@ -160,6 +175,8 @@ export function FirebaseAuthProvider({ children }: { children: ReactNode }) {
         password,
       );
       writeStoredSessionLoginAtMs(Date.now());
+      // The store is created either way; the banner offers a resend if this send fails.
+      void sendEmailVerification(cred.user).catch(() => undefined);
       return cred;
     } catch (err) {
       if (!firebaseAuth.currentUser) {
@@ -174,9 +191,49 @@ export function FirebaseAuthProvider({ children }: { children: ReactNode }) {
     await firebaseSignOut(firebaseAuth);
   }, []);
 
+  const sendVerificationEmail = useCallback(async () => {
+    if (firebaseAuth.currentUser) {
+      await sendEmailVerification(firebaseAuth.currentUser);
+    }
+  }, []);
+
+  const refreshEmailVerified = useCallback(async () => {
+    const current = firebaseAuth.currentUser;
+    if (!current) return false;
+    await current.reload();
+    // email_verified only reaches the server inside a newly issued ID token.
+    if (current.emailVerified) await current.getIdToken(true);
+    setEmailVerified(current.emailVerified);
+    return current.emailVerified;
+  }, []);
+
+  const resetPassword = useCallback(async (email: string) => {
+    await sendPasswordResetEmail(firebaseAuth, email.trim().toLowerCase());
+  }, []);
+
   const value = useMemo(
-    () => ({ user, isLoading, signIn, signUp, signOut }),
-    [isLoading, signIn, signUp, signOut, user],
+    () => ({
+      user,
+      isLoading,
+      emailVerified,
+      signIn,
+      signUp,
+      signOut,
+      sendVerificationEmail,
+      refreshEmailVerified,
+      resetPassword,
+    }),
+    [
+      emailVerified,
+      isLoading,
+      refreshEmailVerified,
+      resetPassword,
+      sendVerificationEmail,
+      signIn,
+      signUp,
+      signOut,
+      user,
+    ],
   );
 
   return (

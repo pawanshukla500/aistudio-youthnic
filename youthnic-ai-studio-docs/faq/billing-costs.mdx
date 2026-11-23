@@ -1,32 +1,34 @@
 ---
 title: "Billing & Credits FAQ"
-description: "Frequently asked questions regarding credit consumption rules, failure refunds, auto-recharge, and pricing tiers."
+description: "How shoots are counted, the free trial, and how a seller store recharges with prepaid packs."
 ---
 
 # Billing & Credits FAQ
 
 <AccordionGroup>
-  <Accordion title="How are generation credits counted and billed?" icon="coins">
-    - **Standard Rate**: Exactly **1 Credit = 1 Generated Image Pose**.
-    - **Complete Photoshoot**: A standard 6-pose catalog photoshoot consumes **6 Credits**.
-    - **Single Pose Regeneration**: Re-rendering an individual pose consumes **1 Credit**.
-    - **AI Product Vision Analysis**: Completely **Free of Charge** (unlimited garment analysis).
-    - **4K Lightbox Inspection & Re-Downloads**: Completely **Free of Charge**.
+  <Accordion title="How are credits counted?" icon="coins">
+    - **One credit is one shoot**: one SKU, delivered as six catalog frames.
+    - **Queuing a shoot uses one credit.** If the shoot cannot be queued, the credit is returned automatically.
+    - **Product analysis does not use a credit.**
+    - Credits apply to seller stores that signed up themselves. An internal workspace has full access and no balance to recharge.
   </Accordion>
 
-  <Accordion title="What happens to my credits if an image generation fails?" icon="arrow-rotate-left">
-    **You are never charged for failed generations.** If a GPU worker times out, or if the automated quality assurance engine rejects an image for anatomical anomalies, the credit is immediately and automatically refunded back to your balance.
+  <Accordion title="What do I get for free when I sign up?" icon="shield">
+    A new store gets **one free shoot**. Verify your email first: open the link we send when you sign up, then press **I have verified** in the banner at the top of the app. You can resend the email from the same banner.
   </Accordion>
 
-  <Accordion title="Do unused monthly credits roll over?" icon="calendar">
-    Yes. Unused credits roll over for up to **90 days** on active subscription plans, ensuring you don't lose value during seasonal sampling down-times.
+  <Accordion title="How do I recharge?" icon="credit-card">
+    Open **Credits** in the sidebar, choose a pack and send the request. Online payment is not connected yet, so email us from that page to arrange payment. Your shoots are added as soon as the payment is confirmed, and the request shows in your recharge history.
+
+    | Pack | Price |
+    | :--- | :--- |
+    | 2 SKUs | ₹500 |
+    | 11 SKUs | ₹2,000 |
+    | 30 SKUs | ₹5,000 |
+    | 60 SKUs | ₹10,000 |
   </Accordion>
 
-  <Accordion title="Can I enforce hard monthly spending limits on my team?" icon="shield">
-    **Yes.** Workspace administrators can allocate dedicated credit quotas to specific department teams (e.g. 2,000 credits for Bridal, 1,000 credits for Western) or set an organization-wide hard spend ceiling in [Costs & Budgets](/admin/costs-budgets).
-  </Accordion>
-
-  <Accordion title="How do I configure automatic credit recharge?" icon="credit-card">
-    Admins can toggle **Auto-Recharge** in [Costs & Budgets](/admin/costs-budgets). When the balance drops below your chosen safety threshold (e.g. 500 credits), the platform automatically purchases a pre-approved credit pack using your corporate card on file, ensuring overnight batches are never halted.
+  <Accordion title="Can I change or cancel a recharge request?" icon="arrow-rotate-left">
+    Yes, until it is approved. A store has one open request at a time: cancel it on the Credits page, then request another pack.
   </Accordion>
 </AccordionGroup>

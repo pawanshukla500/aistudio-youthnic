@@ -1126,14 +1126,14 @@ export function Studio() {
               <span>{organization.name}</span>
             </div>
             {isExternalSeller ? (
-              <div className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-0.5 text-[10px] font-medium text-secondary">
+              <Link to="/credits" title="Open Credits" className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-0.5 text-[10px] font-medium text-secondary">
                 <Sparkles className="h-3 w-3 text-amber-500" />
                 <span>
                   {typeof organization.credits === "number" && organization.credits > 0
-                    ? `${organization.credits} ${organization.credits === 1 ? "Shoot" : "Shoots"} Free`
-                    : "Trial Expired"} · {PACKS_FROM}
+                    ? `${organization.credits} ${organization.credits === 1 ? "shoot" : "shoots"} left`
+                    : "No shoots left"} · {PACKS_FROM}
                 </span>
-              </div>
+              </Link>
             ) : null}
           </div>
           <h1 className="mt-1 font-manrope text-2xl sm:text-[28px] font-bold tracking-tight text-on-surface">

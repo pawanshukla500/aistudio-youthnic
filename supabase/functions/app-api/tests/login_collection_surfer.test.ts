@@ -101,13 +101,13 @@ Deno.test("Option 2 Login isolates the floating glass auth card, scrolls with th
   );
 });
 
-Deno.test("Option 2 Login preserves all multi-tenant auth, 5-free-shoots RPC enrollment, and input IDs", () => {
+Deno.test("Option 2 Login preserves all multi-tenant auth, 1-free-shoot RPC enrollment, and input IDs", () => {
   assertEquals(loginSource.includes('supabase.rpc("app_enroll_seller"'), true);
   assertEquals(loginSource.includes('id="store-name-input"'), true);
   assertEquals(loginSource.includes('id="email-input"'), true);
   assertEquals(loginSource.includes('id="password-input"'), true);
   assertEquals(loginSource.includes('new Event("workspace-refresh")'), true);
-  assertEquals(loginSource.includes("5 Free Shoots on Enrollment"), true);
+  assertEquals(loginSource.includes("1 Free Shoot on Enrollment"), true);
 });
 
 Deno.test("Login workflow board replays a real shoot: pose 1 alone first, a failed back check retried, six frames delivered", () => {
@@ -166,7 +166,7 @@ Deno.test("Login shows two real shoots: six local frames each, passing check sco
 Deno.test("Login pricing lists the trial and the four rupee packs, with no dollar prices left", () => {
   assertEquals(PACKS.map((pack) => [pack.price, pack.skus]), [[500, 2], [2000, 11], [5000, 30], [10000, 60]]);
   assertEquals(PACKS.map(perSku), [250, 182, 167, 167]);
-  assertEquals([TRIAL_SKUS, FRAMES_PER_SKU], [5, 6]);
+  assertEquals([TRIAL_SKUS, FRAMES_PER_SKU], [1, 6]);
   assertEquals(rupees(10000), "₹10,000");
   assertEquals(showcaseSource.includes("$1.00"), false);
   assertEquals(showcaseSource.includes("+$0.50"), false);

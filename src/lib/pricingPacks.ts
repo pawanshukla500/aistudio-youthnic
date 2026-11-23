@@ -2,8 +2,11 @@
 
 export const FRAMES_PER_SKU = 6;
 
+/** Where a store writes to arrange payment until a gateway is connected. */
+export const CONTACT_EMAIL = "pawan@youthnic.shop";
+
 /** Free SKUs a store gets when it enrolls (app_enroll_seller). */
-export const TRIAL_SKUS = 5;
+export const TRIAL_SKUS = 1;
 
 export const PACKS = [
   { skus: 2, price: 500 },
