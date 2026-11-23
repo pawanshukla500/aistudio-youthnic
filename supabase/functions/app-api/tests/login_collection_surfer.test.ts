@@ -16,6 +16,13 @@ import {
   KITKAT_KATTHA,
   WINE_KAFTAN,
 } from "../../../../src/features/auth/showcaseShoots.ts";
+import {
+  FRAMES_PER_SKU,
+  PACKS,
+  TRIAL_SKUS,
+  perSku,
+  rupees,
+} from "../../../../src/features/auth/pricingPacks.ts";
 
 const loginSource = Deno.readTextFileSync(
   new URL("../../../../src/features/auth/Login.tsx", import.meta.url),
@@ -152,6 +159,18 @@ Deno.test("Login shows two real shoots: six local frames each, passing check sco
     ["Model face", "Style reference"],
   );
   assertEquals(showcaseSource.includes("unsplash"), false);
+});
+
+Deno.test("Login pricing lists the trial and the four rupee packs, with no dollar prices left", () => {
+  assertEquals(PACKS.map((pack) => [pack.price, pack.skus]), [[500, 2], [2000, 11], [5000, 30], [10000, 60]]);
+  assertEquals(PACKS.map(perSku), [250, 182, 167, 167]);
+  assertEquals([TRIAL_SKUS, FRAMES_PER_SKU], [5, 6]);
+  assertEquals(rupees(10000), "₹10,000");
+  assertEquals(showcaseSource.includes("$1.00"), false);
+  assertEquals(showcaseSource.includes("+$0.50"), false);
+  assertEquals(showcaseSource.includes("mailto:${CONTACT_EMAIL}"), true);
+  assertEquals(showcaseSource.includes("https://www.linkedin.com/company/youthnic"), true);
+  assertEquals(showcaseSource.includes("https://www.instagram.com/youthnic.in"), true);
 });
 
 Deno.test("CollectionSurfer repeats short collections, decouples embedded scroll, and respects Hallmark rules", () => {

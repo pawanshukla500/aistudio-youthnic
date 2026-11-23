@@ -38,6 +38,7 @@ const SECTIONS = [
   ["frames", "Six frames"],
   ["rules", "Product rules"],
   ["pricing", "Pricing"],
+  ["contact", "Contact"],
 ];
 
 const HERO_FACTS = [
@@ -172,7 +173,7 @@ export function Login({ redirect }: LoginProps) {
             </div>
             <nav
               aria-label="On this page"
-              className="hidden items-center gap-7 text-sm font-semibold text-secondary md:flex"
+              className="hidden items-center gap-7 text-sm font-semibold text-secondary lg:flex"
             >
               {SECTIONS.map(([id, label]) => (
                 <a

@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { motion, useInView, useReducedMotion } from "framer-motion";
 import {
+  animate,
+  motion,
+  MotionConfig,
+  useInView,
+  useMotionValue,
+  useReducedMotion,
+  useTransform,
+} from "framer-motion";
+import {
+  ArrowUpRight,
   Image as ImageIcon,
   Loader2,
   Pause,
@@ -16,6 +25,13 @@ import {
   type FrameStage,
   type ShootStep,
 } from "./shootTimeline";
+import {
+  FRAMES_PER_SKU,
+  PACKS,
+  TRIAL_SKUS,
+  perSku,
+  rupees,
+} from "./pricingPacks";
 import { KITKAT_KATTHA, WINE_KAFTAN } from "./showcaseShoots";
 
 const SECTION = "scroll-mt-16 px-5 py-20 sm:px-8 lg:px-10 lg:py-28 xl:px-14";
@@ -91,10 +107,23 @@ const RULES = [
   ],
 ];
 
-const PRICES = [
-  ["5", "free six-pose shoots when you enroll your store"],
-  ["$1.00", "per shoot after that, with high-reasoning analysis"],
-  ["+$0.50", "per shoot when you switch on automated QA"],
+const CONTACT_EMAIL = "pawan@youthnic.shop";
+
+const CONTACT_LINKS = [
+  ["Email", CONTACT_EMAIL, `mailto:${CONTACT_EMAIL}`],
+  ["LinkedIn", "Youthnic", "https://www.linkedin.com/company/youthnic"],
+  ["Instagram", "@youthnic.in", "https://www.instagram.com/youthnic.in"],
+];
+
+// The trial comes first; index 0 is the trial, 1 to 4 are PACKS.
+const PACK_OPTIONS = [
+  { name: "Trial", skus: TRIAL_SKUS, price: 0, rate: "Free when you enroll" },
+  ...PACKS.map((pack) => ({
+    name: `${pack.skus} SKUs`,
+    skus: pack.skus,
+    price: pack.price,
+    rate: `About ${rupees(perSku(pack))} per SKU`,
+  })),
 ];
 
 const STAGE_LABEL: Record<Exclude<FrameStage, "delivered">, string> = {
@@ -362,7 +391,130 @@ function Workflow() {
   );
 }
 
-/** Everything below the login hero: a real shoot replayed, its six frames, a second shoot, the product rules and pricing. */
+/** A rupee figure that counts to its new value when the pack changes. */
+function Rupees({ value }: { value: number }) {
+  const reduceMotion = useReducedMotion();
+  const amount = useMotionValue(value);
+  const text = useTransform(amount, rupees);
+
+  useEffect(() => {
+    const controls = animate(amount, value, {
+      duration: reduceMotion ? 0 : 0.45,
+      ease: "easeOut",
+    });
+    return () => controls.stop();
+  }, [amount, value, reduceMotion]);
+
+  return <motion.span>{text}</motion.span>;
+}
+
+function Pricing({ onStartFree }: { onStartFree: () => void }) {
+  const [selected, setSelected] = useState(0);
+  const pack = PACK_OPTIONS[selected];
+  const trial = selected === 0;
+
+  return (
+    <section id="pricing" className={`${SECTION} bg-soft-blush`}>
+      <div className="mx-auto max-w-[1560px]">
+        <h2 className={`${HEADING} max-w-4xl text-on-surface`}>
+          Start free. Then buy shoots by the pack.
+        </h2>
+        <p className="mt-5 max-w-2xl text-base leading-relaxed text-secondary sm:text-lg">
+          One SKU is one product, shot as a full six-frame set. Your store
+          starts with {TRIAL_SKUS} free; after that you buy SKUs in packs.
+        </p>
+
+        <MotionConfig reducedMotion="user">
+          <div className="mt-12 grid gap-10 lg:grid-cols-2 lg:gap-16">
+            <fieldset>
+              <legend className="sr-only">Choose a pack</legend>
+              {PACK_OPTIONS.map((option, i) => (
+                <label
+                  key={option.name}
+                  className="relative flex cursor-pointer items-center justify-between gap-4 border-b border-primary/15 px-4 py-4 first-of-type:border-t sm:px-5"
+                >
+                  <input
+                    type="radio"
+                    name="pack"
+                    checked={selected === i}
+                    onChange={() => setSelected(i)}
+                    className="peer sr-only"
+                  />
+                  {selected === i && (
+                    <motion.span
+                      layoutId="pack-highlight"
+                      className="absolute inset-0 rounded-xl bg-card"
+                      transition={{ type: "spring", stiffness: 420, damping: 36 }}
+                    />
+                  )}
+                  <span className="pointer-events-none absolute inset-0 rounded-xl peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-primary" />
+                  <span className="relative">
+                    <span className="block font-syne text-xl font-bold text-on-surface">
+                      {option.name}
+                    </span>
+                    <span className="block text-sm text-secondary">
+                      {option.rate}
+                    </span>
+                  </span>
+                  <span className="relative font-syne text-xl font-bold tabular-nums text-on-surface">
+                    {option.price ? rupees(option.price) : "Free"}
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+
+            <div aria-live="polite" className="lg:self-center">
+              <p className="text-sm font-semibold text-primary">
+                {trial ? "Trial" : `${pack.skus} SKU pack`}
+              </p>
+              <p className="mt-2 font-syne text-6xl font-bold tabular-nums tracking-tighter text-on-surface sm:text-7xl">
+                {trial ? (
+                  "Free"
+                ) : (
+                  <>
+                    <span aria-hidden="true">
+                      <Rupees value={pack.price} />
+                    </span>
+                    <span className="sr-only">{rupees(pack.price)}</span>
+                  </>
+                )}
+              </p>
+              <p className="mt-4 text-lg font-semibold text-on-surface">
+                {pack.skus} SKUs, {pack.skus * FRAMES_PER_SKU} catalog frames
+              </p>
+              <p className="mt-1 text-base text-secondary">{pack.rate}</p>
+              {trial ? (
+                <button
+                  type="button"
+                  onClick={onStartFree}
+                  className="mt-8 cursor-pointer rounded-full bg-primary px-6 py-3 text-sm font-bold text-on-primary transition-colors hover:bg-primary-container"
+                >
+                  Start free studio
+                </button>
+              ) : (
+                <>
+                  <a
+                    href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(
+                      `Youthnic AI Studio: ${pack.skus} SKU pack (${rupees(pack.price)})`,
+                    )}`}
+                    className="mt-8 inline-block rounded-full bg-primary px-6 py-3 text-sm font-bold text-on-primary transition-colors hover:bg-primary-container"
+                  >
+                    Ask for the {pack.skus} SKU pack
+                  </a>
+                  <p className="mt-3 text-sm text-secondary">
+                    Opens an email to {CONTACT_EMAIL}.
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        </MotionConfig>
+      </div>
+    </section>
+  );
+}
+
+/** Everything below the login hero: a real shoot replayed, its six frames, a second shoot, the product rules, pricing and contact. */
 export function LoginShowcase({
   onStart,
 }: {
@@ -493,43 +645,56 @@ export function LoginShowcase({
         </div>
       </section>
 
-      <section id="pricing" className={`${SECTION} bg-soft-blush`}>
-        <div className="mx-auto max-w-[1560px]">
-          <h2 className={`${HEADING} max-w-3xl text-on-surface`}>
-            Your first five shoots are free.
-          </h2>
-          <ul className="mt-12 grid gap-8 sm:grid-cols-3">
-            {PRICES.map(([figure, label]) => (
-              <li key={figure} className="border-t border-primary/25 pt-5">
-                <p className="font-syne text-5xl font-bold tracking-tighter text-primary lg:text-6xl">
-                  {figure}
-                </p>
-                <p className="mt-2 max-w-xs text-sm font-medium leading-relaxed text-on-surface-variant">
-                  {label}
-                </p>
+      <Pricing onStartFree={() => onStart("signup")} />
+
+      <section
+        id="contact"
+        className={`${SECTION} bg-on-surface text-inverse-on-surface`}
+      >
+        <div className="mx-auto grid max-w-[1560px] gap-12 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16">
+          <div>
+            <h2 className={`${HEADING} text-white`}>Get in touch.</h2>
+            <p className="mt-5 max-w-xl text-base leading-relaxed text-inverse-on-surface/75 sm:text-lg">
+              Questions about packs, a large catalog or your first shoot?
+              Write to us.
+            </p>
+            <h3 className="mt-10 font-syne text-xl font-bold text-white">
+              About Youthnic
+            </h3>
+            <p className="mt-2 max-w-xl text-sm leading-relaxed text-inverse-on-surface/75">
+              Youthnic is a fusion fashion label from Surat, Gujarat. Since
+              2021 it has sold tops, tunics, kurtas, co-ords and dresses under
+              the line Modernly Ethnic. AI Studio is its catalog photography
+              tool, and the shoots on this page are real work made with it.
+            </p>
+          </div>
+          <ul className="self-start divide-y divide-white/10 border-y border-white/10">
+            {CONTACT_LINKS.map(([label, text, href]) => (
+              <li key={label}>
+                <a
+                  href={href}
+                  {...(href.startsWith("mailto:")
+                    ? {}
+                    : { target: "_blank", rel: "noopener noreferrer" })}
+                  className="group flex items-center justify-between gap-4 py-5"
+                >
+                  <span>
+                    <span className="block text-xs font-semibold text-inverse-on-surface/60">
+                      {label}
+                    </span>
+                    <span className="block break-all font-syne text-xl font-bold text-white underline-offset-4 group-hover:underline sm:text-2xl">
+                      {text}
+                    </span>
+                  </span>
+                  <ArrowUpRight className="h-5 w-5 shrink-0 text-inverse-on-surface/60 transition-colors group-hover:text-white" />
+                </a>
               </li>
             ))}
           </ul>
-          <div className="mt-12 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() => onStart("signup")}
-              className="cursor-pointer rounded-full bg-primary px-6 py-3 text-sm font-bold text-on-primary transition-colors hover:bg-primary-container"
-            >
-              Start free studio
-            </button>
-            <button
-              type="button"
-              onClick={() => onStart("signin")}
-              className="cursor-pointer rounded-full border border-on-surface/25 px-6 py-3 text-sm font-bold text-on-surface transition-colors hover:border-on-surface"
-            >
-              Sign in
-            </button>
-          </div>
         </div>
       </section>
 
-      <footer className="bg-on-surface px-5 py-10 text-sm text-inverse-on-surface/75 sm:px-8 lg:px-10 xl:px-14">
+      <footer className="border-t border-white/10 bg-on-surface px-5 py-10 text-sm text-inverse-on-surface/75 sm:px-8 lg:px-10 xl:px-14">
         <div className="mx-auto flex max-w-[1560px] flex-wrap items-center justify-between gap-4">
           <p>
             <span className="font-syne text-base font-bold text-white">
