@@ -679,7 +679,7 @@ def test_dna_agent_uses_seed_analysis_without_second_vlm_call(monkeypatch):
 
 
 def test_forced_reanalysis_builds_dna_from_its_fresh_seed_without_a_second_vlm_call(monkeypatch):
-    """Studio "Re-analyze" sends force_refresh with the new analysis as seed: no stored version, no VLM call, no download."""
+    """Studio "Re-analyze" sends force_refresh with the new analysis as seed: no stored version, no VLM call, no blocking download."""
     from agents.evidence_agent import ProductEvidenceAgent
 
     stored = {"source_fingerprint": "fp_seed_forced", "dna_payload": {"main_color": "stale blue", "metadata": {}}, "sku_id": "T94", "version": 3}
