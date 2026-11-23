@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { poseGroupBusyStatus, poseGroupQa, signedSessionReferences } from "../catalogProduction.ts";
+import { BULK_GENERATE_LIMIT, bulkGenerateCatalogWorkItems, poseGroupBusyStatus, poseGroupQa, signedSessionReferences } from "../catalogProduction.ts";
 import { adoptedPostures, boardFromGenerationData, referencesFromSession } from "../../../../src/features/history/generation-flow/boardFromGenerationData.ts";
 import { neighborIds, qaVerdict } from "../../../../src/features/history/generation-flow/flowLinks.ts";
 import { deadlineInputValue, flowSummaryFrom, settingsLine } from "../../../../src/features/history/generation-flow/flowSummary.ts";
@@ -187,4 +187,15 @@ Deno.test("saving the brief without touching the deadline leaves it where it was
   }
   assertEquals(deadlineInputValue(null), "");
   assertEquals(deadlineInputValue("not a date"), "");
+});
+
+Deno.test("bulk generate refuses a list past its limit instead of starting the first 100 in silence", async () => {
+  const reached: string[] = [];
+  const service = { from: (table: string) => (reached.push(table), {}) };
+  const ids = Array.from({ length: BULK_GENERATE_LIMIT + 1 }, (_, index) => `item-${index}`);
+  const workspace = { organization: { id: "org" } };
+  // deno-lint-ignore no-explicit-any
+  const error = await bulkGenerateCatalogWorkItems(service as any, workspace as any, { workItemIds: ids }).catch((reason) => reason);
+  assertEquals((error as Error).message, `Start at most ${BULK_GENERATE_LIMIT} catalog items at a time (${ids.length} were sent).`);
+  assertEquals(reached, [], "nothing is read or written for a refused list");
 });

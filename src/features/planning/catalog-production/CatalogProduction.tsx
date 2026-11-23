@@ -33,6 +33,9 @@ type ImportPreview = {
   invalidDeadlines: number;
 };
 
+/** catalogProduction.bulkGenerate starts at most this many items per request (BULK_GENERATE_LIMIT on the server). */
+const BULK_GENERATE_LIMIT = 100;
+
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error || "Unknown error");
 }
@@ -418,8 +421,9 @@ export function CatalogProduction() {
       let startFailed = false;
       if (pending.autoStart && result.queueableWorkItemIds.length) {
         try {
-          const queued = await invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", { workItemIds: result.queueableWorkItemIds });
-          queuedMessage = ` Started generation for ${queued.queued} queue-ready SKU${queued.queued === 1 ? "" : "s"}.`;
+          const waiting = Math.max(0, result.queueableWorkItemIds.length - BULK_GENERATE_LIMIT);
+          const queued = await invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", { workItemIds: result.queueableWorkItemIds.slice(0, BULK_GENERATE_LIMIT) });
+          queuedMessage = ` Started generation for ${queued.queued} queue-ready SKU${queued.queued === 1 ? "" : "s"}.${waiting ? ` ${waiting} more are ready: start them with Auto-Start.` : ""}`;
         } catch (error) {
           // The rows are imported; only the start failed, so it must not read as a failed import.
           startFailed = true;
@@ -507,12 +511,15 @@ export function CatalogProduction() {
   const confirmGeneration = async () => {
     if (!generationDialog) return;
     const pending = generationDialog;
+    const startIds = pending.ids.slice(0, BULK_GENERATE_LIMIT);
+    const waitingIds = pending.ids.slice(BULK_GENERATE_LIMIT);
     try {
       await runAction(pending.mode === "selected" ? "bulkGenerate" : "autoStart", () => invokeAppApi<{ queued: number }>("catalogProduction.bulkGenerate", {
-        workItemIds: pending.ids,
-      }), `Started generation for ${pending.ids.length} catalog item${pending.ids.length === 1 ? "" : "s"}.`);
+        workItemIds: startIds,
+      }), `Started generation for ${startIds.length} catalog item${startIds.length === 1 ? "" : "s"}.${waitingIds.length ? ` ${waitingIds.length} more are waiting: start them next.` : ""}`);
       setGenerationDialog(null);
-      setSelectedTableIds(new Set());
+      // Items past the limit stay selected for the next start.
+      setSelectedTableIds(new Set(pending.mode === "selected" ? waitingIds : []));
     } catch {
       // runAction already surfaces the actionable backend error and preserves the
       // selection so the manager can fix the affected SKU and retry.

@@ -321,6 +321,11 @@ Deno.test("a handoff that was not sent, or a bulk generation that did not start,
   const workflow = Deno.readTextFileSync(new URL("../../../../src/features/history/generation-flow/OperationalWorkflowView.tsx", import.meta.url));
   assert(workflow.includes('"Comment added.")) setComment("");'));
   assert(!workflow.includes("String(data.item.deadline_at).slice(0, 16)"), "the deadline is shown in local time (flow_board.test.ts)");
+  // A list past the 100-item limit is started 100 at a time and the rest is named (flow_board.test.ts covers the server).
+  const production = Deno.readTextFileSync(new URL("../../../../src/features/planning/catalog-production/CatalogProduction.tsx", import.meta.url));
+  assert(production.includes("workItemIds: result.queueableWorkItemIds.slice(0, BULK_GENERATE_LIMIT)") && production.includes("more are ready: start them with Auto-Start."));
+  assert(production.includes("workItemIds: startIds,") && production.includes('setSelectedTableIds(new Set(pending.mode === "selected" ? waitingIds : []));'));
+  assert(!production.includes("workItemIds: pending.ids,"), "never the whole list in one request");
 });
 
 Deno.test("Clone Session opens in the Studio with its references and analysis instead of an empty Studio", () => {
