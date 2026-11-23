@@ -25,6 +25,11 @@ import {
   perSku,
   rupees,
 } from "../../../../src/lib/pricingPacks.ts";
+import {
+  inlineTokens,
+  parseDocument,
+  plainText,
+} from "../../../../src/features/site/markdown.ts";
 
 const loginSource = Deno.readTextFileSync(
   new URL("../../../../src/features/auth/Login.tsx", import.meta.url),
@@ -181,6 +186,51 @@ Deno.test("Login pricing lists the trial and the four rupee packs, with no dolla
   assertEquals(showcaseSource.includes("mailto:${CONTACT_EMAIL}"), true);
   assertEquals(showcaseSource.includes("https://www.linkedin.com/company/youthnic"), true);
   assertEquals(showcaseSource.includes("https://www.instagram.com/youthnic.in"), true);
+});
+
+Deno.test("Site markdown reader handles front matter, headings, lists, images, quotes and inline links", () => {
+  const doc = parseDocument(
+    "---\ntitle: Sarees: the four photos\ndate: 2026-11-23\n---\n\nIntro with **bold** and [a link](/blog/x).\n\n## First part\n\n- one\n- two\n\n1. step\n2. next\n\n![Alt text](/images/a.webp)\n\n> Quoted\nline\n",
+  );
+  // Only the first colon splits a front matter line, so a title may contain one
+  assertEquals(doc.meta, { title: "Sarees: the four photos", date: "2026-11-23" });
+  assertEquals(doc.blocks.map((block) => block.type), ["paragraph", "heading", "list", "list", "image", "quote"]);
+  assertEquals(doc.blocks[1], { type: "heading", level: 2, text: "First part", id: "first-part" });
+  assertEquals(doc.blocks[2], { type: "list", ordered: false, items: ["one", "two"] });
+  assertEquals(doc.blocks[3], { type: "list", ordered: true, items: ["step", "next"] });
+  assertEquals(doc.blocks[4], { type: "image", alt: "Alt text", src: "/images/a.webp" });
+  assertEquals(doc.blocks[5], { type: "quote", text: "Quoted line" });
+  assertEquals(inlineTokens("Intro with **bold** and [a link](/blog/x)."), [
+    { type: "text", text: "Intro with " },
+    { type: "bold", text: "bold" },
+    { type: "text", text: " and " },
+    { type: "link", text: "a link", href: "/blog/x" },
+    { type: "text", text: "." },
+  ]);
+  assertEquals(plainText(doc.blocks).startsWith("Intro with bold and a link."), true);
+  // A heading or image with no blank line after it is still its own block
+  assertEquals(
+    parseDocument("## Title\nText right after\n![Alt](/a.webp)\nMore text").blocks.map((block) => block.type),
+    ["heading", "paragraph", "image", "paragraph"],
+  );
+});
+
+Deno.test("Public site: blog and legal pages load without the app bundle, and the landing links to them", () => {
+  const read = (file: string) =>
+    Deno.readTextFileSync(new URL(`../../../../src/${file}`, import.meta.url)).replace(/\r\n/g, "\n");
+  const main = read("main.tsx");
+  // The public branch comes before the app, and must not pull in sign-in
+  assertEquals(main.includes("/^\\/(blog|privacy|terms|refund-policy)(\\/|$)/.test(window.location.pathname)"), true);
+  assertEquals(main.indexOf("features/site/PublicSite.tsx") < main.indexOf("./App.tsx"), true);
+  const site = read("features/site/PublicSite.tsx") + read("features/site/SiteChrome.tsx") + read("features/site/content.ts");
+  assertEquals(/Firebase|supabase|WorkspaceContext/.test(site), false);
+  assertEquals(site.includes('path="/blog/:slug"'), true);
+  assertEquals(loginSource.includes('href="/blog"'), true);
+  assertEquals(showcaseSource.includes("<SiteFooter />"), true);
+  // Every prerendered address is also reachable in the browser entry
+  const prerender = read("features/site/prerender.tsx");
+  assertEquals(prerender.includes("renderToStaticMarkup"), true);
+  assertEquals(prerender.includes('type="application/ld+json"'), true);
 });
 
 Deno.test("CollectionSurfer repeats short collections, decouples embedded scroll, and respects Hallmark rules", () => {

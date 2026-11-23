@@ -1,4 +1,10 @@
-import { useRef, useState, type FormEvent, type MouseEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type MouseEvent,
+} from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useInView, useReducedMotion } from "framer-motion";
 import {
@@ -36,7 +42,6 @@ const RUNWAY_ITEMS = [0, 3, 4, 1, 2, 5].flatMap((frame, i) =>
 const SECTIONS = [
   ["workflow", "How a shoot runs"],
   ["frames", "Six frames"],
-  ["rules", "Product rules"],
   ["pricing", "Pricing"],
   ["contact", "Contact"],
 ];
@@ -59,6 +64,12 @@ export function Login({ redirect, initialMode = "signin" }: LoginProps) {
   // The runway glides only while the hero is on screen; below it the sections cover it.
   const heroRef = useRef<HTMLElement>(null);
   const heroInView = useInView(heroRef);
+
+  // Links from the blog and the footer arrive as /#pricing; the section only exists once this renders.
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (id) document.getElementById(id)?.scrollIntoView();
+  }, []);
   const [searchParams] = useSearchParams();
   const rawRedirect = redirect || searchParams.get("redirect") || "";
   const targetRedirect =
@@ -204,6 +215,9 @@ export function Login({ redirect, initialMode = "signin" }: LoginProps) {
                   {label}
                 </a>
               ))}
+              <a href="/blog" className="transition-colors hover:text-on-surface">
+                Blog
+              </a>
             </nav>
             <div className="flex items-center gap-4 text-sm font-semibold">
               <Link
@@ -228,14 +242,17 @@ export function Login({ redirect, initialMode = "signin" }: LoginProps) {
           <div className="mx-auto grid min-h-[calc(100svh-4rem)] max-w-[1560px] gap-x-10 gap-y-8 px-5 pb-10 pt-8 sm:px-8 lg:grid-cols-[1.08fr_0.92fr] lg:grid-rows-[1fr_auto] lg:px-10 lg:pb-12 lg:pt-10 xl:px-14">
             <div className="pointer-events-auto self-center lg:col-start-1 lg:row-start-1">
               <h1 className="font-syne text-[clamp(2.6rem,5.6vw,5.5rem)] font-bold leading-[0.98] tracking-tighter text-on-surface">
+                <span className="mb-4 block font-manrope text-base font-semibold leading-normal tracking-normal text-primary sm:text-lg">
+                  AI catalog photoshoots for fashion e-commerce
+                </span>
                 Two photos in.
                 <br />
                 Six frames out.
               </h1>
               <p className="mt-5 max-w-xl text-base font-medium leading-relaxed text-secondary sm:text-lg">
                 Upload the front and back of a garment. Youthnic AI Studio
-                reads it, plans a six-pose shoot and delivers catalog images
-                that keep the cut, print and colour of the product you
+                reads it, plans a six-pose shoot and delivers e-commerce catalog
+                images that keep the cut, print and colour of the product you
                 uploaded.
               </p>
             </div>
