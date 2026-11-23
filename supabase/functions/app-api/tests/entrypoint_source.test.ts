@@ -404,6 +404,28 @@ Deno.test("History modals close on Escape, lock the page behind them, and read c
   assert(history.includes("min-h-[50vh] place-items-center overflow-auto bg-neutral-950 p-3 sm:p-6 lg:min-h-0"));
   // No browser alert for a failed clone.
   assert(!history.includes("alert("));
+  // The Compare toggle announces its state.
+  assert(history.includes("aria-pressed={compareWithPrevious}"));
+});
+
+Deno.test("an unchanged poll re-renders nothing, a refresh after a save always delivers, and the open History card is memoized", () => {
+  const backend = Deno.readTextFileSync(new URL("../../../../src/lib/backend.ts", import.meta.url)).replace(/\r\n/g, "\n");
+  const history = Deno.readTextFileSync(new URL("../../../../src/features/history/History.tsx", import.meta.url)).replace(/\r\n/g, "\n");
+  // Measured on History with one shoot open: an unchanged refresh re-rendered 907 of 907 nodes before, 0 after.
+  assert(backend.includes("if (deliver || serialized === undefined || serialized !== serializedValueRef.current) {"));
+  // A save that lands while a request is in flight queues one more request: the in-flight response
+  // predates the save, so it is never taken as the save's refresh (CodeAnt on #200).
+  assert(backend.includes("const deliver = deliverNext && !refreshQueued;"));
+  assert(backend.includes("if (always) refreshQueued = true;"));
+  assert(/inFlight = false;\n\s+if \(refreshQueued && active\) \{\n\s+refreshQueued = false;\n\s+load\(true\);/.test(backend));
+  // The comparison text is reset with the data, so new arguments never compare against the old payload.
+  assertEquals(backend.split("serializedValueRef.current = undefined;").length - 1, 2);
+  // Only polls and tab-refocus skip unchanged data: Admin re-syncs its draft forms from a refresh after a save.
+  assert(backend.includes("const refreshAfterSave = () => load(true);"));
+  assert(backend.includes('window.addEventListener("supabase-backend-refresh", refreshAfterSave);'));
+  assert(backend.includes("const onVisible = () => { if (!document.hidden) load(); };"));
+  // The open shoot card depends on its job id only: History's own state (search, dialogs, list refreshes) skips it.
+  assert(history.includes('const JobDetails = memo(function JobDetails({ jobId }: { jobId: Id<"generationJobs"> }) {'));
 });
 
 Deno.test("the Studio progress tiles name each pose's state, retry only a failed pose on a click, and preview finished images", () => {

@@ -3,6 +3,7 @@ import * as ExcelJS from "https://esm.sh/exceljs@4.4.0";
 import { encodeBase64, decodeBase64 } from "jsr:@std/encoding/base64";
 import { deleteFirebaseObject, downloadFirebaseObject, uploadFirebaseObject, createFirebaseUser, updateFirebaseUser, deleteFirebaseUser } from "./firebase-admin.ts";
 import { claimGenerationRun, queueReuseResponse, scopePoseRowsToJob, type PoseRowLike } from "../../../src/lib/generationRuns.ts";
+import { regenerationQueuedStatus } from "../../../src/lib/generationStatus.ts";
 import { deliveredVersionTiming, stampPoseTiming } from "../../../src/lib/poseVersions.ts";
 import { applyRequestedBackground } from "./lib/sceneLock.ts";
 import { fetchFastApiWithRetry } from "./lib/fastApiClient.ts";
@@ -200,7 +201,7 @@ const DEFAULT_IMAGE_QUALITY = "medium";
 // regenerations, so it must not drop earlier ones after a single epoch's worth;
 // the bound only keeps the row finite.
 const REJECTED_ATTEMPT_HISTORY_LIMIT = 100;
-const QA_VERSION = "saree-qa-v16-crop-footwear-back-hair";
+const QA_VERSION = "saree-qa-v17-pose2-turn";
 const WORKER_LEASE_MS = 4 * 60_000;
 const WORKER_LEASE_HEARTBEAT_MS = 60_000;
 const PREFLIGHT_FAILED_RETRY_MS = 6 * 60 * 60_000;
@@ -5323,6 +5324,9 @@ async function regeneratePose(request: Request, args: JsonRecord, options: { all
       failed_poses: Math.max(0, Number(job.failed_poses || 0) - countStatus("failed")),
       current_pose: null, available_at: regenerationRequestedAt, error_code: "", error_message: "", completed_at: null,
       lock_expires_at: null, locked_at: null, updated_at: regenerationRequestedAt,
+      // Replace the last run's stage ("Pose 2 generating"): until the worker reaches the pose, History
+      // would show that stale text for the pose queued now.
+      job_data: { ...jsonRecord(job.job_data), detailedStatus: regenerationQueuedStatus(poses.map((entry) => Number(entry.pose_index))) },
     }).eq("job_id", job.job_id),
     service.from("catalog_sessions").update({ status: "generating", updated_at: regenerationRequestedAt }).eq("session_id", pose.session_id),
     service.from("audit_logs").insert(poses.map((entry) => ({
@@ -5529,6 +5533,8 @@ async function regenerateSession(request: Request, args: JsonRecord) {
       status: "queued", readiness_status: "ready", readiness_reasons: [], attempt_count: 0, failed_poses: 0,
       current_pose: null, available_at: now, error_code: "", error_message: "", completed_at: null,
       lock_expires_at: null, locked_at: null, updated_at: now,
+      // Replace the last run's stage text (see regeneratePose): this retry has not reached a pose yet.
+      job_data: { ...jsonRecord(job.job_data), detailedStatus: "Queued to retry the poses that did not complete" },
     }).eq("job_id", job.job_id),
     service.from("catalog_sessions").update({ status: "generating", updated_at: now }).eq("session_id", job.session_id),
     service.from("audit_logs").insert({
