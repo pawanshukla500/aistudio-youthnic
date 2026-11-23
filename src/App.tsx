@@ -10,6 +10,7 @@ import { NodeWorkflowExample } from "./features/history/generation-flow/NodeWork
 import { Admin } from "./features/admin/Admin";
 import { Notifications } from "./features/notifications/Notifications";
 import { Login } from "./features/auth/Login";
+import { Credits } from "./features/billing/Credits";
 import { DocsPortal } from "./features/docs/DocsPortal";
 import { useWorkspace } from "./lib/WorkspaceContext";
 import { useFirebaseAuth } from "./lib/FirebaseAuthContext";
@@ -44,6 +45,7 @@ function AppRoutes() {
         <Route path="notifications" element={<Notifications />} />
         <Route path="history" element={<Guard permission="studio.view"><History /></Guard>} />
         <Route path="history/flow/:jobId" element={<Guard permission={["studio.view", "planning.view"]}><GenerationFlowPage /></Guard>} />
+        <Route path="credits" element={<Credits />} />
         <Route path="admin" element={<Guard admin><Admin /></Guard>} />
         <Route path="*" element={<Navigate to={landing} replace />} />
       </Route>
@@ -54,8 +56,9 @@ function AppRoutes() {
 function StudioAuthBarrier({ user }: { user: unknown }) {
   const location = useLocation();
   if (!user) {
-    const isRoot = location.pathname === "/" || location.pathname === "" || location.pathname === "/login";
-    return <Login redirect={isRoot ? undefined : `${location.pathname}${location.search}`} />;
+    const signup = location.pathname === "/signup";
+    const isRoot = signup || location.pathname === "/" || location.pathname === "" || location.pathname === "/login";
+    return <Login redirect={isRoot ? undefined : `${location.pathname}${location.search}`} initialMode={signup ? "signup" : "signin"} />;
   }
   return <AppRoutes />;
 }
