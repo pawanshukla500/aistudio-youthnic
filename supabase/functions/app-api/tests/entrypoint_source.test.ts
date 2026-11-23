@@ -278,8 +278,13 @@ Deno.test("a duplicate analysis joins the one in flight, registered before the s
   // The Studio names its tab, so its earlier analysis of other inputs is stopped (studio_analysis_flights.test.ts).
   assert(body.includes('clientId: String(args.analysisClientId || "").slice(0, 64),'));
   const studio = Deno.readTextFileSync(new URL("../../../../src/features/studio/Studio.tsx", import.meta.url));
-  assert(studio.includes("const [analysisClientId] = useState(() => crypto.randomUUID());"), "one id per Studio tab");
-  assert(/forceRefresh,\s+analysisClientId,\s+\};/.test(studio), "sent with every analysis");
+  // One id per page load, held outside the component: an id per mount made a return to the Studio look like
+  // another tab, so the analysis started before leaving kept its owner and ran on.
+  const component = studio.indexOf("export function Studio() {");
+  const idAt = studio.indexOf('let studioAnalysisClientId = "";');
+  assert(idAt > 0 && idAt < component, "the id outlives a Studio mount");
+  assert(!/useState\([^)]*randomUUID/.test(studio), "never a per-mount id");
+  assert(studio.includes("analysisClientId: (studioAnalysisClientId ||= crypto.randomUUID()),"), "sent with every analysis");
 });
 
 Deno.test("a catalog with a queued or running job cannot be deleted, and seeded sales are prepared before they start", () => {
