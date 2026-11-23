@@ -12,6 +12,10 @@ import {
   SHOOT_TICKS,
   shootAt,
 } from "../../../../src/features/auth/shootTimeline.ts";
+import {
+  KITKAT_KATTHA,
+  WINE_KAFTAN,
+} from "../../../../src/features/auth/showcaseShoots.ts";
 
 const loginSource = Deno.readTextFileSync(
   new URL("../../../../src/features/auth/Login.tsx", import.meta.url),
@@ -128,8 +132,26 @@ Deno.test("Login workflow board replays a real shoot: pose 1 alone first, a fail
   assertEquals(run.at(-1)!.delivered, SHOOT_FRAMES.length);
   assertEquals(shootAt(SHOOT_TICKS).step, "upload");
   assertEquals(loginSource.includes("<LoginShowcase"), true);
+  assertEquals(loginSource.includes("items={RUNWAY_ITEMS}"), true);
   assertEquals(showcaseSource.includes("useReducedMotion"), true);
   assertEquals(showcaseSource.includes("transition-all"), false);
+});
+
+Deno.test("Login shows two real shoots: six local frames each, passing check scores, and no third-party reference photo", () => {
+  for (const shoot of [WINE_KAFTAN, KITKAT_KATTHA]) {
+    assertEquals(shoot.frames.length, SHOOT_FRAMES.length);
+    shoot.frames.forEach((frame, i) => {
+      assertEquals(new RegExp(`^/images/showcase/[a-z-]+-pose-${i + 1}\.webp$`).test(frame.image), true);
+      // 85 is the product DNA pass floor (qa.ts)
+      assertEquals(frame.check >= 85 && frame.check <= 100, true);
+    });
+  }
+  // The wine kaftan model face / style reference is a magazine photo: named as an input, never shipped
+  assertEquals(
+    WINE_KAFTAN.inputs.filter((input) => !input.image).map((input) => input.role),
+    ["Model face", "Style reference"],
+  );
+  assertEquals(showcaseSource.includes("unsplash"), false);
 });
 
 Deno.test("CollectionSurfer repeats short collections, decouples embedded scroll, and respects Hallmark rules", () => {

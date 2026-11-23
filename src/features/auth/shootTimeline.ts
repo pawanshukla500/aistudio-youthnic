@@ -30,27 +30,27 @@ type ShootEvent = {
   note: string;
 };
 
-/** The Back frame replays one failed product check and its retry, as the worker does. */
-export const RETRIED_FRAME = 2;
+/** In the wine kaftan shoot the Turning frame failed its first product check and was generated again. */
+export const RETRIED_FRAME = 1;
 
 const EVENTS: ShootEvent[] = [
   {
     step: "upload",
     frame: -1,
     stage: "queued",
-    note: "Front and back photos are in, with a fabric close-up and a style reference.",
+    note: "Five product photos are in, with a model face and a style reference.",
   },
   {
     step: "analyse",
     frame: -1,
     stage: "queued",
-    note: "Reading the garment from the product photos.",
+    note: "Reading the garment: deep wine, sheer tissue-silk, an embroidered black panel.",
   },
   {
     step: "plan",
     frame: -1,
     stage: "queued",
-    note: "Six poses planned. Pose 4 takes the posture of the style reference.",
+    note: "Six poses planned. Pose 4 takes the seated posture of the style reference.",
   },
   ...SHOOT_FRAMES.flatMap((name, frame): ShootEvent[] => [
     {
@@ -74,13 +74,13 @@ const EVENTS: ShootEvent[] = [
             step: "generate",
             frame,
             stage: "retrying",
-            note: "Pose 3 did not match the back photo. That attempt is archived and the pose is generated again.",
+            note: "Pose 2 drifted from the kaftan's real length. That attempt is archived and the pose is generated again.",
           },
           {
             step: "check",
             frame,
             stage: "checking",
-            note: "Checking the new pose 3 against the back photo.",
+            note: "Checking the new pose 2 against the product photos.",
           },
         ] satisfies ShootEvent[])
       : []),

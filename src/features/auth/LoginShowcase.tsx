@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion, useInView, useReducedMotion } from "framer-motion";
-import { Check, Loader2, Pause, Play } from "lucide-react";
+import {
+  Image as ImageIcon,
+  Loader2,
+  Pause,
+  Play,
+  User,
+} from "lucide-react";
 import {
   RETRIED_FRAME,
   SHOOT_FRAMES,
@@ -10,6 +16,7 @@ import {
   type FrameStage,
   type ShootStep,
 } from "./shootTimeline";
+import { KITKAT_KATTHA, WINE_KAFTAN } from "./showcaseShoots";
 
 const SECTION = "scroll-mt-16 px-5 py-20 sm:px-8 lg:px-10 lg:py-28 xl:px-14";
 const HEADING =
@@ -34,7 +41,7 @@ const STEPS: Array<{ key: ShootStep; name: string; text: string }> = [
   {
     key: "generate",
     name: "Generate",
-    text: "Pose 1 comes first and fixes the model, the set and the light. Poses 2 to 6 follow on the same set, 3:4 at 2K.",
+    text: "Pose 1 comes first and fixes the model, the set and the light. Poses 2 to 6 follow on the same set, 3:4 at 2K unless you choose another ratio.",
   },
   {
     key: "check",
@@ -90,12 +97,11 @@ const PRICES = [
   ["+$0.50", "per shoot when you switch on automated QA"],
 ];
 
-const STAGE_LABEL: Record<FrameStage, string> = {
+const STAGE_LABEL: Record<Exclude<FrameStage, "delivered">, string> = {
   queued: "Queued",
   generating: "Generating",
   checking: "Checking",
   retrying: "Generating again",
-  delivered: "Delivered",
 };
 
 const STAGE_TONE: Record<FrameStage, string> = {
@@ -106,180 +112,26 @@ const STAGE_TONE: Record<FrameStage, string> = {
   delivered: "text-tertiary-fixed-dim",
 };
 
-// One drawing of the garment, cropped six ways: the same product and set in every frame.
-const FRAME_VIEWS: Array<{
-  viewBox: string;
-  turn?: boolean;
-  back?: boolean;
-  posed?: boolean;
-}> = [
-  { viewBox: "0 0 120 160" },
-  { viewBox: "0 0 120 160", turn: true },
-  { viewBox: "0 0 120 160", back: true },
-  { viewBox: "0 0 120 160", posed: true },
-  { viewBox: "36 8 48 64" },
-  { viewBox: "20 62 36 48" },
-];
-
-const LIT = {
-  garment: "fill-primary-container",
-  trim: "fill-primary-fixed",
-  trimLine: "stroke-primary-fixed",
-  body: "fill-outline",
-  hair: "fill-on-surface",
-  set: "stroke-outline-variant",
-};
-
-const GHOST = {
-  garment: "fill-white",
-  trim: "fill-white",
-  trimLine: "stroke-white",
-  body: "fill-white",
-  hair: "fill-white",
-  set: "stroke-white",
-};
-
-const YOKE = [
-  [52.5, 40],
-  [54.5, 44],
-  [57, 48],
-  [60, 50.5],
-  [63, 48],
-  [65.5, 44],
-  [67.5, 40],
-];
-
-const PRINT = [
-  [56, 84],
-  [66, 92],
-  [50, 100],
-  [61, 106],
-  [72, 112],
-  [45, 118],
-  [57, 122],
-  [68, 126],
-  [78, 124],
-  [40, 128],
-];
-
-function FrameArt({ index, lit }: { index: number; lit: boolean }) {
-  const view = FRAME_VIEWS[index];
-  const tone = lit ? LIT : GHOST;
+function ShootImage({
+  src,
+  alt,
+  ratio,
+  className = "",
+}: {
+  src: string;
+  alt: string;
+  ratio: string;
+  className?: string;
+}) {
   return (
-    <div
-      className={`aspect-[3/4] overflow-hidden rounded-lg border transition-colors duration-500 ${
-        lit
-          ? "border-outline-variant/50 bg-card"
-          : "border-white/10 bg-white/[0.04]"
-      }`}
-    >
-      <svg
-        viewBox={view.viewBox}
-        preserveAspectRatio="xMidYMid slice"
-        className="h-full w-full"
-        aria-hidden="true"
-      >
-        <g opacity={lit ? 1 : 0.16}>
-          {/* The set: the same arch and floor in every frame */}
-          <path
-            d="M22 146V58a38 38 0 0 1 76 0v88M0 146h120"
-            fill="none"
-            strokeWidth="1"
-            vectorEffect="non-scaling-stroke"
-            className={tone.set}
-          />
-          <g
-            transform={
-              view.turn
-                ? "translate(60 0) scale(0.72 1) translate(-60 0)"
-                : undefined
-            }
-          >
-            {view.back ? (
-              <g className={tone.hair}>
-                <circle cx="60" cy="23" r="9" />
-                <circle cx="60" cy="11.5" r="4.5" />
-              </g>
-            ) : (
-              <>
-                <path
-                  d="M49 24a11 11 0 0 1 22 0v13H49z"
-                  className={tone.hair}
-                />
-                <circle cx="60" cy="24" r="8" className={tone.body} />
-              </>
-            )}
-            <g className={tone.body}>
-              <rect x="57" y="30" width="6" height="8" />
-              <path d="M55 37l5 9 5-9z" />
-              <ellipse cx="53" cy="146" rx="5" ry="2.2" />
-              <ellipse cx="67" cy="146" rx="5" ry="2.2" />
-            </g>
-            <g className={tone.garment}>
-              <path
-                d={
-                  view.back
-                    ? "M45 38l9-1q6 7 12 0l9 1-4 32 17 70H32l17-70z"
-                    : "M45 38l10-1 5 9 5-9 10 1-4 32 17 70H32l17-70z"
-                }
-              />
-              <path d="M75 38l7 24 6 24-6 2-6-22-4-16z" />
-              <path
-                d={
-                  view.posed
-                    ? "M45 38L35 57l10 14 4-4-7-10 7-11z"
-                    : "M45 38l-7 24-6 24 6 2 6-22 4-16z"
-                }
-              />
-            </g>
-            <g className={tone.body}>
-              <circle cx="86" cy="91" r="3" />
-              <circle
-                cx={view.posed ? 48.5 : 34}
-                cy={view.posed ? 70.5 : 91}
-                r="3"
-              />
-            </g>
-            <g className={tone.trim}>
-              <path d="M33.7 133h52.6l1.7 7H32z" />
-              <path d="M87 82.1l1 3.9-6 2-1-3.9z" />
-              <path
-                d={
-                  view.posed
-                    ? "M42.7 67.7L45 71l4-4-2.3-3.3z"
-                    : "M33 82.1l-1 3.9 6 2 1-3.9z"
-                }
-              />
-              {PRINT.map(([cx, cy]) => (
-                <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="1" />
-              ))}
-              {view.back ? (
-                <>
-                  <ellipse cx="57.2" cy="48" rx="2.6" ry="1.6" />
-                  <ellipse cx="62.8" cy="48" rx="2.6" ry="1.6" />
-                </>
-              ) : (
-                <>
-                  {YOKE.map(([cx, cy]) => (
-                    <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="1.1" />
-                  ))}
-                  <path d="M60 53l2 3-2 3-2-3z" />
-                </>
-              )}
-            </g>
-            {view.back && (
-              <path
-                d="M56 41l4 7 4-7M60 48l-2.5 8M60 48l2.5 8"
-                fill="none"
-                strokeWidth="0.8"
-                strokeLinecap="round"
-                className={tone.trimLine}
-              />
-            )}
-          </g>
-        </g>
-      </svg>
-    </div>
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      className={`block w-full rounded-lg object-cover ${className}`}
+      style={{ aspectRatio: ratio }}
+    />
   );
 }
 
@@ -300,23 +152,25 @@ function Workflow() {
   // Reduced motion shows the delivered shoot instead of the replay.
   const board = shootAt(reduceMotion ? SHOOT_TICKS - 1 : tick);
   const activeStep = reduceMotion ? null : board.step;
+  const reached = STEPS.findIndex((step) => step.key === board.step);
 
   return (
     <section
       id="workflow"
       className={`${SECTION} bg-on-surface text-inverse-on-surface`}
     >
-      <div className="mx-auto grid max-w-[1560px] gap-12 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16">
+      <div className="mx-auto grid max-w-[1560px] gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16">
         {/* On phones the board follows the intro and the step list comes last */}
         <div className="contents lg:block">
           <div className="order-1">
             <h2 className={`${HEADING} text-white`}>
-              A shoot, start to finish.
+              A real shoot, start to finish.
             </h2>
             <p className="mt-5 max-w-xl text-base leading-relaxed text-inverse-on-surface/75 sm:text-lg">
-              Every shoot in Studio runs through these six steps. The board
-              replays a sample shoot, including a back view that fails its
-              product check and is generated again.
+              This is the wine kaftan shoot from {WINE_KAFTAN.shotOn}, replayed
+              with its own photos, its own analysis and the six frames it
+              delivered. Its Turning frame failed the first product check and
+              was generated again, exactly as shown.
             </p>
           </div>
 
@@ -359,7 +213,7 @@ function Workflow() {
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm font-semibold text-white">
-              Sample shoot, replayed
+              {WINE_KAFTAN.name}, replayed
             </p>
             <div className="flex items-center gap-3">
               <span className="font-mono text-xs tabular-nums text-inverse-on-surface/75">
@@ -382,88 +236,133 @@ function Workflow() {
             </div>
           </div>
 
-          {/* The step list beside it is the accessible version of this board */}
-          <div aria-hidden="true">
-            <div className="mt-4 h-1 overflow-hidden rounded-full bg-white/10">
-              <div
-                className="h-full rounded-full bg-inverse-primary transition-[width] duration-700"
-                style={{
-                  width: `${(board.delivered / SHOOT_FRAMES.length) * 100}%`,
-                }}
-              />
-            </div>
-
-            <p className="mt-4 text-xs text-inverse-on-surface/60">
-              References: front, back, fabric close-up, style reference
-            </p>
-
-            <p className="mt-4 min-h-[4rem] text-sm leading-snug text-white sm:min-h-[2.75rem]">
-              {board.note}
-            </p>
-
-            <div className="mt-2 grid grid-cols-3 gap-3 sm:gap-4">
-              {SHOOT_FRAMES.map((name, i) => {
-                const stage = board.stages[i];
-                const lit = stage === "delivered" || stage === "checking";
-                const working =
-                  stage === "generating" || stage === "retrying";
-                return (
-                  <div key={name}>
-                    <div
-                      className={`relative overflow-hidden rounded-lg transition-opacity duration-500 ${
-                        stage === "checking" ? "opacity-70" : ""
-                      }`}
-                    >
-                      <FrameArt index={i} lit={lit} />
-                      {working && (
-                        <motion.span
-                          className="pointer-events-none absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-transparent via-white/20 to-transparent"
-                          animate={{ y: ["-100%", "300%"] }}
-                          transition={{
-                            duration: 1.3,
-                            repeat: Infinity,
-                            ease: "linear",
-                          }}
-                        />
-                      )}
-                      {stage === "delivered" && (
-                        <span className="absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-success text-white">
-                          <Check className="h-3 w-3" strokeWidth={3} />
-                        </span>
-                      )}
-                      {i === RETRIED_FRAME && board.retried && (
-                        <span
-                          className={`absolute bottom-1.5 left-1.5 rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white ${
-                            lit ? "bg-on-surface/85" : "bg-white/15"
-                          }`}
-                        >
-                          {stage === "retrying" ? "v1 archived" : "v2"}
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-2 text-xs font-semibold leading-tight text-white">
-                      {i + 1}. {name}
-                    </p>
-                    <p
-                      className={`mt-1 flex items-center gap-1 text-[11px] font-medium ${STAGE_TONE[stage]}`}
-                    >
-                      {(working || stage === "checking") && (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      )}
-                      {STAGE_LABEL[stage]}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
+          <div className="mt-4 h-1 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-inverse-primary transition-[width] duration-700"
+              style={{
+                width: `${(board.delivered / SHOOT_FRAMES.length) * 100}%`,
+              }}
+            />
           </div>
+
+          <p className="mt-4 min-h-[4rem] text-sm leading-snug text-white sm:min-h-[2.75rem]">
+            {board.note}
+          </p>
+
+          <p className="text-xs font-semibold text-inverse-on-surface/60">
+            What was uploaded
+          </p>
+          <ul className="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-7">
+            {WINE_KAFTAN.inputs.map((input) => (
+              <li key={input.role}>
+                {input.image ? (
+                  <ShootImage
+                    src={input.image}
+                    alt={`Uploaded product photo: ${input.role.toLowerCase()}`}
+                    ratio={WINE_KAFTAN.ratio}
+                    className="object-top"
+                  />
+                ) : (
+                  // A third-party photo: listed as an input, not republished here
+                  <div
+                    className="grid place-items-center rounded-lg border border-dashed border-white/25 text-white/45"
+                    style={{ aspectRatio: WINE_KAFTAN.ratio }}
+                  >
+                    {input.role === "Model face" ? (
+                      <User className="h-5 w-5" />
+                    ) : (
+                      <ImageIcon className="h-5 w-5" />
+                    )}
+                  </div>
+                )}
+                <p className="mt-1 text-[11px] leading-tight text-inverse-on-surface/75">
+                  {input.role}
+                </p>
+              </li>
+            ))}
+          </ul>
+
+          <p className="mt-5 text-xs font-semibold text-inverse-on-surface/60">
+            What the analysis read
+          </p>
+          <dl
+            className={`mt-2 grid gap-x-4 gap-y-1.5 text-xs leading-snug transition-opacity duration-700 sm:grid-cols-[6.5rem_1fr] ${
+              reached >= 1 ? "opacity-100" : "opacity-20"
+            }`}
+          >
+            {WINE_KAFTAN.facts.map(([label, value]) => (
+              <div key={label} className="contents">
+                <dt className="text-inverse-on-surface/60">{label}</dt>
+                <dd className="text-white">{value}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <p className="mt-5 text-xs font-semibold text-inverse-on-surface/60">
+            What was delivered
+          </p>
+          <ol className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-6">
+            {SHOOT_FRAMES.map((name, i) => {
+              const stage = board.stages[i];
+              const delivered = stage === "delivered";
+              const working = stage === "generating" || stage === "retrying";
+              const frame = WINE_KAFTAN.frames[i];
+              return (
+                <li key={name}>
+                  <div
+                    className="relative overflow-hidden rounded-lg bg-white/[0.06]"
+                    style={{ aspectRatio: WINE_KAFTAN.ratio }}
+                  >
+                    <img
+                      src={frame.image}
+                      alt={`Delivered frame ${i + 1}: ${name}`}
+                      loading="lazy"
+                      decoding="async"
+                      className={`h-full w-full object-cover transition-opacity duration-700 ${
+                        delivered ? "opacity-100" : "opacity-0"
+                      }`}
+                    />
+                    {!delivered && (
+                      <span className="absolute inset-0 grid place-items-center font-syne text-2xl font-bold text-white/25">
+                        {i + 1}
+                      </span>
+                    )}
+                    {working && (
+                      <motion.span
+                        className="pointer-events-none absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-transparent via-white/20 to-transparent"
+                        animate={{ y: ["-100%", "300%"] }}
+                        transition={{
+                          duration: 1.3,
+                          repeat: Infinity,
+                          ease: "linear",
+                        }}
+                      />
+                    )}
+                  </div>
+                  <p className="mt-1.5 text-[11px] font-semibold leading-tight text-white">
+                    {i + 1}. {name}
+                  </p>
+                  <p
+                    className={`mt-0.5 flex items-center gap-1 text-[11px] font-medium leading-tight ${STAGE_TONE[stage]}`}
+                  >
+                    {stage !== "queued" && !delivered && (
+                      <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                    )}
+                    {stage === "delivered"
+                      ? `Passed, ${frame.check}%${i === RETRIED_FRAME ? ", 2nd try" : ""}`
+                      : STAGE_LABEL[stage]}
+                  </p>
+                </li>
+              );
+            })}
+          </ol>
         </div>
       </div>
     </section>
   );
 }
 
-/** Everything below the login hero: how a shoot runs, the six frames, the product rules and pricing. */
+/** Everything below the login hero: a real shoot replayed, its six frames, a second shoot, the product rules and pricing. */
 export function LoginShowcase({
   onStart,
 }: {
@@ -479,24 +378,86 @@ export function LoginShowcase({
             Six frames, one set.
           </h2>
           <p className="mt-5 max-w-2xl text-base leading-relaxed text-secondary sm:text-lg">
-            Every new shoot delivers the same six frames in the same order, so a
-            whole catalog reads as one brand. The arch and floor in these
-            diagrams stay put because the set does too: only the pose, the
-            camera angle and the framing change.
+            These are the six frames of the wine kaftan shoot, as delivered.
+            Every new shoot delivers the same six in the same order, so a whole
+            catalog reads as one brand: the model, the set and the light stay
+            put, and only the pose, the camera angle and the framing change.
           </p>
           <ol className="mt-12 grid grid-cols-2 gap-x-5 gap-y-10 md:grid-cols-3 xl:grid-cols-6">
             {SHOOT_FRAMES.map((name, i) => (
               <li key={name}>
-                <FrameArt index={i} lit />
+                <ShootImage
+                  src={WINE_KAFTAN.frames[i].image}
+                  alt={`${WINE_KAFTAN.name}, frame ${i + 1}: ${name}`}
+                  ratio={WINE_KAFTAN.ratio}
+                />
                 <h3 className="mt-4 font-syne text-lg font-bold leading-snug text-on-surface">
                   {i + 1}. {name}
                 </h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-secondary">
                   {FRAME_NOTES[i]}
                 </p>
+                <p className="mt-2 text-xs font-semibold text-success">
+                  Product check passed, {WINE_KAFTAN.frames[i].check}%
+                </p>
               </li>
             ))}
           </ol>
+        </div>
+      </section>
+
+      <section
+        id="more"
+        className={`${SECTION} border-t border-outline-variant/50 bg-surface-container-low`}
+      >
+        <div className="mx-auto max-w-[1560px]">
+          <h2 className={`${HEADING} max-w-4xl text-on-surface`}>
+            A different product, the same six frames.
+          </h2>
+          <p className="mt-5 max-w-2xl text-base leading-relaxed text-secondary sm:text-lg">
+            A block-printed cotton top, uploaded as product photos. The studio
+            read the print, the square neckline and the lace-up back, then
+            delivered this shoot on {KITKAT_KATTHA.shotOn}.
+          </p>
+          <div className="mt-12 grid gap-10 lg:grid-cols-[0.3fr_1fr] lg:gap-14">
+            <div>
+              <p className="text-sm font-semibold text-on-surface">Uploaded</p>
+              <ShootImage
+                src={KITKAT_KATTHA.inputs[0].image!}
+                alt={`${KITKAT_KATTHA.name}, uploaded front photo`}
+                ratio="400 / 447"
+                className="mt-3 max-w-xs"
+              />
+              <dl className="mt-6 max-w-xs space-y-3 text-sm leading-snug">
+                {KITKAT_KATTHA.facts.map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="font-semibold text-on-surface">{label}</dt>
+                    <dd className="text-secondary">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-on-surface">Delivered</p>
+              <ol className="mt-3 grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3">
+                {SHOOT_FRAMES.map((name, i) => (
+                  <li key={name}>
+                    <ShootImage
+                      src={KITKAT_KATTHA.frames[i].image}
+                      alt={`${KITKAT_KATTHA.name}, frame ${i + 1}: ${name}`}
+                      ratio={KITKAT_KATTHA.ratio}
+                    />
+                    <p className="mt-2 text-sm font-semibold text-on-surface">
+                      {i + 1}. {name}
+                    </p>
+                    <p className="text-xs font-semibold text-success">
+                      Product check passed, {KITKAT_KATTHA.frames[i].check}%
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </div>
         </div>
       </section>
 

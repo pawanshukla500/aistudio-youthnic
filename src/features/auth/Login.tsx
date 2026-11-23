@@ -20,6 +20,18 @@ import { getErrorMessage } from "../../lib/errors";
 import { useFirebaseAuth } from "../../lib/FirebaseAuthContext";
 import { supabase } from "../../lib/supabase";
 import { LoginShowcase } from "./LoginShowcase";
+import { SHOOT_FRAMES } from "./shootTimeline";
+import { KITKAT_KATTHA, WINE_KAFTAN } from "./showcaseShoots";
+
+// The runway carries real delivered frames, the two shoots interleaved.
+const RUNWAY_ITEMS = [0, 3, 4, 1, 2, 5].flatMap((frame, i) =>
+  [WINE_KAFTAN, KITKAT_KATTHA].map((shoot, j) => ({
+    id: i * 2 + j + 1,
+    image: shoot.frames[frame].image,
+    title: shoot.name,
+    subtitle: SHOOT_FRAMES[frame],
+  })),
+);
 
 const SECTIONS = [
   ["workflow", "How a shoot runs"],
@@ -132,6 +144,7 @@ export function Login({ redirect }: LoginProps) {
           The zero-height wrapper lets the page scroll over it with the document. */}
       <div className="h-0" aria-hidden="true">
         <CollectionSurfer
+          items={RUNWAY_ITEMS}
           variant="magnetic"
           autoPlay={heroInView}
           autoPlaySpeed={46}
