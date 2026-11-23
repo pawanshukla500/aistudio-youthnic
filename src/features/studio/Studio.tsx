@@ -5,6 +5,7 @@ import { api, invokeAppApi, useAction, useMutation, useQuery, type Id, type Prod
 import { Button } from "@/components/ui/button";
 import { ActionDialog } from "../../components/ui/ActionDialog";
 import { useWorkspace } from "../../lib/WorkspaceContext";
+import { PACKS_FROM } from "../../lib/pricingPacks";
 import { uploadCatalogAsset } from "../../lib/catalogStorage";
 import { resizeImageFile } from "../../lib/imageResizer";
 import { AnalysisProfile } from "./components/AnalysisProfile";
@@ -1130,7 +1131,7 @@ export function Studio() {
                 <span>
                   {typeof organization.credits === "number" && organization.credits > 0
                     ? `${organization.credits} ${organization.credits === 1 ? "Shoot" : "Shoots"} Free`
-                    : "Trial Expired"} · $1.00 High / +$0.50 QA
+                    : "Trial Expired"} · {PACKS_FROM}
                 </span>
               </div>
             ) : null}

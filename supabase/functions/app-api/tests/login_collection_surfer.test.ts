@@ -6,9 +6,32 @@ import {
   isFirebaseSessionExpired,
   resolveSessionLoginAtMs,
 } from "../../../../src/lib/sessionExpiry.ts";
+import {
+  RETRIED_FRAME,
+  SHOOT_FRAMES,
+  SHOOT_TICKS,
+  shootAt,
+} from "../../../../src/features/auth/shootTimeline.ts";
+import {
+  KITKAT_KATTHA,
+  WINE_KAFTAN,
+} from "../../../../src/features/auth/showcaseShoots.ts";
+import {
+  FRAMES_PER_SKU,
+  PACK_LIST,
+  PACKS,
+  PACKS_FROM,
+  TRIAL_SKUS,
+  perSku,
+  rupees,
+} from "../../../../src/lib/pricingPacks.ts";
 
 const loginSource = Deno.readTextFileSync(
   new URL("../../../../src/features/auth/Login.tsx", import.meta.url),
+).replace(/\r\n/g, "\n");
+
+const showcaseSource = Deno.readTextFileSync(
+  new URL("../../../../src/features/auth/LoginShowcase.tsx", import.meta.url),
 ).replace(/\r\n/g, "\n");
 
 const surferSource = Deno.readTextFileSync(
@@ -40,7 +63,10 @@ Deno.test("functions invoke base stays a single slash before app-api", () => {
 Deno.test("Option 2 Login integrates CollectionSurfer in Light Atelier Mode with default Magnetic + Glide and no badge/runway-switcher clutter", () => {
   assertEquals(loginSource.includes("<CollectionSurfer"), true);
   assertEquals(loginSource.includes('variant="magnetic"'), true);
-  assertEquals(loginSource.includes("autoPlay={true}"), true);
+  // The runway glides only while the hero is on screen: the showcase sections cover it below the fold
+  assertEquals(loginSource.includes("autoPlay={heroInView}"), true);
+  assertEquals(loginSource.includes("const heroInView = useInView(heroRef);"), true);
+  assertEquals(loginSource.includes("<section ref={heroRef}"), true);
   assertEquals(loginSource.includes("showOverlays={false}"), true);
   // Light Atelier Mode tokens used; no #070609 dark mode, saree mannequin box, or removed pills
   assertEquals(loginSource.includes("bg-background"), true);
@@ -61,10 +87,11 @@ Deno.test("Option 2 Login integrates CollectionSurfer in Light Atelier Mode with
   );
 });
 
-Deno.test("Option 2 Login isolates the floating glass auth card, remains scrollable on short desktops, and validates internal redirect", () => {
+Deno.test("Option 2 Login isolates the floating glass auth card, scrolls with the document, and validates internal redirect", () => {
   assertEquals(loginSource.includes('data-surfer-ignore="true"'), true);
   assertEquals(loginSource.includes("onWheel={(e) => e.stopPropagation()}"), true);
-  assertEquals(loginSource.includes("overflow-y-auto overscroll-contain"), true);
+  // The page is a long document: no fixed inner scroller that the wheel cannot reach over the runway
+  assertEquals(loginSource.includes("overflow-y-auto"), false);
   assertEquals(loginSource.includes("lg:overflow-hidden"), false);
   assertEquals(loginSource.includes("bg-card/95"), true);
   assertEquals(loginSource.includes("transition-all"), false);
@@ -81,6 +108,79 @@ Deno.test("Option 2 Login preserves all multi-tenant auth, 5-free-shoots RPC enr
   assertEquals(loginSource.includes('id="password-input"'), true);
   assertEquals(loginSource.includes('new Event("workspace-refresh")'), true);
   assertEquals(loginSource.includes("5 Free Shoots on Enrollment"), true);
+});
+
+Deno.test("Login workflow board replays a real shoot: pose 1 alone first, a failed back check retried, six frames delivered", () => {
+  assertEquals([...SHOOT_FRAMES], [
+    "Full Front",
+    "Turning",
+    "Back",
+    "Signature Reference",
+    "Face + Details",
+    "Product Highlight",
+  ]);
+  const run = Array.from({ length: SHOOT_TICKS }, (_, tick) => shootAt(tick));
+  assertEquals(
+    run.map((board) => board.step).filter((step, i, steps) => step !== steps[i - 1]).slice(0, 5),
+    ["upload", "analyse", "plan", "generate", "check"],
+  );
+  // Pose 1 anchors the set: nothing else starts until it is delivered
+  for (const board of run.filter((board) => board.stages[0] !== "delivered")) {
+    assertEquals(board.stages.slice(1).every((stage) => stage === "queued"), true);
+  }
+  // A frame is delivered only straight after a check, and never goes back
+  for (let frame = 0; frame < SHOOT_FRAMES.length; frame++) {
+    const first = run.findIndex((board) => board.stages[frame] === "delivered");
+    assertEquals(run[first - 1].stages[frame], "checking");
+    assertEquals(run.slice(first).every((board) => board.stages[frame] === "delivered"), true);
+  }
+  assertEquals(
+    run.filter((board) => board.stages.includes("retrying")).map((board) => board.stages.indexOf("retrying")),
+    [RETRIED_FRAME],
+  );
+  assertEquals(run.at(-1)!.delivered, SHOOT_FRAMES.length);
+  assertEquals(shootAt(SHOOT_TICKS).step, "upload");
+  assertEquals(loginSource.includes("<LoginShowcase"), true);
+  assertEquals(loginSource.includes("items={RUNWAY_ITEMS}"), true);
+  assertEquals(showcaseSource.includes("useReducedMotion"), true);
+  assertEquals(showcaseSource.includes("transition-all"), false);
+});
+
+Deno.test("Login shows two real shoots: six local frames each, passing check scores, and no third-party reference photo", () => {
+  for (const shoot of [WINE_KAFTAN, KITKAT_KATTHA]) {
+    assertEquals(shoot.frames.length, SHOOT_FRAMES.length);
+    shoot.frames.forEach((frame, i) => {
+      assertEquals(new RegExp(`^/images/showcase/[a-z-]+-pose-${i + 1}\.webp$`).test(frame.image), true);
+      // 85 is the product DNA pass floor (qa.ts)
+      assertEquals(frame.check >= 85 && frame.check <= 100, true);
+    });
+  }
+  // The wine kaftan model face / style reference is a magazine photo: named as an input, never shipped
+  assertEquals(
+    WINE_KAFTAN.inputs.filter((input) => !input.image).map((input) => input.role),
+    ["Model face", "Style reference"],
+  );
+  assertEquals(showcaseSource.includes("unsplash"), false);
+});
+
+Deno.test("Login pricing lists the trial and the four rupee packs, with no dollar prices left", () => {
+  assertEquals(PACKS.map((pack) => [pack.price, pack.skus]), [[500, 2], [2000, 11], [5000, 30], [10000, 60]]);
+  assertEquals(PACKS.map(perSku), [250, 182, 167, 167]);
+  assertEquals([TRIAL_SKUS, FRAMES_PER_SKU], [5, 6]);
+  assertEquals(rupees(10000), "₹10,000");
+  assertEquals(showcaseSource.includes("$1.00"), false);
+  assertEquals(showcaseSource.includes("+$0.50"), false);
+  // The app header, Studio and the onboarding note quote the same packs, not the old dollar rates
+  assertEquals(PACKS_FROM, "Packs from \u20b9500");
+  assertEquals(PACK_LIST, "\u20b9500 for 2 SKUs, \u20b92,000 for 11 SKUs, \u20b95,000 for 30 SKUs, \u20b910,000 for 60 SKUs");
+  for (const file of ["components/ui/Layout.tsx", "features/studio/Studio.tsx", "features/auth/SellerOnboarding.tsx"]) {
+    const source = Deno.readTextFileSync(new URL(`../../../../src/${file}`, import.meta.url));
+    assertEquals(/\$1\.00|\$0\.50/.test(source), false);
+    assertEquals(/PACKS_FROM|PACK_LIST/.test(source), true);
+  }
+  assertEquals(showcaseSource.includes("mailto:${CONTACT_EMAIL}"), true);
+  assertEquals(showcaseSource.includes("https://www.linkedin.com/company/youthnic"), true);
+  assertEquals(showcaseSource.includes("https://www.instagram.com/youthnic.in"), true);
 });
 
 Deno.test("CollectionSurfer repeats short collections, decouples embedded scroll, and respects Hallmark rules", () => {

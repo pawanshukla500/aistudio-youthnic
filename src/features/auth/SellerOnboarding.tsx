@@ -3,6 +3,7 @@ import { ArrowRight, CheckCircle2, Loader2, LogOut, ShieldCheck, Sparkles, Store
 import type { User } from "firebase/auth";
 import { supabase } from "../../lib/supabase";
 import { getErrorMessage } from "../../lib/errors";
+import { PACK_LIST } from "../../lib/pricingPacks";
 import type { WorkspaceValue } from "../../lib/WorkspaceContext";
 
 interface SellerOnboardingProps {
@@ -127,10 +128,10 @@ export function SellerOnboarding({ user, onEnrolled, onSignOut }: SellerOnboardi
           {/* Pricing transparency note */}
           <div className="mt-4 rounded-xl border border-amber-200/70 bg-amber-50/60 p-3.5 text-xs text-amber-950">
             <p className="font-semibold text-[11px] tracking-wide uppercase text-amber-800">
-              Transparent Pay-As-You-Go Rates
+              Transparent Pack Prices
             </p>
             <p className="mt-1 text-[12px] leading-relaxed">
-              First 5 complete photoshoots free (6-pose catalog runs). After trial: <b>$1.00</b> per shoot (Meta Muse Spark High Reasoning) + <b>$0.50</b> optional Automated CV QA Inspection.
+              First 5 complete photoshoots free (6-pose catalog runs). After the trial, buy SKUs in packs: {PACK_LIST}.
             </p>
           </div>
 
