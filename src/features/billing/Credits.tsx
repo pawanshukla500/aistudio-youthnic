@@ -45,10 +45,13 @@ export function Credits() {
 
   const load = useCallback(async () => {
     try {
-      setOverview(await invokeAppApi<Overview>("billing.overview", {}));
+      const next = await invokeAppApi<Overview>("billing.overview", {});
+      setOverview(next);
       setError("");
+      return next;
     } catch (reason) {
       setError(getErrorMessage(reason, "Could not load your credits."));
+      return null;
     }
   }, []);
 
@@ -63,17 +66,25 @@ export function Credits() {
     }
   }, [overview, organization.credits]);
 
-  const act = async (operation: string, args: Record<string, unknown>, failure: string) => {
+  // A call that timed out may still have gone through, so the balance is reloaded either way and
+  // the failure is shown only when the reloaded page does not already show the change (`settled`).
+  const act = async (
+    operation: string,
+    args: Record<string, unknown>,
+    failure: string,
+    settled: (next: Overview) => boolean,
+  ) => {
     setBusy(true);
     setError("");
+    let failed = "";
     try {
       await invokeAppApi(operation, args);
-      await load();
     } catch (reason) {
-      setError(getErrorMessage(reason, failure));
-    } finally {
-      setBusy(false);
+      failed = getErrorMessage(reason, failure);
     }
+    const next = await load();
+    if (failed && !(next && settled(next))) setError(failed);
+    setBusy(false);
   };
 
   const open = overview?.recharges.find((row) => row.status === "requested");
@@ -146,6 +157,10 @@ export function Credits() {
                       "billing.cancelRecharge",
                       { id: open.id },
                       "Could not cancel the request.",
+                      (next) =>
+                        !next.recharges.some(
+                          (row) => row.id === open.id && row.status === "requested",
+                        ),
                     )
                   }
                   className="cursor-pointer text-sm font-semibold text-secondary underline-offset-4 hover:text-on-surface hover:underline disabled:cursor-not-allowed disabled:opacity-60"
@@ -198,6 +213,7 @@ export function Credits() {
                     "billing.requestRecharge",
                     { skus: pack.skus },
                     "Could not send the recharge request.",
+                    (next) => next.recharges.some((row) => row.status === "requested"),
                   )
                 }
                 className="mt-6 cursor-pointer rounded-full bg-primary px-6 py-3 text-sm font-bold text-on-primary transition-colors hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60"

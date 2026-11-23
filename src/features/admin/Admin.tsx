@@ -425,7 +425,11 @@ function TeamEditor({
 }
 
 export function Admin() {
-  const { organization, user } = useWorkspace();
+  const { organization, user, isAdmin, permissions: workspacePermissions } = useWorkspace();
+  // The same rule the server applies (canApproveRecharges in app-api/lib/sellerAccess.ts), so the
+  // tab never shows to a delegated admin who would only get its error.
+  const canApproveRecharges =
+    organization.is_primary === true && (isAdmin || workspacePermissions.includes("admin.settings"));
   const { data: overview, error: overviewError } = useQuery(api.admin.overview, {
     organizationId: organization._id,
   }) as { data: AdminOverview | undefined; error: any };
@@ -964,8 +968,7 @@ export function Admin() {
             { id: "ai", label: "AI routing", icon: Brain },
             { id: "system", label: "System", icon: Activity },
             { id: "costs", label: "Cost Breakdown", icon: Database },
-            // Stores' recharge requests are approved from the primary organization only.
-            ...(organization.is_primary ? [{ id: "recharges", label: "Recharges", icon: Wallet }] : []),
+            ...(canApproveRecharges ? [{ id: "recharges", label: "Recharges", icon: Wallet }] : []),
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -1541,7 +1544,7 @@ export function Admin() {
           </section>
         )}
         
-        {tab === "recharges" && <RechargeRequests />}
+        {tab === "recharges" && canApproveRecharges && <RechargeRequests />}
 
         {tab === "costs" && (
           <section className="space-y-6">

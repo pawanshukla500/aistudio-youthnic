@@ -54,6 +54,13 @@ Deno.test("only administrators of the primary organization approve recharges", (
   // A seller is the administrator of its own store: that must not let it approve its own recharge.
   assertEquals(canApproveRecharges({ organization: store, isAdmin: true, permissions: ["admin.settings"] }), false);
   assertEquals(canApproveRecharges({ organization: {}, isAdmin: true, permissions: [] }), false);
+  // Administration shows the Recharges tab by the same rule, so nobody sees a tab that only errors.
+  const adminSource = read("../../../../src/features/admin/Admin.tsx");
+  assertEquals(
+    adminSource.includes('organization.is_primary === true && (isAdmin || workspacePermissions.includes("admin.settings"))'),
+    true,
+  );
+  assertEquals(adminSource.includes("...(canApproveRecharges ? [{ id: \"recharges\""), true);
 });
 
 Deno.test("the SQL price list equals the packs the app shows, and new stores get one trial shoot", () => {
